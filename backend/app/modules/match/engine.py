@@ -181,3 +181,21 @@ def match_ship_to_cargos(ship: ShipInput, cargos: list[CargoInput]) -> MatchResu
 
     result.candidates.sort(key=lambda c: (-c.score, c.ref_id))
     return result
+
+
+def pair_violation(cargo: CargoInput, ship: ShipInput) -> str | None:
+    """出单前的货-船组合硬约束校验（F6 订单模块复用）。
+
+    返回 None 表示组合可承运；否则返回违反的约束说明
+    （与 match_cargo_to_ships 的过滤条件完全一致，单一事实来源）。
+    """
+    if ship.status != "verified":
+        return "船舶未通过审核，不可承接订单"
+    if ship.cert_expiry < cargo.expect_date:
+        return "船舶证书有效期未覆盖装货日期"
+    if ship.deadweight_t < cargo.weight_t:
+        return "船舶载重能力不足以承运该货源"
+    compat = CARGO_SHIP_COMPAT.get(cargo.cargo_type, {})
+    if ship.ship_type not in compat:
+        return "船型与货类不兼容"
+    return None
