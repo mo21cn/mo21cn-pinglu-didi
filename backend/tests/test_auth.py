@@ -7,54 +7,19 @@
 4. 切换角色 → 重签 token、current_role 生效
 5. 未绑定角色切换 → 400
 6. 无 token 访问 /me → 401；伪造 token → 401；合法 token → 200
+
+client fixture 见 tests/conftest.py。
 """
 from __future__ import annotations
 
-import os
 import uuid
 
-# 必须先设 APP_ENV 再导入 app（config 按 APP_ENV 加载 .env.test）
-os.environ["APP_ENV"] = "test"
+import jwt
+from fastapi.testclient import TestClient
 
-import jwt  # noqa: E402
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine  # noqa: E402
-from sqlalchemy.orm import sessionmaker  # noqa: E402
-from sqlalchemy.pool import StaticPool  # noqa: E402
-
-from app.core.config import get_settings  # noqa: E402
-from app.models import Base  # noqa: E402
+from app.core.config import get_settings
 
 settings = get_settings()
-
-
-@pytest.fixture()
-def client(monkeypatch):
-    """每个测试用独立的 SQLite 内存库 + TestClient。"""
-    test_engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,  # 内存库需共享同一连接
-    )
-    test_session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
-    Base.metadata.create_all(bind=test_engine)
-
-    # 覆盖全局 get_db，指向测试库
-    def override_get_db():
-        db = test_session_factory()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    from app.main import app
-    from app.modules.auth.router import get_db
-
-    app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as tc:
-        yield tc
-    app.dependency_overrides.clear()
 
 
 def _login(client: TestClient, code: str = None, nickname: str = "测试用户") -> dict:
