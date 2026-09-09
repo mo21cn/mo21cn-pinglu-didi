@@ -5,6 +5,9 @@ pydantic>=2.9,<3.0
 pydantic-settings>=2.6,<3.0
 python-dotenv>=1.0,<2.0
 
+# ===== 认证 =====
+pyjwt>=2.9,<3.0
+
 # ===== 数据 =====
 sqlalchemy>=2.0,<3.0
 pymysql>=1.1,<2.0
