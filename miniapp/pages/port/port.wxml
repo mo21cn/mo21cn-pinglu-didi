@@ -1,4 +1,103 @@
-<!-- port 页面（占位） -->
+<!-- 港口工作台：泊位预约审核 / 泊位管理 -->
 <view class="page">
-  <text>port 工作台</text>
+  <!-- Tab 切换 -->
+  <view class="tabs">
+    <view class="tab {{tab === 'appts' ? 'active' : ''}}" bindtap="switchTab" data-tab="appts">
+      预约审核{{apptTotal > 0 ? ' (' + apptTotal + ')' : ''}}
+    </view>
+    <view class="tab {{tab === 'list' ? 'active' : ''}}" bindtap="switchTab" data-tab="list">泊位管理</view>
+    <view class="tab {{tab === 'new' ? 'active' : ''}}" bindtap="switchTab" data-tab="new">新建泊位</view>
+  </view>
+
+  <!-- ============ 预约审核 ============ -->
+  <view wx:if="{{tab === 'appts'}}">
+    <view wx:if="{{!loading && apptList.length === 0}}" class="empty">
+      <text>暂无待确认的泊位预约</text>
+    </view>
+    <view wx:for="{{apptList}}" wx:key="id" class="card">
+      <view class="card-head">
+        <text class="card-title">船舶 #{{item.ship_id}} 申请泊位 #{{item.berth_id}}</text>
+        <text class="badge badge-pending">{{statusLabels[item.status]}}</text>
+      </view>
+      <view class="row">
+        <text class="label">计划靠泊</text>
+        <text>{{item.plan_start}}</text>
+      </view>
+      <view class="row">
+        <text class="label">计划离泊</text>
+        <text>{{item.plan_end}}</text>
+      </view>
+      <view wx:if="{{item.remark}}" class="row">
+        <text class="label">备注</text>
+        <text>{{item.remark}}</text>
+      </view>
+      <view class="actions">
+        <button class="btn btn-primary" size="mini" data-id="{{item.id}}" bindtap="confirmAppt">
+          确认（锁定档期）
+        </button>
+        <button class="btn btn-danger" size="mini" data-id="{{item.id}}" bindtap="rejectAppt">驳回</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- ============ 泊位管理 ============ -->
+  <view wx:if="{{tab === 'list'}}">
+    <view wx:if="{{!loading && berthList.length === 0}}" class="empty">
+      <text>暂无泊位，请先新建</text>
+    </view>
+    <view wx:for="{{berthList}}" wx:key="id" class="card">
+      <view class="card-head">
+        <text class="card-title">{{item.port_code}} - {{item.berth_no}} {{item.berth_name}}</text>
+        <text class="badge {{item.status === 'active' ? 'badge-ok' : 'badge-off'}}">
+          {{item.status === 'active' ? '可用' : '停用'}}
+        </text>
+      </view>
+      <view class="row">
+        <text class="label">最大载重</text>
+        <text>{{item.max_dwt}} 吨</text>
+      </view>
+      <view class="row">
+        <text class="label">允许吃水</text>
+        <text>{{item.max_draft}} 米</text>
+      </view>
+      <view class="row">
+        <text class="label">并发容量</text>
+        <text>{{item.concurrent_capacity}} 船位</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- ============ 新建泊位 ============ -->
+  <view wx:if="{{tab === 'new'}}" class="form">
+    <view class="form-item">
+      <text class="label">所属港口</text>
+      <picker mode="selector" range="{{ports}}" range-key="label" value="{{portIndex}}" bindchange="onPortPick">
+        <view class="picker">{{ports[portIndex].label}}（{{form.port_code}}）</view>
+      </picker>
+    </view>
+    <view class="form-item">
+      <text class="label">泊位号 *</text>
+      <input class="input" placeholder="如 01" value="{{form.berth_no}}" data-field="berth_no" bindinput="onInput" />
+    </view>
+    <view class="form-item">
+      <text class="label">泊位名称</text>
+      <input class="input" placeholder="如 平塘港区1号泊位" value="{{form.berth_name}}" data-field="berth_name" bindinput="onInput" />
+    </view>
+    <view class="form-item">
+      <text class="label">最大载重吨 *</text>
+      <input class="input" type="digit" placeholder="如 5000" value="{{form.max_dwt}}" data-field="max_dwt" bindinput="onInput" />
+    </view>
+    <view class="form-item">
+      <text class="label">允许吃水（米）*</text>
+      <input class="input" type="digit" placeholder="如 6.0" value="{{form.max_draft}}" data-field="max_draft" bindinput="onInput" />
+    </view>
+    <view class="form-item">
+      <text class="label">并发容量（船位）</text>
+      <input class="input" type="number" placeholder="默认 1" value="{{form.concurrent_capacity}}" data-field="concurrent_capacity" bindinput="onInput" />
+    </view>
+    <view class="form-tip">
+      <text>适靠船型默认：散货船 / 件杂货船</text>
+    </view>
+    <button class="btn btn-primary btn-block" loading="{{submitting}}" bindtap="submitForm">创建泊位</button>
+  </view>
 </view>

@@ -13,6 +13,7 @@ from app.core.database import engine
 from app.models import Base
 from app.modules.auth import router as auth_router
 from app.modules.cargo import router as cargo_router
+from app.modules.port import router as port_router
 from app.modules.ship import router as ship_router
 
 settings = get_settings()
@@ -39,3 +40,4 @@ async def healthz() -> dict[str, str]:
 app.include_router(auth_router, prefix=f"{settings.API_PREFIX}/auth", tags=["auth"])
 app.include_router(cargo_router, prefix=f"{settings.API_PREFIX}/cargo", tags=["cargo"])
 app.include_router(ship_router, prefix=f"{settings.API_PREFIX}/ship", tags=["ship"])
+app.include_router(port_router, prefix=f"{settings.API_PREFIX}/port", tags=["port"])
