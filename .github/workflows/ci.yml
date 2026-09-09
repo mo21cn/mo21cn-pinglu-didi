@@ -37,4 +37,4 @@ jobs:
       - name: 测试（pytest）
         env:
           APP_ENV: test
-        run: pytest -v --tb=short
+        run: pytest --tb=short --cov=app --cov-report=term-missing
