@@ -1,0 +1,27 @@
+# 代码所有者（CODEOWNERS）
+# 作用：当 PR 涉及对应路径时，自动指定审查人（GitHub 会在 PR 中 @ 这些账号）
+# 说明：正式研发团队组建后，请将占位的 @mo21cn 替换为实际负责人。
+
+# 全局默认审查人（项目负责人）
+* @mo21cn
+
+# 后端（模块化单体）
+/backend/ @mo21cn
+
+# 撮合引擎（核心算法，需重点审查）
+/backend/app/modules/match/ @mo21cn
+
+# 支付与结算（资金敏感，须严格审查）
+/backend/app/modules/payment/ @mo21cn
+
+# 智能体平台（Agent 网关无直写红线）
+/backend/app/modules/agent/ @mo21cn
+
+# 微信小程序
+/miniapp/ @mo21cn
+
+# 工程规范文档
+/docs/ @mo21cn
+
+# CI/CD 工作流
+/.github/ @mo21cn

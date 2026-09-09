@@ -1,0 +1,26 @@
+# ===== Web 框架 =====
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+pydantic>=2.9,<3.0
+pydantic-settings>=2.6,<3.0
+python-dotenv>=1.0,<2.0
+
+# ===== 数据 =====
+sqlalchemy>=2.0,<3.0
+pymysql>=1.1,<2.0
+redis>=5.0,<6.0
+
+# ===== HTTP 客户端（政企接口对接） =====
+httpx>=0.27,<1.0
+
+# ===== 撮合引擎与算法 =====
+numpy>=1.26,<3.0
+
+# ===== 测试 =====
+pytest>=8.0,<9.0
+pytest-asyncio>=0.24,<1.0
+pytest-cov>=5.0,<6.0
+
+# ===== 代码质量 =====
+ruff>=0.6,<1.0
+mypy>=1.11,<2.0

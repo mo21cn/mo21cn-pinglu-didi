@@ -1,0 +1,45 @@
+/* pages/index/index.wxss */
+.page {
+  padding: 32rpx;
+}
+
+.banner {
+  background: linear-gradient(135deg, #1565C0, #0288D1);
+  border-radius: 16rpx;
+  padding: 48rpx 40rpx;
+  color: #FFFFFF;
+  margin-bottom: 32rpx;
+}
+
+.banner-title {
+  display: block;
+  font-size: 40rpx;
+  font-weight: 600;
+  margin-bottom: 8rpx;
+}
+
+.banner-sub {
+  display: block;
+  font-size: 26rpx;
+  opacity: 0.9;
+}
+
+.entry {
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  padding: 32rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
+}
+
+.entry-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #1A237E;
+  margin-bottom: 8rpx;
+}
+
+.entry-desc {
+  font-size: 26rpx;
+  color: #616161;
+}

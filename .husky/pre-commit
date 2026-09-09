@@ -1,0 +1,17 @@
+#!/bin/sh
+# pre-commit 钩子：提交前通用检查（不依赖第三方工具）
+# 后续可按需追加：后端 ruff 检查、小程序 eslint 检查等
+
+# 1. 检查暂存区是否残留未解决的合并冲突标记
+if git diff --cached --name-only -z | xargs -0 grep -n -E '^(<<<<<<<|=======|>>>>>>>)' 2>/dev/null; then
+  echo "❌ 发现未解决的合并冲突标记，请先解决冲突再提交"
+  exit 1
+fi
+
+# 2. 检查是否误提交了 .env 本地文件（含真实密钥）
+if git diff --cached --name-only | grep -E '^\.env$' >/dev/null 2>&1; then
+  echo "❌ 禁止提交 .env 本地文件（可能含敏感信息），请使用 .env.example 或环境注入"
+  exit 1
+fi
+
+exit 0

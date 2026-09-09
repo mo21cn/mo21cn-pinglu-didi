@@ -1,0 +1,25 @@
+extends:
+  - "@commitlint/config-conventional"
+
+rules:
+  # 提交类型（对齐 Conventional Commits）
+  type-enum:
+    - 2
+    - always
+    - [feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert]
+  # 类型必填
+  type-empty:
+    - 2
+    - never
+  # 描述必填
+  subject-empty:
+    - 2
+    - never
+  # 标题长度上限（超出提示换行到正文）
+  header-max-length:
+    - 2
+    - always
+    - 100
+  # 关闭自动首字母大写校验（中文提交常见）
+  subject-case:
+    - 0

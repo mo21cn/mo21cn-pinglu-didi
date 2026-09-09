@@ -1,0 +1,20 @@
+<!-- pages/index/index.wxml —— 首页：三角色工作台入口 -->
+<view class="page">
+  <view class="banner">
+    <text class="banner-title">平陆运河 · 滴滴打船</text>
+    <text class="banner-sub">货 · 船 · 港 三态智能撮合</text>
+  </view>
+
+  <view class="entries">
+    <view
+      class="entry"
+      wx:for="{{entries}}"
+      wx:key="key"
+      data-key="{{item.key}}"
+      bindtap="enterRole"
+    >
+      <view class="entry-title">{{item.text}}</view>
+      <view class="entry-desc">{{item.desc}}</view>
+    </view>
+  </view>
+</view>
