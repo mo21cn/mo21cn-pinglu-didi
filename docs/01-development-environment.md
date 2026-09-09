@@ -18,8 +18,8 @@
 ### 2.1 克隆仓库
 
 ```bash
-git clone git@github.com:mo21cn/pinglu-didi.git
-cd pinglu-didi
+git clone git@github.com:mo21cn/mo21cn-pinglu-didi.git
+cd mo21cn-pinglu-didi
 git checkout develop
 ```
 
