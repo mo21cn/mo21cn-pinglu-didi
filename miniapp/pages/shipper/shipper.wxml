@@ -22,9 +22,11 @@
         <text wx:if="{{item.offer_price}}">¥ {{item.offer_price}}</text>
         <text wx:else>面议</text>
       </view>
-      <view wx:if="{{item.status === 'draft' || item.status === 'published'}}" class="card-actions">
+      <view wx:if="{{item.status === 'draft' || item.status === 'published' || item.status === 'matched' || item.status === 'shipped'}}" class="card-actions">
         <button wx:if="{{item.status === 'draft'}}" class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" data-action="publish" bindtap="onAction">发布</button>
-        <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" data-action="cancel" bindtap="onAction">取消</button>
+        <button wx:if="{{item.status === 'published'}}" class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onMatch">智能找船</button>
+        <button wx:if="{{item.status === 'matched' || item.status === 'shipped'}}" class="btn-mini btn-primary" size="mini" bindtap="goOrders">查看订单</button>
+        <button wx:if="{{item.status === 'draft' || item.status === 'published'}}" class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" data-action="cancel" bindtap="onAction">取消</button>
       </view>
     </view>
   </view>

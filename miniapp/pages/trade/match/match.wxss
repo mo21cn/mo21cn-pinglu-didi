@@ -1,0 +1,33 @@
+/* 撮合页 */
+.page { padding: 24rpx 32rpx; background: #f6f8fa; min-height: 100vh; box-sizing: border-box; }
+
+.head { margin-bottom: 24rpx; display: flex; flex-direction: column; gap: 8rpx; }
+.head-total { font-size: 32rpx; font-weight: 600; color: #0f2540; }
+.head-stats { font-size: 22rpx; color: #98a6b8; }
+
+.list { display: flex; flex-direction: column; gap: 20rpx; }
+.empty { text-align: center; color: #98a6b8; padding: 80rpx 0; font-size: 26rpx; }
+
+.card { background: #fff; border-radius: 20rpx; padding: 28rpx; box-shadow: 0 4rpx 24rpx rgba(15,37,64,.06); }
+.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12rpx; }
+.card-title { font-size: 30rpx; font-weight: 600; color: #0f2540; }
+.score { display: flex; align-items: baseline; gap: 4rpx; }
+.score-num { font-size: 36rpx; font-weight: 700; color: #0f7cff; }
+.score-label { font-size: 20rpx; color: #98a6b8; }
+.card-row { display: flex; justify-content: space-between; font-size: 24rpx; color: #6b7a8c; margin-bottom: 10rpx; }
+.card-breakdown { display: flex; flex-wrap: wrap; gap: 12rpx; font-size: 20rpx; color: #98a6b8; background: #f6f8fa; border-radius: 10rpx; padding: 12rpx 16rpx; }
+.card-actions { display: flex; gap: 16rpx; margin-top: 16rpx; justify-content: flex-end; }
+.card-note { margin-top: 12rpx; font-size: 22rpx; color: #9a6a00; }
+
+.btn-primary { background: #0f7cff; color: #fff; font-size: 30rpx; border-radius: 16rpx; }
+.btn-mini { border-radius: 10rpx; font-size: 24rpx; }
+.btn-ghost { background: #f1f4f8; color: #6b7a8c; }
+
+.mask { position: fixed; inset: 0; background: rgba(15,37,64,.5); display: flex; align-items: center; justify-content: center; z-index: 99; }
+.modal { width: 560rpx; background: #fff; border-radius: 24rpx; padding: 40rpx 32rpx; }
+.modal-title { font-size: 32rpx; font-weight: 600; color: #0f2540; margin-bottom: 20rpx; }
+.modal-row { font-size: 26rpx; color: #6b7a8c; margin-bottom: 20rpx; }
+.field { margin-bottom: 28rpx; }
+.label { display: block; font-size: 24rpx; color: #6b7a8c; margin-bottom: 10rpx; }
+.input { background: #f6f8fa; border-radius: 12rpx; padding: 18rpx 20rpx; font-size: 28rpx; color: #0f2540; }
+.modal-actions { display: flex; gap: 16rpx; justify-content: flex-end; }

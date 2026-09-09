@@ -156,6 +156,17 @@ Page({
       .catch(() => {})
   },
 
+  /** 已发布货源 → 跳转撮合页找候选船（可下单） */
+  onMatch(e) {
+    const id = e.currentTarget.dataset.id
+    wx.navigateTo({ url: `/pages/trade/match/match?mode=cargo&refId=${id}` })
+  },
+
+  /** 查看我的订单（支付/签收/撤单） */
+  goOrders() {
+    wx.navigateTo({ url: '/pages/trade/orders/orders' })
+  },
+
   /** 角色不符时引导切换 */
   ensureRole() {
     const auth = require('../../utils/auth')

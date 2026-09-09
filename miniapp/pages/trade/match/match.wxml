@@ -1,0 +1,78 @@
+<!-- 撮合页：候选列表（确定性引擎评分排序） -->
+<view class="page">
+  <view class="head">
+    <text class="head-total">撮合候选 {{total}} 个</text>
+    <text wx:if="{{filterStats.length}}" class="head-stats">未入局：{{filterStats.join(' · ')}}</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty">引擎计算中...</view>
+  <view wx:elif="{{items.length === 0}}" class="empty">暂无满足硬约束的候选</view>
+
+  <!-- 货主视角：候选船卡片，可下单 -->
+  <view wx:if="{{mode === 'cargo'}}" class="list">
+    <view wx:for="{{items}}" wx:key="ship_id" class="card" data-index="{{index}}" bindtap="onTapCandidate">
+      <view class="card-head">
+        <text class="card-title">{{item.ship_name}}</text>
+        <view class="score">
+          <text class="score-num">{{item.score_text}}</text>
+          <text class="score-label">分</text>
+        </view>
+      </view>
+      <view class="card-row">
+        <text>{{item.ship_type_label}} · 载重 {{item.deadweight_t}} 吨</text>
+        <text>船籍港 {{item.home_port}}</text>
+      </view>
+      <view class="card-breakdown">
+        <text>利用率 {{item.breakdown.load_utilization}}</text>
+        <text>船型 {{item.breakdown.type_fit}}</text>
+        <text>就近 {{item.breakdown.home_port}}</text>
+        <text>证书 {{item.breakdown.cert_margin}}</text>
+      </view>
+      <view class="card-actions">
+        <button class="btn-mini btn-primary" size="mini" catchtap="onTapCandidate" data-index="{{index}}">选船下单</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 船东视角：候选货源卡片（只读，下单由货主发起） -->
+  <view wx:if="{{mode === 'ship'}}" class="list">
+    <view wx:for="{{items}}" wx:key="cargo_id" class="card">
+      <view class="card-head">
+        <text class="card-title">{{item.cargo_name}}</text>
+        <view class="score">
+          <text class="score-num">{{item.score_text}}</text>
+          <text class="score-label">分</text>
+        </view>
+      </view>
+      <view class="card-row">
+        <text>{{item.weight_t}} 吨 · {{item.origin_label}} → {{item.dest_label}}</text>
+        <text>期望装货 {{item.expect_date}}</text>
+      </view>
+      <view class="card-breakdown">
+        <text>利用率 {{item.breakdown.load_utilization}}</text>
+        <text>船型 {{item.breakdown.type_fit}}</text>
+        <text>就近 {{item.breakdown.home_port}}</text>
+        <text>证书 {{item.breakdown.cert_margin}}</text>
+      </view>
+      <view class="card-note">请联系货主确认运价并发起订单</view>
+    </view>
+  </view>
+
+  <!-- 下单弹窗 -->
+  <view wx:if="{{orderModal}}" class="mask" catchtap="closeModal">
+    <view class="modal" catchtap="">
+      <view class="modal-title">确认下单</view>
+      <view class="modal-row" wx:if="{{target}}">
+        <text>{{target.ship_name}} · 载重 {{target.deadweight_t}} 吨</text>
+      </view>
+      <view class="field">
+        <text class="label">成交运费（元）*</text>
+        <input class="input" type="digit" placeholder="如：25000" value="{{freightPrice}}" bindinput="onFreightInput" />
+      </view>
+      <view class="modal-actions">
+        <button class="btn-ghost" size="mini" bindtap="closeModal">取消</button>
+        <button class="btn-primary" size="mini" bindtap="confirmOrder">确认出单</button>
+      </view>
+    </view>
+  </view>
+</view>

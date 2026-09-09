@@ -26,3 +26,5 @@
 .input, .picker { background: #f6f8fa; border-radius: 12rpx; padding: 18rpx 20rpx; font-size: 28rpx; color: #0f2540; }
 .btn-submit { margin-top: 12rpx; }
 .btn-primary { background: #0f7cff; color: #fff; font-size: 30rpx; border-radius: 16rpx; }
+.btn-mini { border-radius: 10rpx; font-size: 24rpx; }
+.card-actions { display: flex; gap: 16rpx; margin-top: 16rpx; justify-content: flex-end; }
