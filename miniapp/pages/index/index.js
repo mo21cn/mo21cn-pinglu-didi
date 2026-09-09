@@ -1,25 +1,88 @@
-// pages/index/index.js —— 首页：角色路由入口（三角色合一）
-const app = getApp()
+// 首页：登录态检查 + 微信一键登录 + 三角色工作台入口
+const auth = require('../../utils/auth')
+
+const ROLE_META = [
+  { key: 'shipper', label: '货主', desc: '发货找船 · 货源管理', page: '/pages/shipper/shipper' },
+  { key: 'owner', label: '船东', desc: '接单找货 · 船舶管理', page: '/pages/owner/owner' },
+  { key: 'port', label: '港口方', desc: '泊位调度 · 港作协同', page: '/pages/port/port' }
+]
 
 Page({
   data: {
-    role: null,
-    roleText: '',
-    entries: [
-      { key: 'shipper', text: '货主工作台', desc: '发布货源 · 比价下单 · 全程跟踪' },
-      { key: 'owner', text: '船东工作台', desc: '挂载运力 · 接单 · 过闸 · 结算' },
-      { key: 'port', text: '港口工作台', desc: '泊位维护 · 预约审批 · 装卸排期' }
-    ]
+    isLoggedIn: false,
+    user: null,
+    roles: [],          // 已绑定角色的展示元数据
+    currentRole: '',
+    logging: false
+  },
+
+  onLoad() {
+    this.refreshView()
   },
 
   onShow() {
-    const role = app.globalData.role
-    this.setData({ role })
+    this.refreshView()
   },
 
-  // 进入指定角色工作台
-  enterRole(e) {
-    const key = e.currentTarget.dataset.key
-    wx.navigateTo({ url: app.routeByRole(key) })
+  refreshView() {
+    const user = auth.getUser()
+    if (auth.isLoggedIn()) {
+      const roles = ROLE_META.filter((r) => (user.roles || []).includes(r.key))
+      this.setData({
+        isLoggedIn: true,
+        user,
+        roles,
+        currentRole: user.current_role
+      })
+    } else {
+      this.setData({ isLoggedIn: false, user: null, roles: [], currentRole: '' })
+    }
+  },
+
+  /** 微信一键登录 */
+  handleLogin() {
+    if (this.data.logging) return
+    this.setData({ logging: true })
+    auth.login()
+      .then(() => {
+        wx.showToast({ title: '登录成功', icon: 'success' })
+        this.refreshView()
+      })
+      .catch(() => {
+        wx.showToast({ title: '登录失败，请重试', icon: 'none' })
+      })
+      .finally(() => this.setData({ logging: false }))
+  },
+
+  /** 切换当前角色 */
+  handleSwitchRole(e) {
+    const role = e.currentTarget.dataset.role
+    if (role === this.data.currentRole) return
+    auth.switchRole(role)
+      .then(() => {
+        wx.showToast({ title: '已切换角色', icon: 'success' })
+        this.refreshView()
+      })
+      .catch(() => {})
+  },
+
+  /** 进入对应角色工作台 */
+  handleEnterWorkspace(e) {
+    const page = e.currentTarget.dataset.page
+    const role = e.currentTarget.dataset.role
+    // 进入工作台前确保当前角色一致
+    if (role !== this.data.currentRole) {
+      auth.switchRole(role)
+        .then(() => wx.navigateTo({ url: page }))
+        .catch(() => {})
+    } else {
+      wx.navigateTo({ url: page })
+    }
+  },
+
+  /** 退出登录 */
+  handleLogout() {
+    auth.clearUser()
+    this.refreshView()
   }
 })

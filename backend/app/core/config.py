@@ -43,11 +43,18 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # ---- 数据库（MySQL） ----
+    # 生产为 MySQL；开发/测试可通过 DATABASE_URL 覆盖为 SQLite（免装 MySQL 即可跑通）
+    DATABASE_URL: str = ""  # 非空时优先生效，如 sqlite:///./pinglu_didi_dev.db
     DB_HOST: str = "127.0.0.1"
     DB_PORT: int = 3306
     DB_NAME: str = "pinglu_didi"
     DB_USER: str = "root"
     DB_PASSWORD: str = ""
+
+    # ---- 认证（JWT） ----
+    JWT_SECRET_KEY: str = "change-me-in-env"  # 生产由 CI/CD secrets 注入
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 60 * 12  # access token 有效期（12 小时）
 
     # ---- Redis ----
     REDIS_URL: str = "redis://127.0.0.1:6379/0"
@@ -57,6 +64,8 @@ class Settings(BaseSettings):
     WX_APP_SECRET: str = ""
     WX_MCH_ID: str = ""
     WX_PAY_KEY: str = ""
+    # Mock 开关：true 时不真实调用 code2session（本地开发/CI 无 appid 时使用）
+    WECHAT_MOCK: bool = False
 
     # ---- 撮合引擎 ----
     MATCH_STAGE1_TIMEOUT_MS: int = 200
@@ -71,6 +80,8 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
         return (
             f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"

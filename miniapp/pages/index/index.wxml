@@ -1,20 +1,54 @@
-<!-- pages/index/index.wxml —— 首页：三角色工作台入口 -->
+<!-- 首页：登录 / 三角色工作台 -->
 <view class="page">
-  <view class="banner">
-    <text class="banner-title">平陆运河 · 滴滴打船</text>
-    <text class="banner-sub">货 · 船 · 港 三态智能撮合</text>
+  <view class="header">
+    <text class="title">平陆运河 · 滴滴打船</text>
+    <text class="subtitle">货—船—港 三合一撮合平台</text>
   </view>
 
-  <view class="entries">
-    <view
-      class="entry"
-      wx:for="{{entries}}"
-      wx:key="key"
-      data-key="{{item.key}}"
-      bindtap="enterRole"
-    >
-      <view class="entry-title">{{item.text}}</view>
-      <view class="entry-desc">{{item.desc}}</view>
-    </view>
+  <!-- 未登录：微信一键登录 -->
+  <view wx:if="{{!isLoggedIn}}" class="login-card">
+    <view class="login-icon">⚓</view>
+    <text class="login-desc">登录后可发布货源、找船接单、协同港口作业</text>
+    <button class="btn-primary" loading="{{logging}}" bindtap="handleLogin">微信一键登录</button>
   </view>
+
+  <!-- 已登录：用户信息 + 角色卡 -->
+  <block wx:else>
+    <view class="user-card">
+      <view class="user-row">
+        <text class="user-name">{{user.nickname || '船友'}}</text>
+        <text class="user-role">{{user.role_label}}</text>
+      </view>
+      <text class="user-logout" bindtap="handleLogout">退出登录</text>
+    </view>
+
+    <view class="section-title">我的角色工作台</view>
+    <view class="role-list">
+      <view
+        wx:for="{{roles}}"
+        wx:key="key"
+        class="role-card {{currentRole === item.key ? 'role-active' : ''}}"
+        data-role="{{item.key}}"
+        data-page="{{item.page}}"
+        bindtap="handleEnterWorkspace"
+      >
+        <view class="role-head">
+          <text class="role-label">{{item.label}}</text>
+          <text wx:if="{{currentRole === item.key}}" class="role-badge">当前</text>
+        </view>
+        <text class="role-desc">{{item.desc}}</text>
+      </view>
+    </view>
+
+    <view class="section-title">切换当前角色</view>
+    <view class="switch-row">
+      <button
+        wx:for="{{roles}}"
+        wx:key="key"
+        class="btn-switch {{currentRole === item.key ? 'btn-switch-active' : ''}}"
+        data-role="{{item.key}}"
+        bindtap="handleSwitchRole"
+      >{{item.label}}</button>
+    </view>
+  </block>
 </view>
