@@ -4,6 +4,8 @@
     "pages/shipper/shipper",
     "pages/owner/owner",
     "pages/port/port",
+    "pages/trade/match/match",
+    "pages/trade/orders/orders",
     "pages/message/message",
     "pages/mine/mine"
   ],

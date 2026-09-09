@@ -1,0 +1,24 @@
+/* 订单列表页 */
+.page { padding: 24rpx 32rpx; background: #f6f8fa; min-height: 100vh; box-sizing: border-box; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 14rpx; margin-bottom: 24rpx; }
+.filter { padding: 12rpx 28rpx; background: #fff; border-radius: 999rpx; font-size: 24rpx; color: #6b7a8c; }
+.filter-active { background: #0f7cff; color: #fff; font-weight: 600; }
+
+.list { display: flex; flex-direction: column; gap: 20rpx; }
+.empty { text-align: center; color: #98a6b8; padding: 80rpx 0; font-size: 26rpx; }
+
+.card { background: #fff; border-radius: 20rpx; padding: 28rpx; box-shadow: 0 4rpx 24rpx rgba(15,37,64,.06); }
+.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12rpx; }
+.card-title { font-size: 30rpx; font-weight: 600; color: #0f2540; }
+.badge { font-size: 20rpx; padding: 4rpx 16rpx; border-radius: 999rpx; }
+.badge-matched { color: #9a6a00; background: #fff4d6; }
+.badge-shipped { color: #0f7cff; background: rgba(15,124,255,.1); }
+.badge-completed { color: #0a8f56; background: rgba(10,143,86,.1); }
+.badge-cancelled { color: #c0392b; background: rgba(192,57,43,.1); }
+.card-row { display: flex; justify-content: space-between; font-size: 24rpx; color: #6b7a8c; margin-bottom: 6rpx; }
+.card-actions { display: flex; gap: 16rpx; margin-top: 16rpx; justify-content: flex-end; }
+
+.btn-mini { border-radius: 10rpx; font-size: 24rpx; }
+.btn-primary { background: #0f7cff; color: #fff; }
+.btn-ghost { background: #f1f4f8; color: #6b7a8c; }
