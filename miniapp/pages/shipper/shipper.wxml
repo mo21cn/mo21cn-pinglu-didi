@@ -1,4 +1,78 @@
-<!-- shipper 页面（占位） -->
+<!-- 货主工作台：我的货源 / 发布货源 -->
 <view class="page">
-  <text>shipper 工作台</text>
+  <view class="tabs">
+    <view class="tab {{tab === 'list' ? 'tab-active' : ''}}" data-tab="list" bindtap="switchTab">我的货源（{{total}}）</view>
+    <view class="tab {{tab === 'form' ? 'tab-active' : ''}}" data-tab="form" bindtap="switchTab">发布货源</view>
+  </view>
+
+  <!-- 列表 -->
+  <view wx:if="{{tab === 'list'}}" class="list">
+    <view wx:if="{{loading}}" class="empty">加载中...</view>
+    <view wx:elif="{{list.length === 0}}" class="empty">暂无货源，点击"发布货源"发布第一单</view>
+    <view wx:for="{{list}}" wx:key="id" class="card">
+      <view class="card-head">
+        <text class="card-title">{{item.cargo_name}}</text>
+        <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+      </view>
+      <view class="card-row">
+        <text>{{item.weight_t}} 吨 · {{item.origin_port}} → {{item.dest_port}}</text>
+      </view>
+      <view class="card-row">
+        <text>期望装货：{{item.expect_date}}</text>
+        <text wx:if="{{item.offer_price}}">¥ {{item.offer_price}}</text>
+        <text wx:else>面议</text>
+      </view>
+      <view wx:if="{{item.status === 'draft' || item.status === 'published'}}" class="card-actions">
+        <button wx:if="{{item.status === 'draft'}}" class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" data-action="publish" bindtap="onAction">发布</button>
+        <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" data-action="cancel" bindtap="onAction">取消</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 发布表单 -->
+  <view wx:if="{{tab === 'form'}}" class="form">
+    <view class="field">
+      <text class="label">货物名称 *</text>
+      <input class="input" placeholder="如：散装水泥" value="{{form.cargo_name}}" data-field="cargo_name" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="label">货类</text>
+      <picker mode="selector" range="{{cargoTypes}}" range-key="label" value="{{typeIndex}}" bindchange="onTypePick">
+        <view class="picker">{{cargoTypes[typeIndex].label}}</view>
+      </picker>
+    </view>
+    <view class="field">
+      <text class="label">重量（吨）*</text>
+      <input class="input" type="digit" placeholder="如：800" value="{{form.weight_t}}" data-field="weight_t" bindinput="onInput" />
+    </view>
+    <view class="field-row">
+      <view class="field field-half">
+        <text class="label">起运港 *</text>
+        <picker mode="selector" range="{{ports}}" range-key="label" value="{{originIndex}}" bindchange="onOriginPick">
+          <view class="picker">{{ports[originIndex].label}}</view>
+        </picker>
+      </view>
+      <view class="field field-half">
+        <text class="label">目的港 *</text>
+        <picker mode="selector" range="{{ports}}" range-key="label" value="{{destIndex}}" bindchange="onDestPick">
+          <view class="picker">{{ports[destIndex].label}}</view>
+        </picker>
+      </view>
+    </view>
+    <view class="field">
+      <text class="label">期望装货日期 *</text>
+      <picker mode="date" start="{{today}}" value="{{form.expect_date}}" bindchange="onDatePick">
+        <view class="picker">{{form.expect_date}}</view>
+      </picker>
+    </view>
+    <view class="field">
+      <text class="label">运费出价（元，可空为面议）</text>
+      <input class="input" type="digit" placeholder="如：25000" value="{{form.offer_price}}" data-field="offer_price" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="label">备注</text>
+      <textarea class="textarea" placeholder="装卸要求、货物特性等" value="{{form.remark}}" data-field="remark" bindinput="onInput" maxlength="255"></textarea>
+    </view>
+    <button class="btn-primary btn-submit" loading="{{submitting}}" bindtap="submitForm">发布货源（进入撮合池）</button>
+  </view>
 </view>

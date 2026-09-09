@@ -1,4 +1,71 @@
-<!-- owner 页面（占位） -->
+<!-- 船东工作台：我的船队 / 船舶备案 -->
 <view class="page">
-  <text>owner 工作台</text>
+  <view class="tabs">
+    <view class="tab {{tab === 'list' ? 'tab-active' : ''}}" data-tab="list" bindtap="switchTab">我的船队（{{total}}）</view>
+    <view class="tab {{tab === 'form' ? 'tab-active' : ''}}" data-tab="form" bindtap="switchTab">船舶备案</view>
+  </view>
+
+  <!-- 船队列表 -->
+  <view wx:if="{{tab === 'list'}}" class="list">
+    <view wx:if="{{loading}}" class="empty">加载中...</view>
+    <view wx:elif="{{list.length === 0}}" class="empty">暂无船舶，点击"船舶备案"提交第一艘船</view>
+    <view wx:for="{{list}}" wx:key="id" class="card">
+      <view class="card-head">
+        <text class="card-title">{{item.ship_name}}</text>
+        <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+      </view>
+      <view class="card-row">
+        <text>载重 {{item.deadweight_t}} 吨 · 吃水 {{item.draft_m}} 米</text>
+        <text>{{item.length_m}} × {{item.width_m}} 米</text>
+      </view>
+      <view class="card-row">
+        <text>证书：{{item.cert_no}}</text>
+        <text>有效期至 {{item.cert_expiry}}</text>
+      </view>
+      <view wx:if="{{item.status === 'rejected'}}" class="reject-reason">驳回原因：{{item.reject_reason}}</view>
+    </view>
+  </view>
+
+  <!-- 备案表单 -->
+  <view wx:if="{{tab === 'form'}}" class="form">
+    <view class="field">
+      <text class="label">船名 *</text>
+      <input class="input" placeholder="如：平陆001" value="{{form.ship_name}}" data-field="ship_name" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="label">船型</text>
+      <picker mode="selector" range="{{shipTypes}}" range-key="label" value="{{typeIndex}}" bindchange="onTypePick">
+        <view class="picker">{{shipTypes[typeIndex].label}}</view>
+      </picker>
+    </view>
+    <view class="field">
+      <text class="label">载重吨（吨）*</text>
+      <input class="input" type="digit" placeholder="如：2000" value="{{form.deadweight_t}}" data-field="deadweight_t" bindinput="onInput" />
+    </view>
+    <view class="field-row">
+      <view class="field field-half">
+        <text class="label">船长（米）</text>
+        <input class="input" type="digit" placeholder="如：88" value="{{form.length_m}}" data-field="length_m" bindinput="onInput" />
+      </view>
+      <view class="field field-half">
+        <text class="label">船宽（米）</text>
+        <input class="input" type="digit" placeholder="如：13.6" value="{{form.width_m}}" data-field="width_m" bindinput="onInput" />
+      </view>
+    </view>
+    <view class="field">
+      <text class="label">满载吃水（米）*（撮合硬约束核心）</text>
+      <input class="input" type="digit" placeholder="如：3.8" value="{{form.draft_m}}" data-field="draft_m" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="label">船舶检验证书号 *</text>
+      <input class="input" placeholder="如：CERT-2026-0001" value="{{form.cert_no}}" data-field="cert_no" bindinput="onInput" />
+    </view>
+    <view class="field">
+      <text class="label">证书有效期至 *</text>
+      <picker mode="date" value="{{form.cert_expiry}}" bindchange="onExpiryPick">
+        <view class="picker">{{form.cert_expiry || '请选择日期'}}</view>
+      </picker>
+    </view>
+    <button class="btn-primary btn-submit" loading="{{submitting}}" bindtap="submitForm">提交备案（待平台审核）</button>
+  </view>
 </view>

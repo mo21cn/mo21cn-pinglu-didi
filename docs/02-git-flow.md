@@ -87,7 +87,7 @@ gh api repos/mo21cn/pinglu-didi/branches/main/protection \
   -f enforce_admins=true
 
 # develop 分支保护
-gh api repos/mo21cn/pinglu-didi/branches/develop/protection \
+gh api repos/mo21cn/mo21cn-pinglu-didi/branches/develop/protection \
   -X PUT -f required_status_checks.strict=true \
   -f required_pull_request_reviews.required_approving_review_count=1 \
   -f enforce_admins=true

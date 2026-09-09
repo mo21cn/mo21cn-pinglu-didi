@@ -36,8 +36,8 @@ pinglu-didi/
 
 ```bash
 # 1. 克隆
-git clone git@github.com:mo21cn/pinglu-didi.git
-cd pinglu-didi
+git clone git@github.com:mo21cn/mo21cn-pinglu-didi.git
+cd mo21cn-pinglu-didi
 
 # 2. 后端依赖
 cd backend
