@@ -140,12 +140,18 @@ def cancel_order(db: Session, order: Order, reason: str) -> Order:
     """撤单：matched → cancelled，货源释放回撮合池（published）。
 
     仅 matched 可撤（启运后进入履约期，撤单属线下协商范畴）。
+    支付联动（F7）：已支付 → 全额退款（refunded）；待支付 → 关闭（closed），
+    资金流与订单流状态一致性由确定性内核驱动。
     """
     if order.status != "matched":
         raise OrderStateError(f"当前状态 {order.status} 不可撤单")
     order.status = "cancelled"
     order.cancel_reason = reason or "协商撤单"
     order.cancelled_at = datetime.now()
+
+    from app.modules.payment.service import settle_on_cancel  # 延迟导入避免环
+
+    settle_on_cancel(db, order)
 
     cargo = db.get(Cargo, order.cargo_id)
     if cargo is not None and cargo.status == "matched":
