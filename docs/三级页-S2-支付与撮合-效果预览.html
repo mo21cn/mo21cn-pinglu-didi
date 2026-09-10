@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="RAqUmVjEIqRRQauCutUGKJ">
+<head data-page-node-id="qv2wRkRufESWyYWPM8e3Ng">
+<meta charset="UTF-8" data-page-node-id="nB5PmoRzorY3PrcDyEhhJV">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="lKzWBxnjxZ5H3o7kb4Q5Hw">
+<title>三级页冲刺 S2 · 支付详情 + 撮合结果 效果预览</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: #F5F7FA; color: #0F2540;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+  .tag { font-size: 12px; padding: 3px 12px; border-radius: 999px; background: rgba(59,91,219,.08); color: #3B5BDB; }
+  .tag.purple { background: rgba(112,72,232,.10); color: #7048E8; }
+  .tag.green { background: rgba(18,184,134,.10); color: #12B886; }
+  .tag.warn { background: rgba(240,140,0,.10); color: #F08C00; }
+  .tag.gray { background: #F1F4F8; color: #6B7A8C; }
+  h2 { font-size: 16px; font-weight: 600; margin: 40px 0 6px; }
+  .sub { font-size: 13px; color: #6B7A8C; margin: 0 0 16px; }
+  .phones { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+  .cap { font-size: 12.5px; font-weight: 600; color: #3D4C63; margin: 0 0 8px; }
+  .cap span { font-weight: 400; color: #98A6B8; }
+
+  /* ---- 手机框 ---- */
+  .phone {
+    width: 340px; background: #FFFFFF; border-radius: 22px; overflow: hidden;
+    box-shadow: 0 8px 32px rgba(61,90,219,.12); display: flex; flex-direction: column;
+  }
+  .p-nav { background: #3B5BDB; color: #fff; font-size: 13px; text-align: center; padding: 10px 0; flex-shrink: 0; }
+  .p-body { padding: 14px; background: #F5F7FA; height: 588px; overflow: hidden; }
+  .p-bar { background: #fff; border-top: 1px solid #EEF1F6; padding: 9px 14px 12px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+  .b-note { font-size: 11px; color: #98A6B8; text-align: center; line-height: 1.5; }
+  .b-acts { display: flex; gap: 10px; }
+  .btn { flex: 1; text-align: center; height: 38px; line-height: 38px; border-radius: 10px; font-size: 13px; }
+  .btn-ghost { background: #fff; border: 1px solid rgba(59,91,219,.25); color: #3B5BDB; }
+  .btn-primary { flex: 1; background: linear-gradient(135deg,#3B5BDB,#7048E8); color: #fff; }
+  .disabled { opacity: .45; }
+
+  /* ---- 头卡 ---- */
+  .hero { background: linear-gradient(135deg,#3B5BDB,#7048E8); border-radius: 14px; padding: 16px; color: #fff; margin-bottom: 12px; }
+  .hero-row { display: flex; justify-content: space-between; align-items: center; }
+  .hero-name { font-size: 12px; color: rgba(255,255,255,.85); letter-spacing: 1px; }
+  .hero-chip { font-size: 10px; background: rgba(255,255,255,.22); border-radius: 999px; padding: 2px 9px; }
+  .amt-label { font-size: 13px; color: rgba(255,255,255,.85); }
+  .amt { font-size: 34px; font-weight: 700; line-height: 1.2; margin: 6px 0 4px; }
+  .amt-cny { font-size: 16px; font-weight: 500; margin-right: 3px; }
+  .amt-meta { font-size: 10.5px; color: rgba(255,255,255,.78); display: flex; gap: 6px; flex-wrap: wrap; }
+  .amt-note { margin-top: 11px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.20); font-size: 10.5px; color: rgba(255,255,255,.78); line-height: 1.6; }
+  .hero-title { font-size: 21px; font-weight: 600; margin: 7px 0 6px; }
+  .hero-desc { font-size: 11.5px; color: rgba(255,255,255,.82); line-height: 1.6; }
+  .hero-ref { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.20); font-size: 10.5px; color: rgba(255,255,255,.78); }
+
+  /* ---- 卡片 ---- */
+  .card { background: #fff; border-radius: 14px; margin-bottom: 11px; overflow: hidden; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  .card-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px 6px; }
+  .card-title { font-size: 14px; font-weight: 600; }
+  .card-more { font-size: 11.5px; color: #98A6B8; }
+  .chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: #F1F4F8; color: #6B7A8C; }
+  .chip-warn { background: rgba(240,140,0,.10); color: #F08C00; }
+  .chip-success { background: rgba(18,184,134,.10); color: #12B886; }
+  .chip-purple { background: rgba(112,72,232,.10); color: #7048E8; }
+
+  /* ---- 字段行 ---- */
+  .frow { display: flex; align-items: center; min-height: 34px; padding: 0 14px; border-bottom: 1px solid #F1F4F8; }
+  .frow:last-child { border-bottom: none; }
+  .flabel { width: 84px; flex-shrink: 0; font-size: 12.5px; color: #3D4C63; }
+  .fval { flex: 1; text-align: right; font-size: 12.5px; color: #0F2540; }
+  .mono { font-family: Consolas, Menlo, monospace; font-size: 10.5px; word-break: break-all; color: #3D4C63; }
+
+  /* ---- 时间轴 ---- */
+  .tl { padding: 4px 14px 12px; }
+  .tl-item { display: flex; gap: 10px; }
+  .tl-rail { width: 16px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
+  .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: #E3E9F2; margin-top: 5px; flex-shrink: 0; }
+  .tl-line { width: 1px; flex: 1; background: #EEF1F6; margin-top: 3px; }
+  .tl-done .tl-dot { background: linear-gradient(135deg,#3B5BDB,#7048E8); box-shadow: 0 0 0 3px rgba(59,91,219,.12); }
+  .tl-body { flex: 1; padding-bottom: 14px; }
+  .tl-item:last-child .tl-body { padding-bottom: 2px; }
+  .tl-title { font-size: 12.5px; font-weight: 500; color: #98A6B8; }
+  .tl-done .tl-title { font-weight: 600; color: #0F2540; }
+  .tl-time { font-size: 10.5px; color: #B7C2D0; margin-top: 2px; }
+  .tl-done .tl-time { color: #6B7A8C; }
+  .tl-note { font-size: 10px; color: #98A6B8; margin-top: 2px; word-break: break-all; }
+  .tl-foot { padding: 9px 14px 12px; border-top: 1px solid #F1F4F8; font-size: 10.5px; color: #98A6B8; line-height: 1.6; }
+
+  /* ---- 无支付单 ---- */
+  .nocp { padding: 4px 14px 14px; }
+  .nocp-t { font-size: 12.5px; color: #3D4C63; line-height: 1.7; }
+  .nocp-h { margin-top: 9px; font-size: 11px; color: #F08C00; background: rgba(240,140,0,.08); border-radius: 8px; padding: 8px 10px; line-height: 1.6; }
+
+  /* ---- 未入局 ---- */
+  .fs { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 14px 2px; }
+  .fs-i { display: flex; align-items: center; gap: 6px; background: #F4F6FB; border-radius: 8px; padding: 6px 10px; }
+  .fs-l { font-size: 11px; color: #6B7A8C; }
+  .fs-c { font-size: 13px; font-weight: 600; }
+  .fs-f { padding: 9px 14px 12px; border-top: 1px solid #F1F4F8; margin-top: 8px; font-size: 10.5px; color: #98A6B8; line-height: 1.6; }
+
+  /* ---- 排序条 ---- */
+  .sorts { display: flex; gap: 8px; margin-bottom: 10px; }
+  .sort { height: 30px; line-height: 30px; padding: 0 12px; border-radius: 999px; background: #fff; font-size: 11.5px; color: #6B7A8C; box-shadow: 0 1px 6px rgba(61,90,219,.06); }
+  .sort-on { background: linear-gradient(135deg,#3B5BDB,#7048E8); color: #fff; font-weight: 600; }
+
+  /* ---- 候选卡 ---- */
+  .cand { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 10px; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  .cand-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .cand-tw { flex: 1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .cand-t { font-size: 15px; font-weight: 600; }
+  .cand-s { display: flex; align-items: baseline; gap: 2px; flex-shrink: 0; }
+  .cand-sn { font-size: 21px; font-weight: 700; color: #3B5BDB; line-height: 1; }
+  .cand-su { font-size: 10px; color: #98A6B8; }
+  .cand-f { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; font-size: 11.5px; color: #6B7A8C; }
+  .dim-list { margin-top: 11px; padding-top: 11px; border-top: 1px solid #F1F4F8; display: flex; flex-direction: column; gap: 7px; }
+  .dim-h { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .dim-n { font-size: 10.5px; color: #6B7A8C; }
+  .dim-v { font-size: 10.5px; font-weight: 600; color: #3B5BDB; }
+  .dim-v span { font-weight: 400; color: #B7C2D0; }
+  .dim-track { height: 5px; border-radius: 999px; background: #F1F4F8; overflow: hidden; }
+  .dim-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg,#3B5BDB,#7048E8); }
+  .cand-act { display: flex; justify-content: flex-end; margin-top: 11px; }
+  .mini-btn { padding: 0 18px; height: 30px; line-height: 30px; border-radius: 8px; background: linear-gradient(135deg,#3B5BDB,#7048E8); color: #fff; font-size: 12px; }
+  .cand-note { margin-top: 11px; padding-top: 9px; border-top: 1px solid #F1F4F8; font-size: 10.5px; color: #9A6A00; line-height: 1.6; }
+  .note-card { background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  .note-t { font-size: 13px; font-weight: 600; margin-bottom: 7px; }
+  .note-l { font-size: 11px; color: #6B7A8C; line-height: 1.9; }
+  .note-w { font-weight: 700; color: #7048E8; }
+
+  /* ---- 表格 ---- */
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(61,90,219,.06); font-size: 13px; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #F1F4F8; vertical-align: top; }
+  th { background: #FAFBFD; font-weight: 600; font-size: 12.5px; color: #3D4C63; }
+  tr:last-child td { border-bottom: none; }
+  code { background: #F4F6FB; border-radius: 4px; padding: 1px 5px; font-family: Consolas, Menlo, monospace; font-size: 12px; color: #3B5BDB; }
+  .ok { color: #12B886; font-weight: 600; }
+  .warn { color: #F08C00; font-weight: 600; }
+  .box { background: #fff; border-radius: 14px; padding: 16px 18px; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  .box ul { margin: 8px 0 0; padding-left: 20px; }
+  .box li { font-size: 13px; margin-bottom: 5px; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 14px; font-size: 13px; }
+  .kv dt { color: #6B7A8C; }
+  .kv dd { margin: 0; }
+</style>
+</head>
+<body data-page-node-id="MiirMeEjWxPfsRbJzj7i3N">
+<div class="wrap" data-page-node-id="grYvwAv5E4gBQXss0dndsA">
+
+  <h1 data-page-node-id="gQcAyUoYeDNCEVtyXKW2Px">三级页冲刺 S2 · 交易闭环页组效果预览</h1>
+  <div class="meta" data-page-node-id="CY4SJpUPi39X2G6al1Dj5t">
+    <span class="tag green" data-page-node-id="dDXgvTfo2DkClTcOyE0HI8">PR #23 已合并</span>
+    <span class="tag" data-page-node-id="hsf0Yroqhy4p1HAUCPAzyo">develop = <code data-page-node-id="cv5aQTeICyWE4aOr7mHqdk">7ecc638</code></span>
+    <span class="tag purple" data-page-node-id="uX98NGaBbLRhL1DVf7RtqY">零后端改动</span>
+    <span class="tag" data-page-node-id="XYBIWoa97fcr3cEMTBeH2L">12 页面 / 43 路由 / 152 事件绑定</span>
+    <span class="tag gray" data-page-node-id="wVq46Wj5jRr209flQPVWkd">静态校验 + 真实冒烟 + 60 断言</span>
+  </div>
+  <p class="sub" data-page-node-id="IHFFAMg6kEGh0GIjG3QAzg">
+    本文所有数字均来自 dev 库的真实接口返回（<code data-page-node-id="X76AwwBPPOQJsSt3YsKNOq">LLM_MOCK=true</code> 起后端直连），不是设计稿示意值。
+    支付页三种状态分别取自支付单 #3（pending）、#1（paid）、#2（refunded）。
+  </p>
+
+  <h2 data-page-node-id="lyNkm39C5J4sXiZB94GK2O">S2-1 · 支付详情三级页</h2>
+  <p class="sub" data-page-node-id="TZg9puocAlg21QdscnmFiF">
+    入口：订单卡「去支付」（待承运）/「支付详情」（已启运、已完成、已撤单）。
+    设计主线是<strong data-page-node-id="2B7pAkhSTLqJarLkqMNZfm">一张单据的完整资金留痕</strong>——创建锁价 → 支付成功 → 退款 / 关闭。
+  </p>
+
+  <div class="phones" data-page-node-id="Oz8mDTOfr20y6XhLfzjFHE">
+
+    <!-- ===== 待支付 ===== -->
+    <div data-page-node-id="eFqm2wlDJtE615D8soqYJ3">
+      <p class="cap" data-page-node-id="N4XDjzqVyd6n29yDm3FyHT">① 待支付 <span data-page-node-id="UTLmJaS4DWCJIcdrIbQH1A">— 货主视角，底栏可直接模拟支付</span></p>
+      <div class="phone" data-page-node-id="EFFskCzkMAUkwvw9Uk6IhC">
+        <div class="p-nav" data-page-node-id="YtE4mGLpTlHCSuvMbRG3He">支付详情</div>
+        <div class="p-body" data-page-node-id="ZDixm0Jtd0qWyIKnWHwrKz">
+          <div class="hero" data-page-node-id="sHrzTg9RNqAdqRraDk2VTc">
+            <div class="hero-row" data-page-node-id="sl4brN6VwIGaFM9ciYPLGD">
+              <span class="amt-label" data-page-node-id="sDZzHuw7R5jN3TOeckoPjp">订单运费</span>
+              <span class="hero-chip" data-page-node-id="J0h3QVqW8OvmcuttS7Hntl">待支付</span>
+            </div>
+            <div class="amt" data-page-node-id="ss0XUwSpChFXm4bih2Ezwn"><span class="amt-cny" data-page-node-id="2ygaE0UFS79QiZBxBgOxcJ">¥</span>28000.00</div>
+            <div class="amt-meta" data-page-node-id="IOmqq82Hbxa7gfO5SVYtdt">
+              <span data-page-node-id="KfduUgRYi3VAqdaMCx4dOW">订单 #4</span><span data-page-node-id="Bv4zoFrUpxaF04kCEnceCZ">·</span><span data-page-node-id="GXhkTZbAVutI0BfwiOYQ9v">模拟支付（联调期）</span><span data-page-node-id="7Ibrxgz26BU9dbGShLqWdo">·</span><span data-page-node-id="XfPUwcOdd62vnx9UpEx3Es">待承运</span>
+            </div>
+            <div class="amt-note" data-page-node-id="7z87w8htmI3xaR6zC0bzcU">运费金额在创建支付单时锁定，此后订单字段变化不影响本单金额。</div>
+          </div>
+
+          <div class="card" data-page-node-id="u0DfzIXvkfjjcCq2xF7jQH">
+            <div class="card-head" data-page-node-id="RqG4PxDAhLtz6UYampx2oQ"><span class="card-title" data-page-node-id="Eb8exrt1OqSnRpXeN9ivx0">支付单信息</span><span class="chip chip-warn" data-page-node-id="a8rykqJ4GeyEvTlsOad4he">待支付</span></div>
+            <div class="frow" data-page-node-id="qkGLmB9s9UCmhXjeQOJF8b"><span class="flabel" data-page-node-id="AHcfQv1SjTpvM3bCLbYFhu">支付单号</span><span class="fval" data-page-node-id="Ep7vEIdYTkVc5enXHYLj7w">#3</span></div>
+            <div class="frow" data-page-node-id="YjYhXLORuS7jSTLC4yKNB2"><span class="flabel" data-page-node-id="T5W1GzcZ6Hv4SS6n9yue89">支付渠道</span><span class="fval" data-page-node-id="aHve9cFQSTyU4uv5FZLiRZ">模拟支付（联调期）</span></div>
+            <div class="frow" data-page-node-id="HH5B0stVTBz6Aj4prQrMTb"><span class="flabel" data-page-node-id="Gwidodmw9I4SWM2rX0sX4v">付款方</span><span class="fval" data-page-node-id="nalFsH28O9d9jtKP4695Xm">用户 #1（货主）</span></div>
+            <div class="frow" data-page-node-id="4EHCodpjmkHGi43fPBgthA"><span class="flabel" data-page-node-id="BYa4OwZKXGbqgRZRhARyWv">收款方</span><span class="fval" data-page-node-id="IVTlBfy8e0sQNG8ulaVCYT">用户 #2（船东）</span></div>
+          </div>
+
+          <div class="card" data-page-node-id="U8usbfef9racWSj8F19iFD">
+            <div class="card-head" data-page-node-id="kMmTVJWB0WLWWGVlSOkJec"><span class="card-title" data-page-node-id="MUfuRDSc42f36vaMZtS7VO">资金状态留痕</span><span class="chip chip-purple" data-page-node-id="BORswvwtXVnozpUNZKwTaR">确定性状态机</span></div>
+            <div class="tl" data-page-node-id="iTDFXjQAZ9gYd0O7aB9h4c">
+              <div class="tl-item tl-done" data-page-node-id="S3j1KBXpl5uYAftQkOaTdY">
+                <div class="tl-rail" data-page-node-id="AlEhgkHL7IAXQdIdNNxwbk"><div class="tl-dot" data-page-node-id="p5CLESjCXFchtCeXYXEltm"></div><div class="tl-line" data-page-node-id="CzhCFGLisPu5rQEb3cZDfy"></div></div>
+                <div class="tl-body" data-page-node-id="6jEuICPjI53UyQe3A9KCae">
+                  <div class="tl-title" data-page-node-id="gkoFdGjD8DBrbeGpJfPfwv">支付单创建 · 锁定运费</div>
+                  <div class="tl-time" data-page-node-id="8BntzP6QC0AGJ0g5DH3nFR">2026-09-10 23:23:46</div>
+                  <div class="tl-note" data-page-node-id="CoqGEQBjDGWokN9aPvVQLD">渠道 模拟支付（联调期）</div>
+                </div>
+              </div>
+              <div class="tl-item" data-page-node-id="8Dnny1rqpdAK6ZVGqKHtXT">
+                <div class="tl-rail" data-page-node-id="yT9dQWA5yFGwF4IF3lhaMM"><div class="tl-dot" data-page-node-id="CYvMCnlXcSk1T4AMuaJYOE"></div><div class="tl-line" data-page-node-id="AaUo5w89uy7CejYZsAzzop"></div></div>
+                <div class="tl-body" data-page-node-id="fyv4pkghBvHJqDbLQu9K59">
+                  <div class="tl-title" data-page-node-id="OyDuE8mGvGAY6vKmr5whO1">等待支付成功</div>
+                  <div class="tl-time" data-page-node-id="tTvb2BfLydvAIazeBrPR5w">待发生</div>
+                  <div class="tl-note" data-page-node-id="GVrENYFV3jCyo4uThRkO3X">收到模拟回调 / 微信支付通知后置为已支付</div>
+                </div>
+              </div>
+              <div class="tl-item" data-page-node-id="KVskHBtWHaOSdCIVS9viCK">
+                <div class="tl-rail" data-page-node-id="8CjcG92Fl4Fbtol8y2ZEAN"><div class="tl-dot" data-page-node-id="F4tczzGBPEESKBkmuWrDms"></div></div>
+                <div class="tl-body" data-page-node-id="SaexQ6tihALkrtjXt9Cgm2">
+                  <div class="tl-title" data-page-node-id="XGJi46RMSwnpFyq6xOOruJ">超时未付自动关单</div>
+                  <div class="tl-time" data-page-node-id="peGiq3ucLhfKSgO0oOwp5p">待发生</div>
+                  <div class="tl-note" data-page-node-id="SX3e11C4xt6z2JBNqHClRv">超时关单定时任务为后续版本能力</div>
+                </div>
+              </div>
+            </div>
+            <div class="tl-foot" data-page-node-id="LnzFpwyiP2Wmjr8lUveMgo">
+              资金流与订单流的一致性由确定性内核驱动：撤单时已付款自动全额退款、待付款直接关闭，
+              平台不开放独立退款端点，避免两条状态机各说各话。
+            </div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="bABgXxI3qkvKWSm3MWObvq">
+          <div class="b-note" data-page-node-id="Y2IxEYLjQhJUAiM6XnlP8E">联调期以模拟回调替代微信支付，点击后资金状态置为已支付</div>
+          <div class="b-acts" data-page-node-id="yCVdCRzA4xwL8uLoI82EeQ"><div class="btn btn-primary" data-page-node-id="U4TdCtlFNMZjtyP07cCS1g">模拟支付成功</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 已支付 ===== -->
+    <div data-page-node-id="RyTCmpd4RrGiCN4rKgrlM2">
+      <p class="cap" data-page-node-id="Lhg3VJNEZvCuI7QShm8iU7">② 已支付 <span data-page-node-id="27FhcIy3kO83wMtfImCjvq">— 实心圆点＝已发生，灰点＝待发生</span></p>
+      <div class="phone" data-page-node-id="G6vZxFZOv1RFOprAskAfx7">
+        <div class="p-nav" data-page-node-id="iBVljRZVmaZR0GhCeGRECw">支付详情</div>
+        <div class="p-body" data-page-node-id="Pf1OkqkxS3RWpC61qhF5mY">
+          <div class="hero" data-page-node-id="EEFmwFrV8NM2Rkf0SMn2dG">
+            <div class="hero-row" data-page-node-id="AKWCkHpM0oo2UrvxOEUsrM">
+              <span class="amt-label" data-page-node-id="vdWE2UtlZXlhG41VjyfYdq">订单运费</span>
+              <span class="hero-chip" data-page-node-id="qj2resdr4szZimPYHvxeAh">已支付</span>
+            </div>
+            <div class="amt" data-page-node-id="qvmFlLKjZIyfQejwAJyJPB"><span class="amt-cny" data-page-node-id="IP5Toujb7pEHqi4Es2MIMq">¥</span>35500.00</div>
+            <div class="amt-meta" data-page-node-id="3DR9lkVOTYf2AewN9V2t1N">
+              <span data-page-node-id="9JAtFaZDTuU1N8Y9vW0jEF">订单 #1</span><span data-page-node-id="IFmxc2iOPTttbGvsPOxa6k">·</span><span data-page-node-id="idnnthBfIQUKbDEsdbxiu3">模拟支付（联调期）</span><span data-page-node-id="XXTegB9KFX7BEYvU1dZjL1">·</span><span data-page-node-id="ZIYPrUAI82i1Qb7uGE0eiI">已完成</span>
+            </div>
+            <div class="amt-note" data-page-node-id="O2Ys5pOrPTQoYBtFnGyuK0">运费金额在创建支付单时锁定，此后订单字段变化不影响本单金额。</div>
+          </div>
+
+          <div class="card" data-page-node-id="257uVXTXQFZxsB8WjZcLb4">
+            <div class="card-head" data-page-node-id="9jbAgxc5AbihOFq8uo4iW5"><span class="card-title" data-page-node-id="M5er9UqvGm5DyxDphAiueL">支付单信息</span><span class="chip chip-success" data-page-node-id="GmLRQmMaHxGF6Cq79XxzVQ">已支付</span></div>
+            <div class="frow" data-page-node-id="izU6CJfpSjnCl3D9quOgAe"><span class="flabel" data-page-node-id="FBfs3pmgiBzq0UYMFnwgYS">支付单号</span><span class="fval" data-page-node-id="FLELAWCRRtb4HBi5dKGB8y">#1</span></div>
+            <div class="frow" data-page-node-id="KvkHMh27ctSHSjaSnUABPP"><span class="flabel" data-page-node-id="c3ttYI0sH4NTo3moyULO8m">支付渠道</span><span class="fval" data-page-node-id="2fwyQ91VTSX7GBf1WiZz2A">模拟支付（联调期）</span></div>
+            <div class="frow" data-page-node-id="3A3356sgAvIvDSxAMOFFGG"><span class="flabel" data-page-node-id="RwhgdVRIUl4uLwtonzA79L">付款方</span><span class="fval" data-page-node-id="qf6ceskXc1CoT0fFmDB19m">用户 #4（货主）</span></div>
+            <div class="frow" data-page-node-id="zf5ZwnSwE7TOEkzeAIssKj"><span class="flabel" data-page-node-id="HDozCEmKc0qipknXxkCUJu">收款方</span><span class="fval" data-page-node-id="47MjRjGhEnsoR1ZuQl2loZ">用户 #2（船东）</span></div>
+            <div class="frow" data-page-node-id="yKi4U6owovqPsgRyK2ApSk"><span class="flabel" data-page-node-id="XK94PdACJWqm9AuEGmpXhi">支付流水号</span><span class="fval mono" data-page-node-id="8CFnqbDBvwkrW4YQHbyeWB">MOCK-eebea3e6fd0f4ba2a224437d</span></div>
+          </div>
+
+          <div class="card" data-page-node-id="M1eVa8pxUwLtHfJOJp3Jyp">
+            <div class="card-head" data-page-node-id="NZIWRMjECQLPSqAISaRfkQ"><span class="card-title" data-page-node-id="XQBbgfnkTnP44YbsZzVobk">资金状态留痕</span><span class="chip chip-purple" data-page-node-id="O4q8eAUybLR2bnbx0nPTTz">确定性状态机</span></div>
+            <div class="tl" data-page-node-id="k51ClilJfC72tfo7pbsTEO">
+              <div class="tl-item tl-done" data-page-node-id="nb5maLZa0inKKPVUwzxSSY">
+                <div class="tl-rail" data-page-node-id="CrDPKPQPlf1tvZOi3xspAF"><div class="tl-dot" data-page-node-id="NdQa9Kz5wd7ZX0qkmjOtG4"></div><div class="tl-line" data-page-node-id="kPzHYpF2AzbgWwZkZ8t4ut"></div></div>
+                <div class="tl-body" data-page-node-id="q0HLL2ImZQzFFDAgAne0yV">
+                  <div class="tl-title" data-page-node-id="tSNGgFDtCrzsn3XAyVB3u3">支付单创建 · 锁定运费</div>
+                  <div class="tl-time" data-page-node-id="CuEJyPMwHhzsaknPRnWChx">2026-09-10 00:21:33</div>
+                  <div class="tl-note" data-page-node-id="Y0gsdwCKLbaQPUTXV5CIcq">渠道 模拟支付（联调期）</div>
+                </div>
+              </div>
+              <div class="tl-item tl-done" data-page-node-id="ByA9mkeEZSbcbQiUbH0LZu">
+                <div class="tl-rail" data-page-node-id="QEfqFdHigA8BYYd5T0yGVP"><div class="tl-dot" data-page-node-id="CsVwxJBVbHjxfypBAAPmbY"></div><div class="tl-line" data-page-node-id="mUANyOPcaNRICWJrji5KXp"></div></div>
+                <div class="tl-body" data-page-node-id="NF5DrIjEUyxAyZ5tusDxQr">
+                  <div class="tl-title" data-page-node-id="HhHucBm6jOQciBKKnHFuQP">支付成功 · 运费进入平台待结算</div>
+                  <div class="tl-time" data-page-node-id="BdUX3Z465W3NxhlHj0kB8B">2026-09-10 08:21:33</div>
+                  <div class="tl-note" data-page-node-id="nqNkUfgAZIY9JjJqrXq7jp">流水号 MOCK-eebea3e6fd0f4ba2a224437d</div>
+                </div>
+              </div>
+              <div class="tl-item" data-page-node-id="7TUVuFFX0fDZFVIcKpGxKE">
+                <div class="tl-rail" data-page-node-id="2gdNTEDNb8FOI0n8kHxhe7"><div class="tl-dot" data-page-node-id="FxpPHACPfpa3hEDukbxDwa"></div></div>
+                <div class="tl-body" data-page-node-id="a0MKhFUOhzEoofRSfCc8Vm">
+                  <div class="tl-title" data-page-node-id="AiHEfjG9LhpKHzF39hgwFN">结算分账 / 船东提现</div>
+                  <div class="tl-time" data-page-node-id="l3ZvHsj0BKvAvk4rDv2OVP">待发生</div>
+                  <div class="tl-note" data-page-node-id="oRMr9E8ST3BMB5JqGknQfR">后续版本能力，当前非阻断</div>
+                </div>
+              </div>
+            </div>
+            <div class="tl-foot" data-page-node-id="j13tNSd3UQZGCd4q0hTpgs">
+              资金流与订单流的一致性由确定性内核驱动：撤单时已付款自动全额退款、待付款直接关闭，
+              平台不开放独立退款端点，避免两条状态机各说各话。
+            </div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="4Jm59HISIujW1IvBSjw5zV">
+          <div class="b-note" data-page-node-id="ok18xz5jkxdr2rvJC1AP6L">如需退款，请在订单页发起撤单，系统将自动原路全额退款</div>
+          <div class="b-acts" data-page-node-id="AlDzN3TwDVLjypRLCGoDdJ">
+            <div class="btn btn-ghost disabled" data-page-node-id="TYjd8O0vXqgVmqBr7tWmKZ">下载支付凭证</div>
+            <div class="btn btn-primary disabled" data-page-node-id="UryL4H5ZTwtFkN2JD4slFf">在线退款</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 已退款 ===== -->
+    <div data-page-node-id="86JCO4PHUSTxVcIFNK8E1u">
+      <p class="cap" data-page-node-id="I583mX7ah7ST4xR0XifeUo">③ 已退款 <span data-page-node-id="TJNI44CM4Cq6pGB0bxgTh1">— 撤单联动，三段全部打点</span></p>
+      <div class="phone" data-page-node-id="JEvJaVKiqAiJcN47odDTjQ">
+        <div class="p-nav" data-page-node-id="3PWOWV9X1ENu3vyrdYJGve">支付详情</div>
+        <div class="p-body" data-page-node-id="rUFWyp7tjXM3kQs9WXdwpk">
+          <div class="hero" data-page-node-id="T5OtDOGQlWmG1cxcWsC1nB">
+            <div class="hero-row" data-page-node-id="XbOpeCYWYFqJzyxXHocMHw">
+              <span class="amt-label" data-page-node-id="PgQXaz1B43XpDq32vm0sTH">订单运费</span>
+              <span class="hero-chip" data-page-node-id="Wn9xsJ8Giu4lQpDrDQyIm3">已退款</span>
+            </div>
+            <div class="amt" data-page-node-id="NtYu4Gh3TmsHKNVpBcfAXe"><span class="amt-cny" data-page-node-id="Of7CEs8O3pE0nXR4vmNyfi">¥</span>27000.00</div>
+            <div class="amt-meta" data-page-node-id="AgxGucN6sG8QhedT6AcZnT">
+              <span data-page-node-id="CZTQ54aDo5LexxMzFJyVQP">订单 #2</span><span data-page-node-id="f0pd6XsE4v3zDK4bzqMrZb">·</span><span data-page-node-id="Y1sGAVEZCxGrDuvgwD8CvZ">模拟支付（联调期）</span><span data-page-node-id="f9sUNDu0KyXpXygEnbWzqv">·</span><span data-page-node-id="iuMa541KGEuzwqzU1bFNSn">已撤单</span>
+            </div>
+            <div class="amt-note" data-page-node-id="qlkXjDiKPt3Dn0HADXA3VD">运费金额在创建支付单时锁定，此后订单字段变化不影响本单金额。</div>
+          </div>
+
+          <div class="card" data-page-node-id="LjDq6zcCCEa5QC8RpVxBDx">
+            <div class="card-head" data-page-node-id="qvPOWoEPh3HuDBgHFOHZkH"><span class="card-title" data-page-node-id="vzrU5SqBBDMaKumCIimtbb">支付单信息</span><span class="chip chip-purple" data-page-node-id="eMuBZ6AJeFoJ3IDTi4ZHdl">已退款</span></div>
+            <div class="frow" data-page-node-id="O01Bt2c3eV4TssYPPki2t1"><span class="flabel" data-page-node-id="dHrcQml7lgGExSgvMvHFrb">支付单号</span><span class="fval" data-page-node-id="iNBT1EHu570yZXUbA6JjJC">#2</span></div>
+            <div class="frow" data-page-node-id="2dcVAhFrk00PStG8mRtisw"><span class="flabel" data-page-node-id="xZjYje2CpkXZklHrmXyjtl">支付渠道</span><span class="fval" data-page-node-id="gMz4AqHDaRoEPVcn7zmGhA">模拟支付（联调期）</span></div>
+            <div class="frow" data-page-node-id="OnFS5XZgsIBzqtH7LWN6lh"><span class="flabel" data-page-node-id="mbi5e9B3lynRvbN2zq3Bnb">付款方</span><span class="fval" data-page-node-id="AInoNq6TBfB68Y1RAz7I8F">用户 #4（货主）</span></div>
+            <div class="frow" data-page-node-id="cf9j6XEEIxg6ZzBWCRmeTp"><span class="flabel" data-page-node-id="q3siPVLNTjQme4E23gFBFf">收款方</span><span class="fval" data-page-node-id="A3US5liVVDwgAAOtazxgFb">用户 #2（船东）</span></div>
+            <div class="frow" data-page-node-id="bOS30EjRlzrYPSFbhvEGVw"><span class="flabel" data-page-node-id="ZU2RUF7XBJwpw2UIi9CC5y">支付流水号</span><span class="fval mono" data-page-node-id="gDfM8vXkWlpQPWvGmR0oPi">MOCK-2a1cb973c4554a66a6472f4f</span></div>
+            <div class="frow" data-page-node-id="lnf62qpcbMEGxGF6ghk8fM"><span class="flabel" data-page-node-id="c1DrD3HnCO5NypaLpZmaxe">退款流水号</span><span class="fval mono" data-page-node-id="fGbAk68sKmue58pFAtLTGQ">RF-df53aaa0065142c7817f1e44</span></div>
+          </div>
+
+          <div class="card" data-page-node-id="5RViHJ4trE4hTbCp3gpad0">
+            <div class="card-head" data-page-node-id="bo5Xp6G68fqAvJtB4KR1yr"><span class="card-title" data-page-node-id="SlwNMS19Qq05p6a1syJqIn">资金状态留痕</span><span class="chip chip-purple" data-page-node-id="EDKBRdH5ps9ZtIEbFTkvDT">确定性状态机</span></div>
+            <div class="tl" data-page-node-id="g7rG6HlDo3ZUtFAUsDBKfP">
+              <div class="tl-item tl-done" data-page-node-id="hYqW3iAboS92s2Z7zC4oXy">
+                <div class="tl-rail" data-page-node-id="oZoCIYmunGnWB8TnmT3z1V"><div class="tl-dot" data-page-node-id="mtGEzc0Yd5TFduJdzoTc7K"></div><div class="tl-line" data-page-node-id="5mTUC2m7J07h4q9DQuZ3FT"></div></div>
+                <div class="tl-body" data-page-node-id="XCDwA6uPz0V9xjeZncjgWx">
+                  <div class="tl-title" data-page-node-id="ATC4AiKrpJU1umnRELlrc7">支付单创建 · 锁定运费</div>
+                  <div class="tl-time" data-page-node-id="p1MkxYIKT2rCoRB1fQtN5B">2026-09-10 00:21:34</div>
+                  <div class="tl-note" data-page-node-id="eCEGLIuLdY7RO5Loz4aSwo">渠道 模拟支付（联调期）</div>
+                </div>
+              </div>
+              <div class="tl-item tl-done" data-page-node-id="zdaI61GRJz6bSSC8lKtAbC">
+                <div class="tl-rail" data-page-node-id="9PHhqnREsmnXDp9kl436UD"><div class="tl-dot" data-page-node-id="VpbJDYCxgmR8ntFJjVadKo"></div><div class="tl-line" data-page-node-id="EKygwaOxDbRsc4Qpu2Bv8R"></div></div>
+                <div class="tl-body" data-page-node-id="bOZ8tAahEueNx7wPC2ZIL2">
+                  <div class="tl-title" data-page-node-id="IkSoaDDnd1hEQ2uSFmDONr">支付成功 · 运费进入平台待结算</div>
+                  <div class="tl-time" data-page-node-id="xmHRysGefpknsdKqUoAEld">2026-09-10 08:21:34</div>
+                  <div class="tl-note" data-page-node-id="r1jT3Mmu4qWurXBCMh34I7">流水号 MOCK-2a1cb973c4554a66a6472f4f</div>
+                </div>
+              </div>
+              <div class="tl-item tl-done" data-page-node-id="0DE9MkezFYklOY02v3x9a7">
+                <div class="tl-rail" data-page-node-id="PphQACKb72PLoPrmnznUBo"><div class="tl-dot" data-page-node-id="5cVKJsyNNhx16UdbUQ37Fo"></div></div>
+                <div class="tl-body" data-page-node-id="G7ihK0jMXoerE2lQLPmjnD">
+                  <div class="tl-title" data-page-node-id="pG98tTK8sWu3pLdxfOdeb1">全额退款 · 已原路退回</div>
+                  <div class="tl-time" data-page-node-id="OV6n0weYXpjjeGGLEIMXBo">2026-09-10 08:21:35</div>
+                  <div class="tl-note" data-page-node-id="O4ilDAzPw4jdakqzpS8vu4">退款单号 RF-df53aaa0065142c7817f1e44</div>
+                </div>
+              </div>
+            </div>
+            <div class="tl-foot" data-page-node-id="2sUaiuc1ZiVT8SdCDaGyU9">
+              资金流与订单流的一致性由确定性内核驱动：撤单时已付款自动全额退款、待付款直接关闭，
+              平台不开放独立退款端点，避免两条状态机各说各话。
+            </div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="Cfi5CdedNozPK6AvLJohBA">
+          <div class="b-note" data-page-node-id="h0XUZBy9roA2R7BZ6SYfWI">该支付单已全额退款，资金流已闭环</div>
+          <div class="b-acts" data-page-node-id="RAPSnZzM8np14lip8MoybE">
+            <div class="btn btn-ghost disabled" data-page-node-id="6zG4d1w71zHFlbMDN2tZwt">下载支付凭证</div>
+            <div class="btn btn-primary disabled" data-page-node-id="rCYMoopB2Y7GGSLuRe8GL9">在线退款</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 无支付单 / 面议 ===== -->
+    <div data-page-node-id="wAoI1bRmsQcvnhAdw1KBnN">
+      <p class="cap" data-page-node-id="EuBtADZpjSrazaUECseZhR">④ 兜底态 <span data-page-node-id="w8otkkZHY0YQzIOXtBRDyD">— 尚无支付单，且把「为什么不能发起」讲清楚</span></p>
+      <div class="phone" data-page-node-id="zZxyDAt2VSSeffjHRpFjJQ">
+        <div class="p-nav" data-page-node-id="pSqHbYV9b5LdBq9MhY6zj0">支付详情</div>
+        <div class="p-body" data-page-node-id="6jn0PVW0wknbIPEO8zWwlN">
+          <div class="hero" data-page-node-id="NDIZB0D6FAcDSzpLfjHPad">
+            <div class="hero-row" data-page-node-id="KAnEWRJn2YS8GwgI7VnPAk">
+              <span class="amt-label" data-page-node-id="Aj3Utazsh8KLUxuDO4O3Bd">订单运费</span>
+              <span class="hero-chip" data-page-node-id="YYLKZ5DH8PjPfOQLF6BccQ">未发起</span>
+            </div>
+            <div class="amt" data-page-node-id="NDrjNNTggXnvA9CovRqcTm">面议</div>
+            <div class="amt-meta" data-page-node-id="yzCImWcDuF8YMGIG6emuJo">
+              <span data-page-node-id="O6q9b19v6NORGqmbHBiUY8">订单 #3</span><span data-page-node-id="mMyOKo4OEGpGEFbltnjVwa">·</span><span data-page-node-id="oWNYLBBP4ve3N9rjKUHSQy">—</span><span data-page-node-id="tqz3hEGNc9TxfdxyVWytzC">·</span><span data-page-node-id="mIJQH1j6hlHjozhEjGHErL">待承运</span>
+            </div>
+            <div class="amt-note" data-page-node-id="VgFlCG60iCc4TnlG7kd1ZL">运费金额在创建支付单时锁定，此后订单字段变化不影响本单金额。</div>
+          </div>
+
+          <div class="card" data-page-node-id="FgwCyuEEgRXZ8wUuj9m36z">
+            <div class="card-head" data-page-node-id="fmZUxZSHq25AvTYoWZeEww"><span class="card-title" data-page-node-id="jCTrOT0Q5njSE39zm8P4m6">该订单尚无支付单</span><span class="chip" data-page-node-id="kuyOM3RoPvaJqwxWOT7vcA">未发起</span></div>
+            <div class="nocp" data-page-node-id="OvofJcBF8LBK76juBukrvd">
+              <div class="nocp-t" data-page-node-id="w3DATgqusABZVimOL83GZc">发起支付后将生成待支付单据，运费金额随即锁定，并进入资金状态留痕。</div>
+              <div class="nocp-h" data-page-node-id="PgZPNVxTIOeRzimIhP3Vp0">订单运费为面议，须先与船东议定运价再支付</div>
+            </div>
+          </div>
+
+          <div class="card" data-page-node-id="wQv2jLBD0GAV7WTUrzG8AR">
+            <div class="card-head" data-page-node-id="XzTDBrW9yfM0sL9YUNDk5E"><span class="card-title" data-page-node-id="5ite4bSNIkmXVxzTqaoXP3">资金状态留痕</span><span class="chip chip-purple" data-page-node-id="j6inTxLpUVUPqi4RhYt2FP">确定性状态机</span></div>
+            <div class="tl" data-page-node-id="9YNILSQK6G3CJNEv44Gic9"><div class="note-l" style="padding:6px 0 8px" data-page-node-id="mFPEUIDBPcYgrAEBNKxUFM">尚无支付单 → 时间轴为空</div></div>
+            <div class="tl-foot" data-page-node-id="XnuR9IslHBrJC2fWSLYFDQ">
+              资金流与订单流的一致性由确定性内核驱动：撤单时已付款自动全额退款、待付款直接关闭，
+              平台不开放独立退款端点，避免两条状态机各说各话。
+            </div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="brAxjffm4uP6JxA4mN7ng7">
+          <div class="b-note" data-page-node-id="5fBVBKc47ZL9hMOgABPdKn">订单运费为面议，须先与船东议定运价再支付</div>
+          <div class="b-acts" data-page-node-id="CKFQfj0plniBmBXCsM4Is0">
+            <div class="btn btn-ghost disabled" data-page-node-id="BqkOKWtH0Db56kc1WndMWo">下载支付凭证</div>
+            <div class="btn btn-primary disabled" data-page-node-id="WVKA7IDMnL2m3PKsZ1cW4H">在线退款</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2 data-page-node-id="t0JIFN8gTH6UQty8ufQOFw">S2-2 · 撮合结果页（正式化）</h2>
+  <p class="sub" data-page-node-id="tHIof9hjltYarZjIkSxzZb">
+    把原来的「演示版候选列表」升级为完整三级页：引擎头卡讲清确定性口径，未入局原因显性化，
+    评分不再是单一总分而是可拆解的四项进度条，并支持四种排序。
+  </p>
+
+  <div class="phones" data-page-node-id="13fwzDkRxDfKmdonrNDmI5">
+
+    <!-- ===== 货主找船 ===== -->
+    <div data-page-node-id="Llv9oixoKKPpyswXemdjMS">
+      <p class="cap" data-page-node-id="bC73bjUyPmFtrpPHE9d6jk">⑤ 货主找船 <span data-page-node-id="x28608B0AT0MtDV9YzRxY4">— 真实候选：桂平航 6688，86.67 分</span></p>
+      <div class="phone" data-page-node-id="BKHwy7wMFGWBGMLWuEGHWm">
+        <div class="p-nav" data-page-node-id="UMtS5iI4zWR91a2Y6V2RZM">智能撮合</div>
+        <div class="p-body" data-page-node-id="VZDnSpDLiwQerlAldtQoWl">
+          <div class="hero" data-page-node-id="xNsbzc1dS1YszfZVjvAzHZ">
+            <div class="hero-row" data-page-node-id="HNBc7GYu8l6cNU5voUhJlz">
+              <span class="hero-name" data-page-node-id="XctbHqilF5vAxNJmwRgjuE">撮合引擎</span>
+              <span class="hero-chip" data-page-node-id="LDQhBHori8l9rNU0K3FFWi">确定性内核 · 零 LLM</span>
+            </div>
+            <div class="hero-title" data-page-node-id="fGYHkPCMQWPI6IBpwuHrKY">为货源找船</div>
+            <div class="amt-meta" data-page-node-id="01T76OUEadHkydDMpb0Rmh">
+              <span data-page-node-id="iax1VVzU1U2UXLYz7wBwF4">候选 1 个</span><span data-page-node-id="OI2i3HTWcgmapiCwHYztuD">·</span><span data-page-node-id="2Zh0mAfZ1K4VORLpUrjysW">硬约束过滤 + 四项加权评分</span><span data-page-node-id="tX3ffknCNqujsDsrWasqhq">·</span><span data-page-node-id="kB0JIbEyGaupWpOck3ZPPk">P99 &lt; 200ms</span>
+            </div>
+            <div class="hero-desc" data-page-node-id="yZ15LDAFBsZ51Zda5KbmKO">
+              硬约束（船舶过审 / 证书覆盖装货日 / 载重 ≥ 货量 / 船型货类兼容）先筛掉不合格候选，
+              再按载重利用率 40 + 船型适配 20 + 船籍港就近 20 + 证书余量 20 打分。纯函数内核，不经大模型，结果可复现。
+            </div>
+            <div class="hero-ref" data-page-node-id="L3q1Kjaws6Cut7OAHxa2Y4">货源 #6</div>
+          </div>
+
+          <div class="card" data-page-node-id="EbL4DCdZEkDqcgVdG3jHQt">
+            <div class="card-head" data-page-node-id="sWedDeTUXsZ8EFc0HkEeAH"><span class="card-title" data-page-node-id="EieUKW8M9zaqrjkIBzjZce">未入局候选</span><span class="chip" data-page-node-id="R6ODEbUjQTKtHEJJJ5D4hT">硬约束拦截</span></div>
+            <div class="fs" data-page-node-id="BL0rsuOrGTCXXymMQfaOYI">
+              <div class="fs-i" data-page-node-id="US3cRMRsrEqi08B7CaXH3p"><span class="fs-l" data-page-node-id="AeF476dwDjiSP2iNVCwEPA">船舶未过审</span><span class="fs-c" data-page-node-id="21Xd0JbBoNhvjWAA8AR74a">1</span></div>
+            </div>
+            <div class="fs-f" data-page-node-id="MFPLZWHjqpjpi2lFf3Gnid">硬约束不达标直接不入局（软性差异才交给评分），因此这里的候选不会出现在下方排序中。</div>
+          </div>
+
+          <div class="sorts" data-page-node-id="ANguBGt8ahvzbPIeSNEvN1">
+            <div class="sort sort-on" data-page-node-id="6mptglWMItnS2JABxYMKW3">综合评分</div>
+            <div class="sort" data-page-node-id="EVKeqjeoQLP4B3dfq5XbHT">载重利用率</div>
+            <div class="sort" data-page-node-id="kNRzuzkND0ZxJiHiZkvP89">证书余量</div>
+            <div class="sort" data-page-node-id="d3oUrlmGOw36hVuMy3SIMm">船籍港就近</div>
+          </div>
+
+          <div class="cand" data-page-node-id="o8YIuWmq2ZTWjQnlnY7XvP">
+            <div class="cand-head" data-page-node-id="zGdBRDtIU47XQzfTOhHKld">
+              <div class="cand-tw" data-page-node-id="ClK0l1DYqWCuPFRJEbgsRk"><span class="cand-t" data-page-node-id="U7v5gIz3v3D4cxVyfR6juk">桂平航 6688</span><span class="chip" data-page-node-id="b1UAv60smD6dxPNoQ88742">散货船</span></div>
+              <div class="cand-s" data-page-node-id="tCbvIWXIOZNbQEy1MMa5Ih"><span class="cand-sn" data-page-node-id="UDf3cxlMcSfl0iGDlnc8TM">86.7</span><span class="cand-su" data-page-node-id="4PMKbZHCd4UrfwuaB5S5e9">分</span></div>
+            </div>
+            <div class="cand-f" data-page-node-id="4QSQus0TMrjavTgNZlEt5Y"><span data-page-node-id="zYTHAjKSwgfB7n9GpOqaGc">载重 1500.0 吨</span><span data-page-node-id="oGVJNot8wiNuOivdiOz01v">·</span><span data-page-node-id="HIBQRkX0inGK6eSHIfqQEa">船籍港 南宁</span></div>
+            <div class="dim-list" data-page-node-id="vc6HlLT8aK7qrth1Pe0ASD">
+              <div class="dim" data-page-node-id="T6Vapi8tYsIh5EubMCG4lZ">
+                <div class="dim-h" data-page-node-id="TlOHbaEw9CYF9ghADveiv4"><span class="dim-n" data-page-node-id="WFgTSIIZ7oGDRgfmBXMeZq">载重利用率</span><span class="dim-v" data-page-node-id="fxIWgeMoZVBTzEptcR75cj">26.7<span data-page-node-id="I7QukUccofNX3pymu0Ltiy">/40</span></span></div>
+                <div class="dim-track" data-page-node-id="87UIEfI1AZFdF1hyJavQ7q"><div class="dim-fill" style="width:67%" data-page-node-id="w83LwFdiZuTjVxGG3pbuvK"></div></div>
+              </div>
+              <div class="dim" data-page-node-id="0b3JeQE2DM4N0HBGhswHao">
+                <div class="dim-h" data-page-node-id="BdnDz88dRbyH0V1jwcdBwY"><span class="dim-n" data-page-node-id="AohELGwPyRRYkDbZlLer8F">船型适配</span><span class="dim-v" data-page-node-id="OQREaKtMCTZn63ID87D52Z">20.0<span data-page-node-id="SWfjeHUJVs8KMNs7ONVayZ">/20</span></span></div>
+                <div class="dim-track" data-page-node-id="2Ywu0E5JEDmdx7OEzdyWeh"><div class="dim-fill" style="width:100%" data-page-node-id="twAsTM7qRU8LFFX7j81c09"></div></div>
+              </div>
+              <div class="dim" data-page-node-id="WbAuz41FI4cMKrtLFBebil">
+                <div class="dim-h" data-page-node-id="XRRFAS7hUx63cKLj4xWKJv"><span class="dim-n" data-page-node-id="9ucYkJPR1zal9iHhVUBzMg">船籍港就近</span><span class="dim-v" data-page-node-id="5JYS9knArBt7hrg6QW41XT">20.0<span data-page-node-id="isVH7UKbCFLBmPGawI3cpg">/20</span></span></div>
+                <div class="dim-track" data-page-node-id="d3JPIFLg33I80J0qEXJIy9"><div class="dim-fill" style="width:100%" data-page-node-id="c5GmLxGdywSvNPZ0ZZKC09"></div></div>
+              </div>
+              <div class="dim" data-page-node-id="qExAN5ujavBuJlfvEVAsLp">
+                <div class="dim-h" data-page-node-id="KmdmnyOGOGpS0V0EdnJrkp"><span class="dim-n" data-page-node-id="Vlk5s2vbqE25CNvIp20RDN">证书余量</span><span class="dim-v" data-page-node-id="9NQfsMOfjCTBgXOEuQjfzI">20.0<span data-page-node-id="AHYl9XWuwAAFF5YzAyH6nY">/20</span></span></div>
+                <div class="dim-track" data-page-node-id="17NZPUEVrlv1YntgsbZtif"><div class="dim-fill" style="width:100%" data-page-node-id="dVbELiDTJ0d0Maq97rvbSO"></div></div>
+              </div>
+            </div>
+            <div class="cand-act" data-page-node-id="rUw1Q6PgONTW4u1qDAGSsB"><div class="mini-btn" data-page-node-id="2x4FCwmmA7FhoFca3OR9S7">选船下单</div></div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="C6HjMNRzzywkkonbSBIxmz">
+          <div class="b-note" data-page-node-id="rkyFgbTGiBTdhPURaGRpRQ">撮合为只读推荐，出单由货主发起；出单时再次校验硬约束</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 船东找货 + 排序切换 ===== -->
+    <div data-page-node-id="yJYlmNRJYWlhFXyg2hGiQL">
+      <p class="cap" data-page-node-id="zvuDl7wmduzhJE4lVwnJuj">⑥ 船东找货 <span data-page-node-id="hrnvi1Lzw4XSpOfkAGKXNn">— 排序切到「载重利用率」，顺序随之变化</span></p>
+      <div class="phone" data-page-node-id="VqPic01NezDUbBbAR7wppi">
+        <div class="p-nav" data-page-node-id="wJmSusrJt9eBSGdIKB8si4">智能撮合</div>
+        <div class="p-body" data-page-node-id="QTMaGlQLW4iynhwb7Pz8ro">
+          <div class="hero" data-page-node-id="kuCZUKed2A9UIfmYXr2pY5">
+            <div class="hero-row" data-page-node-id="6EzOTeZDb1GOMgzGOsNEHn">
+              <span class="hero-name" data-page-node-id="l9dEoWGQtilqDSFscCvqtT">撮合引擎</span>
+              <span class="hero-chip" data-page-node-id="eBRucQ3BlqDQt2gl3iXVex">确定性内核 · 零 LLM</span>
+            </div>
+            <div class="hero-title" data-page-node-id="JpaVWtEC1Fkw1gkEU88Gps">为船找货源</div>
+            <div class="amt-meta" data-page-node-id="PtMB4LzTHPvAEXFasb9njT">
+              <span data-page-node-id="cjtHpeQaRsAsxhIJFYLwhq">候选 2 个</span><span data-page-node-id="sMzFEMYj0KcD4kLF3lYsZU">·</span><span data-page-node-id="yBnFKEAPoxpYGHmAwGRv60">硬约束过滤 + 四项加权评分</span><span data-page-node-id="HRbBwrt7xF4DP3rBN1NSR2">·</span><span data-page-node-id="M6ImdSpWB7KAYwMXC3RwrC">P99 &lt; 200ms</span>
+            </div>
+            <div class="hero-desc" data-page-node-id="0T2jFM8k6O0xkCLTa05UwG">
+              硬约束（船舶过审 / 证书覆盖装货日 / 载重 ≥ 货量 / 船型货类兼容）先筛掉不合格候选，
+              再按载重利用率 40 + 船型适配 20 + 船籍港就近 20 + 证书余量 20 打分。纯函数内核，不经大模型，结果可复现。
+            </div>
+            <div class="hero-ref" data-page-node-id="vuiRgHbN0wLD585WYVsFTH">船舶 #1</div>
+          </div>
+
+          <div class="card" data-page-node-id="HUtcO9hLFFsoba8rQ6N0EH">
+            <div class="card-head" data-page-node-id="o7RazYG0GIFAZenEF7da37"><span class="card-title" data-page-node-id="yTrTKTUx69QK9d7nzo2zMc">未入局候选</span><span class="chip" data-page-node-id="NtRANf9FcgN0OoNEDSf6fl">硬约束拦截</span></div>
+            <div class="fs" data-page-node-id="6YTVXLPi6wGydDHavWyBmG">
+              <div class="fs-i" data-page-node-id="fBtWbflWp6IZtEubXqLECa"><span class="fs-l" data-page-node-id="Scb9L0Kwrub8JVuMMda0HG">货源未发布</span><span class="fs-c" data-page-node-id="8inhGCTHcQM9Njj8MuoVVb">4</span></div>
+            </div>
+          </div>
+
+          <div class="sorts" data-page-node-id="6SYHzG3L5406cBYjMDpBBA">
+            <div class="sort" data-page-node-id="HTYEeIO3uGXTNSHjcUC8R9">综合评分</div>
+            <div class="sort sort-on" data-page-node-id="6VELSQceHfFmKgOmPADMuw">载重利用率</div>
+            <div class="sort" data-page-node-id="SUoVyCZla4lJSKWRZtWue4">证书余量</div>
+            <div class="sort" data-page-node-id="MWO1fB3n8JOlCo2qqd8UH6">船籍港就近</div>
+          </div>
+
+          <div class="cand" data-page-node-id="nJUQBpEDHkdmtxoJwHTKFk">
+            <div class="cand-head" data-page-node-id="BJARkDzlHIPvCFLgUJCh8t">
+              <div class="cand-tw" data-page-node-id="giVL8r7vRJfHZxUZMSwlpc"><span class="cand-t" data-page-node-id="4igpaFrEKmuRfJ4GpkiPYU">散装水泥</span><span class="chip" data-page-node-id="lN4CWKyhKLNpGfhtMAhPPC">散货</span></div>
+              <div class="cand-s" data-page-node-id="CPZziZAmQIXOc0nKGOvXHs"><span class="cand-sn" data-page-node-id="oRIlevY0XRvcbcW2wIkHgS">92.0</span><span class="cand-su" data-page-node-id="AJ0SFsE5VykN0LRIdrluCC">分</span></div>
+            </div>
+            <div class="cand-f" data-page-node-id="ynwQStVJCihe2HFEHoHYPe"><span data-page-node-id="YNYCIBYFnXGVouN3CXJgjY">南宁 → 贵港</span><span data-page-node-id="28Q5gnRL2oCCe0DQAbrjza">·</span><span data-page-node-id="AKN00yyGM737IVa572sclU">1200.0 吨</span></div>
+            <div class="cand-f" data-page-node-id="6FNfV4rX21ido7WiRseTjM"><span data-page-node-id="XUdEXedw2cjh09Ha3UzrFB">期望装货 2026-09-11</span></div>
+            <div class="dim-list" data-page-node-id="3JBIpJ6otRo72jlekCBrnU">
+              <div class="dim" data-page-node-id="UTsXYA8xgjBiFOTOdzYjh3">
+                <div class="dim-h" data-page-node-id="og9S0MD6MSU7L97P8eThia"><span class="dim-n" data-page-node-id="cDTmw9gFi8coBBgw4p76T1">载重利用率</span><span class="dim-v" data-page-node-id="e6jXjqEBs08nPoH5XOmKsw">32.0<span data-page-node-id="GWJ8FPpDpu45DrGymB5MfD">/40</span></span></div>
+                <div class="dim-track" data-page-node-id="YGGW1zDUbAIoDa4usDYV2S"><div class="dim-fill" style="width:80%" data-page-node-id="2ghETCMoHA6SwsTEP6UN4M"></div></div>
+              </div>
+              <div class="dim" data-page-node-id="BpyQ1EVwkXH8ee6jJ1FyoM">
+                <div class="dim-h" data-page-node-id="CKyGG3WSS59YQZwrVNMWI5"><span class="dim-n" data-page-node-id="ZwcOVVnrU3RXEXhfKHCrs9">船型适配</span><span class="dim-v" data-page-node-id="VDGmjkBCkZREz2k4xJVurM">20.0<span data-page-node-id="hQynVP30y2P7bTQwpCfFcs">/20</span></span></div>
+                <div class="dim-track" data-page-node-id="71rzawhQX3SyImHdIn7b7h"><div class="dim-fill" style="width:100%" data-page-node-id="P4guzu1AG18IKmhay0mMmo"></div></div>
+              </div>
+              <div class="dim" data-page-node-id="qm9EDboeX4mSgjK773BNrw">
+                <div class="dim-h" data-page-node-id="jKsX7XkDD6D9g8S8EQppNM"><span class="dim-n" data-page-node-id="5utvlBE4K00aTYO5aWUWN3">船籍港就近</span><span class="dim-v" data-page-node-id="E1R0dXUAEDlHZaRA4w8Ybz">20.0<span data-page-node-id="6QnNzerrLG2y5brqVwwqOn">/20</span></span></div>
+                <div class="dim-track" data-page-node-id="qyZ5W9QS8U88RZQhNwSNZp"><div class="dim-fill" style="width:100%" data-page-node-id="PJEopBrrrKnG36xnPyCBzM"></div></div>
+              </div>
+              <div class="dim" data-page-node-id="UU4IxyuDmulG7Q81Nt9MGi">
+                <div class="dim-h" data-page-node-id="jv5H7Y2yWZK2Sj7CxI2iM4"><span class="dim-n" data-page-node-id="fR7vuk6hrjcSKIjesabZhw">证书余量</span><span class="dim-v" data-page-node-id="OQXcKAq66ZvzaO4GM85vs8">20.0<span data-page-node-id="fS221v7taCCM7OffWhu8fA">/20</span></span></div>
+                <div class="dim-track" data-page-node-id="QStajF3k0WInokn25W8Ghj"><div class="dim-fill" style="width:100%" data-page-node-id="PMG88Iso6TsFxrCdi1cVYb"></div></div>
+              </div>
+            </div>
+            <div class="cand-note" data-page-node-id="PwgSsHUDFau6ygcCdqk8vN">撮合为只读推荐 —— 请联系货主确认运价，由货主发起订单</div>
+          </div>
+
+          <div class="cand" data-page-node-id="PgEcoSYB2eIv9V739E3HfE">
+            <div class="cand-head" data-page-node-id="QgFmXHLmNoanEkYjS8shes">
+              <div class="cand-tw" data-page-node-id="sMKjlmFAiPFtNLAoqxNn7f"><span class="cand-t" data-page-node-id="01yAby02Ue3YPFJrtWS0t0">S2 冒烟散货 1000 吨</span><span class="chip" data-page-node-id="vdrLYIRygfOpRz3qOMbPkE">散货</span></div>
+              <div class="cand-s" data-page-node-id="mGFl3y7SQK0thJVJpopovF"><span class="cand-sn" data-page-node-id="q6DjPCFeX8SogK0Ztxzdv1">86.7</span><span class="cand-su" data-page-node-id="GVAfRGmG8RRrNrcOsoCMud">分</span></div>
+            </div>
+            <div class="cand-f" data-page-node-id="UyIGG7KMfv7CGGx40WcD5d"><span data-page-node-id="ikdPxDLq0e7cV5Lf09YHVG">南宁 → 贵港</span><span data-page-node-id="csEGgBlv7DfftFekgvQl2b">·</span><span data-page-node-id="isVlndGlumKEjWKO1nFyOh">1000.0 吨</span></div>
+            <div class="dim-list" data-page-node-id="Vl5FBAPhuOso0BEM7eo31Q">
+              <div class="dim" data-page-node-id="Le0J2nWigCwI5Q2CqWlQJV">
+                <div class="dim-h" data-page-node-id="h68uNhDUssOuD8CSEyaw4t"><span class="dim-n" data-page-node-id="WWPWC1kb1j999m1Z0w0a69">载重利用率</span><span class="dim-v" data-page-node-id="xzCWapvCp9qa8hjnEw4EX9">26.7<span data-page-node-id="xId4uyuMseMCNGbAAmNRmn">/40</span></span></div>
+                <div class="dim-track" data-page-node-id="BKhCnL1W7R7cVZsjVevHSr"><div class="dim-fill" style="width:67%" data-page-node-id="RnFzwwelGGAMsf1HPyZPZH"></div></div>
+              </div>
+              <div class="dim" data-page-node-id="KHtUforhfDEP2ihr4FRASn">
+                <div class="dim-h" data-page-node-id="33LHqFZg99GixBxrZ0Np7O"><span class="dim-n" data-page-node-id="dXOrP5HuTf8uGADRuSHxRJ">船型适配</span><span class="dim-v" data-page-node-id="7jKNarVs0cWEFAAzDACG10">20.0<span data-page-node-id="uRxN3Z2fPbpmlGMNQQ2cXd">/20</span></span></div>
+                <div class="dim-track" data-page-node-id="8hygYWkHAdqK1gRvLZxtcF"><div class="dim-fill" style="width:100%" data-page-node-id="BGpFzg5xUB5r92Fi2uq61E"></div></div>
+              </div>
+            </div>
+            <div class="cand-note" data-page-node-id="fMuRdLIUs2EnChvQEfHXAt">其余两项同为满分，此处省略展示</div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="cOUghDScKe6ALjTQvPFzYH">
+          <div class="b-note" data-page-node-id="C5b3s7tv8UIyLi6DJ4rtnN">排序：综合评分 / 载重利用率 / 证书余量 / 船籍港就近（同分回退综合分）</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2 data-page-node-id="6HfdhnR3vNYka99YRIkkkd">入口与交互</h2>
+  <div class="box" data-page-node-id="KpnOrvfUNEidERw5MgfJgB">
+    <dl class="kv" data-page-node-id="1t0BfQlirjmqVt9zGlIbqG">
+      <dt data-page-node-id="xVF0XCSDNrGZeAFjtX0tG5">合同三级页</dt><dd data-page-node-id="TZbJch8mvh2elD6VHXDdT6">订单卡「查看合同」→ 三级页完整版；<strong data-page-node-id="1hD3HEYGtf3W39znAQncAa">长按订单卡</strong> → 页内弹层快速预览</dd>
+      <dt data-page-node-id="g6UyJZSPqQ5c3LEKoAbypT">支付三级页</dt><dd data-page-node-id="kBE31DLJTdKbVC8gIZlz2i">待承运订单「去支付」→ 支付页；已启运 / 已完成 / 已撤单 → 「支付详情」</dd>
+      <dt data-page-node-id="Z4BSnlOKE5S554Kc0IDMCk">撮合三级页</dt><dd data-page-node-id="udzbWjVYaAKWPO4QPhjdjQ">货主端「我的货源」查看匹配船源 · 发布货源成功后自动跳转 · 船东端「我的船队」找货</dd>
+      <dt data-page-node-id="6CIZVbAc0sB2UJjwyxMkGZ">返回订单页</dt><dd data-page-node-id="t3juYbqWcXshsLcVufO4gf">支付页「前往订单页」用 <code data-page-node-id="aegB5kWAhZdcD4bRTD1cLA">wx.switchTab</code>；撮合页下单成功后用 <code data-page-node-id="gDa1YKYSEnpdJHk7od5gx8">wx.switchTab</code></dd>
+    </dl>
+    <p style="font-size:13px;color:#F08C00;margin:14px 0 0" data-page-node-id="Ez51LUOkTNHADSIVl8gHan">
+      ⚠ 顺手修掉一个真 bug：撮合页下单成功后原本用 <code data-page-node-id="aTjvxp8FxMtj8JkHBRWmPI">wx.redirectTo</code> 跳订单页——
+      订单页是 tabBar 页，<code data-page-node-id="WpLDzeEe9py7JJhWiCpwpP">redirectTo</code> 会静默失败，用户其实一直停在撮合页。已改为 <code data-page-node-id="5GYLGBuxbsqBqoMdBMiBSN">wx.switchTab</code>。
+    </p>
+  </div>
+
+  <h2 data-page-node-id="xPGOAST3GDMemEsKaFK2Mo">验证结果</h2>
+
+  <h3 style="font-size:14px;margin:18px 0 8px" data-page-node-id="L3EsqijAlCcBfqhZscBZBs">静态校验（scripts/verify_miniapp.js）</h3>
+  <table data-page-node-id="ugLFMWFMYcVEyVbLwp5oRq">
+    <tr data-page-node-id="HyUD8jbzs2VFojMf7TRJlV"><th style="width:200px" data-page-node-id="ZbYXQWxXCGgY1VFAnTHTdb">项目</th><th data-page-node-id="ZCvAJcjlY9doahQifJQFWw">S1 交付时</th><th data-page-node-id="woNoStJUqSrIsyibDfi8XA">S2 交付后</th></tr>
+    <tr data-page-node-id="9TG4vvKenwOrsjtRXDeFr2"><td data-page-node-id="RO6Kp9C3IzjBC57wg6sMWi">JSON 可解析</td><td data-page-node-id="Pt5YAYnruXOsaDnktngEfw">16</td><td data-page-node-id="Epd6hsVgDzMm2cnypeqpG6">16</td></tr>
+    <tr data-page-node-id="KsfjEgMxCkUdH0xMq4bndy"><td data-page-node-id="QXXBmAWFN25lCVGYJGKMav">页面四件套齐全</td><td data-page-node-id="DKrSjS7NK9mUplCnSNOa1H">11</td><td data-page-node-id="Z3VQp7OxbdOHA6hYDOxvQM"><strong data-page-node-id="cxGg9We88OcupexNnI8KOR">12</strong>（+ payment）</td></tr>
+    <tr data-page-node-id="bIXk4ijA31rUId4PhFoN0v"><td data-page-node-id="jptA1q6DFUHR21LrBU7YEh">路由引用可达</td><td data-page-node-id="GJEObKCnlnhzH40BAXJVcw">41</td><td data-page-node-id="e6EwL2KX1qWxatatAFXSC7"><strong data-page-node-id="9s4b1sJR6F8R94r8Gul60r">43</strong></td></tr>
+    <tr data-page-node-id="ABVSjTbxI9xhAn9ttj88n3"><td data-page-node-id="YcolCoR3t2goae7ucWb2Bh">wxml 事件处理函数存在</td><td data-page-node-id="1xxnTol6h53b7zUpWLSJhk">144</td><td data-page-node-id="BD0j3BvghqUfHJyTOG2duD"><strong data-page-node-id="BZEu7HlcubqAKNdACIptUG">152</strong></td></tr>
+    <tr data-page-node-id="D70yTlyv5NZUgN4dzx8Et1"><td data-page-node-id="8aDj86H71jRvwbIEsE9zWr">结果</td><td class="ok" data-page-node-id="SZpJFjl2L6vK1HW8FXBW5W">全部通过</td><td class="ok" data-page-node-id="BL80oY08tfxHuWUEkaVSFc">全部通过</td></tr>
+  </table>
+
+  <h3 style="font-size:14px;margin:22px 0 8px" data-page-node-id="gBEq9FJyTfwWk8EtNaJVEh">真实接口冒烟（MPP：LLM_MOCK=true 起后端直连）</h3>
+  <table data-page-node-id="uyqq8dKFQtdbv2KU17iM0D">
+    <tr data-page-node-id="x4lcICvwBHRpw0yrfbGV4g"><th style="width:280px" data-page-node-id="u8CTRkHCwICOpuv4VrfarY">场景</th><th style="width:90px" data-page-node-id="DKDtlyiP5D1ByFug0EzvJp">期望</th><th data-page-node-id="H9ckIcZw9dNHPsnx0E2Yri">实际返回</th></tr>
+    <tr data-page-node-id="4NwadE8GLj2mYEet2jMQsQ"><td data-page-node-id="8SockKkgopq6GiiOhyzatF">matched 订单查支付单（尚无）</td><td data-page-node-id="5UhY8e74gXA4F0f48ODwJ2">404</td><td data-page-node-id="fYGoSq5JNZpHkZcsqkKWKO">404 <code data-page-node-id="pKViz5OoXuCkvbjUKCKnQR">该订单尚无支付单</code></td></tr>
+    <tr data-page-node-id="zJyCQAhPUTvKFlgAmb882E"><td data-page-node-id="T1gVIp4wRdVTvL5dso1PI4">发起支付（已定价 matched 单）</td><td data-page-node-id="P5aS5hTXhGdpRB0YIKIf4M">201</td><td data-page-node-id="tcBXH4jHpHoJrOBNZXOA1b">201 pending，金额锁定 ¥28000.00</td></tr>
+    <tr data-page-node-id="jKqzdbYHzhARVJGgQcdUSC"><td data-page-node-id="zuVCjPAMxCRHbZvMUzsJfL">重复发起支付</td><td data-page-node-id="jseC02xC48iClgDVYkNISL">409</td><td data-page-node-id="JvXnuVRHD4AzXU6y0zjjqR">409 <code data-page-node-id="SkZwAfyZqWly3KDwxFQgWu">该订单已存在支付单，不可重复发起</code></td></tr>
+    <tr data-page-node-id="zvnDo9u1Iq3hhu1wedQedK"><td data-page-node-id="StwbvratfGoY7RsNQoK3ZQ">模拟支付成功</td><td data-page-node-id="0HkCHfxGwWLZM4BEiq2C4Y">200</td><td data-page-node-id="HWS8Nx8d6zXrMBsxjkWAxM">200 paid，生成 <code data-page-node-id="WpAKFWiCW6w2KfqrerIJw2">MOCK-</code> 流水号</td></tr>
+    <tr data-page-node-id="4m5XlZtBro3DoWasG7nbY4"><td data-page-node-id="Kczwg4G8fWPvtkRPjiYG5n"><strong data-page-node-id="UqlPWbBbcjDkR2JKZ5np6p">重复回调幂等</strong></td><td data-page-node-id="emIfbqCLuK3jUX33sWqoXy">200</td><td data-page-node-id="e9dpdmZR4B6yb0FdL0EXGd">200 paid，<strong data-page-node-id="uM0lHQYxLHWew4M611IuGd">paid_at 未变</strong></td></tr>
+    <tr data-page-node-id="BcE9sVbuHlOenFI7TpUeGa"><td data-page-node-id="MmVnyEsUhM0ZzPEBUZDFJg">撤单联动退款</td><td data-page-node-id="iOICqqyr70ZdGOLGTDdRNM">200</td><td data-page-node-id="TlLWoVEqMAQsD3MAZlYTBN">200 refunded，生成 <code data-page-node-id="eQdrXECAMERL7vKgI1ssLy">RF-</code> 退款单号</td></tr>
+    <tr data-page-node-id="xCCGkWWhIvoyExORhdtHtE"><td data-page-node-id="qQS8Jj8NIQZluka9YVbdCH">运费面议拒发起</td><td data-page-node-id="40tCDeqkACCsYBqEdifUBa">400</td><td data-page-node-id="MylwrXvxOxKybHDaqDIRf2">400 <code data-page-node-id="nXbubSyavPTFJHdkn9MZyT">订单运费为面议，须先与船东议定运价再支付</code></td></tr>
+    <tr data-page-node-id="ycSKZ5dZlDBbBxlBqB8dn0"><td data-page-node-id="vPEVdIZ9CSyYpHrmH9h9rH">非参与方查支付单</td><td data-page-node-id="jZpf9TgKpijhkvPZ0DBz9G">404</td><td data-page-node-id="vmLjjFFYNPZVrgqirPc89A">404 <code data-page-node-id="u7Hzbg5BqOSvhEZDH7W2Oy">订单不存在</code>（不泄露存在性）</td></tr>
+    <tr data-page-node-id="F8SUxJUhMqaZYzypKTHRig"><td data-page-node-id="tV5fMkLKwHJVSettMqEGZj">撮合（货主找船）</td><td data-page-node-id="mKEHs5Ucisj2EjS7z4cmSX">200</td><td data-page-node-id="0lYB9YLQaQVq6NMzEr6onD">候选 1，未入局 <code data-page-node-id="iT8uQgkVnNdjczPqSpckD8">{"ship_not_verified": 1}</code></td></tr>
+    <tr data-page-node-id="PUByVx9uuRAIPElWSVSOzn"><td data-page-node-id="zHFlXz4lspkMU4ClA6jwC0">撮合（船东找货）</td><td data-page-node-id="2JCBYYcNyqoxEhnfPdlBfc">200</td><td data-page-node-id="aXdALEpnFCF4bOMlEOw9nq">候选 2，未入局 <code data-page-node-id="Rlay2hFBYxK84cGOvspQug">{"cargo_not_published": 4}</code></td></tr>
+  </table>
+
+  <h3 style="font-size:14px;margin:22px 0 8px" data-page-node-id="t5TAcSslFp0RxRGCDWK8Q4">前端渲染逻辑验证（真实载荷驱动页面 JS，60+ 断言全绿）</h3>
+  <table data-page-node-id="Pv7paVIfAUs1hjyR93vHK2">
+    <tr data-page-node-id="izVot1lqGZG5BRG6jHEGSv"><th style="width:200px" data-page-node-id="xyWDKywidCMRFV7Yr1omTK">验证面</th><th data-page-node-id="47echOhLhGwJVA01CNWMyP">覆盖</th><th style="width:80px" data-page-node-id="hfHUZA4RYKp9bP0CvAnhAv">结果</th></tr>
+    <tr data-page-node-id="A1MzYvA0gKTNdhJU4Qijrp"><td data-page-node-id="ZcdQqGlWg2U2x8jyRHUVnZ">时间轴构造</td><td data-page-node-id="gqD3XqhdnP9ghImoqSFYGp">pending / paid / refunded / closed 四态 + null 兜底 + 时间格式化（截断微秒）+ 流水号挂载</td><td class="ok" data-page-node-id="vBLEi2SLJ46ajF8DzKDx0D">通过</td></tr>
+    <tr data-page-node-id="fRI6v6aU6m7UWn2DS6e1oo"><td data-page-node-id="njjwDAZlYVcisVs9RdrDt3">底栏态推导</td><td data-page-node-id="hdTV5Tn6fp6JSkkPrL49H4">角色 × 状态组合的 canPay / canCreate / 金额 / 渠道 / 富化字段 / 提示文案</td><td class="ok" data-page-node-id="Z8E2iiuC5TGZvFBuAJuzy1">通过</td></tr>
+    <tr data-page-node-id="2MpTRugdvrh3lYaLcW6wop"><td data-page-node-id="FZ05KYmBlgX2uU7diVehMS">金额口径</td><td data-page-node-id="qqhqRPkqPA7VRV0XD2Z8De">有支付单取支付单锁定值；面议单显示「面议」且不带 ¥</td><td class="ok" data-page-node-id="NbnXD2rXTU4qATBVQcIlXM">通过</td></tr>
+    <tr data-page-node-id="GyTu4AQ4wjl35b6GEmfXVx"><td data-page-node-id="h0B4v02xVvb2oAdPm5BwAK">评分条数学</td><td data-page-node-id="LB4h41UhOXgKYcjAhADdsE">四项满分 40/20/20/20、百分比 0-100 无 NaN、<strong data-page-node-id="xMwaRHG581uEB2VleusT2H">四项之和 = 综合分</strong></td><td class="ok" data-page-node-id="bWTvLPAogVocpNEClFQWQC">通过</td></tr>
+    <tr data-page-node-id="azchSTx42A8KUyOCII59xh"><td data-page-node-id="DeDbsy0s7DdEyAyvMfgZW0">排序</td><td data-page-node-id="JiLe8hxgah9DB6lOxx5Dtg">四种排序降序（真实 1 条 + 3 条合成）、同分回退综合分、不污染原始数组</td><td class="ok" data-page-node-id="5QkIb9R0lw9yN9ax2TLwuo">通过</td></tr>
+  </table>
+
+  <h2 data-page-node-id="Sp7ZNVGVny0RSFV2l3gIZW">三域状态机对照（可直接用于汇报答辩）</h2>
+  <table data-page-node-id="EN562Fd8PMpGar6DLuCpMr">
+    <tr data-page-node-id="gaL8X10La7g4Ct6dKJp1lX"><th style="width:110px" data-page-node-id="2cSu9M0W83AS5Xv9o28zHp">域</th><th style="width:270px" data-page-node-id="FFdR8Gzw5i32HIOL1H8o3j">状态机</th><th data-page-node-id="hZmi6qibg4tb7LoIBMKCvC">幂等 / 并发防线</th><th style="width:130px" data-page-node-id="4FUlKFEX3J55FCNSM6i0aD">留痕</th></tr>
+    <tr data-page-node-id="2JxfxF4ADBCqDuyKYwDbla">
+      <td data-page-node-id="iDWXR3QR2lDfwpyvHPWXkV">订单 F6</td>
+      <td data-page-node-id="SuBwlgqjotGgdb7LEsiWxp"><code data-page-node-id="gcmVqFspI7RJ2mYKGCPmZs">matched → shipped → completed</code><br data-page-node-id="RcDIJW66j1RmxA2LqQnw3x"><code data-page-node-id="DrK9tJxbF8Z3mgcsJVQwHv">matched → cancelled</code></td>
+      <td data-page-node-id="reof3LnmhHsoY8wEr1qwci">货源至多一个 active 订单（创建时 <code data-page-node-id="L2KOwc0wA5ttitw4afC6Ce">FOR UPDATE</code> 锁货源行）</td>
+      <td data-page-node-id="P2Vz1dyMZECSNpx9JB4uGH">五时间戳</td>
+    </tr>
+    <tr data-page-node-id="c91HyAdycesnA7YMeJonaK">
+      <td data-page-node-id="sYpKBmUpdBkvL9c5G20q3u">支付 F7</td>
+      <td data-page-node-id="DJ4M3pzx3ehPrVvScVa5nV"><code data-page-node-id="tErR9aJOOcf14AuMzFSfnC">pending → paid</code><br data-page-node-id="Wo2iDtQouJh2L3lsU6tI5F"><code data-page-node-id="2AIch37HamE6bXKBDrqjLW">pending → closed</code><br data-page-node-id="zOfcalUB3kK527h2f4V9xw"><code data-page-node-id="ivmHYNbQldh2kPxzNSIj1F">paid → refunded</code></td>
+      <td data-page-node-id="Y32FIynqdXA9HMQnhICzEC">一订单一支付单（<code data-page-node-id="utSJVO1yZHgmVtga4TcSUo">order_id</code> 唯一约束 + 锁订单行）；回调幂等（重复回调不改 <code data-page-node-id="MSE1UETZHFfotzYpZe63ff">paid_at</code>）</td>
+      <td data-page-node-id="AAAiwsY7Xa7xHKb3OBWfBO">双流水号 + 四时间戳</td>
+    </tr>
+    <tr data-page-node-id="Ocu98noIbjooinw3Shywo0">
+      <td data-page-node-id="wrurHg2GL3AAKyFS4ok0MY">撮合 F5</td>
+      <td data-page-node-id="bTiXrdqOLY8hP3qAvOwGvO">无状态（只读推荐，不落库不出单）</td>
+      <td data-page-node-id="dBuxaZdfIKzvdk2wPuJBLt">硬约束 CSP 先行过滤；纯函数内核结果可复现</td>
+      <td data-page-node-id="kpGtBHYoijsRo2BElogsEW">—</td>
+    </tr>
+  </table>
+
+  <h2 data-page-node-id="7bGsLxD8jkAwICmOOAXXAl">演示用种子数据（dev 库已就绪）</h2>
+  <table data-page-node-id="UgvJiVOwpx1dTd0WsHMN48">
+    <tr data-page-node-id="R7pReJ60rDv6ACBL0RQj10"><th style="width:100px" data-page-node-id="BaHBUrJ8yXgm7u6PhGaygq">订单</th><th style="width:130px" data-page-node-id="G0MUA7iMdppSUjkJk3sBeb">状态</th><th style="width:110px" data-page-node-id="Wuph8N0dIPFBRtnsE4L80U">运费</th><th data-page-node-id="ZnDdD0d9u5dYb2NCSifptV">演示看点</th></tr>
+    <tr data-page-node-id="rDd7P699G2kLIPJM3vZefd"><td data-page-node-id="fGfyGqBJFBxgHVQSC3Lmdl">#4</td><td data-page-node-id="zaWJ0MCIJFaDYLYMZqMHiZ">待承运</td><td data-page-node-id="91nvGQ2qUQoeXnpY8Vce4V">¥28000</td><td data-page-node-id="eCWxcqrCA0u7wW0AI1Jicj"><strong data-page-node-id="JGpO31RhkftxTtO5Fjvjkh">支付单待支付</strong> —— 现场点「模拟支付成功」，看时间轴实时点亮</td></tr>
+    <tr data-page-node-id="gorHBoD5RRsHJ76HqlOEs4"><td data-page-node-id="Q8jtI2im9GFESwBnwauRlP">#5</td><td data-page-node-id="A2KJ5g4WzAnQpYmNpjLMYH">已撤单</td><td data-page-node-id="B6IceCIOihqcrwmBfa73ZR">¥30000</td><td data-page-node-id="URXBUlDGC2vyGybUYpWBMc"><strong data-page-node-id="IxTiHuwqtsGabivSASUBFM">已退款</strong> —— 展示撤单联动全额退款（RF- 单号）</td></tr>
+    <tr data-page-node-id="qZaFEYjRs4M9ctn2E8lTFQ"><td data-page-node-id="9WtrPzRM84GAHF5HgaNch6">#1</td><td data-page-node-id="FwAkETPGLRpIeB6eBBm2Zw">已完成</td><td data-page-node-id="c2RtT7rbCv4Evon8SgCwvQ">¥35500</td><td data-page-node-id="93E1WbTl06JgrG5G1tdFc5">已支付 + 合同页出「风险 0 项」路径</td></tr>
+    <tr data-page-node-id="0vgO6c9Isx5yi0Q35rB0Oz"><td data-page-node-id="HMkspL9uWETdx3wrJaxvZN">#3</td><td data-page-node-id="CDQ6XbaHQHLWDNaEIEr890">待承运</td><td data-page-node-id="N6oqtlNnJSJjqp7nqQzS77">面议</td><td data-page-node-id="1k3fsx2Csz2d5tBHdnsWJi">合同页 2 项高风险；支付页「面议拒发起」兜底文案</td></tr>
+  </table>
+  <p class="sub" style="margin-top:12px" data-page-node-id="hhRxnKg5mGnrWRUIzdLqok">
+    登录身份用 <code data-page-node-id="BwG4cuIkqnMkYCQBUOkNAo">seed-shipper</code>（订单 #4 / #5 属于该身份）；订单 #1 / #2 / #3 属于 <code data-page-node-id="u5HMCFVRMQE8DKCx2WVBle">e2e-shipper</code>。
+  </p>
+
+  <h2 data-page-node-id="apjSYl0F3UMYi21ECOfOLS">遗留与下阶段</h2>
+  <div class="box" data-page-node-id="EqmHJBiRlYEAvAL4Cusa9R">
+    <ul data-page-node-id="8CF6DQXONlcreXlKpBPaw0">
+      <li data-page-node-id="8OqntpzlUyIvLVcSH0ew3B"><span class="warn" data-page-node-id="6PA86iKljABq2r3xjvKbBd">演示前建议</span>：撮合候选池当前只有 1 条真实候选（船 2 未过审被硬约束拦截）。若想演示「多候选排序 + 未入局统计」的对比效果，先把船 2 走一次审核通过。</li>
+      <li data-page-node-id="ZawGpClVZx9WFp8wYq5ZNz"><span class="warn" data-page-node-id="9VoSaiD9kEBPUC9hC2oq9g">汇报前提醒</span>：后端以 <code data-page-node-id="SEWMu8YfkjIxLmeoYDDAGM">LLM_MOCK=true</code> 起，避免合同页依赖外网（合同 Agent 在 LLM 故障时返回 503，注释所述「降级返回」与代码不符，见 README TODO-03）。</li>
+      <li data-page-node-id="R2HSEZHh502Pp7wSUZKxzl"><strong data-page-node-id="p8ezZ7oe9WXb4fmOhQMTHf">S3</strong>（可裁剪）：港口域详情页 —— 泊位档期（<code data-page-node-id="BE1DilFXzwYSDflFmlQHLU">GET /port/berths/{id}/schedule</code>）+ 预约审核详情（confirm / reject / cancel / complete），可展示「防超卖」行锁 + 重叠计数。</li>
+      <li data-page-node-id="cVRSUaaolcCkZmTCTHvfPv"><strong data-page-node-id="RV8iAkTZniXVbAyXRJ6fVN">S4</strong>（必保）：三态兜底全局统一 + 演示数据贯通 + 走查脚本，目标「演示路径一次跑通不中断」。</li>
+      <li data-page-node-id="mSUlPNRXRdr6W7uFSkAFdK">已知限制 TODO-02：<code data-page-node-id="zFvFdeyxz38xCnWVNtVKeT">OrderOut</code> 仍只有 <code data-page-node-id="TDrMme2rF685TLLWusmXvU">cargo_id</code> / <code data-page-node-id="LBbl2kuHm8a9HNE7LL7qaI">ship_id</code>，订单卡与支付页的路线靠前端富化，船东视角降级为「货源 #id」。根治需给 <code data-page-node-id="QumFUQJDCecHKv3Mum0DsQ">OrderOut</code> 加 cargo 摘要字段。</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>

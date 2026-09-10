@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="WJlIBD7ixizvhZSQYmQABx">
+<head data-page-node-id="BsjLoCDN2OI9VBYU4z0jYc">
+<meta charset="UTF-8" data-page-node-id="fqorYkBcNQWGbqE8HmL869">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="BDDVe2CPxeIJwe7I2ztsj8">
+<title>船好多 · UI V2 设计概览</title>
+<style>
+  :root{
+    --blue:#3B5BDB; --purple:#7048E8; --ink:#14233B; --ink2:#3D4C63;
+    --muted:#8A99AC; --weak:#A8B4C4; --line:#EEF2F9; --bg:#F5F7FA;
+    --grad:linear-gradient(135deg,#3B5BDB 0%,#7048E8 100%);
+    --soft:linear-gradient(180deg,#E6EDFF 0%,#F2F6FF 100%);
+    --shadow:0 4px 16px rgba(61,90,219,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:#EEF2F8; color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:14px; line-height:1.65; padding:32px 20px 80px;
+  }
+  .wrap{max-width:1360px;margin:0 auto}
+
+  /* ---- 页头 ---- */
+  .hero{
+    background:var(--grad); color:#fff; border-radius:22px;
+    padding:32px 36px; box-shadow:0 12px 34px rgba(80,78,220,.26); margin-bottom:28px;
+  }
+  .hero h1{font-size:28px;font-weight:800;letter-spacing:1px}
+  .hero .sub{margin-top:8px;font-size:14px;color:rgba(255,255,255,.86)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .chip{
+    background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.28);
+    border-radius:999px; padding:4px 14px; font-size:12.5px;
+  }
+
+  /* ---- 章节 ---- */
+  section{margin-bottom:34px}
+  h2{
+    font-size:19px;font-weight:700;margin-bottom:14px;padding-left:12px;
+    border-left:4px solid var(--blue);line-height:1.3;
+  }
+  h4{font-size:14.5px;font-weight:700;margin:18px 0 8px;color:var(--ink)}
+  p{color:var(--ink2)}
+  .panel{background:#fff;border-radius:16px;padding:22px 24px;box-shadow:var(--shadow)}
+  .panel + .panel{margin-top:14px}
+
+  /* ---- 表格 ---- */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;background:#fff;border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+  th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:#F7F9FD;font-weight:600;color:var(--ink)}
+  tr:last-child td{border-bottom:none}
+  td code,code{background:#F2F5FD;border-radius:5px;padding:1px 6px;font-size:12.5px;color:var(--blue);font-family:ui-monospace,Menlo,Consolas,monospace}
+
+  /* ---- 8 屏网格 ---- */
+  .screens{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+  @media(max-width:1240px){.screens{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:940px){.screens{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:640px){.screens{grid-template-columns:1fr}}
+
+  .cell{display:flex;flex-direction:column;gap:10px}
+  .cell-title{font-size:13.5px;font-weight:700;color:var(--ink)}
+  .cell-title span{color:var(--weak);font-weight:500;margin-left:6px;font-size:12px}
+
+  .phone{
+    width:100%; aspect-ratio:300/620; background:#fff; border-radius:24px;
+    border:1px solid #E3E9F2; box-shadow:0 10px 26px rgba(61,90,219,.12);
+    overflow:hidden; display:flex; flex-direction:column; position:relative;
+  }
+  .phone.plain{background:#F5F7FA}
+  .body{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+
+  /* 通用小组件 */
+  .status{height:16px;background:var(--soft);display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:8px;color:#7C8CA0}
+  .status.on-grad{background:transparent;color:#fff;opacity:.9}
+  .topbar{background:var(--soft);padding:8px 12px 10px}
+  .topbar.white{background:#fff;padding:6px 12px 4px}
+  .trow{display:flex;align-items:center;gap:8px;height:26px}
+  .tlogo{width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 1px 4px rgba(61,90,219,.14)}
+  .tloc{font-size:12.5px;font-weight:600;color:var(--ink)}
+  .tcaret{font-size:9px;color:#7C8CA0}
+  .trole{margin-left:auto;background:#fff;border-radius:999px;padding:2px 9px;font-size:10.5px;color:var(--blue);font-weight:600;box-shadow:0 1px 4px rgba(61,90,219,.12)}
+  .searchrow{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .search{flex:1;height:28px;background:#fff;border-radius:999px;display:flex;align-items:center;gap:6px;padding:0 10px;font-size:10.5px;color:var(--weak);box-shadow:0 1px 5px rgba(61,90,219,.07)}
+  .tact{width:26px;display:flex;flex-direction:column;align-items:center;gap:1px}
+  .tact i{font-style:normal;font-size:13px}
+  .tact b{font-size:8px;color:#5C6B80;font-weight:500}
+
+  .content{flex:1;padding:10px 12px 0;overflow:hidden;min-height:0}
+  .card{background:#fff;border-radius:13px;box-shadow:var(--shadow);margin-bottom:10px;overflow:hidden}
+  .card.plain{box-shadow:none;border:1px solid var(--line)}
+  .btitle{padding:10px 12px 6px;font-size:12.5px;font-weight:700;color:var(--ink)}
+  .btitle .no{display:inline-block;background:var(--grad);color:#fff;font-size:9.5px;border-radius:5px;padding:0 5px;margin-right:5px;font-weight:600}
+
+  .row{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #F4F6FA;font-size:11.5px}
+  .row:last-child{border-bottom:none}
+  .row .k{color:var(--ink)}
+  .row .v{color:var(--ink2)}
+  .row .v.ph{color:#C3CCD8}
+  .row .arrow{color:#C3CCD8;font-size:12px;margin-left:6px}
+
+  .dual{display:flex;gap:8px;padding:8px 12px 4px}
+  .dual .d{flex:1;background:#F7F9FD;border:1px solid var(--line);border-radius:10px;padding:8px 9px}
+  .dual .d .dl{font-size:9.5px;color:var(--muted)}
+  .dual .d .dv{margin-top:2px;font-size:10px;color:var(--blue);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .seg{display:flex;gap:8px;padding:8px 12px 2px}
+  .seg div{flex:1;height:26px;border-radius:10px;border:1px solid #E3E9F2;background:#FAFBFD;display:flex;align-items:center;justify-content:center;gap:5px;font-size:10.5px;color:var(--muted)}
+  .seg div.on{border-color:#5C7CFA;background:rgba(92,124,250,.08);color:var(--blue);font-weight:600}
+  .seg .radio{width:9px;height:9px;border-radius:50%;border:1.5px solid #C3CCD8}
+  .seg div.on .radio{border:3.5px solid var(--blue)}
+
+  .btn{
+    margin:9px 12px 11px;height:30px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+    font-size:11.5px;font-weight:600;background:var(--grad);color:#fff;box-shadow:0 3px 10px rgba(80,78,220,.24);
+  }
+  .btn.ghost{background:#fff;color:var(--blue);border:1px solid rgba(59,91,219,.28);box-shadow:none}
+  .btnrow{display:flex;gap:9px;margin:9px 12px 11px}
+  .btnrow .btn{margin:0;flex:1}
+  .btnrow .btn.grow{flex:1.7}
+
+  .shead{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 5px}
+  .shead .t{font-size:12.5px;font-weight:700}
+  .shead .m{font-size:9.5px;color:var(--weak)}
+
+  .itemrow{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid #F4F6FA}
+  .thumb{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#E8EEFF,#E4DBFF);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+  .itemrow .b{flex:1;min-width:0}
+  .itemrow .n{font-size:11.5px;font-weight:600;color:var(--ink)}
+  .itemrow .s{font-size:9.5px;color:var(--muted)}
+  .itemrow .r{text-align:right}
+  .link{font-size:9.5px;color:var(--blue)}
+
+  .pills{display:flex;gap:6px;padding:2px 12px 6px}
+  .pill{height:22px;border-radius:999px;background:#F4F6FB;display:flex;align-items:center;gap:3px;padding:0 9px;font-size:10px;color:var(--ink2)}
+  .pill.on{background:rgba(59,91,219,.10);color:var(--blue);font-weight:600}
+  .sortrow{display:flex;align-items:center;gap:12px;padding:0 12px 8px;font-size:10px;color:var(--muted)}
+  .sortrow .on{color:var(--blue);font-weight:600}
+  .sortrow .fr{margin-left:auto;background:#F4F6FB;border-radius:999px;padding:2px 9px;color:var(--ink2)}
+
+  .cargocard{margin:0 12px 9px;padding:9px 10px;border-radius:12px;background:#fff;border:1px solid var(--line);box-shadow:0 2px 8px rgba(61,90,219,.05)}
+  .ccr{display:flex;align-items:center;gap:6px}
+  .ccr .nm{font-size:13px;font-weight:700;color:var(--ink)}
+  .ccr .ar{background:var(--grad);color:#fff;border-radius:999px;padding:0 6px;font-size:9px;line-height:14px}
+  .ccr .pr{margin-left:auto;font-size:9.5px;color:var(--purple);background:rgba(112,72,232,.08);border-radius:999px;padding:1px 8px}
+  .cmid{margin-top:6px;font-size:11px;color:var(--ink2)}
+  .cfoot{margin-top:8px;padding-top:7px;border-top:1px solid var(--line);display:flex;align-items:center}
+  .cfoot .ow{font-size:10px;color:var(--ink2)}
+  .cfoot .tm{font-size:9.5px;color:var(--weak);margin-left:8px}
+  .cfoot .vb{margin-left:auto;font-size:10px;color:var(--blue);font-weight:600;background:rgba(59,91,219,.09);border:1px solid rgba(59,91,219,.20);border-radius:999px;padding:2px 10px}
+
+  .statrow{display:flex;background:#fff;padding:6px 4px 12px;border-bottom-left-radius:16px;border-bottom-right-radius:16px;box-shadow:var(--shadow)}
+  .statrow .c{flex:1;text-align:center}
+  .statrow .n{font-size:15px;font-weight:800;color:var(--ink)}
+  .statrow .c.on .n{color:var(--blue)}
+  .statrow .l{font-size:9px;color:var(--muted)}
+  .statrow .c.on .l{color:var(--blue)}
+
+  .todorow{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid #F4F6FA}
+  .todorow .ic{width:22px;height:22px;border-radius:50%;background:rgba(59,91,219,.08);display:flex;align-items:center;justify-content:center;font-size:10px}
+  .todorow .tt{flex:1;font-size:11.5px}
+  .todorow .cn{font-size:10.5px;color:var(--blue);font-weight:700}
+
+  .mapline{position:relative;height:150px;background:linear-gradient(180deg,#DCE9F0,#EFF5F8);overflow:hidden;flex-shrink:0}
+  .blob{position:absolute;border-radius:46% 54% 60% 40% / 54% 46% 54% 46%}
+  .blob.g{background:rgba(176,207,172,.6)}
+  .blob.w{background:rgba(178,211,230,.75)}
+  .anchor{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:4px}
+  .pin{width:30px;height:30px;border-radius:50%;background:var(--grad);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 4px 12px rgba(61,90,219,.34)}
+  .anchorlabel{font-size:10px;font-weight:600;background:rgba(255,255,255,.9);border-radius:999px;padding:0 8px}
+  .maptip{position:absolute;left:10px;bottom:10px;font-size:9.5px;background:rgba(255,255,255,.92);border-radius:999px;padding:1px 8px;color:#55677E}
+
+  .sheet{background:#fff;border-top-left-radius:16px;border-top-right-radius:16px;margin-top:-14px;position:relative;padding:10px 12px 6px;flex:1}
+  .handle{width:28px;height:3.5px;border-radius:4px;background:#E3E9F2;margin:0 auto 10px}
+  .ghead{display:flex;align-items:center;gap:7px;padding:5px 0 2px}
+  .ghead .gt{font-size:12.5px;font-weight:800}
+  .tag{font-size:9px;border-radius:999px;padding:0 7px}
+  .tag.pv{color:var(--purple);background:rgba(112,72,232,.10)}
+  .tag.soon{color:#98A6B8;background:#F1F4F8}
+  .ghead .gr{margin-left:auto;font-size:9px;color:#C3CCD8}
+  .grid{display:flex;flex-wrap:wrap}
+  .gi{width:25%;display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 0}
+  .gi .ic{width:32px;height:32px;border-radius:10px;background:#F2F5FD;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .gi .ic.real{background:linear-gradient(135deg,#E8EEFF,#EDE4FF)}
+  .gi .lb{font-size:9.5px;color:var(--ink2)}
+
+  .navrow{height:32px;display:flex;align-items:center;justify-content:center;position:relative;background:#fff}
+  .navrow .nt{font-size:13.5px;font-weight:600}
+  .navrow .bell{position:absolute;right:12px;font-size:14px}
+  .navrow .dot{position:absolute;right:9px;top:5px;width:6px;height:6px;border-radius:50%;background:#FA5252}
+  .navrow .prev{position:absolute;right:10px;font-size:9px;color:var(--purple);background:rgba(112,72,232,.10);border-radius:999px;padding:1px 8px}
+
+  .ucard{display:flex;align-items:center;gap:10px;padding:8px 12px 12px;background:var(--soft)}
+  .uava{width:44px;height:44px;border-radius:50%;background:var(--grad);color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;flex-shrink:0}
+  .ucard .un{font-size:15px;font-weight:800}
+  .ucard .up{font-size:10px;color:#7C8CA0;margin-top:2px}
+  .utags{display:flex;gap:5px;margin-top:5px}
+  .utag{font-size:9px;border-radius:999px;padding:0 7px}
+  .utag.warn{color:#F08C00;background:rgba(240,140,0,.10)}
+  .utag.plain{color:var(--muted);background:#F1F4F8}
+
+  .vip{display:flex;align-items:center;background:var(--grad);border-radius:13px;padding:11px 13px;color:#fff;box-shadow:0 6px 16px rgba(80,78,220,.26);margin-bottom:10px}
+  .vip .vt{font-size:12.5px;font-weight:800}
+  .vip .vs{font-size:9.5px;opacity:.85;margin-top:2px}
+  .vip .vr{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+  .vip .vb{background:#fff;color:var(--blue);border-radius:999px;padding:2px 12px;font-size:10.5px;font-weight:800}
+  .vip .vg{font-size:8.5px;opacity:.85}
+
+  .assets{display:flex;background:#fff;border-radius:13px;box-shadow:var(--shadow);padding:11px 0;margin-bottom:10px}
+  .assets .a{flex:1;text-align:center}
+  .assets .an{font-size:13px;font-weight:800}
+  .assets .an.weak{font-size:11px;color:var(--weak);font-weight:600}
+  .assets .al{font-size:9px;color:var(--muted)}
+  .assets .line{width:1px;height:24px;background:var(--line);align-self:center}
+
+  .fngrid{display:flex;flex-wrap:wrap;padding:4px 6px 8px}
+  .fn{width:25%;display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 0;position:relative}
+  .fn .ic{width:32px;height:32px;border-radius:10px;background:#F4F7FD;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .fn .lb{font-size:9.5px;color:var(--ink2)}
+  .fn .bg{position:absolute;top:2px;right:12px;background:#FA5252;color:#fff;font-size:7.5px;border-radius:999px;padding:0 4px;line-height:11px}
+
+  /* 自定义 tabBar 示意 */
+  .tabbar{
+    margin-top:auto;height:44px;background:#fff;border-top-left-radius:14px;border-top-right-radius:14px;
+    box-shadow:0 -3px 14px rgba(61,90,219,.10);display:flex;align-items:center;position:relative;flex-shrink:0;
+  }
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;font-size:8.5px;color:var(--muted)}
+  .tb i{font-style:normal;font-size:14px;opacity:.55;line-height:1}
+  .tb.on{color:var(--blue);font-weight:700}
+  .tb.on i{opacity:1}
+  .tbc{position:relative}
+  .tbc .cbtn{
+    width:36px;height:36px;border-radius:50%;background:var(--grad);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:19px;margin-top:-20px;
+    box-shadow:0 5px 12px rgba(80,78,220,.38);
+  }
+  .tbc .clb{font-size:8.5px;color:#5C6B80;margin-top:1px}
+
+  /* 说明列表 */
+  ul.plainlist{list-style:none}
+  ul.plainlist li{padding:7px 0 7px 22px;position:relative;border-bottom:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+  ul.plainlist li:last-child{border-bottom:none}
+  ul.plainlist li::before{content:"";position:absolute;left:6px;top:15px;width:7px;height:7px;border-radius:50%;background:var(--grad)}
+  .ok::before{background:#12B886 !important}
+  .todo::before{background:#F08C00 !important}
+
+  .footnote{margin-top:34px;text-align:center;font-size:12px;color:var(--weak)}
+</style>
+</head>
+<body data-page-node-id="ThrWmJHlvHOJNyzRzSzXlh">
+<div class="wrap" data-page-node-id="9lqCDLBuZmyQj6Sj4l8UuF">
+
+  <div class="hero" data-page-node-id="u7M9CME90DT34FPMP6RuIo">
+    <h1 data-page-node-id="0AdKtKnAY4ZrM53BJSbmc2">船好多 · UI V2 设计概览</h1>
+    <div class="sub" data-page-node-id="L6jGYVKB36K8L9GDVtCauN">按 8 屏原型 1:1 落地 · 自定义 tabBar 支撑角色化导航 · 后端零改动</div>
+    <div class="chips" data-page-node-id="tfIapaSAP1529T8ZniFycj">
+      <div class="chip" data-page-node-id="yoUYeg6umDPFItAl2u3jpA">PR #20 已合并</div>
+      <div class="chip" data-page-node-id="aIf8NLOgfszUBgS2pJOVLR">develop = 090ea5b</div>
+      <div class="chip" data-page-node-id="RvwGNVk2RFjTeCST9aaMbZ">10 页面 / 40 处路由校验通过</div>
+      <div class="chip" data-page-node-id="rDbFLa18dsgklsAhHittYV">品牌：船好多 · 船好货多赚好多</div>
+    </div>
+  </div>
+
+  <!-- ============ 1. 关键技术决定 ============ -->
+  <section data-page-node-id="k2pT6Bt6AaiLqYBRHaQHqH">
+    <h2 data-page-node-id="0sKjfoX8SLz4g7aaHuYM6B">① 关键技术决定：自定义 tabBar</h2>
+    <div class="panel" data-page-node-id="1iikfF32DE2dsbYYxByLkN">
+      <p data-page-node-id="FB2y5wOXO3XGowScknFz8Q">原型的底栏有两个位置<strong data-page-node-id="FF3CHQe8SStUYSf6alFjeG">随角色变化</strong>：第 1 位「找船 / 找货」、中间凸起位「发布货物 / 发布空船」。
+      原生 tabBar 是 <code data-page-node-id="phwTrCmEhwQdZOFzQqnmFX">app.json</code> 静态配置，做不到 → 启用 <code data-page-node-id="yEzcFdY3h2GVl2JV0H5Boj">tabBar.custom = true</code>，新增
+      <code data-page-node-id="yhjYhNMWAXJMKgGkcQ7AkS">miniapp/custom-tab-bar/</code> 组件按当前角色动态渲染。</p>
+
+      <h4 data-page-node-id="0lnkd7rhRwErntRk4A0HV3">5 个位置的角色化映射</h4>
+      <table data-page-node-id="Ysc5o8wMXnV4fmElG08OzH">
+        <thead data-page-node-id="URAG5O9TGtGf2trw432Mkb"><tr data-page-node-id="OzNHBcxt2K3Cl2rEngNlX3"><th data-page-node-id="f75k89rLxwGsd4GpLmMDcw">位置</th><th data-page-node-id="wMCpgeqJYVMtPoyBTZ3Knf">货主端</th><th data-page-node-id="1hI1Xyv2pALMG4Dfo86Ojr">船东端</th><th data-page-node-id="CoULZFOeQKs9FCJ4opOMfp">行为</th></tr></thead>
+        <tbody data-page-node-id="YGGw2rxmZqGIsFKbedXYSH">
+          <tr data-page-node-id="O0OOL8iflyEbNxn4Hti5gg"><td data-page-node-id="1IRJ1CWulg9dA9Nw3HnflV">1</td><td data-page-node-id="SQNAmvbZW0SZom5dIQhAhR">🚢 找船</td><td data-page-node-id="6l7CoXr317kqo17Btk2ax6">📦 找货</td><td data-page-node-id="8KZbX4No516TIWSVsXWL1Z"><code data-page-node-id="VUjIrS4aI6NoS6Emq0t05Z">switchTab</code> shipper / owner</td></tr>
+          <tr data-page-node-id="wMWv1KhT7B4HSjIooAhm0n"><td data-page-node-id="l0C3z6j5Ghsq6F2cUL6fuF">2</td><td data-page-node-id="9LzhXmwLpXUrK1xG3AtCrE">📋 订单</td><td data-page-node-id="94rtUUPjqb4nfA5ZnHdPEF">📋 订单</td><td data-page-node-id="tRyVWyu5oAOVH0zvDJQayN"><code data-page-node-id="Jd2YF2jbfPaCbhYLHGIcGE">switchTab</code> orders</td></tr>
+          <tr data-page-node-id="t75wT9Wwp61iXVP9UFmfjG"><td data-page-node-id="35kLHeEYjBBBy5JxH0DOTt">3（凸起）</td><td data-page-node-id="kRVng09fGyBjuerNewVkdB">＋ 发布货物</td><td data-page-node-id="fzbXrXQihOMQ5IQjIkQkRX">＋ 发布空船</td><td data-page-node-id="0EVokSsaewXDDjCorJK5DH"><code data-page-node-id="GQZ7oKq7cFsruMHynbHWoU">navigateTo</code> publish/cargo · publish/ship</td></tr>
+          <tr data-page-node-id="6RuGvB9tIwx0ZNoOlo10Da"><td data-page-node-id="H5cvUKS5LwnlD6jTV8kzLR">4</td><td data-page-node-id="yYDdWU5FrUro01kV839hlB">⚓ 港口</td><td data-page-node-id="wyeAX0XtA2xRND5lrVRQOv">⚓ 港口</td><td data-page-node-id="fnvU0lvYzTkctPJbNYPeEr"><code data-page-node-id="gQnzaWQp7IiVLB01q5zv8G">switchTab</code> port</td></tr>
+          <tr data-page-node-id="v0gXeLvx0BnQ8FyS2mDWlM"><td data-page-node-id="ReR3Uc9pUvkw1hyGuMD1oQ">5</td><td data-page-node-id="GTzF1MdkcsL4pgW56DcwgB">👤 我的</td><td data-page-node-id="baoFRVovThRrCH5Vy4MRFD">👤 我的</td><td data-page-node-id="aDoa4RKNpgU3zN2Of10SPb"><code data-page-node-id="U04lKb6ZwxHugbKTxFBb1d">switchTab</code> mine</td></tr>
+        </tbody>
+      </table>
+
+      <h4 data-page-node-id="5pQ6jE5akokwt9WmAoTvAJ">踩坑与解法</h4>
+      <ul class="plainlist" data-page-node-id="DTD13pls0c593GoK8bvsij">
+        <li data-page-node-id="152QJP0qHC2ldJGIiE23hE"><code data-page-node-id="GPA93WKvBGTsCRHnNYlm8s">app.json</code> 的 <code data-page-node-id="9cZx7DueqQk2urXpEfCLVm">tabBar.list</code> 是 <code data-page-node-id="Hxu0CoCjBokN2z4jwJrRGu">switchTab</code> 白名单 —— <strong data-page-node-id="sO389k2j3UzApl3DnVtBQO">owner 必须列在里面</strong>，否则 switchTab owner 静默失败。list 保留 5 个真实页面，组件只渲染 5 个按钮（前两位合并成一个动态位）。<em data-page-node-id="oIjhxU7tfgKEDuGTsHqNC2">list 项数 ≠ 渲染按钮数</em>。</li>
+        <li data-page-node-id="mRrDtpgIpXmSfnp8XkFdum">每个 tab 页 <code data-page-node-id="H915NJn4nq1eQJMHUbGQpY">onShow</code> 调用 <code data-page-node-id="A3F2aFBmcwCt4qivtRrIwW">syncTabBar(this)</code>（<code data-page-node-id="KcpjzQRdEIpzY24ahIwWVj">utils/tabbar.js</code>），刷新高亮位与角色文案。</li>
+        <li data-page-node-id="0BRFbrHjiYHkKybSh0kOAL">高亮位由<strong data-page-node-id="pchCGAE1UCxQDDmSC39Xib">当前路由</strong>反推（<code data-page-node-id="5i8iCmFwvoA3XDfW2tYp4V">calcSelected(route)</code>），不依赖组件自己的状态。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 2. 八屏 ============ -->
+  <section data-page-node-id="RKBZg2zEBZjHjfkJC5V2BC">
+    <h2 data-page-node-id="sLTe5DXeBoxw9NXeXD6qU2">② 八屏落地</h2>
+    <div class="screens" data-page-node-id="Ztxf1lj6Wmv03BqmZ9H46Q">
+
+      <!-- 01 -->
+      <div class="cell" data-page-node-id="eNXpeRDpnFlZVwfRiqewCW">
+        <div class="cell-title" data-page-node-id="gYozGknL3YHUNLyq6EEFxY">01 身份选择<span data-page-node-id="yCaSij5r1dryZke4vKTZEE">不设主页</span></div>
+        <div class="phone" data-page-node-id="zF0Yno2dpP5dXwO9POwfhp">
+          <div class="status" data-page-node-id="gt32v3Kd65as5hzEFDsnYn"><span data-page-node-id="2HLc8grEBDxGhpeUxCuhH0">9:41</span><span data-page-node-id="gDj44YVpa0UDAPE3r7ZKnS">▪▪▪ ⌁</span></div>
+          <div class="body" style="position:relative;background:linear-gradient(180deg,#DCE9F0,#EFF5F8)" data-page-node-id="mQJEE94tJVqwIzYNYGd7IR">
+            <div class="blob g" style="width:170px;height:130px;left:-40px;top:40px" data-page-node-id="1F84l8hAkHXauvU44R5t4L"></div>
+            <div class="blob w" style="width:150px;height:160px;right:-44px;top:90px" data-page-node-id="qPTioE1CEEkJ60GdA0tKBQ"></div>
+            <div style="position:relative;padding:56px 26px 0" data-page-node-id="tS3hxNvy16kkOQXRUeRwbr">
+              <div style="display:flex;align-items:center;gap:8px" data-page-node-id="sDk5PDFzDGiR3gBCZ7OhL4">
+                <div style="width:38px;height:38px;border-radius:10px;background:var(--grad);color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;box-shadow:0 5px 12px rgba(61,90,219,.28)" data-page-node-id="3lAJl5gRxBx9XxSu27UhKo">⛵</div>
+                <div style="font-size:26px;font-weight:800;letter-spacing:2px" data-page-node-id="UZcbyDntSDOi3HP5JK5Jho">船好多</div>
+              </div>
+              <div style="margin-top:7px;font-size:11px;color:#55677E;letter-spacing:3px" data-page-node-id="33YRHOXxFxmvYBXFbhMhCJ">船好货多赚好多</div>
+            </div>
+            <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top-left-radius:20px;border-top-right-radius:20px;padding:10px 16px 18px;box-shadow:0 -4px 18px rgba(61,90,219,.12)" data-page-node-id="t8S8g1iT6RFUinxxqThwFk">
+              <div class="handle" data-page-node-id="3tYM7S54aiEaFUvzmZ9ZLF"></div>
+              <div style="text-align:center;font-size:16px;font-weight:800" data-page-node-id="uOarTYEhotQHctSHtlFYYK">请选择您的身份</div>
+              <div style="text-align:center;font-size:10px;color:#93A1B3;margin-top:3px" data-page-node-id="UBkMLw7SgwmMVmSrXA06Vl">选择后直接进入专属工作台</div>
+              <div style="margin-top:14px;display:flex;flex-direction:column;gap:9px" data-page-node-id="Gc5v2Ke3wa8b3HH7lB9HBD">
+                <div style="display:flex;align-items:center;gap:9px;background:#F7F9FD;border:1px solid #EDF1F8;border-radius:12px;padding:11px 11px" data-page-node-id="b0oue06Ymh1tU20CQrBPch">
+                  <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#E8EEFF,#DDE6FF);display:flex;align-items:center;justify-content:center;font-size:16px" data-page-node-id="Nys2AwwleIWmbSkAqDOq8A">📦</div>
+                  <div style="flex:1" data-page-node-id="jdTvfrZcJtaRJbZBgYpdyy">
+                    <div style="font-size:13.5px;font-weight:700" data-page-node-id="SSQ9qtrnBk07gJQBpqOFcT">我是货主</div>
+                    <div style="font-size:10px;color:#8A99AC;margin-top:2px" data-page-node-id="bz4Z6y62urKLshhr9S2l5i">发货找船，查看推荐航线</div>
+                  </div>
+                  <div style="color:#C3CCD8;font-size:16px" data-page-node-id="5svXIakD8muD54xsRcaJDz">›</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;background:#F7F9FD;border:1px solid #EDF1F8;border-radius:12px;padding:11px 11px" data-page-node-id="f41kS3RCfCWNNETpgD7icn">
+                  <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#F2EAFF,#E8DDFF);display:flex;align-items:center;justify-content:center;font-size:16px" data-page-node-id="yo039Ruw6qZd5AkPMfRUNa">🚢</div>
+                  <div style="flex:1" data-page-node-id="F0Ia7dQl7zhzek3d9wzMj7">
+                    <div style="font-size:13.5px;font-weight:700" data-page-node-id="Z7Ln8dlsqFYaDHU50QCUja">我是船东</div>
+                    <div style="font-size:10px;color:#8A99AC;margin-top:2px" data-page-node-id="2FvWxc6ZZvQfmWUTzGF7kO">寻找货源，发布空船</div>
+                  </div>
+                  <div style="color:#C3CCD8;font-size:16px" data-page-node-id="e2O3oHD6OBMmY1mWOdHZIg">›</div>
+                </div>
+              </div>
+              <div style="margin-top:13px;text-align:center;font-size:10px;color:#6B7A8C" data-page-node-id="7Y8fZTckrdJ0FLJIUu053A">我是港口方 · <span style="color:#A8B4C4" data-page-node-id="HYrM1cOECDrDUeWAf7hCGu">后续可切换身份</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 02 -->
+      <div class="cell" data-page-node-id="6mQURnaRhHjewDaxD2hDYU">
+        <div class="cell-title" data-page-node-id="7JZhto6XyCwYhhHZnAXsKG">02 货主端 · 找船<span data-page-node-id="QRa9dO9GVTkLzOxiseU1F7">真实可用</span></div>
+        <div class="phone plain" data-page-node-id="5ED7McC03pjQHhXvXnK7Nn">
+          <div class="status" data-page-node-id="jh6EBCVmNcqHLhJHebFOvH"><span data-page-node-id="HYfi1t89MiakccfGmClkVK">9:41</span><span data-page-node-id="dNrg2fWa2ElgORkhimFGLQ">▪▪▪ ⌁</span></div>
+          <div class="body" data-page-node-id="CMqEeU9ezVj09kOqI5xetJ">
+            <div class="topbar" data-page-node-id="qTC4diPpdNh2L9n1coMFXf">
+              <div class="trow" data-page-node-id="JHk1B4j7f6F7AfY9kZ1x1Q">
+                <div class="tlogo" data-page-node-id="TDn0kpFOIXIhel1zPFbD5h">📋</div>
+                <div class="tloc" data-page-node-id="x0uT5Qn9z22GYyoALyQKmd">📍 南宁 · 平塘港 ▾</div>
+                <div class="trole" data-page-node-id="66VeuQWJaBkbHZR1c5hXB3">货主 ▾</div>
+              </div>
+              <div class="searchrow" data-page-node-id="EXzPikzHnl2krBZ1p9EyZu">
+                <div class="search" data-page-node-id="BSUDiYoG1F6kiRTSfTBHC0">🔍 搜索船源、航线</div>
+                <div class="tact" data-page-node-id="WhCSBF1UQIKTUoyZhz5MNt"><i data-page-node-id="rCDAZ6Mhjqk5veXQljPP2u">✨</i><b data-page-node-id="x6wwiOFSijfy37OoHqF2SN">Ai</b></div>
+                <div class="tact" data-page-node-id="rFhkkyL0FqOMD1QyIoreez"><i data-page-node-id="IPO27MaUGLkJNAiyL6Tz6R">💬</i><b data-page-node-id="BxoOd0icnsX3eBukQ9T6lq">客服</b></div>
+              </div>
+            </div>
+            <div class="content" data-page-node-id="zrUvIIMA1RFZr2ub5qBWXN">
+              <div class="card" data-page-node-id="d9wBihiBX5QAKaUImbTpWp">
+                <div class="btitle" data-page-node-id="CwWQHRsq0FZ2rWjGudSGmT">我要发货</div>
+                <div class="row" data-page-node-id="LQpxxKenE92WbFHz4KTDio"><span class="k" data-page-node-id="ZNZHPDCiYLYV5ggDlst2nS">装货港</span><span class="v" data-page-node-id="qCSQbWKnwQoIRtYCf7vy4V">南宁 · 平塘港 ›</span></div>
+                <div class="row" data-page-node-id="XiREIaZjA0msLHFNal5CPH"><span class="k" data-page-node-id="T9MW863LYK5p3p9Lv7p9Ic">卸货港</span><span class="v ph" data-page-node-id="G90OJ0iGxiA3ofECzohWTK">请选择目的港 ›</span></div>
+                <div class="dual" data-page-node-id="yoB7DgA8I5pzdHAvd5A65E">
+                  <div class="d" data-page-node-id="ErVxA20k0IykGAgHNkj7MT"><div class="dl" data-page-node-id="bzr6lr3bKgmQVuPUQZvHL1">货物资料</div><div class="dv" data-page-node-id="F3r8TRi9igs5tZQ1Vj8hEf">散货 · 1200 吨 ›</div></div>
+                  <div class="d" data-page-node-id="DicU7i9MVYZj2ugnMmVx8N"><div class="dl" data-page-node-id="3aPTXaWmoyaV2JQkBmDapC">用船需求</div><div class="dv" data-page-node-id="L9cqys8U6rX2XOyPaSFwIe">散货船 · 09-15 装 ›</div></div>
+                </div>
+                <div class="seg" data-page-node-id="wjl6iz1CXHf1yEaXKUCPBH">
+                  <div class="on" data-page-node-id="FNC2q2JZ3omS4fJEtzme8e"><span class="radio" data-page-node-id="zEExVqwB3B8CXtP1N6JsCQ"></span>整船运输</div>
+                  <div data-page-node-id="N9XkJKfBs3RBl2uFq9u7Uk"><span class="radio" data-page-node-id="X8ehDFEC8TbEDu0J0IfPuz"></span>拼船运输</div>
+                </div>
+                <div class="btn" data-page-node-id="5SzP3HjfTT5OPD2TEwYrIR">查看匹配船源</div>
+              </div>
+              <div class="card" data-page-node-id="3z1wV9gpo04p0QFKywEBZS">
+                <div class="shead" data-page-node-id="N0dYsc3B0nxkMKIfYd3Sj6"><span class="t" data-page-node-id="9DlwnMYjWnW9Afsn4KI0So">推荐船源</span><span class="m" data-page-node-id="pHoaPf94yswtMVUAblwalO">查看更多 ›</span></div>
+                <div class="itemrow" style="border-top:none" data-page-node-id="6OY7c0pmgAH3vVNLPFl9Rz">
+                  <div class="thumb" data-page-node-id="xyJp6H45T3GawqbgqiONon">🚢</div>
+                  <div class="b" data-page-node-id="SbkDx9jASIoNoTsiMZm0EK"><div class="n" data-page-node-id="2lUeCix1xLGfZfFmBoau0N">桂航008</div><div class="s" data-page-node-id="Zwv1IdYsK6qd3MgubVweoN">散货船 · 2000 吨</div></div>
+                  <div class="r" data-page-node-id="wO80oYROeKrSufckCFeXwc"><div class="link" data-page-node-id="8oVpfMDOCpjDxyVGKjJ8nk">查看详情 ›</div></div>
+                </div>
+                <div class="itemrow" data-page-node-id="SGfDQ2HAeBsde1KMhDcTdj">
+                  <div class="thumb" data-page-node-id="vhCgk0zjAgLXcZaWtrEcDr">🚢</div>
+                  <div class="b" data-page-node-id="T69mh4ChyqWM2izZKibmH3"><div class="n" data-page-node-id="5Iqo3Dxl55jGvC3quAcTil">西江016</div><div class="s" data-page-node-id="ztdQPslzYVDpGa775fbbWO">散货船 · 3000 吨</div></div>
+                  <div class="r" data-page-node-id="ZDlSRzNveeSl39nNjdqlE3"><div class="link" data-page-node-id="EofyNxUXwu0J6cBoCBNDBY">查看详情 ›</div></div>
+                </div>
+              </div>
+              <div class="card" data-page-node-id="OyeUSNfy9XSRKYlF1TLPPt">
+                <div class="shead" data-page-node-id="KlSfmod6C5Ri2EhD5DrI9h"><span class="t" data-page-node-id="jY9N9v75ZJyR3BagwiUu7R">推荐航线</span><span class="m" data-page-node-id="87O8vgPd4VVVsrE8lnXTN5">查看更多 ›</span></div>
+                <div class="itemrow" style="border-top:none" data-page-node-id="aAhIAESK7alAHAhq8A4IDD">
+                  <div class="b" data-page-node-id="uI9XYZHowibpLzF98E0nw3"><div class="n" data-page-node-id="YU7LyZVVOJTTgJvf7vf9AR">南宁 <span class="ar" style="background:var(--grad);color:#fff;border-radius:999px;padding:0 5px;font-size:8.5px" data-page-node-id="kcDutpXC40ADYtcCSlrCiX">→</span> 贵港</div><div class="s" data-page-node-id="Pn4CEGrCJOH51cM9eE8JCg">查看沿线船源</div></div>
+                  <div class="r" data-page-node-id="ybtojw02Unk6fFwd2MV6Ef"><span style="color:#C3CCD8" data-page-node-id="cTXlqu37hYvuQGB1g6qMI0">›</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="tabbar" data-page-node-id="1e3gid2H3UhI4P6v7Di3i3">
+              <div class="tb on" data-page-node-id="OhmDWSEn1bptZt5TWC85Bm"><i data-page-node-id="sM9YOr8woGo5b5d4crcVGw">🚢</i>找船</div>
+              <div class="tb" data-page-node-id="ojdxmQhIFyZOUSw2x2Ockp"><i data-page-node-id="5irX3TYLiSulDwRBxHgUvj">📋</i>订单</div>
+              <div class="tb tbc" data-page-node-id="8IbxYKegD1bCMFrRwCYXrD"><div class="cbtn" data-page-node-id="hWYTlnNJeGHXyk22JdTVN4">＋</div><div class="clb" data-page-node-id="A88jRWcETsmEQWX3nLzyVT">发布货物</div></div>
+              <div class="tb" data-page-node-id="GlrV5SpH8q95e3LRy9Dpkt"><i data-page-node-id="c8MLwNXO6bSORFFVKD8BZN">⚓</i>港口</div>
+              <div class="tb" data-page-node-id="IQmG7d147FGG8qsUQegBIl"><i data-page-node-id="Kfo5DkuTkkr9on2JrLu7dT">👤</i>我的</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 03 -->
+      <div class="cell" data-page-node-id="HV4nRCrjaOwLyo9BtnFWS0">
+        <div class="cell-title" data-page-node-id="OhOvR1HFTGWPLL41TkiDzU">03 船东端 · 找货<span data-page-node-id="qQreI2mFdkM4iyH7em3RCs">大厅为演示数据</span></div>
+        <div class="phone plain" data-page-node-id="877gKlM4cwq7pRFoykkZq4">
+          <div class="status" data-page-node-id="FnEYjNyRgoBG13I58BE0JP"><span data-page-node-id="UPD7CMKsPaiBiXUTMdLyos">9:41</span><span data-page-node-id="8qXKDW4g0hvDh0a9nsdw8f">▪▪▪ ⌁</span></div>
+          <div class="body" data-page-node-id="wBkQOJNApYaq8G8rNpFyLL">
+            <div class="topbar" data-page-node-id="KBB9MHkWABSVg4yqAZbXsQ">
+              <div class="trow" data-page-node-id="UAcHoZG2Z4ZYCl8pamA1Cq">
+                <div class="tlogo" data-page-node-id="uUghby7dYSJbMqqDNoboLE">🚢</div>
+                <div class="tloc" data-page-node-id="nVKPU6B00KTgrzPDxbKOIN">📍 南宁 · 平塘港 ▾</div>
+                <div class="trole" data-page-node-id="ySPVGFpdac99RvhCehBBG3">船东 ▾</div>
+              </div>
+              <div class="searchrow" data-page-node-id="iiHqUSkAZFZu7gGgJPr1Sn">
+                <div class="search" data-page-node-id="g1h8VCa4yPvO54NOknCzkk">🔍 搜索货源、航线</div>
+                <div class="tact" data-page-node-id="whgiTbGOui7OLq30yG4PwE"><i data-page-node-id="94sAV0EmrYkQSKP4UzP4tA">✨</i><b data-page-node-id="dP3H3hxlEmHbvbzJ1WDTCC">Ai</b></div>
+                <div class="tact" data-page-node-id="3GDGlHiOZq5sW1ZmgSlYNh"><i data-page-node-id="Rwx86CW0Sb5pKSr7cerxNu">💬</i><b data-page-node-id="CaZUV016DP5FgcmnSNizx0">客服</b></div>
+              </div>
+            </div>
+            <div class="content" data-page-node-id="Ro1qwPsrGRgSv5AlwkCcnr">
+              <div class="card" data-page-node-id="BhcBop7TAfIRvRTHsa8BEw">
+                <div class="btitle" data-page-node-id="PomsDA9DB35KZVIuGMcjXW">货源大厅</div>
+                <div class="pills" data-page-node-id="pmsoEIGhYhAs3OZ6ZQc3DC">
+                  <div class="pill" data-page-node-id="FMCZJhA58YNraDvOe6bAPt">装货港 ▾</div>
+                  <div class="pill" data-page-node-id="CqoRtjQqjPQPwlorDmEpee">卸货港 ▾</div>
+                  <div class="pill" data-page-node-id="OHQvNnZYcUwiKBNQjfBdis">船型 ▾</div>
+                </div>
+                <div class="sortrow" data-page-node-id="T4S1jHjGDCtyQq5vDbNPjd">
+                  <span class="on" data-page-node-id="Ah4gq5QOCQbJnI5eZ55tNg">最新发布</span><span data-page-node-id="TLQdRK2WY8dFuHWGk2PVbr">距离优先</span>
+                  <span class="fr" data-page-node-id="eOHVVnVM3OPzSaaCeQVSMe">▽ 筛选</span>
+                </div>
+                <div class="cargocard" style="margin-top:2px" data-page-node-id="twPxzfmvpR2kWAKg3yNePi">
+                  <div class="ccr" data-page-node-id="bPIT5P1gWY1XyAKkdP0n1x"><span class="nm" data-page-node-id="0rcu9dKCQfwl4o8DTqeFuC">南宁</span><span class="ar" data-page-node-id="DicxgKHGeM9mSq3T8LSuR3">→</span><span class="nm" data-page-node-id="930fALpr5EyHjXSlR1mNS9">贵港</span><span class="pr" data-page-node-id="4vt1UpUvlK2vBYFgoMHP1Z">运费面议</span></div>
+                  <div class="cmid" data-page-node-id="nmpSPyukmFL1hEtH5NqXIH">水泥熟料 · 1200 吨</div>
+                  <div class="cfoot" data-page-node-id="qLhOUGinlrrLH66ddcn2t4"><span class="ow" data-page-node-id="j2DGJlz78IKtryZ1erquzc">陈某</span><span class="tm" data-page-node-id="Y1czjEM9v8RGqm16IN9eTU">1小时前发布</span><span class="vb" data-page-node-id="REzZDqijUY0vqd7MkawzyX">查看货源</span></div>
+                </div>
+                <div class="cargocard" data-page-node-id="qQVsD98Z2aNJrvWi5W979U">
+                  <div class="ccr" data-page-node-id="6teOuX0AwMiRf9e7sM9cuh"><span class="nm" data-page-node-id="gRGGzhMoF6aPHf9Qt6FBzO">贵港</span><span class="ar" data-page-node-id="HHBFXjGXUTi1eXGaOW3dEe">→</span><span class="nm" data-page-node-id="Qt78O5DylqrN29yhSjhJh8">梧州</span><span class="pr" data-page-node-id="VGh0GfDGmRErZH9xoCHE4u">运费面议</span></div>
+                  <div class="cmid" data-page-node-id="EJDbZ4EShELe5uoXVD3CXl">钢材 · 800 吨</div>
+                  <div class="cfoot" data-page-node-id="33CDWC6EMxEm6ZLxPDbHE8"><span class="ow" data-page-node-id="QmaGrZ52hN1XcO61vfGWlI">李老板</span><span class="tm" data-page-node-id="i02A2gnA4CivOrQQSxb7JI">3小时前发布</span><span class="vb" data-page-node-id="zpCeSt1LagSkUIa1hHTunV">查看货源</span></div>
+                </div>
+                <div class="cargocard" data-page-node-id="yscTRHstmRyjGdXsVPpp9n">
+                  <div class="ccr" data-page-node-id="1mqvKJqUhu4LRM7H43Z0jT"><span class="nm" data-page-node-id="bsr0y9fuoDOJVUNCLXOuSW">钦州</span><span class="ar" data-page-node-id="ZBguC08j9RWAtLz62r35qL">→</span><span class="nm" data-page-node-id="ciNVPMjOYIcak3oqgFPWA9">南宁</span><span class="pr" data-page-node-id="CkufVhhuC8czSY74XGTv0w">运费面议</span></div>
+                  <div class="cmid" data-page-node-id="L8ASZJN8q4xXDwIhSFxBzb">设备 · 200 吨</div>
+                  <div class="cfoot" data-page-node-id="hr7AsxA1EG5VkkJZ5A1VwL"><span class="ow" data-page-node-id="XpMmL8W9aQCwvEY0frPGXF">王先生</span><span class="tm" data-page-node-id="Fl8fQQ2IjvsHeCMPwfBlco">5小时前发布</span><span class="vb" data-page-node-id="BADfuAD6XE2aZP9j3adOlg">查看货源</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="tabbar" data-page-node-id="eR20VSA6llE5CIcDaPNZ7w">
+              <div class="tb on" data-page-node-id="8tV7muQQ9aLUBUrDbhIfLM"><i data-page-node-id="PFCVLdB0Lrv7rErAbMSOG8">📦</i>找货</div>
+              <div class="tb" data-page-node-id="7B2TOLh8H8ypkqCui95bLE"><i data-page-node-id="8SDK00RaSn8hJbCJNew75Q">📋</i>订单</div>
+              <div class="tb tbc" data-page-node-id="KgDgsdfZgjSNACkAfK1Gcl"><div class="cbtn" data-page-node-id="aC7QWLlrCYQeXlvJRnFh8q">＋</div><div class="clb" data-page-node-id="XL2DsSyu6QuNzcMuPgqlVr">发布空船</div></div>
+              <div class="tb" data-page-node-id="jfSFKc3zgiBJ137X0seQkC"><i data-page-node-id="73d6yqpXTjKagBKSZRzVwg">⚓</i>港口</div>
+              <div class="tb" data-page-node-id="ozGRUamKoeMnm23OC4dCLN"><i data-page-node-id="F0Mj64pnNBBgDQYiFQW342">👤</i>我的</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 04 -->
+      <div class="cell" data-page-node-id="oi3QtrLVM5voom3svIAYfu">
+        <div class="cell-title" data-page-node-id="cKsYDP3kiSOxjiDOTq9t2i">04 发布货物<span data-page-node-id="hNkkFIio11UwPx59zdZLJk">新建 · 真实可用</span></div>
+        <div class="phone plain" data-page-node-id="b8tBAh3efmATQF1nAGX43F">
+          <div class="status" data-page-node-id="qxGLg2XMVxbzWJzfGq6k6G"><span data-page-node-id="nie4XoHQPb51Dgn7zHZSQx">9:41</span><span data-page-node-id="AoBCeAbDdObIzUGn5YhV2p">▪▪▪ ⌁</span></div>
+          <div class="body" data-page-node-id="JTdQDGFVAXN6rLgoQb1tsA">
+            <div class="navrow" style="background:#fff;border-bottom:1px solid var(--line)" data-page-node-id="f6SdjvvlX3HNfpBpqQazCA"><span style="position:absolute;left:12px;color:#C3CCD8" data-page-node-id="DM8HPJ3LndZOGy5uQfvTt6">‹</span><span class="nt" data-page-node-id="cYKerIKizQAX5J70MDj873">发布货物</span></div>
+            <div class="content" style="padding-top:8px" data-page-node-id="KuJyiawTq0yJFm3ZInhiCj">
+              <div class="card" data-page-node-id="BrcbQLO5uSVouGU0rsVi3S">
+                <div class="btitle" data-page-node-id="ab8Uaiz38fSRWMdMbpj4xe"><span class="no" data-page-node-id="IGsuBEI7INsdu4eXPERELK">01</span>运输路线</div>
+                <div class="row" data-page-node-id="VIiU1mU8EYwE2w7OKuM8Ni"><span class="k" data-page-node-id="HRBqbpgKd6g49fxEN3dIxW">装货港</span><span class="v" data-page-node-id="Dy7fuhqOHJ8CvDOBHiouBG">南宁 · 平塘港 ›</span></div>
+                <div class="row" data-page-node-id="7cjzT8InzoCyHBeklhwmoZ"><span class="k" data-page-node-id="ZmZX1VHiVRlktuhEdNOkp2">卸货港</span><span class="v" data-page-node-id="6eqF5UD08OGKjYWQbTiqeI">贵港 ›</span></div>
+              </div>
+              <div class="card" data-page-node-id="LJfZeY7inBwBtlBvXJZCJS">
+                <div class="btitle" data-page-node-id="fxU2iuTuqyG1ADAr90jh0O"><span class="no" data-page-node-id="8etTVFYx3AfrgVzfWTHuBB">02</span>货物信息</div>
+                <div class="row" data-page-node-id="RzCJ3AldX11sGTONh2aNye"><span class="k" data-page-node-id="2Jg3XRnNFuJpOKN0ebM0eo">货物名称</span><span class="v" data-page-node-id="0pINdlvy7ZFyT3mGRoFDQF">水泥熟料</span></div>
+                <div class="row" data-page-node-id="HyPHP9BwWXGx78s1ZBSGDf"><span class="k" data-page-node-id="zakWBtJPydYD3KUBtyQR9q">货物类型</span><span class="v" data-page-node-id="hlPKnXq2UgPdIVzmhBRCCJ">散货 ›</span></div>
+                <div class="row" data-page-node-id="oFz74yMUuqxtDMkQtlEAqy"><span class="k" data-page-node-id="j4LOmZssHrC8UMuqc22jp7">重量（吨）</span><span class="v" data-page-node-id="KZ0dwROx1fW0p9WFJvEjgX">1200</span></div>
+                <div class="row" data-page-node-id="Y1Zw67LH6u28J9GmuT5TFk"><span class="k" data-page-node-id="xX69xdrORP26m0azbHwJFb">包装方式</span><span class="v ph" data-page-node-id="5oGFVjeHcSN81LOQDtROre">请选择包装方式 ›</span></div>
+              </div>
+              <div class="card" data-page-node-id="kDz7SWAVGYsu1avE7iGbgE">
+                <div class="btitle" data-page-node-id="0mYmxqZiF1fLQzKxuvVG6g"><span class="no" data-page-node-id="woj1E8APv0ULzwp6TOgQ01">03</span>用船与时间</div>
+                <div class="row" data-page-node-id="fAHZmdsgUO880zxg8vaksC"><span class="k" data-page-node-id="NuNQiEGnc3xovtWj4qaCrg">期望装货日期</span><span class="v" data-page-node-id="yNoRMKpb1dooZ6v5P8aWCp">2026-09-15 ›</span></div>
+                <div class="row" data-page-node-id="coW8SeoUISkAQl83kvp56J"><span class="k" data-page-node-id="GqWFCoSeJkHLRjuflbLGl4">所需船型</span><span class="v" data-page-node-id="O3vKssIiXfE7niz9oYDuBF">散货船 ›</span></div>
+              </div>
+              <div class="card" data-page-node-id="WaZaWaiqGpCkJWdigMhQBG">
+                <div class="btitle" data-page-node-id="vCXnJqxJgX8qEcyNl2qcAx"><span class="no" data-page-node-id="orFJihz5ary6rQRGkzVSIX">04</span>运费与备注</div>
+                <div class="seg" data-page-node-id="LNCCVDpVqQUskQU1rLDD25">
+                  <div class="on" data-page-node-id="vKQgRkQPXxVZUxJpI9BBJj"><span class="radio" data-page-node-id="SyEBVuLTwUSHU32jb33WTV"></span>运费面议</div>
+                  <div data-page-node-id="VxlyYT8QQO2qAVviPKEon7"><span class="radio" data-page-node-id="kqWv7S8Yl3fEUTLrM8oAhG"></span>一口价</div>
+                </div>
+                <div class="row" data-page-node-id="DqWl2Kp09Y4UeiFVIPWBBR"><span class="k" data-page-node-id="da8PZkENATti0SOq4QYsFX">参考运费（元）</span><span class="v ph" data-page-node-id="VHGGgObvAqCVmnZQkeMvml">选填 · 供船东参考</span></div>
+                <div class="row" style="color:#C3CCD8" data-page-node-id="ejjl8NgwKORFWokxkrTVaJ"><span data-page-node-id="pqd1y6MDWUx2mEuWwCBqj2">补充说明（选填）</span><span data-page-node-id="uXH9UujGvS75t3pw0Yn99n">0/200</span></div>
+              </div>
+            </div>
+            <div style="padding:0 12px 10px;display:flex;align-items:center;gap:6px;font-size:10px;color:#6B7A8C" data-page-node-id="DcaNrHKOK6Hy3Pc91nHe3Z">
+              <span style="width:12px;height:12px;border-radius:50%;border:1.5px solid #C3CCD8;display:inline-block" data-page-node-id="Jz5tCjSwBO7CLh9krzSEOS"></span>
+              已确认货物信息真实准确
+            </div>
+            <div style="background:#fff;border-top:1px solid var(--line);padding:9px 12px;display:flex;gap:9px;flex-shrink:0" data-page-node-id="nTzTxiqEDQweEVygsflwBq">
+              <div class="btn ghost" style="flex:1;margin:0" data-page-node-id="W5FWbsv3r2ujEokJlFevO4">保存草稿</div>
+              <div class="btn" style="flex:1.6;margin:0" data-page-node-id="ossN59IqcTAaTaMGYav6NN">确认发布</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 05 -->
+      <div class="cell" data-page-node-id="610O414RD7cRt0BcNrMBsv">
+        <div class="cell-title" data-page-node-id="l9Eq0cmoApsba03sXIM9sP">05 发布空船<span data-page-node-id="ZRDH4ynHly7E46M7btyt7A">新建 · 接口待开发（占位）</span></div>
+        <div class="phone plain" data-page-node-id="RvK0tNDgDo2d5LslcCfGnY">
+          <div class="status" data-page-node-id="tVdXRBUnFFMFoMoqzsLwna"><span data-page-node-id="REp2m4JEBEkt5sp1R7mXEc">9:41</span><span data-page-node-id="F42e6OunifGR17R3TAOAYY">▪▪▪ ⌁</span></div>
+          <div class="body" data-page-node-id="vrg6jMh7zOIks7SaHnGMU0">
+            <div class="navrow" style="background:#fff;border-bottom:1px solid var(--line)" data-page-node-id="pNIlTP6l1RUITABiCrUO4C"><span style="position:absolute;left:12px;color:#C3CCD8" data-page-node-id="0vZVXI1j87DAv9t19rk8Y9">‹</span><span class="nt" data-page-node-id="SGiV4ZAjsooDUFSRjWBDRy">发布空船</span></div>
+            <div class="content" style="padding-top:8px" data-page-node-id="GoiFNBMK8oKHLv3w3soyHm">
+              <div style="background:rgba(112,72,232,.07);border:1px solid rgba(112,72,232,.18);border-radius:11px;padding:8px 10px;margin-bottom:9px;display:flex;align-items:center;gap:7px" data-page-node-id="xGQN0QLrn8sEp6ZAH3A5Gc">
+                <span class="tag pv" style="flex-shrink:0" data-page-node-id="fiO8i5J8Ahm0fv2rAnWwxl">功能预览</span>
+                <span style="font-size:9.5px;color:#6B5AA8" data-page-node-id="fuRbg5v74TKa0Jzw7lGoFX">空船大厅接口开发中 · 提交保存为本机草稿</span>
+              </div>
+              <div class="card" data-page-node-id="l0yXtBG1cSrAq0rDtb8jwZ">
+                <div class="btitle" data-page-node-id="CJ10CgCfN8cAdHGCakoNLG"><span class="no" data-page-node-id="xCNW9D8wBZ0NAALkDnE9Cb">01</span>选择船舶</div>
+                <div class="row" data-page-node-id="Z0C4AbvCygVJbILHZ1QfIH"><span class="k" data-page-node-id="OfiLzbGhz9C0JdBEVdfplv">选择船舶</span><span class="v" data-page-node-id="J6QI8Ja3EquQqOwcwFUUBG">桂航008 ›</span></div>
+                <div class="row" style="border-bottom:none" data-page-node-id="Z6O46JW7KVq7JJDCGUqaw9"><span style="font-size:10px;color:var(--muted)" data-page-node-id="iayHlZ4aZCdK3F8SEoyb9w">散货船 · 载重 2000 吨 · 吃水 3.8 米</span><span class="tag soon" style="color:#12B886;background:rgba(18,184,134,.10)" data-page-node-id="uC9TTX5AeDOh9O6EDqvxvJ">已认证</span></div>
+              </div>
+              <div class="card" data-page-node-id="M9SzBAqe2LQD3LbykgoGyl">
+                <div class="btitle" data-page-node-id="gBeP079RwUKpinige4dcoP"><span class="no" data-page-node-id="qJAxrgDJbdr1MJZASApFDO">02</span>当前运力</div>
+                <div class="row" data-page-node-id="JYt2k3TBqLLMMVJbcl3Uao"><span class="k" data-page-node-id="84hlpjIcFlztiLCSKSBb9v">当前停靠港</span><span class="v" data-page-node-id="3JKvCs5uK2WPTeAlkZUbhY">南宁 · 平塘港 ›</span></div>
+                <div class="row" data-page-node-id="tE9kpDFyrTxdOY60sRqgwU"><span class="k" data-page-node-id="tTTlw7Telrm8SVgEoDhjhf">可用载重（吨）</span><span class="v" data-page-node-id="VqSOS5E0HHIuepwqZEYfp3">2000</span></div>
+                <div class="row" data-page-node-id="yr10JGRZCEQKjBKp5H3UJd"><span class="k" data-page-node-id="qESnHO5HCkCSBsGgU61cAS">空船可用日期</span><span class="v" data-page-node-id="uHQAGWNyT5PJ62SykAED4b">2026-09-15 ›</span></div>
+              </div>
+              <div class="card" data-page-node-id="7n000NzbOqHHCpLHWoRQ7F">
+                <div class="btitle" data-page-node-id="Mvvi2XFqCZaE8OYXyxzea2"><span class="no" data-page-node-id="HUW4MwAaQLPHGi1omfAqhB">03</span>期望航线</div>
+                <div class="row" data-page-node-id="8yAm87JGyR7aGTSAvhmu8J"><span class="k" data-page-node-id="RQ08v4VzooZR6xpx0NTGN0">出发港</span><span class="v" data-page-node-id="fMBWadAG5MSkwnYGDcszBk">南宁 ›</span></div>
+                <div class="row" data-page-node-id="0RUhMi2PBHaY5K1ZurICxV"><span class="k" data-page-node-id="dBwKBvIU3cD84RRnWnBcBE">目的港（可选）</span><span class="v" data-page-node-id="QUmxsOmeAuAm8264tLx0Me">不同港</span></div>
+              </div>
+              <div class="card" data-page-node-id="2T3GbLSWvjhso55X6NE9D5">
+                <div class="btitle" data-page-node-id="x9MQsvmwKWVkDuhXONyLIN"><span class="no" data-page-node-id="Qsd8MUsU2kiuFWnu7FtX80">04</span>报价与备注</div>
+                <div class="seg" data-page-node-id="fMsBCGJJ7z1RMpyTT7Tv9x">
+                  <div class="on" data-page-node-id="UIYYwA1sgIHf4OJhUDFxF6"><span class="radio" data-page-node-id="DuU2uWxSpBbQ4M2oXeXnmk"></span>运费面议</div>
+                  <div data-page-node-id="DH7aglvuv8X3UJuTLoGcDA"><span class="radio" data-page-node-id="nreNV08Pf0PtExoeSQJmzR"></span>参考报价</div>
+                </div>
+                <div class="row" data-page-node-id="Ghq3dymqOeGYljM8VXTk6o"><span class="k" data-page-node-id="nDUEvWaXVqTu65WU3Wd1G8">参考运费（元）</span><span class="v ph" data-page-node-id="AGHR8x0G5Sxq0D9b0DwAXr">选填 · 供货主参考</span></div>
+              </div>
+            </div>
+            <div style="background:#fff;border-top:1px solid var(--line);padding:9px 12px;display:flex;gap:9px;flex-shrink:0" data-page-node-id="8NeuHEZ1NtJdWniULxgDoL">
+              <div class="btn ghost" style="flex:1;margin:0" data-page-node-id="godPsb6EiXCT75XGjXWbMz">保存草稿</div>
+              <div class="btn" style="flex:1.6;margin:0" data-page-node-id="lJdAi71wfq5S7LmhrxmTnm">发布空船信息</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 06 -->
+      <div class="cell" data-page-node-id="Z5w8yHEZ3fDgKgBwkjB63s">
+        <div class="cell-title" data-page-node-id="GWLOEAbePUOqw8TXoOvTKL">06 我的订单<span data-page-node-id="sTOQWP9YERZZ3t9WYf7SBH">真实数据 + 路线富化</span></div>
+        <div class="phone plain" data-page-node-id="b80blZv1QRIGqBDNVQlihv">
+          <div class="status" data-page-node-id="H9Ov65YWwC6n6Pc0UfLaAe"><span data-page-node-id="Cuwkb66VtQ800qvF5Sq5bC">9:41</span><span data-page-node-id="reKADjCoBI3NucACir4kn5">▪▪▪ ⌁</span></div>
+          <div class="body" data-page-node-id="K8cZFLbMX9MEqNCMnGB3AA">
+            <div class="navrow" data-page-node-id="jxzWVf6pnSm2rc2gdPDgUP"><span class="nt" data-page-node-id="a9xTv1AlG4qHeF1EkjTEBW">我的订单</span><span class="bell" data-page-node-id="gvLCswrcKwSVVlss7V3MXi">🔔</span><span class="dot" data-page-node-id="btrcpNPhBu7UMLmzyUPbMX"></span></div>
+            <div class="statrow" data-page-node-id="54ko7tTHh1Ux25i2E41oKj">
+              <div class="c" data-page-node-id="MImH3IEalT91ydRaL8cbed"><div class="n" data-page-node-id="3m35dTfSj3WyecduvR7DPM">12</div><div class="l" data-page-node-id="roUPFBllrVsHofM8zMNCmY">全部</div></div>
+              <div class="c on" data-page-node-id="id2Q4cn1F6oTpRk8vX5zWB"><div class="n" data-page-node-id="6oI5aZ10GKOEartmCYWMSu">3</div><div class="l" data-page-node-id="PEhI8LsQVjMVAJQ3nW1UER">待承运</div></div>
+              <div class="c" data-page-node-id="VMQpPYSsH0JgXOgG3yo6d8"><div class="n" data-page-node-id="peWgOrKbFcwaqHVtraxJQH">5</div><div class="l" data-page-node-id="pp5k3kBD0DhvpwmMqfN4ta">运输中</div></div>
+              <div class="c" data-page-node-id="twXSgnJvNJ89ZMgPHZn8Gd"><div class="n" data-page-node-id="VcfAYwo1rWrrmEKue8qasf">3</div><div class="l" data-page-node-id="q7qHVFumvEY6rINdmGioT6">已完成</div></div>
+              <div class="c" data-page-node-id="Rjngt8jeWVGERrvfQPGSud"><div class="n" data-page-node-id="HB3vAKG943oqzOn8EtV47k">1</div><div class="l" data-page-node-id="5xmT7s3KFx8oIOKntmDsKD">已撤单</div></div>
+            </div>
+            <div class="content" style="padding-top:10px" data-page-node-id="fXMa3QylDqgGeAtBtVMIRD">
+              <div class="card" data-page-node-id="wytRm2pJFsmWjbRhUnFdQh">
+                <div class="shead" data-page-node-id="UOtl4e87NhGTjs3u72p423"><span class="t" data-page-node-id="WBSCEc46WTOyh3sQgHN6sS">待处理事项</span></div>
+                <div class="todorow" data-page-node-id="mgQJq56KbhBnG3vFliED7k"><div class="ic" data-page-node-id="KdhKEAfUGDsxHmlekKZTvX">💰</div><div class="tt" data-page-node-id="KZ9udxvff1h1M1k7zUk63a">待支付订单</div><div class="cn" data-page-node-id="GztChEBVgPosAwpI2rUaVP">1 笔</div><span style="color:#C3CCD8" data-page-node-id="sJe64BOeHAGA5hohheD1rX">›</span></div>
+                <div class="todorow" data-page-node-id="p1INFHReBdHVMIYnxcBTG7"><div class="ic" data-page-node-id="OS4L2VZISpK9jSukwndeUu">✅</div><div class="tt" data-page-node-id="H4ynCM4kmsc1fR7EAhb92K">待确认收货</div><div class="cn" data-page-node-id="KFURXezIma1q7BLFDsOZ5D">1 笔</div><span style="color:#C3CCD8" data-page-node-id="xaHzv8Doh0KkdE0vXnVGFT">›</span></div>
+              </div>
+              <div class="card" data-page-node-id="4peRra7zmDlN7aTO6nmqIw">
+                <div class="shead" data-page-node-id="9bNqyLCroslbHgJy3QEbpS"><span class="t" data-page-node-id="Aj8ZdXqNV5T7GsY3LThkLr">最近订单</span><span class="m" data-page-node-id="SwsEQJGYGdFpy7zQmO3X23">查看全部 ›</span></div>
+                <div style="margin:0 12px 10px;padding:9px 10px;border:1px solid var(--line);border-radius:12px" data-page-node-id="BfwqPCGHlcH12GvQcHsIVn">
+                  <div class="ccr" data-page-node-id="zflwPO8qts2deLOB5zPVYt"><span class="nm" data-page-node-id="SGOLi4FcTEsEJk7AHXaQzn">南宁</span><span class="ar" data-page-node-id="w7ch4nRx1FaAU7U2wxRPqe">→</span><span class="nm" data-page-node-id="oirbO9npwCx2CVdDgcXt4Q">贵港</span><span class="pr" style="color:#F08C00;background:rgba(240,140,0,.10)" data-page-node-id="vXCvq4XdpvhpLDloCqbMhy">待承运</span></div>
+                  <div class="cmid" data-page-node-id="rILMnvFsHbIlbA7hXkzC3k">水泥熟料 · 1200 吨</div>
+                  <div style="display:flex;font-size:9.5px;color:var(--weak);margin-top:5px" data-page-node-id="gbBbJQVBqtHcoC9YbqCruU"><span data-page-node-id="tKBd81Raxt3ARPQaAlJy8V">2026-09-15 装货</span><span style="margin-left:auto;color:var(--purple);font-weight:600" data-page-node-id="kTdJ0wrDNYzidqS2r0K8NZ">¥ 25000</span></div>
+                  <div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:6px" data-page-node-id="oG2xOxAZ6z43EjlWLAxEFI">
+                    <span class="vb" style="margin-left:0" data-page-node-id="4m55LkEC2rqobpcuHY40Zl">查看合同</span>
+                    <span style="font-size:10px;color:#fff;font-weight:600;background:var(--grad);border-radius:999px;padding:2px 10px" data-page-node-id="NtpoY3ltijRDTa2NqJyHyD">去支付</span>
+                  </div>
+                </div>
+                <div style="margin:0 12px 11px;padding:9px 10px;border:1px solid var(--line);border-radius:12px" data-page-node-id="CElfuaxVCAF0W8K6FeDel8">
+                  <div class="ccr" data-page-node-id="ElWoMVX0VM8dAOExp8lxFx"><span class="nm" data-page-node-id="xBjQvZUYI5SPINqhXmu6lF">贵港</span><span class="ar" data-page-node-id="HiRLUgVLqCRVauVeCWFSHL">→</span><span class="nm" data-page-node-id="pJNMEGsjUFi0e3zeufqCIP">梧州</span><span class="pr" data-page-node-id="DPKfkdpSueTq9qfn5cot35">运输中</span></div>
+                  <div class="cmid" data-page-node-id="xlho2t8Q29vVJR7W0b4i1G">钢材 · 800 吨</div>
+                  <div style="display:flex;font-size:9.5px;color:var(--weak);margin-top:5px" data-page-node-id="NdVsjbAnHFj8cYEk1LLMWW"><span data-page-node-id="GjtMcqJvkEPz98SL2ELtK2">2026-09-18 装货</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="tabbar" data-page-node-id="sLFfsxjNrb7fKAmrh4rrTF">
+              <div class="tb" data-page-node-id="Wnsa2wCJzTXuDvUGM9ZLiG"><i data-page-node-id="tSzXCoOqDSCgx2TONVyF6b">🚢</i>找船</div>
+              <div class="tb on" data-page-node-id="qxSXxDttZ43rHLu7e8GD9P"><i data-page-node-id="FVEwHBqkFndBK0LibAusCw">📋</i>订单</div>
+              <div class="tb tbc" data-page-node-id="gvOAKNfEUNcRI5sgefAFEI"><div class="cbtn" data-page-node-id="6HV6aoO2jDyGQQGaED8Y16">＋</div><div class="clb" data-page-node-id="OUAuI3dbqVBePe3yGJb5oB">发布货物</div></div>
+              <div class="tb" data-page-node-id="Ed5GP0BJq9KtcATSlsQHg4"><i data-page-node-id="D3YOC2criC825kHD4qFIKD">⚓</i>港口</div>
+              <div class="tb" data-page-node-id="a5LUM3o7sDUQqOgPpiSnEV"><i data-page-node-id="mPh79QCGgkOIroM7DAiDgM">👤</i>我的</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 07 -->
+      <div class="cell" data-page-node-id="Rse1c73WYcIvVfEJd9dRg6">
+        <div class="cell-title" data-page-node-id="MV8O7rKiW0kmfrVsEr6Fd5">07 港口服务<span data-page-node-id="4RKsjlawzRdEVLYwf8ujfB">网格占位 + 保留运营台</span></div>
+        <div class="phone plain" data-page-node-id="DItYsbJZjcN1q73sEkbyY9">
+          <div class="status" data-page-node-id="qoqEzamCNW1gRFXnAhpHgh"><span data-page-node-id="urOoyceCxPVNqVSqoDr6EE">9:41</span><span data-page-node-id="zR59Bhsue9CQYLa2O4awdX">▪▪▪ ⌁</span></div>
+          <div class="body" data-page-node-id="hW6HNuE79ZyIFq2VbXLgyO">
+            <div class="mapline" data-page-node-id="r3EHxFCRZxh95I2zR5k3YF">
+              <div class="blob w" style="width:190px;height:110px;left:-20px;top:14px" data-page-node-id="38txiQOxkkP2mI1WPJgjdT"></div>
+              <div class="blob g" style="width:140px;height:100px;right:-30px;top:-16px" data-page-node-id="0yIDp346uE7TNFOhqGmhaY"></div>
+              <div class="blob g" style="width:150px;height:90px;left:20px;bottom:-30px" data-page-node-id="0L0xnEpxsAA0DYtpzJNkvU"></div>
+              <div class="anchor" data-page-node-id="CNvnt5arN2psPtgWD3hqvl"><div class="pin" data-page-node-id="07TRXeO3jLTI6pTqoTG9PM">⚓</div><div class="anchorlabel" data-page-node-id="Ar6eNzz7SHmgWkM5GZCLqn">企石枢纽</div></div>
+              <div class="maptip" data-page-node-id="DgYEjRtTHVzQmFJq3TIEaI">地图示意</div>
+              <div style="position:absolute;right:10px;bottom:10px;width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--blue);box-shadow:0 3px 9px rgba(61,90,219,.18)" data-page-node-id="26tBndDAwQFpwaXpKTPq03">◎</div>
+            </div>
+            <div class="sheet" data-page-node-id="77FniWumnB9ttB7ak6yXRF">
+              <div class="handle" data-page-node-id="pBY4XzQwhEWm0zHf2wTlTh"></div>
+              <div class="ghead" data-page-node-id="Uf68Zr0mN6p1wY0hHgWTNa"><span class="gt" data-page-node-id="es2UpLJVfPrfhHt61p0OKc">港航服务</span><span class="tag pv" data-page-node-id="o1xu1u4x5jt0WVarw7mADo">功能预览</span><span class="gr" data-page-node-id="uGRGFNe0MTkVeBb8DC2JT0">⌃</span></div>
+              <div style="font-size:9.5px;color:var(--weak);padding-bottom:2px" data-page-node-id="4imnmU7dWcfIuqzlOwincx">服务入口已预留，后续开放</div>
+              <div class="grid" data-page-node-id="Qqb3toMlrNe8n9TeTt1WyA">
+                <div class="gi" data-page-node-id="JQTNp0cEPOeo94kyl9zZEL"><div class="ic real" data-page-node-id="1GoDm6MOHh5aJIob6P2ZwV">🔔</div><div class="lb" data-page-node-id="rxkEkOgBEhHHWHFYMokVpB">预约报闸</div></div>
+                <div class="gi" data-page-node-id="HTN8ZqRhWGSMOBomnJYGX2"><div class="ic real" data-page-node-id="AG951EwRvZfamulkD5FuNK">💰</div><div class="lb" data-page-node-id="oFGnQbUb8bFPxTD0LodTtZ">过闸费用</div></div>
+                <div class="gi" data-page-node-id="eMCCgRXPHV6SQGEFZ9txHx"><div class="ic real" data-page-node-id="gEebz3biJP3pYS7pSSZYs5">⏳</div><div class="lb" data-page-node-id="q0W2rRGLHdjfEvTB29nvqu">待闸队列</div></div>
+              </div>
+              <div class="ghead" data-page-node-id="JpTT8JkB01gX4R1X92caXU"><span class="gt" data-page-node-id="58zKdiNgWuECswowBipmPC">船闸服务</span><span class="tag soon" data-page-node-id="MPVOOonk7kg1ybFoMvMc1a">即将开放</span><span class="gr" data-page-node-id="xpzRPfbSbcVZrH7oRLLTbC">⌃</span></div>
+              <div class="grid" data-page-node-id="Vmaa5J5cyH8RbsTWqeEqzY">
+                <div class="gi" data-page-node-id="IlQsDzNhHE1ba1pW3NNn7j"><div class="ic" data-page-node-id="yU8AKEOM1DChiwOaOLXEvs">🔔</div><div class="lb" data-page-node-id="vMjYTZwPLOrPWQeWiAEBrn">预约报闸</div></div>
+                <div class="gi" data-page-node-id="uSrm5eVF26bTLuA54k0lpU"><div class="ic" data-page-node-id="Q9gvP7nt4QuqBT22AL6rSB">🔍</div><div class="lb" data-page-node-id="gtirBRhIw6G66MP71tyHOg">待闸查询</div></div>
+                <div class="gi" data-page-node-id="e6NyQzItK6MAsxp3daFjO3"><div class="ic" data-page-node-id="yLE708ggfUawaxCCKvsWvf">⏳</div><div class="lb" data-page-node-id="55uWLOzVqGMFV0sZQj0YoZ">待闸队列</div></div>
+                <div class="gi" data-page-node-id="WA2YV5Mfmt5CLqTI02x0qy"><div class="ic" data-page-node-id="DP31NgWht0oH2D7XKPZ5vd">📏</div><div class="lb" data-page-node-id="vINNCNHOOAzuhGpHtJapbN">船闸水位</div></div>
+                <div class="gi" data-page-node-id="z3JFx4tG7mviqPwLPuefw1"><div class="ic" data-page-node-id="3oOMQ4noyNO5YrSxvCk6F5">💰</div><div class="lb" data-page-node-id="eiJgpMABkPTSNLrLH2lGOw">过闸费用</div></div>
+                <div class="gi" data-page-node-id="GgWscp1x3jPUpJJC6Cue7H"><div class="ic" data-page-node-id="3xKXUCWjWJ6kogaxH7hZ2Y">🏛</div><div class="lb" data-page-node-id="1gWH7FpDzespnClRfECNPo">船闸信息</div></div>
+                <div class="gi" data-page-node-id="geserAcaSyX7HmOsM4sMdv"><div class="ic" data-page-node-id="AXwHrfkPmA8jDiQEgWePPN">📋</div><div class="lb" data-page-node-id="7ngg3TQcHWHzLTZBoBa9h1">过闸记录</div></div>
+                <div class="gi" data-page-node-id="W1MWoXkgQHxMP0Oy5BBtxn"><div class="ic" data-page-node-id="CHd5Ucpjc1A0GjTmxLmteP">🧭</div><div class="lb" data-page-node-id="Zx4Ey4nF2UlQSwBnkiMPRk">运行方案</div></div>
+              </div>
+              <div class="ghead" data-page-node-id="4OjtyekwIUA16gQbSPSZGu"><span class="gt" data-page-node-id="ZrMn1Mw6K47ApDdi1CyVFm">港口服务</span><span class="tag soon" data-page-node-id="YteNjeDqQqymhGXWcz6C4E">即将开放</span><span class="gr" data-page-node-id="2Ngac7Ej8OuTuyzEJIsRcD">⌃</span></div>
+              <div class="grid" data-page-node-id="xFDRDK7JJqFSl4IhX7HdRI">
+                <div class="gi" data-page-node-id="d4jMmWnBp4a9aCOYxElZSe"><div class="ic real" data-page-node-id="fA7MGe3R7dwIGEsWbCCHkw">🏢</div><div class="lb" data-page-node-id="qxarFz3nkr4HSBBnFC1sqP">业务办理</div></div>
+                <div class="gi" data-page-node-id="G1AD037aqJVZkFM2tq6VAQ"><div class="ic" data-page-node-id="H3n2qP9XpMYCApYuIjg8mF">ℹ️</div><div class="lb" data-page-node-id="OAWj8BJ0tBqOTfEmPK2o5V">港口信息</div></div>
+                <div class="gi" data-page-node-id="WxXKyoKMO4tGm4nDCWQRB5"><div class="ic" data-page-node-id="75Cele9HbOybhzAdrbAcSo">📅</div><div class="lb" data-page-node-id="klt40unWpiR83uDXJhalzq">船期表查询</div></div>
+              </div>
+              <div class="ghead" data-page-node-id="zpXW6ZOIrQoUDvw4P1jWEH"><span class="gt" data-page-node-id="fZh816Xkaia4qaf9HvkOCr">航道服务</span><span class="tag soon" data-page-node-id="s8miwDFP9RnhRWr0kvN9Mp">即将开放</span><span class="gr" data-page-node-id="nTQoJGo23mhzfDShsEFFy2">⌃</span></div>
+              <div class="grid" data-page-node-id="whEzzoWU4UXcJFmSeO3MnN">
+                <div class="gi" data-page-node-id="iD5c4GSfaEPvS52S8si1Dp"><div class="ic" data-page-node-id="5nZEOyKhL5gZJsPufDtqNG">🌤</div><div class="lb" data-page-node-id="uAwlRJN9UpueJa4c60JOKg">水情气象</div></div>
+                <div class="gi" data-page-node-id="nCFjJl4qp5MvYmuYxnatNe"><div class="ic" data-page-node-id="sqkDV4rt0Ab0WXeW7Fbx2T">⚓</div><div class="lb" data-page-node-id="pODnEvEDTCsQ46qEutFHfR">拖船租赁</div></div>
+                <div class="gi" data-page-node-id="67QSIqlGREqWKw3Yv54u2Q"><div class="ic" data-page-node-id="DKH5MWx7kaosX1gZOMUHOU">⛽</div><div class="lb" data-page-node-id="9hnDwyDrL3n3No5PRFnXE7">燃料补给</div></div>
+                <div class="gi" data-page-node-id="Nminm0MRwn7PtHqlUStTSQ"><div class="ic" data-page-node-id="M81kyX5VcNxqADQJ0BMwTC">🔧</div><div class="lb" data-page-node-id="EG3LJs2HpAEB7mnbOPmyqY">船舶维修</div></div>
+              </div>
+              <div style="text-align:center;font-size:9px;color:var(--weak);padding-top:8px" data-page-node-id="VOriScKguvIhAUwjMrMS20">以上服务为原型占位，后续分批开放</div>
+            </div>
+            <div class="tabbar" data-page-node-id="fot1XES6N35BIkCypZ3ZMh">
+              <div class="tb" data-page-node-id="nMpX6fqXRswCdrYiXAojum"><i data-page-node-id="t7m0MdlBJyhxp0ssz8Wdus">🚢</i>找船</div>
+              <div class="tb" data-page-node-id="ZnT1vEGt0KpzVY9dDCGqvs"><i data-page-node-id="U0MeAwCLOH4BFNveEX6EOj">📋</i>订单</div>
+              <div class="tb tbc" data-page-node-id="AgqG8UDYYDsOjYC9rJiZOK"><div class="cbtn" data-page-node-id="psjIMB3JcMmjlwTA5KS8wF">＋</div><div class="clb" data-page-node-id="0srGILbpMGOGCSxocmB3C4">发布货物</div></div>
+              <div class="tb on" data-page-node-id="JkI1D7DhxeTHMNrQMz3BUH"><i data-page-node-id="bICeB4BdIz4ocC994F7MSv">⚓</i>港口</div>
+              <div class="tb" data-page-node-id="NUmEcDBMsmlfYR6Htp2nkr"><i data-page-node-id="EPEuwYPC0cmQSqf3DkNkQ3">👤</i>我的</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 08 -->
+      <div class="cell" data-page-node-id="WhkM0HqJKdi4qg2s3B7Sji">
+        <div class="cell-title" data-page-node-id="NurAD5I2F5kysQWsgwXuED">08 我的<span data-page-node-id="JrGdTGMDi81vO6jbBYqaYv">信息真实 + 功能占位</span></div>
+        <div class="phone plain" data-page-node-id="QBwLWT5vnGQmoNytfj4GJS">
+          <div class="status" data-page-node-id="JoI8NVX1nOzBBs5KFAowba"><span data-page-node-id="JuD6epxHELYSkZmFRoYws3">9:41</span><span data-page-node-id="73VslTooQqDJfViJGin3j8">▪▪▪ ⌁</span></div>
+          <div class="body" data-page-node-id="anPE9NRIpt6cEY3G5Zotls">
+            <div class="navrow" style="background:var(--soft)" data-page-node-id="dP9RX8qFGMdz8Zv8dOGAbj"><span class="nt" data-page-node-id="G0XsBG8b0Ns6bXjZHOoDgb">我的</span><span class="prev" data-page-node-id="e8WXXnlcpZHxeOvCcZLpb3">功能预览</span></div>
+            <div class="ucard" style="padding-top:2px" data-page-node-id="8RGwOa9R4rMN2pdJxjEjpm">
+              <div class="uava" data-page-node-id="eowu1NtFBg4R6qvBfbCArH">用</div>
+              <div style="flex:1" data-page-node-id="QDwrkLbYYQOWokoVfvyuOD">
+                <div class="un" data-page-node-id="JCUpllvDoGEBbGGKpSBjEl">用户49124</div>
+                <div class="up" data-page-node-id="Tv22Qs0wGhPYrG2JJxzlqy">📱 未绑定手机号</div>
+                <div class="utags" data-page-node-id="zBAN0lbLiL4ynH0XGE45rx"><span class="utag warn" data-page-node-id="VgncdYbgl7KbXf6KA9YZeU">未实名</span><span class="utag plain" data-page-node-id="5Ht2JwwpXpG9BVQ732G2Ey">人气值：0</span></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px" data-page-node-id="XA8cG8bpLVzV6WRSHibXDB">
+                <span style="position:relative;font-size:15px" data-page-node-id="rPCsu0Jm0sLYD3V8vj7gtO">🔔<span style="position:absolute;right:-1px;top:0;width:6px;height:6px;border-radius:50%;background:#FA5252" data-page-node-id="gsFYUbbx8RH9YyuIohw3EC"></span></span>
+                <span style="color:#C3CCD8;font-size:16px" data-page-node-id="LbBS0sEqUoABWzgg3wxFOb">›</span>
+              </div>
+            </div>
+            <div class="content" style="padding-top:0" data-page-node-id="XIoRiGM5ZKASbw2qztxqQp">
+              <div class="vip" data-page-node-id="2ROrq7yAipdif2xy3d63aj">
+                <div data-page-node-id="hkQLcniMb6bgZam5jnig0A">
+                  <div class="vt" data-page-node-id="TPaEDNB9KwEnIACHShvJ9S">邀您升级会员</div>
+                  <div class="vs" data-page-node-id="IoDC3XizCZB6cR5tyRaJ0o">解锁更多会员权益</div>
+                </div>
+                <div class="vr" data-page-node-id="IdcwNKhjuyG86aBY9r5hAj"><div class="vb" data-page-node-id="7Fk4O9wr071HhanZs0HJFf">去升级</div><div class="vg" data-page-node-id="ullbCdDdoDU50lnxsQcW8z">即将开放</div></div>
+              </div>
+              <div class="assets" data-page-node-id="OGPBH2r0xz9zBCcYFPV6C4">
+                <div class="a" data-page-node-id="HTuuqDMP6mVTBGEGk3RyFo"><div class="an" data-page-node-id="7Degh9TDuoOGykjHa8ijCU">0.00</div><div class="al" data-page-node-id="UjwoRUnOhMEUWcsWu9ngEA">账户余额 ›</div></div>
+                <div class="line" data-page-node-id="ZWE9ZYiLwELMVcCxHJlTLD"></div>
+                <div class="a" data-page-node-id="ggLT15kNUp1zAaMvEsKRyI"><div class="an" data-page-node-id="UyhCrgbF0nsmh7UhDTEIcC">0.00</div><div class="al" data-page-node-id="HFFXODe6ilCECsMm9KVagF">优惠油电 ›</div></div>
+                <div class="line" data-page-node-id="gPrHOjl9xZtCLu6JFJojWa"></div>
+                <div class="a" data-page-node-id="q79jj8xehlTDKBNqkLBBif"><div class="an weak" data-page-node-id="japJ9LMosr9CB3G5pIK0qH">未维护</div><div class="al" data-page-node-id="HbEaHmtOfUSckYFnHmiNyg">银行卡 ›</div></div>
+              </div>
+              <div class="card" data-page-node-id="kqXa7vfDF9ShiiK6NRYIa6">
+                <div class="shead" data-page-node-id="lq1UMQywkGEbhr0N1IRMx6"><span class="t" data-page-node-id="RphEdwz9EbZZ3cGbrKkTsV">常用功能</span></div>
+                <div class="fngrid" data-page-node-id="llZ6xWSTw9zlauUKej69vI">
+                  <div class="fn" data-page-node-id="vj0R2INn7au6Onwj2q3G4L"><span class="bg" data-page-node-id="WtHL2XA30DAEpQAff2qOrc">新</span><div class="ic" data-page-node-id="ypCAJXPbqwWgYTLWSiCMMR">🚢</div><div class="lb" data-page-node-id="tBf6uwBLk93Ti643wYVs6i">我的空船</div></div>
+                  <div class="fn" data-page-node-id="LHnsHVGpeeRR7EuqPOrrrU"><div class="ic" data-page-node-id="pQM3Vona8njFuuGl9o593F">🎁</div><div class="lb" data-page-node-id="9V4vFdng3iGa24TOpfSyyJ">积分</div></div>
+                  <div class="fn" data-page-node-id="d7OHpdQbHSryn3xDZGeR7Q"><div class="ic" data-page-node-id="927S1QMSw94bA7r4DNiZm4">👥</div><div class="lb" data-page-node-id="g5mjVb4MKFfc08DEIurtpg">最近联系</div></div>
+                  <div class="fn" data-page-node-id="GzdbEOW5YaTSz6K3kSvhGG"><div class="ic" data-page-node-id="017KHFohpoDbAfkMV4vK2k">✅</div><div class="lb" data-page-node-id="4q1zV39DuNOXX9OVTNypVV">认证中心</div></div>
+                  <div class="fn" data-page-node-id="vjINiL5G9BrT1uInBK30X7"><div class="ic" data-page-node-id="D1aqLjNq9weeaqIaXTbd9S">🔳</div><div class="lb" data-page-node-id="CR5nmCCRHrwyuP06THk5pQ">我的二维码</div></div>
+                  <div class="fn" data-page-node-id="TzOuL9StheDozEAUzSPU3R"><div class="ic" data-page-node-id="FcxSczo6QIHxDWq3lrwP18">⚙️</div><div class="lb" data-page-node-id="hQxf5gADbjb8cwU1ENv3Wr">设置</div></div>
+                  <div class="fn" data-page-node-id="RqyXTobmwy0zAwY2mAmVKE"><div class="ic" data-page-node-id="TfjSZUihA4zLGf6uj0MZ2a">🎧</div><div class="lb" data-page-node-id="0yzLuGxqFX1msxYwei7z6D">人工客服</div></div>
+                  <div class="fn" data-page-node-id="JD6vRbV3AMBbdoA2ahJMJf"><div class="ic" data-page-node-id="CW3QFXkuibi4sNHRT3wgco">🏆</div><div class="lb" data-page-node-id="eXImOpAxbRQIp7dhScBLQg">我的奖品</div></div>
+                </div>
+                <div style="text-align:center;font-size:9px;color:var(--weak);padding:0 0 10px" data-page-node-id="8jUp6OhZmA5jZOUNbNTEUH">以上功能为原型占位，后续开放</div>
+              </div>
+            </div>
+            <div class="tabbar" data-page-node-id="KhNjL2kIoVnSY6JB9TZWrc">
+              <div class="tb" data-page-node-id="7jUwrbu5MBaahtWJEyFO8C"><i data-page-node-id="oHKoUBx038NWdbqTDEqqLy">🚢</i>找船</div>
+              <div class="tb" data-page-node-id="4JNSHgkFrlezn2dIIYpkeP"><i data-page-node-id="Lf9qfgewXLP5RFXFaHrUoA">📋</i>订单</div>
+              <div class="tb tbc" data-page-node-id="8z92FCNVHtmT5gcZYb3JGe"><div class="cbtn" data-page-node-id="dyP2jjobr5wXXhMpGMjLoa">＋</div><div class="clb" data-page-node-id="V3vcPDybvBHmvPlD5Q6pdS">发布货物</div></div>
+              <div class="tb" data-page-node-id="LDqJinq4wMslGJ86PaKhOK"><i data-page-node-id="tYCvDjbmSBEoYSjV9zyV5s">⚓</i>港口</div>
+              <div class="tb on" data-page-node-id="0uLl54TUmIZdR94FlbSGkU"><i data-page-node-id="BQ7TrF2s50KN3b9hhu6AHo">👤</i>我的</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ 3. 占位 vs 已开发 ============ -->
+  <section data-page-node-id="pqXn0yzXDLOPvh8va378E4">
+    <h2 data-page-node-id="h2BNrep4zDpuVjbfmYEQj9">③ 占位 vs 已开发</h2>
+    <div class="panel" data-page-node-id="yd3BbL7XiLTLizuU7dD7QI">
+      <h4 style="margin-top:0" data-page-node-id="wdKYyXq8a7kYULKEzUH7sE">✅ 真实可用（点击有真实行为）</h4>
+      <ul class="plainlist" data-page-node-id="EbvNWLlJYtyYxkl62be6XP">
+        <li class="ok" data-page-node-id="98GCNl2ZE6P9PplUiWy9zK">身份选择 / 登录 / 绑角色 / 切换角色（<code data-page-node-id="oBVIgAl1q7OrjzXqBYKOeh">/auth/*</code>）</li>
+        <li class="ok" data-page-node-id="80OEnMEQOnDbF1eqx89sSV">货主「我要发货」→ 创建货源 → 智能撮合（<code data-page-node-id="lw2GEnNRqdIt5zHs8QVuZC">POST /cargo/shipments</code> → <code data-page-node-id="GhkUAIsFAJL23Pmjk5XQCt">/trade/match</code>）</li>
+        <li class="ok" data-page-node-id="8oNZ9zFGMyeRyE6DXv1TUj">发布货物（保存草稿 / 确认发布，<code data-page-node-id="OHbWWN5anPP2vC81CEPk7o">publish_now</code> 区分）</li>
+        <li class="ok" data-page-node-id="oegIuw3ZEPtIxfZrfQDDP2">下单 → 支付（mock 渠道）→ 启运 → 签收 / 双方撤单</li>
+        <li class="ok" data-page-node-id="H03XHCpIhELhupamTXv2ag">智能合同 Agent（风险提示 + 合同草稿）</li>
+        <li class="ok" data-page-node-id="x0SuAzgTDeVQgp1qtMPHjz">智能客服对话（RAG 知识库）</li>
+        <li class="ok" data-page-node-id="hOKaJfzc17DRDkGq6LInSl">船舶备案 / 我的船队 / 智能找货</li>
+        <li class="ok" data-page-node-id="vsKQFgn6FLLLOUxj3276Q8">泊位预约审核 / 泊位管理 / 新建泊位（港口页「业务办理」进入）</li>
+        <li class="ok" data-page-node-id="ZDHGQx69VNQfa4oE7lIYNQ">我的货源 / 我的订单列表</li>
+      </ul>
+
+      <h4 data-page-node-id="DNvvwaq4zly8YFxBDSCCEA">🚧 原型占位（按原型标注「即将开放 / 功能预览」）</h4>
+      <ul class="plainlist" data-page-node-id="bkstnZNq61J8v86GYLQX9u">
+        <li class="todo" data-page-node-id="s3mYn09sbf6TNY0WuQWepS">发布空船 —— <strong data-page-node-id="656d6zSqpXDDy4M1i2TLHN">后端无接口</strong>，表单可填、提交保存本机草稿</li>
+        <li class="todo" data-page-node-id="uactCPCJnc28Hud4jmEjpF">港口页 4 组服务入口（港航 / 船闸 / 港口 / 航道 共 18 项）</li>
+        <li class="todo" data-page-node-id="RTVCAkuO3ckG6sYfDf5OP8">我的页 9 项功能（积分 / 最近联系 / 认证中心 / 二维码 / 设置 / 奖品 / 意见反馈 / 主页 / 关注）</li>
+        <li class="todo" data-page-node-id="59Fgz0fsmhnhUBHqdZX7eq">会员卡、资产行（余额 / 油电 / 银行卡）、消息中心、搜索、高级筛选</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ 4. 工程与验证 ============ -->
+  <section data-page-node-id="m1AzNCnxPkPJqkxs107ZRz">
+    <h2 data-page-node-id="eDrO0PdXv0ndQE7vnyIIZv">④ 工程与验证</h2>
+    <table data-page-node-id="D0ONwkOaYI5kQmtsH5tPDC">
+      <thead data-page-node-id="fQtl5FPvo7mciaVbuKiUII"><tr data-page-node-id="vCBVQnq4XHo0Rb9NJBmamB"><th data-page-node-id="nNGOmicYXIjXdEmRSHhLdC">项</th><th data-page-node-id="FJgzGcA7bFPexbbovRAxy9">结果</th></tr></thead>
+      <tbody data-page-node-id="NyqPZ1iuQrZ6k4TK55BdH7">
+        <tr data-page-node-id="y7OXGGOiFCGkI7uVBCez7w"><td data-page-node-id="nkAYdyA7N4hsmN2zqa4jW9">PR</td><td data-page-node-id="UAiFBaTPDixDvI33ObSLeY">#20 <code data-page-node-id="RKla7QdnnB0NKuwiBdZMCt">feat(miniapp): UI V2 - custom tabBar + role-based 8 screens</code>（已 squash 合并）</td></tr>
+        <tr data-page-node-id="28Zy9oQD5HG22kkznZT1qq"><td data-page-node-id="WHgbmglmdWa0hurCAr7kji">develop</td><td data-page-node-id="M0OJoMXgzDjioufRlDkpwV"><code data-page-node-id="GGV47CYZ9mICdglHJsUm07">090ea5b</code></td></tr>
+        <tr data-page-node-id="I1NYAnRSjfpU3Gwhxe5Rjj"><td data-page-node-id="YDq6XIa7f0eWk7F0U3zQx5">CI</td><td data-page-node-id="lEWiSOCS8zt0f3rzDkzS1L">后端 lint + test 双绿</td></tr>
+        <tr data-page-node-id="As3TfAbERN4mnjFs8rRsxu"><td data-page-node-id="8EqNsyRj3RADaYyrvEFARq">后端改动</td><td data-page-node-id="ZwNsyGQZ75djquzqmjX9eV">零</td></tr>
+        <tr data-page-node-id="8Xbm5YwL56X7YjNIoS7h4i"><td data-page-node-id="i2MHzCrLiagah3yoS8VQ9i">新增页面</td><td data-page-node-id="U5fH6LJYSTqD8n6LPkF81H"><code data-page-node-id="8hi4E3ns6yk0SmxGgfkyEn">pages/publish/cargo</code>、<code data-page-node-id="66ytNO2Bp4IqSPyEPSe7z3">pages/publish/ship</code></td></tr>
+        <tr data-page-node-id="DtFoFsirUQAkEhDiT0CUe1"><td data-page-node-id="nSF8ilKIvTcM2xnqLFo6sN">新增组件</td><td data-page-node-id="5FXrAvGRzQdTXTn5PfgaQb"><code data-page-node-id="pVmqhumemPyZJ0e2zfuHyX">custom-tab-bar/</code>（4 文件）、<code data-page-node-id="3zqCH2D70ym5kzajoCc4yv">utils/tabbar.js</code></td></tr>
+        <tr data-page-node-id="JYhzmbNDZ0fJupQpuCd7n0"><td data-page-node-id="qQnIgpz1DcUzmA7bCS5vv7">新增工具</td><td data-page-node-id="IZJ7LnsZ9UabnxcgzL8Q3M"><code data-page-node-id="glQ71RfuFRX8m6q34ThBkF">scripts/verify_miniapp.js</code> —— JSON 语法 / 页面四件套 / tabBar 配置 / 路由可达 / switchTab 合法性</td></tr>
+        <tr data-page-node-id="vau0FcFVrw2soIAs9xTyjj"><td data-page-node-id="H9qU5JcsJhtHHaU9cwCFDu">校验结果</td><td data-page-node-id="BKvxEHi82YlACaLKNCmkkP">10 页面 · 40 处路由引用 · 15 个 JSON <strong data-page-node-id="CyF630HMtukuJ1OcuBmHnQ">全部通过</strong></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 5. 已知限制 ============ -->
+  <section data-page-node-id="6S9O7X9cRYRCjITK5ec39u">
+    <h2 data-page-node-id="oj52TToSatS3V5FwCpLAph">⑤ 已知限制与下阶段候选</h2>
+    <div class="panel" data-page-node-id="pntFyChG0Ef3MYk7Yy6mQW">
+      <ul class="plainlist" data-page-node-id="1jjUsfJp3Qb9yCxeQxbvmB">
+        <li data-page-node-id="6yJWUbQyzqKvhLVsQQEXrd"><strong data-page-node-id="sDWTIeTK11eupj38OVQmEd">货源大厅为演示数据</strong>：后端没有「公开货源」接口（<code data-page-node-id="SsRz9TLyO9jlfy5S5geHwc">/cargo/shipments</code> 只返回本人发货单）。下阶段建议新增 <code data-page-node-id="6zKYuneJ0Hn13e141CdnmK">GET /cargo/pool</code>（公开货源池）。</li>
+        <li data-page-node-id="fu4GL1y0xNvfGt1N5ERXm7"><strong data-page-node-id="bRazWyBHD5OyHjQmTyRw5q">订单卡的路线依赖前端富化</strong>：<code data-page-node-id="pR3xX4StQYClNUjpO1AzEr">OrderOut</code> 只有 <code data-page-node-id="BMLusYla8KQ7MTxSTKhyGh">cargo_id / ship_id</code>，前端用「我的货源 + 我的船队」建 map 补全；<strong data-page-node-id="x1tmfLt36PmEH3PDZZeXu8">船东视角拿不到别家货源</strong> → 降级显示「货源 #id」。建议在 <code data-page-node-id="xwhEMOnG4argK8MIwEx1BD">OrderOut</code> 增加 cargo 摘要字段（name / origin / dest / weight / expect_date）。</li>
+        <li data-page-node-id="wYTyGZUDT2b9nkGAEagBmu"><strong data-page-node-id="EbJIsoiPXPGF8EhLTsngnn">发布空船无接口</strong> → 本机 Storage 草稿，接口上线后可一键同步。</li>
+        <li data-page-node-id="4w9ggeJ0YaTo9Bfwhoq29I"><strong data-page-node-id="G883IP1QU7GS0T1DwK0Afl">小程序无自动化测试</strong> → 已加静态校验脚本兜底；真机联调仍需在小程序开发者工具中跑（<code data-page-node-id="jAM8FX2DPCYizu39o7CmcI">BASE_URL=127.0.0.1:8000</code>，后端 <code data-page-node-id="d1XFlYRzWayovoBDGOUoRx">WECHAT_MOCK=true</code> 时可用 <code data-page-node-id="s13UKg9MOlRN3qwCjCz5EF">dev_login_code</code> = <code data-page-node-id="llA7EjZp0AHQksDpMDf5ps">seed-shipper / seed-owner / seed-port</code> 快速切身份）。</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="footnote" data-page-node-id="kHc6eT0qgmUSRgC8o3Ozqg">船好多 · 平陆运河滴滴打船 · UI V2 概览 · 生成于 2026-09-11</div>
+</div>
+</body>
+</html>

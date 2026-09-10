@@ -1,0 +1,34 @@
+[
+  {
+    "Path": "E:\\pinglu-didi\\backend\\pinglu_didi_dev.db",
+    "Length": 143360,
+    "LastWriteTimeUtc": "2026-09-10T02:52:30.6960108Z",
+    "SHA256": null,
+    "MetadataUnchanged": true,
+    "HashUnchanged": null
+  },
+  {
+    "Path": "E:\\pinglu-didi\\backend\\pinglu_didi_test.db",
+    "Length": 143360,
+    "LastWriteTimeUtc": "2026-09-10T01:42:58.9562379Z",
+    "SHA256": "B244A2AB4E137D1994DE7F7A7199974F14CA77276997141A5B65C19DB9B56FA3",
+    "MetadataUnchanged": true,
+    "HashUnchanged": true
+  },
+  {
+    "Path": "E:\\pinglu-didi\\滴滴打船平台开发需求文档V2.0.docx",
+    "Length": 57267,
+    "LastWriteTimeUtc": "2026-09-09T19:23:29.8085070Z",
+    "SHA256": "E95E09F441DEA4B785F866DFAA8B13F278ACFBD4E2070C4C21F4DC0603B1C109",
+    "MetadataUnchanged": true,
+    "HashUnchanged": true
+  },
+  {
+    "Path": "E:\\pinglu-didi\\平陆运河滴滴打船平台三合一MVP开发与交付计划.docx",
+    "Length": 53805,
+    "LastWriteTimeUtc": "2026-09-09T19:38:48.0706035Z",
+    "SHA256": "2CDC1C285574983E04E96DA73272648DB76A4C0A34A2EF6C6BD0B42B07AAE9BA",
+    "MetadataUnchanged": true,
+    "HashUnchanged": true
+  }
+]
