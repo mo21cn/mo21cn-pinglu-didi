@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     """全局配置模型。字段可从对应 `.env.{APP_ENV}` 或系统环境变量读取。"""
 
     model_config = SettingsConfigDict(
-        env_file=f".env.{APP_ENV}",
+        # 多文件叠加：.env.{APP_ENV} 为环境基线，.env.local 为本机敏感值最高优先级覆盖
+        # （.env.local 已在 .gitignore，不入库；列表越靠后优先级越高）
+        env_file=(f".env.{APP_ENV}", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
