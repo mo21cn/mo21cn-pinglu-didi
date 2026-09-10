@@ -1,6 +1,10 @@
-// 订单二级页（v1 · 用户 banner + 状态 Tab + 待办卡 + 订单列表 + 合同弹层）
+// 06 我的订单（底栏二级页）
+// 统计行（全部/待承运/运输中/已完成/已撤单）+ 待处理事项 + 订单列表 + 合同弹层
+// 注：订单接口仅返回 cargo_id/ship_id → 用「我的货源 / 我的船队」列表做 enrich 展示路线。
+//     若拿不到货源详情（如船东视角），降级显示「货源 #id」。
 const { request } = require('../../../utils/request')
 const { getUser } = require('../../../utils/auth')
+const { syncTabBar } = require('../../../utils/tabbar')
 
 const ORDER_STATUS_LABELS = {
   matched: '待承运',
@@ -9,150 +13,162 @@ const ORDER_STATUS_LABELS = {
   cancelled: '已撤单'
 }
 
-const STATUS_TABS_BASE = [
-  { key: '',          label: '全部' },
-  { key: 'matched',   label: '待承运' },
-  { key: 'shipped',   label: '运输中' },
-  { key: 'completed', label: '已完成' },
-  { key: 'cancelled', label: '已撤单' }
-]
+const PORT_LABELS = {
+  NNG: '南宁', GGU: '贵港', WUZ: '梧州', BIN: '来宾', LZH: '柳州',
+  BSZ: '百色', CHZ: '崇左', GXL: '桂林', HEZ: '贺州', YUL: '玉林',
+  QNZ: '钦州', FCG: '防城港', BHZ: '北海'
+}
 
 const TODO_BY_ROLE = {
   shipper: [
-    { key: 'verify',  icon: '✅', title: '完成货主认证', sub: '认证后可发布货源、查看船东联系方式', urgent: true,  action: 'verify' },
-    { key: 'invoice', icon: '📋', title: '上传营业执照', sub: '企业货主必传 · 个人货主可跳过',       urgent: false, action: 'invoice' },
-    { key: 'pay',     icon: '💰', title: '关注平台支付优惠', sub: '运费支付返现 · 限时活动进行中', urgent: false, action: 'pay-promo' },
-    { key: 'feedback',icon: '💬', title: '评价已完成订单', sub: '您的评价帮助平台优化匹配',         urgent: false, action: 'feedback' }
+    { key: 'pay',     icon: '💰', title: '待支付订单', status: 'matched' },
+    { key: 'receive', icon: '✅', title: '待确认收货', status: 'shipped' }
   ],
   owner: [
-    { key: 'gps',    icon: '📍', title: '开启定位权限',  sub: '避免轨迹丢失，影响接单信誉',     urgent: true,  action: 'gps' },
-    { key: 'empty',  icon: '🚢', title: '发布空船信息',  sub: '让货主主动找我订船 · 提高曝光', urgent: false, action: 'empty-ship' },
-    { key: 'follow', icon: '🔔', title: '订阅货源推荐',  sub: '接收货源推送 · 运费到账实时通知', urgent: false, action: 'follow' },
-    { key: 'archive',icon: '📑', title: '完善船舶档案',  sub: '解锁精准货源推荐 · 提升成单率', urgent: false, action: 'archive' }
+    { key: 'ship',    icon: '🚢', title: '待启运订单', status: 'matched' },
+    { key: 'transit', icon: '📍', title: '运输中订单', status: 'shipped' }
   ],
-  port: [
-    { key: 'appt',    icon: '📅', title: '审核泊位预约',  sub: '今日待确认预约 · 及时锁定档期', urgent: true,  action: 'appt' },
-    { key: 'berth',   icon: '⚓', title: '完善泊位信息',  sub: '维护吃水/载重限制 · 避免误派单', urgent: false, action: 'berth' },
-    { key: 'report',  icon: '📊', title: '查看周度报表',  sub: '泊位利用率 · 同比环比',         urgent: false, action: 'report' },
-    { key: 'safety',  icon: '🛟', title: '安全合规自查',  sub: '港口安全检查清单 · 月度更新',   urgent: false, action: 'safety' }
-  ]
+  port: []
 }
 
 Page({
   data: {
+    statusBarHeight: 20,
     role: 'shipper',
-    userName: '船友',
-    userInitials: '客',
-    roleLabel: '货主',
-    greeting: '您好',
-    stats: { pending: 0 },
+    activeKey: '',
+    activeLabel: '',
     statusLabels: ORDER_STATUS_LABELS,
-    statusTabs: STATUS_TABS_BASE.map((t) => ({ ...t, count: 0 })),
-    activeStatus: '',
+    stats: [],
+    todoList: [],
+    rawList: [],
     list: [],
     loading: false,
-    todoList: [],
     contract: { show: false, orderId: 0, text: '', risks: [] }
   },
 
+  onLoad() {
+    let info = {}
+    try {
+      info = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync()
+    } catch (e) {
+      info = {}
+    }
+    this.setData({ statusBarHeight: info.statusBarHeight || 20 })
+  },
+
   onShow() {
+    syncTabBar(this)
     const user = getUser()
     const role = (user && user.current_role) || 'shipper'
-    const userName = (user && user.nickname) || '船友'
-    const initials = this.getInitials(userName)
-    const todoList = TODO_BY_ROLE[role] || []
-    const greeting = this.timeBasedGreeting()
-    this.setData({ role, userName, userInitials: initials, todoList, greeting, roleLabel: this.roleLabelText(role) })
-    this.fetchList()
+    this.setData({ role })
+    this.fetchAll()
   },
 
   onPullDownRefresh() {
-    this.fetchList()
+    this.fetchAll()
     wx.stopPullDownRefresh()
   },
 
-  getInitials(name) {
-    if (!name) return '客'
-    return String(name).trim().charAt(0).toUpperCase()
-  },
-
-  timeBasedGreeting() {
-    const h = new Date().getHours()
-    if (h < 6) return '夜深了'
-    if (h < 12) return '早上好'
-    if (h < 14) return '中午好'
-    if (h < 18) return '下午好'
-    return '晚上好'
-  },
-
-  switchStatus(e) {
-    this.setData({ activeStatus: e.currentTarget.dataset.key })
-    this.fetchList()
-  },
-
-  fetchList() {
+  // ---- 数据 ----
+  fetchAll() {
     this.setData({ loading: true })
-    const data = { size: 50 }
-    if (this.data.activeStatus) data.status = this.data.activeStatus
-    request({ url: '/api/v1/order/orders', data })
-      .then((res) => {
-        const items = res.items || []
-        const counts = {
-          '': items.length,
-          matched: items.filter((o) => o.status === 'matched').length,
-          shipped: items.filter((o) => o.status === 'shipped').length,
-          completed: items.filter((o) => o.status === 'completed').length,
-          cancelled: items.filter((o) => o.status === 'cancelled').length
-        }
-        const tabs = this.data.statusTabs.map((t) => ({ ...t, count: counts[t.key] || 0 }))
-        const pending = items.filter((o) => o.status === 'matched').length
-        this.setData({ list: items, statusTabs: tabs, stats: { pending } })
+    const safe = (url) => request({ url, data: { size: 100 } }).catch(() => ({ items: [] }))
+    Promise.all([
+      safe('/api/v1/order/orders'),
+      safe('/api/v1/cargo/shipments'),
+      safe('/api/v1/ship/registry')
+    ])
+      .then(([orders, cargos, ships]) => {
+        const cargoMap = {}
+        ;(cargos.items || []).forEach((c) => { cargoMap[c.id] = c })
+        const shipMap = {}
+        ;(ships.items || []).forEach((s) => { shipMap[s.id] = s })
+
+        const rawList = (orders.items || []).map((o) => this.decorate(o, cargoMap, shipMap))
+        this.setData({ rawList })
+        this.applyView()
       })
       .catch(() => {})
       .finally(() => this.setData({ loading: false }))
   },
 
-  roleLabelText(role) {
-    return { shipper: '货主', owner: '船东', port: '港口方' }[role] || '用户'
+  /** 订单卡片展示字段装饰（拿不到货源详情时降级） */
+  decorate(o, cargoMap, shipMap) {
+    const c = cargoMap[o.cargo_id]
+    const s = shipMap[o.ship_id]
+    const originLabel = c ? (PORT_LABELS[c.origin_port] || c.origin_port) : '货源'
+    const destLabel = c ? (PORT_LABELS[c.dest_port] || c.dest_port) : ('#' + o.cargo_id)
+    let weightText = '—'
+    if (c) weightText = c.weight_t + ' 吨'
+    else if (s) weightText = '载重 ' + s.deadweight_t + ' 吨'
+    let dateText = ''
+    if (c) dateText = c.expect_date + ' 装货'
+    else if (o.matched_at) dateText = String(o.matched_at).slice(0, 10) + ' 成交'
+    return {
+      ...o,
+      origin_label: originLabel,
+      dest_label: destLabel,
+      cargo_name: c ? c.cargo_name : ('货源 #' + o.cargo_id),
+      ship_name: s ? s.ship_name : ('船舶 #' + o.ship_id),
+      weight_text: weightText,
+      date_text: dateText
+    }
+  },
+
+  applyView() {
+    const raw = this.data.rawList
+    const stats = [
+      { key: '',          label: '全部',   count: raw.length },
+      { key: 'matched',   label: '待承运', count: raw.filter((o) => o.status === 'matched').length },
+      { key: 'shipped',   label: '运输中', count: raw.filter((o) => o.status === 'shipped').length },
+      { key: 'completed', label: '已完成', count: raw.filter((o) => o.status === 'completed').length },
+      { key: 'cancelled', label: '已撤单', count: raw.filter((o) => o.status === 'cancelled').length }
+    ]
+    const defs = TODO_BY_ROLE[this.data.role] || []
+    const todoList = defs
+      .map((d) => ({ ...d, count: raw.filter((o) => o.status === d.status).length }))
+      .filter((d) => d.count > 0)
+    const activeKey = this.data.activeKey
+    const list = activeKey ? raw.filter((o) => o.status === activeKey) : raw
+    this.setData({
+      stats,
+      todoList,
+      list,
+      activeLabel: ORDER_STATUS_LABELS[activeKey] || ''
+    })
+  },
+
+  switchStat(e) {
+    const key = e.currentTarget.dataset.key
+    this.setData({ activeKey: this.data.activeKey === key ? '' : key }, () => this.applyView())
+  },
+
+  resetFilter() {
+    if (!this.data.activeKey) return
+    this.setData({ activeKey: '' }, () => this.applyView())
   },
 
   onTodoTap(e) {
-    const action = e.currentTarget.dataset.action
-    const handlers = {
-      verify: () => this.todoTip('前往"我的"完成认证'),
-      invoice: () => this.todoTip('上传营业执照'),
-      'pay-promo': () => this.todoTip('运费支付优惠详情'),
-      feedback: () => this.todoTip('评价订单'),
-      gps: () => (wx.openSetting && wx.openSetting()),
-      'empty-ship': () => this.goShipperTab('发布货源'),
-      follow: () => this.todoTip('货源订阅已开启'),
-      archive: () => wx.switchTab({ url: '/pages/owner/owner' }),
-      appt: () => wx.showToast({ title: '切到港口工作台审核', icon: 'none' }),
-      berth: () => wx.switchTab({ url: '/pages/port/port' }),
-      report: () => this.todoTip('周度报表开发中'),
-      safety: () => this.todoTip('安全自查清单')
-    }
-    const fn = handlers[action]
-    if (fn) fn()
-    else this.todoTip('该功能开发中')
+    const key = e.currentTarget.dataset.key
+    const def = (TODO_BY_ROLE[this.data.role] || []).find((d) => d.key === key)
+    if (!def) return
+    this.setData({ activeKey: def.status }, () => this.applyView())
   },
 
-  goShipperTab() {
-    wx.switchTab({ url: '/pages/shipper/shipper' })
-  },
-
-  todoTip(msg) {
-    wx.showToast({ title: msg, icon: 'none', duration: 1800 })
+  // ---- 订单操作 ----
+  findOrder(id) {
+    return this.data.rawList.find((o) => o.id === Number(id))
   },
 
   onPay(e) {
     const id = Number(e.currentTarget.dataset.id)
-    const order = this.data.list.find((o) => o.id === id)
+    const order = this.findOrder(id)
     if (!order) return
 
     request({ url: `/api/v1/payment/payments/order/${id}`, silent: true })
       .catch((err) => {
-        if (String(err.message).indexOf('支付单') !== -1 || String(err.message).indexOf('订单') !== -1) {
+        const msg = String(err.message)
+        if (msg.indexOf('支付单') !== -1 || msg.indexOf('订单') !== -1) {
           return request({
             url: '/api/v1/payment/payments',
             method: 'POST',
@@ -162,26 +178,18 @@ Page({
         throw err
       })
       .then((pay) => {
-        if (pay.status === 'paid') {
-          return wx.showToast({ title: '该订单已支付', icon: 'none' })
-        }
-        if (pay.status !== 'pending') {
-          return wx.showToast({ title: '支付单已' + (pay.status === 'refunded' ? '退款' : '关闭'), icon: 'none' })
-        }
+        if (pay.status === 'paid') return wx.showToast({ title: '该订单已支付', icon: 'none' })
+        if (pay.status !== 'pending') return wx.showToast({ title: '支付单已关闭', icon: 'none' })
         wx.showModal({
           title: '确认支付运费',
           content: `支付金额：¥ ${pay.amount}`,
           confirmText: '支付',
           success: (r) => {
             if (!r.confirm) return
-            request({
-              url: `/api/v1/payment/payments/${pay.id}/mock-pay`,
-              method: 'POST',
-              data: {}
-            })
+            request({ url: `/api/v1/payment/payments/${pay.id}/mock-pay`, method: 'POST', data: {} })
               .then(() => {
                 wx.showToast({ title: '支付成功', icon: 'success' })
-                this.fetchList()
+                this.fetchAll()
               })
               .catch(() => {})
           }
@@ -191,7 +199,7 @@ Page({
   },
 
   onShip(e) {
-    const id = e.currentTarget.dataset.id
+    const id = Number(e.currentTarget.dataset.id)
     wx.showModal({
       title: '确认启运',
       content: '启运后进入履约期，订单不可撤单',
@@ -200,7 +208,7 @@ Page({
         request({ url: `/api/v1/order/orders/${id}/ship`, method: 'POST' })
           .then(() => {
             wx.showToast({ title: '已启运', icon: 'success' })
-            this.fetchList()
+            this.fetchAll()
           })
           .catch(() => {})
       }
@@ -208,21 +216,27 @@ Page({
   },
 
   onComplete(e) {
-    const id = e.currentTarget.dataset.id
-    request({ url: `/api/v1/order/orders/${id}/complete`, method: 'POST' })
-      .then(() => {
-        wx.showToast({ title: '已签收，订单完成', icon: 'success' })
-        this.fetchList()
-      })
-      .catch(() => {})
+    const id = Number(e.currentTarget.dataset.id)
+    wx.showModal({
+      title: '确认收货',
+      content: '确认后订单完成，运费结算给船东',
+      success: (r) => {
+        if (!r.confirm) return
+        request({ url: `/api/v1/order/orders/${id}/complete`, method: 'POST' })
+          .then(() => {
+            wx.showToast({ title: '已确认收货', icon: 'success' })
+            this.fetchAll()
+          })
+          .catch(() => {})
+      }
+    })
   },
 
   onCancel(e) {
-    const id = e.currentTarget.dataset.id
+    const id = Number(e.currentTarget.dataset.id)
     wx.showModal({
       title: '确认撤单',
       content: '已支付运费将自动原路退款，货源释放回撮合池',
-      editable: false,
       success: (r) => {
         if (!r.confirm) return
         request({
@@ -232,15 +246,27 @@ Page({
         })
           .then(() => {
             wx.showToast({ title: '已撤单', icon: 'success' })
-            this.fetchList()
+            this.fetchAll()
           })
           .catch(() => {})
       }
     })
   },
 
+  onDetail(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    const o = this.findOrder(id)
+    if (!o) return
+    wx.showModal({
+      title: `订单 #${o.id}`,
+      content: `状态：${ORDER_STATUS_LABELS[o.status] || o.status}\n路线：${o.origin_label} → ${o.dest_label}\n货物：${o.cargo_name} · ${o.weight_text}\n船舶：${o.ship_name}\n运费：${o.freight_price ? '¥ ' + o.freight_price : '面议'}\n成交时间：${String(o.matched_at || '').slice(0, 19).replace('T', ' ')}`,
+      showCancel: false,
+      confirmText: '知道了'
+    })
+  },
+
   onContract(e) {
-    const id = e.currentTarget.dataset.id
+    const id = Number(e.currentTarget.dataset.id)
     wx.showLoading({ title: '生成中...', mask: true })
     request({ url: '/api/v1/agent/contract/generate', method: 'POST', data: { order_id: id } })
       .then((res) => {
@@ -254,5 +280,9 @@ Page({
 
   closeContract() {
     this.setData({ 'contract.show': false })
+  },
+
+  onBell() {
+    wx.showToast({ title: '消息中心开发中', icon: 'none' })
   }
 })

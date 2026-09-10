@@ -1,406 +1,208 @@
-/* 货主端首页 · 找船（v1） */
-.page {
-  min-height: 100vh;
-  background: #F5F7FA;
-  padding-bottom: 40rpx;
-  box-sizing: border-box;
-}
+/* 货主端首页（02）· 找船 */
+page { background: #F5F7FA; }
 
-.top-bar {
-  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
-  padding: 24rpx 32rpx 40rpx;
-  border-radius: 0 0 24rpx 24rpx;
+.page-content { padding: 24rpx 24rpx 0; }
+
+/* ---- 顶栏 ---- */
+.top {
+  background: linear-gradient(180deg, #E6EDFF 0%, #F2F6FF 100%);
+  padding: calc(12rpx + env(safe-area-inset-top)) 28rpx 22rpx;
 }
-.top-bar-row {
+.top-row1 {
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  height: 78rpx;
 }
-.top-bar-logo {
-  width: 64rpx;
-  height: 64rpx;
-  background: rgba(255, 255, 255, .2);
-  border-radius: 16rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.logo-glyph { font-size: 36rpx; }
-.top-bar-search {
-  flex: 1;
-  height: 64rpx;
+.top-avatar {
+  width: 66rpx;
+  height: 66rpx;
+  border-radius: 50%;
   background: #FFFFFF;
-  border-radius: 32rpx;
+  color: #3B5BDB;
+  font-size: 32rpx;
+  line-height: 66rpx;
+  text-align: center;
+  margin-right: 18rpx;
+  box-shadow: 0 2rpx 10rpx rgba(61, 90, 219, .12);
+}
+.top-loc {
+  flex: 1;
   display: flex;
   align-items: center;
-  padding: 0 24rpx;
-  gap: 12rpx;
+  gap: 8rpx;
 }
-.top-bar-search-hover { background: #F5F7FA; }
-.search-icon {
-  font-size: 26rpx;
-  color: #98A6B8;
-}
-.search-placeholder {
-  font-size: 26rpx;
-  color: #98A6B8;
-}
-
-.top-bar-actions {
+.loc-dot { font-size: 26rpx; }
+.loc-text { font-size: 30rpx; font-weight: 600; color: #14233B; }
+.caret { font-size: 22rpx; color: #7C8CA0; margin-left: 2rpx; }
+.top-role {
   display: flex;
-  gap: 12rpx;
+  align-items: center;
+  gap: 6rpx;
+  background: #FFFFFF;
+  border-radius: 999rpx;
+  padding: 8rpx 22rpx;
+  box-shadow: 0 2rpx 10rpx rgba(61, 90, 219, .10);
 }
-.top-icon {
+.top-role-label { font-size: 25rpx; color: #3B5BDB; font-weight: 600; }
+
+.top-row2 {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  margin-top: 20rpx;
+}
+.search-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  height: 74rpx;
+  padding: 0 24rpx;
+  background: #FFFFFF;
+  border-radius: 999rpx;
+  box-shadow: 0 2rpx 12rpx rgba(61, 90, 219, .08);
+}
+.search-box-hover { background: #F7F9FF; }
+.search-ico { font-size: 26rpx; }
+.search-ph { font-size: 26rpx; color: #A8B4C4; }
+.top-act {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4rpx;
-  width: 72rpx;
-  padding: 6rpx 0;
+  width: 68rpx;
 }
-.top-icon-hover { opacity: .7; }
-.top-icon-glyph {
-  width: 48rpx;
-  height: 48rpx;
-  border-radius: 50%;
+.act-glyph { font-size: 32rpx; line-height: 1.1; }
+.act-label { font-size: 20rpx; color: #5C6B80; margin-top: 2rpx; }
+.hover-dim { opacity: .6; }
+
+/* ---- 我要发货 ---- */
+.loc-value { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 10rpx; }
+.pin { font-size: 20rpx; line-height: 1; }
+.pin-blue { color: #3B5BDB; }
+.pin-purple { color: #7048E8; }
+
+.dual-row {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26rpx;
-  color: #FFFFFF;
-}
-.top-icon-ai { background: linear-gradient(135deg, #FFA94D, #FF6B6B); }
-.top-icon-cs { background: linear-gradient(135deg, #51CF66, #12B886); }
-.top-icon-label {
-  font-size: 20rpx;
-  color: #FFFFFF;
-  opacity: .95;
-}
-
-.content { padding: 24rpx 32rpx 0; }
-
-.brand-banner {
-  position: relative;
-  padding: 40rpx 32rpx;
-  background: linear-gradient(135deg, #4C6EF5 0%, #7048E8 100%);
-  color: #FFFFFF;
-  border-radius: 24rpx;
-  margin-bottom: 24rpx;
-  overflow: hidden;
-  box-shadow: 0 6rpx 24rpx rgba(76, 110, 245, .25);
-}
-.banner-title {
-  font-size: 40rpx;
-  font-weight: 700;
-  letter-spacing: 2rpx;
-  margin-bottom: 12rpx;
-}
-.banner-sub {
-  font-size: 26rpx;
-  opacity: .9;
-  line-height: 1.6;
-  margin-bottom: 24rpx;
-}
-.banner-cta {
-  display: inline-block;
-  padding: 12rpx 28rpx;
-  background: rgba(255, 255, 255, .22);
-  border-radius: 999rpx;
-  font-size: 24rpx;
-  border: 1rpx solid rgba(255, 255, 255, .35);
-}
-.banner-cta-hover { background: rgba(255, 255, 255, .3); }
-.banner-deco-1,
-.banner-deco-2 {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-.banner-deco-1 {
-  width: 200rpx;
-  height: 200rpx;
-  background: rgba(255, 255, 255, .12);
-  top: -60rpx;
-  right: -40rpx;
-}
-.banner-deco-2 {
-  width: 100rpx;
-  height: 100rpx;
-  background: rgba(255, 255, 255, .10);
-  bottom: 20rpx;
-  right: 100rpx;
-}
-
-.card {
-  background: #FFFFFF;
-  border-radius: 20rpx;
-  padding: 24rpx;
-  box-shadow: 0 4rpx 24rpx rgba(61, 91, 219, .08);
-  margin-bottom: 24rpx;
-}
-
-.address-card { padding: 12rpx 24rpx; }
-.address-row {
-  display: flex;
-  align-items: center;
   gap: 16rpx;
-  padding: 20rpx 0;
+  padding: 20rpx 28rpx 8rpx;
 }
-.address-row-hover { background: #F8FAFF; }
-.address-dot {
-  width: 48rpx;
-  height: 48rpx;
-  border-radius: 50%;
+.dual-item {
+  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 22rpx;
+  gap: 8rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 16rpx;
+  background: #F7F9FD;
+  border: 1rpx solid #EDF1F8;
+}
+.dual-item-active { background: rgba(92, 124, 250, .07); border-color: rgba(92, 124, 250, .35); }
+.dual-body { flex: 1; min-width: 0; }
+.dual-label { font-size: 24rpx; color: #6B7A8C; }
+.dual-value {
+  margin-top: 4rpx;
+  font-size: 24rpx;
+  color: #3B5BDB;
   font-weight: 600;
-  color: #FFFFFF;
-  flex-shrink: 0;
-}
-.address-dot-blue { background: #3B5BDB; }
-.address-dot-purple { background: #7048E8; }
-.address-content {
-  flex: 1;
-  min-width: 0;
-}
-.address-label {
-  font-size: 22rpx;
-  color: #98A6B8;
-  margin-bottom: 4rpx;
-}
-.address-value {
-  font-size: 30rpx;
-  color: #0F2540;
-  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.address-placeholder {
-  color: #B8C2D0;
-  font-weight: 400;
-}
-.address-arrow {
-  font-size: 36rpx;
-  color: #98A6B8;
-  line-height: 1;
-}
+.dual-caret { font-size: 26rpx; color: #C3CCD8; }
 
-.divider-line {
-  height: 1rpx;
-  background: #EEF1F6;
-  margin: 0 -24rpx;
-}
-
-.cargo-card { padding: 24rpx; }
-.cargo-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 20rpx;
-  padding: 0 8rpx;
-}
-.cargo-title {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #0F2540;
-}
-.cargo-tag {
-  font-size: 22rpx;
-  color: #98A6B8;
-}
-.cargo-rows {
-  background: #F8FAFF;
+.panel {
+  margin: 0 28rpx 8rpx;
   border-radius: 16rpx;
-  padding: 0 20rpx;
+  background: #FAFBFE;
+  border: 1rpx dashed #DDE4F0;
+  overflow: hidden;
 }
-.cargo-row {
+.field-row-sm { min-height: 84rpx; padding: 0 24rpx; }
+
+.card-cta {
+  margin: 24rpx 28rpx 16rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  border-radius: 18rpx;
+}
+.cta-hover { opacity: .88; }
+.card-tip {
+  padding: 0 28rpx 26rpx;
+  font-size: 22rpx;
+  color: #A8B4C4;
+  line-height: 1.5;
+}
+.row-hover { background: #F7F9FF; }
+
+/* ---- 推荐船源 ---- */
+.ship-list { padding: 4rpx 28rpx 20rpx; }
+.ship-item {
   display: flex;
   align-items: center;
-  padding: 24rpx 0;
-  gap: 16rpx;
+  gap: 20rpx;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #F1F4F8;
 }
-.cargo-row-hover { background: #EDF1FF; }
-.cargo-row-label {
-  width: 200rpx;
-  font-size: 26rpx;
-  color: #6B7A8C;
+.ship-item:last-child { border-bottom: none; }
+.ship-thumb {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 18rpx;
+  background: linear-gradient(135deg, #E8EEFF 0%, #E4DBFF 100%);
+  font-size: 36rpx;
+  line-height: 76rpx;
+  text-align: center;
   flex-shrink: 0;
 }
-.cargo-row-value {
-  flex: 1;
-  font-size: 28rpx;
-  color: #0F2540;
-  text-align: right;
-}
-.cargo-row-input {
-  flex: 1;
-  font-size: 28rpx;
-  color: #0F2540;
-  text-align: right;
-  background: transparent;
-}
-.input-ph {
-  color: #B8C2D0;
-  font-size: 26rpx;
-}
-.cargo-remark { margin-top: 16rpx; }
-.cargo-remark-input {
-  width: 100%;
-  min-height: 120rpx;
-  background: #F8FAFF;
-  border-radius: 16rpx;
-  padding: 20rpx;
-  font-size: 26rpx;
-  color: #0F2540;
-  box-sizing: border-box;
-}
+.ship-body { flex: 1; min-width: 0; }
+.ship-name-row { display: flex; align-items: center; gap: 10rpx; }
+.ship-name { font-size: 30rpx; font-weight: 600; color: #14233B; }
+.ship-meta { margin-top: 6rpx; font-size: 24rpx; color: #8A99AC; }
+.ship-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6rpx; }
+.ship-home { font-size: 22rpx; color: #12B886; }
+.ship-link { font-size: 23rpx; color: #3B5BDB; }
 
-.action-row {
+/* ---- 推荐航线 ---- */
+.route-list { padding: 4rpx 28rpx 20rpx; }
+.route-item {
   display: flex;
-  gap: 20rpx;
-  margin-bottom: 32rpx;
+  align-items: center;
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid #F1F4F8;
 }
-.action-btn {
-  flex: 1;
-  padding: 32rpx 24rpx;
-  border-radius: 20rpx;
+.route-item:last-child { border-bottom: none; }
+.route-body { flex: 1; }
+.route-names { display: flex; align-items: center; gap: 14rpx; }
+.route-name { font-size: 29rpx; font-weight: 600; color: #14233B; }
+.route-arrow {
+  font-size: 24rpx;
   color: #FFFFFF;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8rpx;
-  box-shadow: 0 6rpx 20rpx rgba(61, 91, 219, .15);
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  border-radius: 999rpx;
+  padding: 0 14rpx;
+  line-height: 34rpx;
 }
-.action-btn-hover {
-  transform: scale(.97);
-  opacity: .92;
-}
-.action-btn-blue { background: linear-gradient(135deg, #3B5BDB, #4C6EF5); }
-.action-btn-purple { background: linear-gradient(135deg, #7048E8, #845EF7); }
-.action-label {
-  font-size: 32rpx;
-  font-weight: 700;
-  letter-spacing: 2rpx;
-}
-.action-sub {
-  font-size: 22rpx;
-  opacity: .9;
-}
+.route-sub { margin-top: 6rpx; font-size: 23rpx; color: #8A99AC; }
+.route-caret { font-size: 34rpx; color: #C3CCD8; font-weight: 300; }
 
-.hot-routes { margin-bottom: 32rpx; }
-.hot-head {
+/* ---- 我的货源快捷入口 ---- */
+.my-entry-card { padding: 0; }
+.my-entry {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 16rpx;
-  padding: 0 4rpx;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx 28rpx;
 }
-.hot-title {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #0F2540;
-}
-.hot-sub {
-  font-size: 22rpx;
-  color: #98A6B8;
-}
-.hot-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16rpx;
-}
-.hot-item {
-  background: #FFFFFF;
+.my-entry-icon {
+  width: 68rpx;
+  height: 68rpx;
   border-radius: 16rpx;
-  padding: 24rpx;
-  box-shadow: 0 2rpx 12rpx rgba(61, 91, 219, .06);
-}
-.hot-item-hover {
-  transform: scale(.98);
-  background: #F8FAFF;
-}
-.hot-from,
-.hot-to {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #0F2540;
-  display: inline-block;
-}
-.hot-arrow {
-  display: inline-block;
-  margin: 0 12rpx;
-  color: #3B5BDB;
-  font-weight: 700;
-}
-.hot-price {
-  margin-top: 12rpx;
+  background: rgba(59, 91, 219, .08);
   font-size: 32rpx;
-  font-weight: 700;
-  color: #FA5252;
+  line-height: 68rpx;
+  text-align: center;
 }
-.hot-price-sub {
-  font-size: 22rpx;
-  color: #98A6B8;
-  font-weight: 400;
-  margin-left: 4rpx;
-}
-
-.quick-entries {
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
-}
-.quick-entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 24rpx;
-  background: #FFFFFF;
-  border-radius: 16rpx;
-  box-shadow: 0 2rpx 12rpx rgba(61, 91, 219, .06);
-}
-.quick-entry-hover { background: #F8FAFF; }
-.quick-entry-left {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-}
-.quick-entry-icon {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 16rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32rpx;
-}
-.quick-entry-icon-blue {
-  background: linear-gradient(135deg, #E7ECFF, #EDF1FF);
-}
-.quick-entry-icon-purple {
-  background: linear-gradient(135deg, #F0E7FF, #F4ECFF);
-}
-.quick-entry-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-}
-.quick-entry-title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #0F2540;
-}
-.quick-entry-sub {
-  font-size: 22rpx;
-  color: #6B7A8C;
-}
-.quick-entry-arrow {
-  font-size: 36rpx;
-  color: #98A6B8;
-  line-height: 1;
-}
-
-.content-bottom-space { height: 40rpx; }
+.my-entry-body { flex: 1; }
+.my-entry-title { font-size: 29rpx; font-weight: 600; color: #14233B; }
+.my-entry-sub { margin-top: 4rpx; font-size: 23rpx; color: #8A99AC; }

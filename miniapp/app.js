@@ -15,8 +15,7 @@ App({
 
   /**
    * 按角色路由到对应工作台（三角色合一的核心）
-   * 注：v0.4 后工作台入口已统一为 tabBar，无需 navigateTo，
-   *     但保留给首屏角色选择弹窗在 wx.switchTab 之前做角色切换。
+   * UI V2：tabBar 已改为自定义组件，找船/找货合并在第 1 位，由 custom-tab-bar 按角色分发。
    */
   routeByRole(role) {
     const map = {
@@ -28,13 +27,16 @@ App({
     return map[role]
   },
 
-  /**
-   * 工作台入口映射（用于首屏角色选择浮窗）
-   * 与 tabBar 同步
-   */
+  /** 工作台入口映射（用于首屏角色选择浮窗） */
   workspacePages: {
     shipper: '/pages/shipper/shipper',
     owner: '/pages/owner/owner',
     port: '/pages/port/port'
+  },
+
+  /** 发布入口映射（tabBar 中间凸起钮，按角色进入不同发布页） */
+  publishPages: {
+    shipper: '/pages/publish/cargo/cargo',
+    owner: '/pages/publish/ship/ship'
   }
 })

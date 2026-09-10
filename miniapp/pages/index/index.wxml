@@ -1,72 +1,74 @@
 <!--
-  首屏：角色选择浮窗（v1）
+  首位屏（01）：身份选择浮窗
+  不设主页——进入即选身份，点击直接进入专属工作台
 -->
 <view class="page">
-  <view class="brand-hero">
-    <view class="hero-logo-row">
-      <view class="hero-logo-mark">⛵</view>
-      <view class="hero-logo-text">新船帮 · XCB</view>
-    </view>
-    <view class="hero-title">平陆运河 · 滴滴打船</view>
-    <view class="hero-sub">货 · 船 · 港 一站式撮合</view>
-    <view class="hero-deco hero-deco-1"></view>
-    <view class="hero-deco hero-deco-2"></view>
+  <!-- 背景：地图风格底图（纯 CSS 模拟，无外部资源） -->
+  <view class="map-bg">
+    <view class="map-blob blob-a"></view>
+    <view class="map-blob blob-b"></view>
+    <view class="map-blob blob-c"></view>
+    <view class="map-line line-a"></view>
+    <view class="map-line line-b"></view>
+    <view class="map-road">G359</view>
   </view>
 
+  <!-- 品牌区 -->
+  <view class="hero">
+    <view class="logo-row">
+      <view class="logo-mark">⛵</view>
+      <text class="logo-text">船好多</text>
+    </view>
+    <view class="logo-slogan">船好货多赚好多</view>
+  </view>
+
+  <!-- 身份选择浮窗 -->
   <view class="role-sheet">
     <view class="sheet-handle"></view>
     <view class="sheet-title">请选择您的身份</view>
-    <view class="sheet-sub">不同身份看到的工作台不同，请按实际选择</view>
+    <view class="sheet-sub">选择后直接进入专属工作台</view>
 
-    <view class="role-grid">
+    <view class="role-list">
       <view
-        class="role-card role-shipper {{pendingRole === 'shipper' ? 'role-pending' : ''}}"
+        class="role-card {{pendingRole === 'shipper' ? 'role-card-pending' : ''}}"
         data-role="shipper"
         bindtap="onPickRole"
         hover-class="role-card-hover"
       >
-        <view class="role-card-icon">🚢</view>
-        <view class="role-card-label">我是货主</view>
-        <view class="role-card-desc">发货找船 · 一句话生成货源</view>
-        <view class="role-card-tag">点此进入 ›</view>
+        <view class="role-icon role-icon-shipper">📦</view>
+        <view class="role-body">
+          <view class="role-name">我是货主</view>
+          <view class="role-desc">发货找船，查看推荐航线</view>
+        </view>
+        <view class="role-arrow">›</view>
       </view>
 
       <view
-        class="role-card role-owner {{pendingRole === 'owner' ? 'role-pending' : ''}}"
+        class="role-card {{pendingRole === 'owner' ? 'role-card-pending' : ''}}"
         data-role="owner"
         bindtap="onPickRole"
         hover-class="role-card-hover"
       >
-        <view class="role-card-icon">⚓</view>
-        <view class="role-card-label">我是船东</view>
-        <view class="role-card-desc">接单找货 · 海量货源抢单</view>
-        <view class="role-card-tag">点此进入 ›</view>
+        <view class="role-icon role-icon-owner">🚢</view>
+        <view class="role-body">
+          <view class="role-name">我是船东</view>
+          <view class="role-desc">寻找货源，发布空船</view>
+        </view>
+        <view class="role-arrow">›</view>
       </view>
     </view>
 
-    <view class="port-entry" bindtap="onPickRole" data-role="port" hover-class="port-entry-hover">
-      <text class="port-entry-icon">🏗</text>
-      <text class="port-entry-text">我是港口方</text>
-      <text class="port-entry-arrow">›</text>
+    <view class="sheet-foot" bindtap="onPickRole" data-role="port" hover-class="sheet-foot-hover">
+      <text>我是港口方</text>
+      <text class="sheet-foot-dot">·</text>
+      <text class="sheet-foot-weak">后续可切换身份</text>
     </view>
   </view>
 
-  <view class="bottom-area">
-    <view class="other-title">其他登录方式</view>
-    <view class="other-row">
-      <view class="other-btn" bindtap="onOneClick" hover-class="other-btn-hover">
-        <view class="other-icon">📱</view>
-        <view class="other-text">一键登录</view>
-      </view>
-      <view class="other-btn" bindtap="onWechatLogin" hover-class="other-btn-hover">
-        <view class="other-icon other-icon-wechat">💬</view>
-        <view class="other-text">微信登录</view>
-      </view>
-    </view>
-    <view class="agreement">
-      登录即代表您同意
-      <text class="link">《用户服务协议》</text>和
-      <text class="link">《隐私政策》</text>
+  <view wx:if="{{logging}}" class="loading-mask">
+    <view class="loading-box">
+      <view class="loading-spinner"></view>
+      <text class="loading-text">正在进入工作台…</text>
     </view>
   </view>
 </view>
