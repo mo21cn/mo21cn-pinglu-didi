@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     # ---- 智能体 ----
     LLM_GATEWAY_URL: str = ""
     VECTOR_DB_URL: str = ""
+    # LLM 供应商（DeepSeek 等 OpenAI 兼容协议；LLM_MOCK=true 时走规则模板，供无 Key 开发/CI）
+    LLM_PROVIDER: str = "deepseek"
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://api.deepseek.com"
+    LLM_MODEL: str = "deepseek-chat"
+    LLM_MOCK: bool = False
+    LLM_TIMEOUT_SECONDS: int = 60
 
     @property
     def is_production(self) -> bool:
