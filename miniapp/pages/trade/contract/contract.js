@@ -33,12 +33,21 @@ function inline(s) {
  */
 function mdToHtml(text) {
   if (!text) return ''
-  // 合并连续引用行（合同头"不具法律效力"声明是两行 "> ..."），避免渲染成两个独立灰块
+  // 预处理：① 合并连续引用行（合同头"不具法律效力"声明是两行 "> ..."）
+  //         ② 合并软换行——合同正文长段落被硬换行，逐行成段会把一句话拆成两段
+  const isPlain = (s) =>
+    !!s.trim() &&
+    s.indexOf('#') !== 0 &&
+    s.indexOf('> ') !== 0 &&
+    s.indexOf('- ') !== 0 &&
+    !/^-{3,}$/.test(s.trim())
   const lines = []
   for (const ln of String(text).split('\n')) {
     const prev = lines[lines.length - 1]
     if (ln.indexOf('> ') === 0 && prev !== undefined && prev.indexOf('> ') === 0) {
       lines[lines.length - 1] = prev + ln.slice(2)
+    } else if (isPlain(ln) && prev !== undefined && isPlain(prev)) {
+      lines[lines.length - 1] = prev + ln
     } else {
       lines.push(ln)
     }
