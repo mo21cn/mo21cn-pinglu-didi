@@ -1,6 +1,8 @@
 // 06 我的订单（底栏二级页）
 // 统计行（全部/待承运/运输中/已完成/已撤单）+ 待处理事项 + 订单列表
-// 合同双入口：卡片「查看合同」→ 三级页 pages/trade/contract（完整版）；长按订单卡 → 弹层快速预览
+// 三级页入口：
+//   合同：卡片「查看合同」→ pages/trade/contract（完整版）；长按订单卡 → 弹层快速预览
+//   支付：卡片「去支付 / 支付详情」→ pages/trade/payment（单据状态机 + 资金留痕）
 // 注：订单接口仅返回 cargo_id/ship_id → 用「我的货源 / 我的船队」列表做 enrich 展示路线。
 //     若拿不到货源详情（如船东视角），降级显示「货源 #id」。
 const { request } = require('../../../utils/request')
@@ -161,42 +163,11 @@ Page({
     return this.data.rawList.find((o) => o.id === Number(id))
   },
 
-  onPay(e) {
+  /** 「去支付 / 支付详情」→ 支付详情三级页（单据状态机 + 资金留痕时间轴） */
+  onPayPage(e) {
     const id = Number(e.currentTarget.dataset.id)
-    const order = this.findOrder(id)
-    if (!order) return
-
-    request({ url: `/api/v1/payment/payments/order/${id}`, silent: true })
-      .catch((err) => {
-        const msg = String(err.message)
-        if (msg.indexOf('支付单') !== -1 || msg.indexOf('订单') !== -1) {
-          return request({
-            url: '/api/v1/payment/payments',
-            method: 'POST',
-            data: { order_id: id, channel: 'mock' }
-          })
-        }
-        throw err
-      })
-      .then((pay) => {
-        if (pay.status === 'paid') return wx.showToast({ title: '该订单已支付', icon: 'none' })
-        if (pay.status !== 'pending') return wx.showToast({ title: '支付单已关闭', icon: 'none' })
-        wx.showModal({
-          title: '确认支付运费',
-          content: `支付金额：¥ ${pay.amount}`,
-          confirmText: '支付',
-          success: (r) => {
-            if (!r.confirm) return
-            request({ url: `/api/v1/payment/payments/${pay.id}/mock-pay`, method: 'POST', data: {} })
-              .then(() => {
-                wx.showToast({ title: '支付成功', icon: 'success' })
-                this.fetchAll()
-              })
-              .catch(() => {})
-          }
-        })
-      })
-      .catch(() => {})
+    if (!id) return
+    wx.navigateTo({ url: '/pages/trade/payment/payment?order_id=' + id })
   },
 
   onShip(e) {

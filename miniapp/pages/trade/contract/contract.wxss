@@ -170,25 +170,10 @@
   font-size: 28rpx;
 }
 
-/* ---- 底部固定操作条（提示行 + 按钮行） ---- */
+/* ---- 底部固定操作条（提示行 + 按钮行）
+   注：.bar-note / .bar-actions / .btn-disabled 已提升到 app.wxss 作为三级页共享工具类 ---- */
 .contract-bar {
   flex-direction: column;
   align-items: stretch;
   gap: 12rpx;
-}
-
-.bar-note {
-  font-size: 22rpx;
-  color: #98A6B8;
-  text-align: center;
-}
-
-.bar-actions {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-}
-
-.btn-disabled {
-  opacity: 0.45;
 }

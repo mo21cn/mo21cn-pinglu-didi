@@ -46,7 +46,7 @@
         <text class="section-head-more" bindtap="resetFilter">查看全部 ›</text>
       </view>
 
-      <view wx:if="{{list.length}}" class="list-hint">「查看合同」进入合同页 · 长按订单卡快速预览</view>
+      <view wx:if="{{list.length}}" class="list-hint">「查看合同 / 支付详情」进入三级页 · 长按订单卡快速预览合同</view>
 
       <view wx:if="{{loading && list.length === 0}}" class="empty">加载中...</view>
       <view wx:elif="{{list.length === 0}}" class="empty">
@@ -91,9 +91,16 @@
               catchtap="onContractPage"
             >查看合同</view>
 
+            <view
+              wx:if="{{item.status !== 'matched'}}"
+              class="act-ghost"
+              data-id="{{item.id}}"
+              catchtap="onPayPage"
+            >支付详情</view>
+
             <block wx:if="{{role === 'shipper'}}">
               <view wx:if="{{item.status === 'matched'}}" class="act-ghost" data-id="{{item.id}}" catchtap="onCancel">撤单</view>
-              <view wx:if="{{item.status === 'matched'}}" class="act-primary" data-id="{{item.id}}" catchtap="onPay">去支付</view>
+              <view wx:if="{{item.status === 'matched'}}" class="act-primary" data-id="{{item.id}}" catchtap="onPayPage">去支付</view>
               <view wx:if="{{item.status === 'shipped'}}" class="act-primary" data-id="{{item.id}}" catchtap="onComplete">确认收货</view>
               <view wx:if="{{item.status === 'completed' || item.status === 'cancelled'}}" class="act-ghost" data-id="{{item.id}}" catchtap="onDetail">查看详情</view>
             </block>

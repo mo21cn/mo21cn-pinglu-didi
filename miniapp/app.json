@@ -8,6 +8,7 @@
     "pages/trade/match/match",
     "pages/trade/orders/orders",
     "pages/trade/contract/contract",
+    "pages/trade/payment/payment",
     "pages/port/port",
     "pages/assistant/assistant",
     "pages/mine/mine"
