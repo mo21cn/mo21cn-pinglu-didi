@@ -3,6 +3,56 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-09-10
+
+Agent 底座与首批智能体场景（F8-F10）：交易主链路延伸至小程序端 + LLM 智能化底座就绪。
+
+### 新增
+
+- **F8 小程序交易入口**（PR #8）：撮合页（货主找船可下单 / 船东找货只读，
+  评分卡片 + 四项得分拆解 + filter_stats）、订单页（角色视角 + 状态过滤，
+  支付/启运/签收/撤单全操作）、支付流（静默探测→创建→弹窗确认→mock-pay）
+- **本地 E2E 联调工具链**（PR #9）：三角色种子脚本（固定 Mock code）、
+  全链路冒烟脚本（场景 A 完整履约 + 场景 B 撤单退款联动）、
+  小程序 dev_login_code 联调开关、DeepSeek 接入配置（.env.local 叠加，
+  Key 不入库）
+- **F9 Agent 底座**（PR #10）：
+  - LLM 网关 `chat_json`：DeepSeek OpenAI 兼容协议（httpx 异步）、
+    JSON 强约束输出、`LLM_MOCK` 规则模板模式（CI 零网络）、
+    错误六分类降级（timeout/network/auth/rate_limit/bad_request/bad_response）
+  - AgentCall 审计表：每次 Agent 调用留痕（用户/Agent 名/输入输出摘要/
+    耗时/成败），工程底线 3 落点
+  - 货源解析 Agent：`POST /agent/cargo-parse` 自然语言→结构化草稿，
+    pydantic 严格校验 + 13 港合法性过滤，Agent 无直写（草稿不落库，
+    工程底线 2）
+- **F10 客服导购 + 一句话发货**（PR #11）：
+  - 客服导购 Agent：`POST /agent/assistant` FAQ/航线/用法问答，
+    纯读零直写、全角色可用，平台知识库注入 system prompt（RAG 替换点），
+    多轮上下文
+  - 小程序发布货源页"一句话发货"：草稿回填（picker 索引同步）+
+    待确认字段提示，人工核对后提交
+
+### 修复
+
+- config.py env_file 多文件叠加（.env.{env} + .env.local，
+  PR #9 中该改动意外丢失，PR #10 补齐）
+
+### 工程质量
+
+- 测试 106 例全绿（新增 agent 9 例：cargo-parse 6 + assistant 3）
+- 真实 DeepSeek 冒烟通过（3.8s 首调 / 2.8s 客服；不编造缺失字段、
+  拒答无依据行情）
+- 三条工程底线全程持有：确定性内核零 LLM、Agent 无直写、全链路留痕
+
+### 已知限制（计划内后续迭代）
+
+- 登录/支付仍为 Mock 模式（真实微信生态接入待 appid）
+- 撮合 Stage2（泊位档期约束、空驶里程成本）待开发
+- 五领域 Agent 已落地 2 个（货源解析/客服导购）；合规初筛、运营分析、
+  智能合同待开发
+- 小程序 tabBar/导航 UI 修复（fix/e2e-ui 分支）待真机验证合并
+- RAG/向量库、LangGraph 多 Agent 编排待接入（当前为 prompt 注入式知识库）
+
 ## [0.1.0] - 2026-09-10
 
 首个 MVP 候选版本：货-船-港三态撮合交易主链路后端闭环（F1-F7）。
