@@ -330,3 +330,52 @@ def test_contract_order_not_found(shipper, client):
         headers=shipper["_headers"],
     )
     assert resp.status_code == 400
+
+
+# ---------- F12 RAG 知识检索 ----------
+
+def test_rag_search_single_port_hit():
+    """问单港 → 精确命中该港文档。"""
+    from app.modules.agent.knowledge import search_knowledge
+
+    hits = search_knowledge("钦州港是干什么的，能走什么货")
+    assert hits, "应有召回"
+    assert hits[0][0].id == "port-qnz"
+    assert "QNZ" in hits[0][0].text
+
+
+def test_rag_search_tanker_and_refund():
+    """液货/退款问题 → 各自命中正确领域文档。"""
+    from app.modules.agent.knowledge import search_knowledge
+
+    assert search_knowledge("液货用什么船拉")[0][0].id == "cargo-tanker"
+    assert search_knowledge("撤单了钱退吗")[0][0].id == "flow-payment"
+
+
+def test_rag_fallback_core_docs():
+    """无召回（无关问题）→ 回退注入角色+主流程核心文档。"""
+    from app.modules.agent.service import _build_system_prompt
+
+    prompt = _build_system_prompt("zzzz qqqq 完全无关")
+    assert "三角色" in prompt or "货主" in prompt
+    assert "主流程" in prompt or "签收" in prompt
+
+
+def test_rag_prompt_contains_retrieved_doc():
+    """正常问题 → prompt 含检索到的知识文本（RAG 注入生效）。"""
+    from app.modules.agent.service import _build_system_prompt
+
+    prompt = _build_system_prompt("贵港港是什么地位")
+    assert "GGU" in prompt
+    assert "参考资料" in prompt
+
+
+def test_assistant_rag_mock_pipeline(shipper, client):
+    """mock 模式全链路：assistant 经 RAG 拼装后正常回答（回归）。"""
+    resp = client.post(
+        "/api/v1/agent/assistant",
+        json={"question": "怎么发货？"},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert "发货" in resp.json()["answer"]

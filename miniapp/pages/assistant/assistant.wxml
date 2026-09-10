@@ -1,0 +1,68 @@
+<view class="page">
+  <!-- 顶部说明 -->
+  <view class="banner">
+    <view class="banner-title">平台智能客服</view>
+    <view class="banner-sub">咨询发货/找船/支付/航线/船型等问题，纯只读，AI 不代替您执行任何写操作</view>
+  </view>
+
+  <!-- 消息列表 -->
+  <scroll-view
+    class="scroll"
+    scroll-y
+    scroll-top="{{scrollTop}}"
+    enhanced
+    show-scrollbar="{{false}}"
+  >
+    <!-- 空状态 -->
+    <view wx:if="{{emptyHint}}" class="empty">
+      <view class="empty-icon">💬</view>
+      <view class="empty-title">有什么可以帮您？</view>
+      <view class="empty-sub">试试问：</view>
+      <view class="empty-chip" bindtap="onQuickAsk" data-q="怎么发布货源？">怎么发布货源？</view>
+      <view class="empty-chip" bindtap="onQuickAsk" data-q="钦州港能走什么货？">钦州港能走什么货？</view>
+      <view class="empty-chip" bindtap="onQuickAsk" data-q="液货用什么船拉？">液货用什么船拉？</view>
+      <view class="empty-chip" bindtap="onQuickAsk" data-q="撤单了运费退吗？">撤单了运费退吗？</view>
+      <view class="empty-chip" bindtap="onQuickAsk" data-q="智能撮合怎么评分？">智能撮合怎么评分？</view>
+    </view>
+
+    <block wx:for="{{messages}}" wx:key="ts" wx:for-index="i">
+      <view id="msg-{{i}}" class="msg-row {{item.role === 'user' ? 'right' : 'left'}}">
+        <view class="avatar {{item.role === 'user' ? 'avatar-user' : 'avatar-bot'}}">
+          {{item.role === 'user' ? '我' : '客'}}
+        </view>
+        <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-bot'}} {{item.pending ? 'bubble-pending' : ''}} {{item.error ? 'bubble-error' : ''}}">
+          <text user-select="{{true}}" space="emsp" decode="{{true}}" class="bubble-text">{{item.text}}</text>
+          <view wx:if="{{item.mocked === false && item.latency}}" class="bubble-meta">DeepSeek · {{item.latency}}ms</view>
+        </view>
+      </view>
+    </block>
+  </scroll-view>
+
+  <!-- 底部输入区 -->
+  <view class="composer">
+    <textarea
+      class="composer-input"
+      value="{{input}}"
+      bindinput="onInput"
+      bindconfirm="onSend"
+      placeholder="描述您的问题，按回车发送"
+      placeholder-class="ph"
+      auto-height
+      maxlength="500"
+      adjust-position="{{true}}"
+      cursor-spacing="20"
+      hold-keyboard="{{true}}"
+      disable-default-padding="{{true}}"
+      confirm-type="send"
+    />
+    <view class="composer-actions">
+      <button class="btn-clear" size="mini" bindtap="onClear" hover-class="btn-clear-hover">清空</button>
+      <button
+        class="btn-send {{sending || !input ? 'btn-send-disabled' : ''}}"
+        size="mini"
+        bindtap="onSend"
+        hover-class="btn-send-hover"
+      >{{sending ? '发送中' : '发送'}}</button>
+    </view>
+  </view>
+</view>
