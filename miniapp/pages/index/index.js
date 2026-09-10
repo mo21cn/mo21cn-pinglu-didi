@@ -1,10 +1,11 @@
-// 首屏：角色选择浮窗（v1）
+// 首位屏（01）：身份选择浮窗
+// 不设主页——进入即弹出身份选择，点击卡片直接进入对应工作台
 const auth = require('../../utils/auth')
 
 const ROLE_META = {
-  shipper: { label: '货主', page: '/pages/shipper/shipper', desc: '发货找船' },
-  owner:   { label: '船东', page: '/pages/owner/owner',     desc: '接单找货' },
-  port:    { label: '港口方', page: '/pages/port/port',     desc: '港作协同' }
+  shipper: { label: '货主', page: '/pages/shipper/shipper' },
+  owner:   { label: '船东', page: '/pages/owner/owner' },
+  port:    { label: '港口方', page: '/pages/port/port' }
 }
 
 Page({
@@ -14,18 +15,18 @@ Page({
   },
 
   onLoad() {
+    // 已登录且已有角色 → 直接进上次的工作台（无需再次选择）
     if (auth.isLoggedIn()) {
       const user = auth.getUser()
-      const role = user.current_role
-      if (ROLE_META[role]) {
+      const role = user && user.current_role
+      if (role && ROLE_META[role]) {
         wx.switchTab({ url: ROLE_META[role].page })
-        return
       }
     }
   },
 
   onShow() {
-    this.setData({ pendingRole: '' })
+    this.setData({ pendingRole: '', logging: false })
   },
 
   onPickRole(e) {
@@ -33,53 +34,40 @@ Page({
     if (!ROLE_META[role] || this.data.logging) return
     this.setData({ pendingRole: role, logging: true })
 
-    const doEnter = () => {
-      auth.switchRole(role)
-        .then(() => wx.switchTab({ url: ROLE_META[role].page }))
-        .catch(() => {
-          this.setData({ logging: false, pendingRole: '' })
-          wx.showToast({ title: '切换角色失败，请重试', icon: 'none' })
-        })
+    const enter = () => {
+      wx.switchTab({
+        url: ROLE_META[role].page,
+        fail: () => this.setData({ logging: false, pendingRole: '' })
+      })
     }
 
     if (!auth.isLoggedIn()) {
+      // 首次进入：登录 → 绑定该角色 → 进入工作台
       auth.login()
         .then(() => auth.bindRole(role))
-        .then(doEnter)
+        .then(enter)
         .catch(() => {
           this.setData({ logging: false, pendingRole: '' })
           wx.showToast({ title: '登录失败，请重试', icon: 'none' })
         })
-    } else {
-      const user = auth.getUser()
-      if ((user.roles || []).includes(role)) {
-        doEnter()
-      } else {
-        auth.bindRole(role)
-          .then(doEnter)
-          .catch(() => {
-            this.setData({ logging: false, pendingRole: '' })
-            wx.showToast({ title: '绑定身份失败，请重试', icon: 'none' })
-          })
-      }
+      return
     }
-  },
 
-  onOneClick() {
-    if (this.data.logging) return
-    this.setData({ logging: true })
-    auth.login()
-      .then(() => {
-        this.setData({ logging: false })
-        wx.showToast({ title: '登录成功，请选择身份', icon: 'success' })
+    const user = auth.getUser() || {}
+    if ((user.roles || []).includes(role)) {
+      // 已有该角色：切过去即可
+      auth.switchRole(role).then(enter).catch(() => {
+        this.setData({ logging: false, pendingRole: '' })
+        wx.showToast({ title: '切换角色失败，请重试', icon: 'none' })
       })
-      .catch(() => {
-        this.setData({ logging: false })
-        wx.showToast({ title: '登录失败，请重试', icon: 'none' })
-      })
-  },
-
-  onWechatLogin() {
-    this.onOneClick()
+    } else {
+      auth.bindRole(role)
+        .then(() => auth.switchRole(role))
+        .then(enter)
+        .catch(() => {
+          this.setData({ logging: false, pendingRole: '' })
+          wx.showToast({ title: '绑定身份失败，请重试', icon: 'none' })
+        })
+    }
   }
 })

@@ -3,6 +3,8 @@
     "pages/index/index",
     "pages/shipper/shipper",
     "pages/owner/owner",
+    "pages/publish/cargo/cargo",
+    "pages/publish/ship/ship",
     "pages/trade/match/match",
     "pages/trade/orders/orders",
     "pages/port/port",
@@ -10,7 +12,7 @@
     "pages/mine/mine"
   ],
   "window": {
-    "navigationBarTitleText": "滴滴打船",
+    "navigationBarTitleText": "船好多",
     "navigationBarBackgroundColor": "#3B5BDB",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#F5F7FA",
@@ -18,6 +20,7 @@
     "enablePullDownRefresh": false
   },
   "tabBar": {
+    "custom": true,
     "color": "#98A6B8",
     "selectedColor": "#3B5BDB",
     "backgroundColor": "#FFFFFF",

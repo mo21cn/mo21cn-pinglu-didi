@@ -1,0 +1,56 @@
+/* 04 发布货物（二级页） */
+page { background: #F5F7FA; }
+
+.page-sub { padding: 24rpx 24rpx 0; }
+
+.section-card { margin-bottom: 24rpx; }
+
+.row-hover { background: #F7F9FF; }
+.hover-dim { opacity: .6; }
+.cta-hover { opacity: .88; }
+
+.price-seg { padding: 20rpx 28rpx 12rpx; }
+
+.remark-box {
+  position: relative;
+  padding: 20rpx 28rpx 32rpx;
+}
+.remark-input {
+  width: 100%;
+  min-height: 160rpx;
+  font-size: 27rpx;
+  color: #14233B;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+.remark-count {
+  position: absolute;
+  right: 28rpx;
+  bottom: 10rpx;
+  font-size: 22rpx;
+  color: #B7C2D0;
+}
+
+.confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  padding: 8rpx 12rpx 40rpx;
+}
+.check-box {
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 50%;
+  border: 2rpx solid #C3CCD8;
+  box-sizing: border-box;
+  font-size: 22rpx;
+  line-height: 30rpx;
+  text-align: center;
+  color: #FFFFFF;
+  flex-shrink: 0;
+}
+.check-box-on {
+  border-color: #3B5BDB;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+}
+.confirm-text { font-size: 25rpx; color: #6B7A8C; }

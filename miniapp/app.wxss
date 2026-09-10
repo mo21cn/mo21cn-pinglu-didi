@@ -1,5 +1,6 @@
 /* ==========================================================================
- * 滴滴打船 · 全局样式（v1 设计语言：蓝紫渐变 · 卡片化 · 顶栏图标行）
+ * 船好多（平陆运河 · 滴滴打船）· 全局样式
+ * 设计语言 v2：蓝紫渐变 · 卡片化 · 顶栏图标行 · 自定义 tabBar
  * ==========================================================================
  * 设计令牌：
  *   主色 蓝 → 紫 渐变   #3B5BDB → #7048E8
@@ -11,6 +12,7 @@
  *   背景                #F5F7FA
  *   卡片                #FFFFFF
  *   阴影 蓝调            0 4rpx 24rpx rgba(61, 90, 219, .08)
+ *   tabBar 高度          108rpx + 安全区
  * ==========================================================================
  */
 
@@ -158,3 +160,223 @@ page {
 .t-body { font-size: 28rpx; color: #0F2540; }
 .t-caption { font-size: 24rpx; color: #6B7A8C; }
 .t-small { font-size: 22rpx; color: #98A6B8; }
+
+/* ==========================================================================
+ * UI V2 新增：页面容器 / 卡片区块 / 表单行 / 分段单选 / 筛选条
+ * ========================================================================== */
+
+/* 页面容器：底部为自定义 tabBar 留白（108rpx + 安全区） */
+.page {
+  min-height: 100vh;
+  background: #F5F7FA;
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+/* 二级页（无 tabBar）底部留白 */
+.page-sub {
+  min-height: 100vh;
+  background: #F5F7FA;
+  padding-bottom: calc(180rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.page-content {
+  padding: 0 24rpx;
+}
+
+/* 区块卡片（白底 · 大圆角 · 内部无 padding，由内部行控制） */
+.section-card {
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
+  margin-bottom: 24rpx;
+  overflow: hidden;
+}
+
+/* 区块头（标题 + 右侧"更多"） */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 28rpx 12rpx;
+}
+.section-head-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+.section-head-more {
+  font-size: 24rpx;
+  color: #98A6B8;
+}
+
+/* 编号标题（发布页 01/02/03/04） */
+.block-title {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 28rpx 28rpx 8rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+.block-title-no {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  border-radius: 10rpx;
+  padding: 2rpx 12rpx;
+}
+
+/* 表单行（左标签 / 右值 或 输入） */
+.field-row {
+  display: flex;
+  align-items: center;
+  min-height: 96rpx;
+  padding: 0 28rpx;
+  border-bottom: 1rpx solid #F1F4F8;
+}
+.field-row:last-child { border-bottom: none; }
+.field-label {
+  width: 200rpx;
+  flex-shrink: 0;
+  font-size: 28rpx;
+  color: #0F2540;
+}
+.field-value {
+  flex: 1;
+  text-align: right;
+  font-size: 28rpx;
+  color: #0F2540;
+}
+.field-value-placeholder { color: #B7C2D0; }
+.field-caret { color: #C3CCD8; font-size: 26rpx; margin-left: 8rpx; }
+.field-input {
+  flex: 1;
+  text-align: right;
+  font-size: 28rpx;
+  color: #0F2540;
+}
+.input-ph { color: #B7C2D0; }
+
+/* 半宽字段行（两个并排） */
+.field-half-row { display: flex; }
+.field-half {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 96rpx;
+  padding: 0 28rpx;
+}
+.field-half + .field-half { border-left: 1rpx solid #F1F4F8; }
+.field-half .field-label { width: auto; margin-right: 12rpx; }
+
+/* 分段单选（整船运输 / 拼船运输；运费面议 / 一口价） */
+.seg-row {
+  display: flex;
+  gap: 20rpx;
+  padding: 12rpx 28rpx 8rpx;
+}
+.seg-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  height: 76rpx;
+  border-radius: 14rpx;
+  border: 1rpx solid #E3E9F2;
+  background: #FAFBFD;
+  font-size: 26rpx;
+  color: #6B7A8C;
+}
+.seg-item-active {
+  border-color: #5C7CFA;
+  background: rgba(92, 124, 250, .08);
+  color: #3B5BDB;
+  font-weight: 600;
+}
+.seg-radio {
+  width: 26rpx;
+  height: 26rpx;
+  border-radius: 50%;
+  border: 2rpx solid #C3CCD8;
+  box-sizing: border-box;
+}
+.seg-item-active .seg-radio {
+  border: 8rpx solid #3B5BDB;
+}
+
+/* 筛选条（船东找货） */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 0 28rpx 20rpx;
+}
+.filter-pill {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  height: 60rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: #F4F6FB;
+  font-size: 25rpx;
+  color: #3D4C63;
+}
+.filter-pill-active {
+  background: rgba(59, 91, 219, .10);
+  color: #3B5BDB;
+  font-weight: 600;
+}
+.filter-sort {
+  display: flex;
+  align-items: center;
+  gap: 28rpx;
+  padding: 0 28rpx 20rpx;
+  font-size: 26rpx;
+  color: #6B7A8C;
+}
+.filter-sort-active { color: #3B5BDB; font-weight: 600; }
+
+/* 结果计数文本 */
+.result-count { font-size: 24rpx; color: #98A6B8; }
+
+/* 占位提示条（"后续开放"） */
+.soon-tip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 20rpx;
+  color: #98A6B8;
+  background: #F1F4F8;
+  border-radius: 999rpx;
+  padding: 2rpx 14rpx;
+}
+.preview-tip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 20rpx;
+  color: #7048E8;
+  background: rgba(112, 72, 232, .10);
+  border-radius: 999rpx;
+  padding: 2rpx 14rpx;
+}
+
+/* 底部固定操作条（发布页 保存草稿 / 确认发布） */
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
+  background: #FFFFFF;
+  box-shadow: 0 -4rpx 24rpx rgba(61, 90, 219, .08);
+}
+.bottom-bar .btn-ghost { flex: 1; height: 88rpx; line-height: 88rpx; text-align: center; }
+.bottom-bar .btn-primary { flex: 2; height: 88rpx; line-height: 88rpx; }

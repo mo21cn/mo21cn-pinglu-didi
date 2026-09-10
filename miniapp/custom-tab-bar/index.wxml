@@ -1,0 +1,17 @@
+<!-- 自定义 tabBar（UI V2）：5 位 · 中间凸起发布钮 · 按角色切换文案 -->
+<view class="tabbar">
+  <view class="tabbar-inner">
+    <view
+      wx:for="{{list}}"
+      wx:key="key"
+      class="tab-item {{item.center ? 'tab-center' : ''}} {{selected === index ? 'tab-active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="onTap"
+      hover-class="{{item.center ? '' : 'tab-item-hover'}}"
+    >
+      <view wx:if="{{item.center}}" class="center-btn">＋</view>
+      <view wx:else class="tab-icon">{{item.icon}}</view>
+      <view class="tab-label">{{item.label}}</view>
+    </view>
+  </view>
+</view>

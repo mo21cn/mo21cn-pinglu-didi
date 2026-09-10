@@ -1,5 +1,8 @@
-// 船东端首页（找货 · v1）
+// 船东端首页（03）· 找货
+// 货源大厅（演示数据 + 前端筛选排序）/ 我的船队 / 船舶备案
 const { request } = require('../../utils/request')
+const auth = require('../../utils/auth')
+const { syncTabBar } = require('../../utils/tabbar')
 
 const SHIP_TYPES = [
   { key: 'bulk',      label: '散货船' },
@@ -7,14 +10,6 @@ const SHIP_TYPES = [
   { key: 'container', label: '集装箱船' },
   { key: 'tanker',    label: '液货船' }
 ]
-
-const CARGO_TYPE_LABELS = {
-  bulk: '散货',
-  general: '件杂货',
-  container: '集装箱',
-  tanker: '液货',
-  other: '其他'
-}
 
 const SHIP_STATUS_LABELS = {
   pending_verify: '待审核',
@@ -33,122 +28,173 @@ const PORTS = [
   { key: 'GXL', label: '桂林' },
   { key: 'HEZ', label: '贺州' },
   { key: 'YUL', label: '玉林' },
-  { key: 'QNZ', label: '钦州（海港）' },
-  { key: 'FCG', label: '防城港（海港）' },
-  { key: 'BHZ', label: '北海（海港）' }
+  { key: 'QNZ', label: '钦州' },
+  { key: 'FCG', label: '防城港' },
+  { key: 'BHZ', label: '北海' }
 ]
 
-const MOCK_CARGO = [
-  { id: 'm1', cargo_type: 'bulk',      cargo_name: '散装水泥',  weight_t: 800,  origin_port: 'NNG', dest_port: 'GGU', expect_date: '2026-09-12', offer_price: 25000, owner_label: '张老板', distance_label: '1.5 km', time_ago: '1分钟前' },
-  { id: 'm2', cargo_type: 'container', cargo_name: '集装箱货',  weight_t: 1200, origin_port: 'QNZ', dest_port: 'FCG', expect_date: '2026-09-13', offer_price: null,  owner_label: '王经理', distance_label: '3.2 km', time_ago: '5分钟前' },
-  { id: 'm3', cargo_type: 'general',   cargo_name: '钢材配件',  weight_t: 600,  origin_port: 'LZH', dest_port: 'WUZ', expect_date: '2026-09-15', offer_price: 18000, owner_label: '李总',   distance_label: '8.6 km', time_ago: '10分钟前' },
-  { id: 'm4', cargo_type: 'tanker',    cargo_name: '食用油',    weight_t: 1500, origin_port: 'BHZ', dest_port: 'FCG', expect_date: '2026-09-14', offer_price: 42000, owner_label: '陈先生', distance_label: '12 km',  time_ago: '15分钟前' },
-  { id: 'm5', cargo_type: 'bulk',      cargo_name: '煤炭',      weight_t: 2000, origin_port: 'BSZ', dest_port: 'GGU', expect_date: '2026-09-16', offer_price: null,  owner_label: '赵老板', distance_label: '20 km',  time_ago: '20分钟前' },
-  { id: 'm6', cargo_type: 'other',     cargo_name: '工程设备',  weight_t: 300,  origin_port: 'YUL', dest_port: 'QNZ', expect_date: '2026-09-13', offer_price: 9500,  owner_label: '钱经理', distance_label: '25 km',  time_ago: '30分钟前' }
+// 货源大厅演示数据
+// 注：后端暂未开放「公开货源大厅」接口（/cargo/shipments 为货主本人的发货单），
+//     本列表为交互原型演示数据；撮合与出单仍走真实接口（货主发起）。
+const DEMO_CARGO = [
+  { id: 'd1', origin_port: 'NNG', dest_port: 'GGU', cargo_name: '水泥熟料', weight_t: 1200, price_label: '运费面议', owner_label: '陈某',   time_ago: '1小时前', distance: 4,  cargo_type: 'bulk' },
+  { id: 'd2', origin_port: 'GGU', dest_port: 'WUZ', cargo_name: '钢材',     weight_t: 800,  price_label: '运费面议', owner_label: '李老板', time_ago: '3小时前', distance: 12, cargo_type: 'general' },
+  { id: 'd3', origin_port: 'QNZ', dest_port: 'NNG', cargo_name: '设备',     weight_t: 200,  price_label: '运费面议', owner_label: '王先生', time_ago: '5小时前', distance: 26, cargo_type: 'general' },
+  { id: 'd4', origin_port: 'NNG', dest_port: 'QNZ', cargo_name: '粮食',     weight_t: 1500, price_label: '¥ 32000',  owner_label: '赵经理', time_ago: '8小时前', distance: 18, cargo_type: 'bulk' },
+  { id: 'd5', origin_port: 'BSZ', dest_port: 'GGU', cargo_name: '煤炭',     weight_t: 2000, price_label: '运费面议', owner_label: '钱老板', time_ago: '昨天',    distance: 45, cargo_type: 'bulk' }
 ]
 
 Page({
   data: {
-    tabs: [
-      { key: 'find',     label: '找货',   count: 0 },
-      { key: 'fleet',    label: '我的船队', count: 0 },
-      { key: 'registry', label: '船舶备案', count: 0 }
-    ],
-    currentTab: 'find',
-    filterRegionLabel: '全国',
-    filterTimeLabel: '时间排序',
-    cargoList: [],
-    loading: false,
+    view: 'hall',            // hall=货源大厅 fleet=我的船队 registry=船舶备案
+    defaultPortLabel: '南宁 · 平塘港',
+
+    // 货源大厅筛选
+    originKey: '', originLabel: '装货港',
+    destKey: '',   destLabel: '卸货港',
+    shipTypeKey: '', shipTypeLabel: '船型',
+    sortKey: 'latest',
+    list: [],
+
+    // 船队
     shipList: [],
     shipLoading: false,
+    shipCount: 0,
+    verifiedCount: 0,
+
+    // 备案表单
     regForm: {
-      ship_name: '',
-      ship_type: 'bulk',
-      deadweight_t: '',
-      length_m: '',
-      width_m: '',
-      draft_m: '',
-      cert_no: '',
-      cert_expiry: ''
+      ship_name: '', ship_type: 'bulk', deadweight_t: '',
+      length_m: '', width_m: '', draft_m: '', cert_no: '', cert_expiry: ''
     },
     regShipTypeLabel: '散货船',
-    regTypeIndex: 0,
     regSubmitting: false
   },
 
-  onLoad() { this.fetchCargoList() },
+  onLoad() {
+    this.applyFilter()
+    this.fetchShipList()
+  },
 
   onShow() {
-    if (this.data.currentTab === 'find') this.fetchCargoList()
-    if (this.data.currentTab === 'fleet') this.fetchShipList()
+    syncTabBar(this)
+    if (this.data.view === 'fleet') this.fetchShipList()
   },
 
   onPullDownRefresh() {
-    if (this.data.currentTab === 'find') this.fetchCargoList()
-    if (this.data.currentTab === 'fleet') this.fetchShipList()
+    if (this.data.view === 'fleet') this.fetchShipList()
+    this.applyFilter()
     wx.stopPullDownRefresh()
+  },
+
+  // ---- 顶栏 ----
+  pickDefaultPort() {
+    wx.showActionSheet({
+      itemList: PORTS.map((p) => p.label),
+      success: (res) => this.setData({ defaultPortLabel: PORTS[res.tapIndex].label })
+    })
+  },
+
+  onSwitchRole() {
+    wx.showActionSheet({
+      itemList: ['切换到货主（找船）', '切换到港口方'],
+      success: (res) => {
+        const role = res.tapIndex === 0 ? 'shipper' : 'port'
+        const url = role === 'shipper' ? '/pages/shipper/shipper' : '/pages/port/port'
+        auth.switchRole(role).then(() => wx.switchTab({ url })).catch(() => {})
+      }
+    })
   },
 
   goSearch() { wx.showToast({ title: '搜索功能开发中', icon: 'none' }) },
   goAI() { wx.navigateTo({ url: '/pages/assistant/assistant?topic=cargo' }) },
   goAssistant() { wx.navigateTo({ url: '/pages/assistant/assistant' }) },
 
-  switchTab(e) {
-    const key = e.currentTarget.dataset.key
-    this.setData({ currentTab: key })
-    if (key === 'find') this.fetchCargoList()
-    if (key === 'fleet') this.fetchShipList()
+  // ---- 货源大厅：筛选 / 排序 ----
+  pickOriginFilter() {
+    const opts = [{ key: '', label: '装货港（全部）' }].concat(PORTS.map((p) => ({ key: p.key, label: p.label })))
+    wx.showActionSheet({
+      itemList: opts.map((o) => o.label),
+      success: (res) => {
+        const o = opts[res.tapIndex]
+        this.setData({ originKey: o.key, originLabel: o.key ? o.label : '装货港' }, () => this.applyFilter())
+      }
+    })
   },
 
-  onFilterRegion() {
+  pickDestFilter() {
+    const opts = [{ key: '', label: '卸货港（全部）' }].concat(PORTS.map((p) => ({ key: p.key, label: p.label })))
     wx.showActionSheet({
-      itemList: ['全国', '西江干线', '北部湾', '广西内河'],
+      itemList: opts.map((o) => o.label),
       success: (res) => {
-        const labels = ['全国', '西江干线', '北部湾', '广西内河']
-        this.setData({ filterRegionLabel: labels[res.tapIndex] })
+        const o = opts[res.tapIndex]
+        this.setData({ destKey: o.key, destLabel: o.key ? o.label : '卸货港' }, () => this.applyFilter())
       }
     })
   },
-  onFilterTime() {
+
+  pickShipTypeFilter() {
+    const opts = [{ key: '', label: '船型（全部）' }].concat(SHIP_TYPES.map((t) => ({ key: t.key, label: t.label })))
     wx.showActionSheet({
-      itemList: ['时间倒序', '时间正序', '距离最近', '出价最高'],
+      itemList: opts.map((o) => o.label),
       success: (res) => {
-        const labels = ['时间排序', '时间倒序', '时间正序', '距离最近', '出价最高']
-        this.setData({ filterTimeLabel: labels[res.tapIndex] || '时间排序' })
+        const o = opts[res.tapIndex]
+        this.setData({ shipTypeKey: o.key, shipTypeLabel: o.key ? o.label : '船型' }, () => this.applyFilter())
       }
     })
   },
+
+  pickSort(e) {
+    this.setData({ sortKey: e.currentTarget.dataset.sort }, () => this.applyFilter())
+  },
+
   onFilterMore() {
-    wx.showToast({ title: '筛选面板开发中', icon: 'none' })
+    wx.showToast({ title: '高级筛选（吨位/日期/出价）开发中', icon: 'none', duration: 2000 })
   },
 
-  fetchCargoList() {
-    this.setData({ loading: true })
-    setTimeout(() => {
-      this.setData({ cargoList: MOCK_CARGO, loading: false })
-    }, 300)
+  applyFilter() {
+    const { originKey, destKey, shipTypeKey, sortKey } = this.data
+    // 注意：船型筛选在演示数据上按货类近似匹配（散货→散货船等）
+    let list = DEMO_CARGO.filter((it) => {
+      if (originKey && it.origin_port !== originKey) return false
+      if (destKey && it.dest_port !== destKey) return false
+      if (shipTypeKey && it.cargo_type !== shipTypeKey) return false
+      return true
+    })
+    list = list.map((it) => ({
+      ...it,
+      origin_label: this.portLabel(it.origin_port),
+      dest_label: this.portLabel(it.dest_port)
+    }))
+    if (sortKey === 'distance') list.sort((a, b) => a.distance - b.distance)
+    this.setData({ list })
   },
 
-  onCargoTap(e) {
+  onViewCargo(e) {
     const item = e.currentTarget.dataset.item
     wx.showModal({
-      title: '货源详情',
-      content: `${item.cargo_name}\n${item.weight_t} 吨\n${item.origin_port} → ${item.dest_port}\n${item.expect_date} 装\n${item.offer_price ? '¥ ' + item.offer_price : '面议'}`,
-      confirmText: '立即抢单',
-      cancelText: '关闭',
+      title: `${item.origin_label} → ${item.dest_label}`,
+      content: `${item.cargo_name} · ${item.weight_t} 吨\n运价：${item.price_label}\n货主：${item.owner_label}\n\n订单由货主发起。建议先发布空船信息提高曝光，货主可直接向您下单。`,
+      confirmText: '发布空船',
+      cancelText: '知道了',
       success: (res) => {
-        if (res.confirm) this.grabCargo(item.id)
+        if (res.confirm) wx.navigateTo({ url: '/pages/publish/ship/ship' })
       }
     })
   },
 
-  onGrab(e) {
-    const id = e.currentTarget.dataset.id
-    this.grabCargo(id)
+  // ---- 我的船队 / 备案（保留已开发能力） ----
+  goFleet() {
+    this.setData({ view: 'fleet' })
+    this.fetchShipList()
   },
 
-  grabCargo(id) {
-    wx.showToast({ title: '抢单接口开发中 · 敬请期待', icon: 'none', duration: 2000 })
+  backToHall() {
+    this.setData({ view: 'hall' })
+  },
+
+  goRegistry() {
+    this.setData({ view: 'registry' })
   },
 
   fetchShipList() {
@@ -159,7 +205,7 @@ Page({
         this.setData({
           shipList: items,
           shipCount: items.length,
-          'tabs[1].count': items.filter((s) => s.status === 'verified').length
+          verifiedCount: items.filter((s) => s.status === 'verified').length
         })
       })
       .catch(() => {})
@@ -171,10 +217,6 @@ Page({
     wx.navigateTo({ url: `/pages/trade/match/match?mode=ship&refId=${id}` })
   },
 
-  goAddShip() {
-    this.setData({ currentTab: 'registry' })
-  },
-
   onRegInput(e) {
     const field = e.currentTarget.dataset.field
     this.setData({ [`regForm.${field}`]: e.detail.value })
@@ -184,13 +226,8 @@ Page({
     wx.showActionSheet({
       itemList: SHIP_TYPES.map((t) => t.label),
       success: (res) => {
-        const idx = res.tapIndex
-        const item = SHIP_TYPES[idx]
-        this.setData({
-          regTypeIndex: idx,
-          regShipTypeLabel: item.label,
-          'regForm.ship_type': item.key
-        })
+        const t = SHIP_TYPES[res.tapIndex]
+        this.setData({ regShipTypeLabel: t.label, 'regForm.ship_type': t.key })
       }
     })
   },
@@ -202,8 +239,8 @@ Page({
     if (!f.draft_m || Number(f.draft_m) <= 0) return wx.showToast({ title: '请填写满载吃水', icon: 'none' })
     if (!f.cert_no) return wx.showToast({ title: '请填写检验证书号', icon: 'none' })
     if (!f.cert_expiry) return wx.showToast({ title: '请填写证书有效期', icon: 'none' })
-
     if (this.data.regSubmitting) return
+
     this.setData({ regSubmitting: true })
     request({
       url: '/api/v1/ship/registry',
@@ -212,8 +249,8 @@ Page({
         ship_name: f.ship_name,
         ship_type: f.ship_type,
         deadweight_t: Number(f.deadweight_t),
-        length_m: Number(f.length_m || 0),
-        width_m: Number(f.width_m || 0),
+        length_m: Number(f.length_m || 1),
+        width_m: Number(f.width_m || 1),
         draft_m: Number(f.draft_m),
         cert_no: f.cert_no,
         cert_expiry: f.cert_expiry
@@ -224,25 +261,21 @@ Page({
         this.setData({
           regForm: {
             ship_name: '', ship_type: 'bulk', deadweight_t: '',
-            length_m: '', width_m: '', draft_m: '',
-            cert_no: '', cert_expiry: ''
+            length_m: '', width_m: '', draft_m: '', cert_no: '', cert_expiry: ''
           }
         })
         this.fetchShipList()
-        this.setData({ currentTab: 'fleet' })
+        this.setData({ view: 'fleet' })
       })
       .catch(() => {})
       .finally(() => this.setData({ regSubmitting: false }))
   },
 
-  cargoTypeLabel(t) { return CARGO_TYPE_LABELS[t] || t },
-  shipStatusLabel(s) { return SHIP_STATUS_LABELS[s] || s },
+  // ---- 工具 ----
   portLabel(key) {
     const p = PORTS.find((x) => x.key === key)
     return p ? p.label : key
   },
 
-  onPromoTap() {
-    wx.showToast({ title: '活动详情开发中', icon: 'none' })
-  }
+  shipStatusLabel(s) { return SHIP_STATUS_LABELS[s] || s }
 })
