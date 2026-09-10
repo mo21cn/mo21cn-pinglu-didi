@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.database import engine
 from app.models import Base
+from app.modules.agent import router as agent_router
 from app.modules.auth import router as auth_router
 from app.modules.cargo import router as cargo_router
 from app.modules.match import router as match_router
@@ -40,6 +41,7 @@ async def healthz() -> dict[str, str]:
 
 
 # ---- 业务路由注册（MVP 迭代逐步挂载） ----
+app.include_router(agent_router, prefix=f"{settings.API_PREFIX}/agent", tags=["agent"])
 app.include_router(auth_router, prefix=f"{settings.API_PREFIX}/auth", tags=["auth"])
 app.include_router(cargo_router, prefix=f"{settings.API_PREFIX}/cargo", tags=["cargo"])
 app.include_router(ship_router, prefix=f"{settings.API_PREFIX}/ship", tags=["ship"])
