@@ -44,3 +44,22 @@ class CargoParseResult(BaseModel):
     )
     mocked: bool = Field(default=False, description="是否为规则模板输出（LLM_MOCK）")
     latency_ms: int = Field(default=0, description="解析耗时（毫秒）")
+
+
+class AssistantRequest(BaseModel):
+    """客服导购请求（FAQ / 航线 / 用法咨询，纯读）。"""
+
+    question: str = Field(..., min_length=2, max_length=512, description="用户问题")
+    history: list[dict] = Field(
+        default_factory=list,
+        max_length=10,
+        description="多轮上下文（[{role, content}]，最近 10 条）",
+    )
+
+
+class AssistantResult(BaseModel):
+    """客服导购回答。"""
+
+    answer: str = Field(..., min_length=1, description="回答文本（Markdown 简易格式）")
+    mocked: bool = Field(default=False, description="是否为规则模板输出（LLM_MOCK）")
+    latency_ms: int = Field(default=0, description="回答耗时（毫秒）")

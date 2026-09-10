@@ -101,6 +101,38 @@ def test_cargo_parse_llm_failure_degrades(shipper, client, monkeypatch):
     assert "稍后重试" in resp.json()["detail"]
 
 
+# ---------- F10 客服导购 ----------
+
+def test_assistant_mock_faq(shipper, client):
+    """关键词命中 FAQ 模板（mock 模式）。"""
+    resp = client.post(
+        "/api/v1/agent/assistant",
+        json={"question": "怎么发布货源？"},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "发布货源" in body["answer"]
+    assert body["mocked"] is True
+
+
+def test_assistant_available_to_all_roles(owner, client):
+    """客服问答不限角色（对比 cargo-parse 的 shipper 限定）。"""
+    resp = client.post(
+        "/api/v1/agent/assistant",
+        json={"question": "平台支持哪些港口？"},
+        headers=owner["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert "13" in resp.json()["answer"] or "港口" in resp.json()["answer"]
+
+
+def test_assistant_requires_auth(client):
+    """未登录 401。"""
+    resp = client.post("/api/v1/agent/assistant", json={"question": "怎么发货"})
+    assert resp.status_code == 401
+
+
 def test_audit_row_written_on_success_and_failure():
     """审计留痕（工程底线 3）：成功与失败各落一行 AgentCall。"""
     engine = create_engine(
