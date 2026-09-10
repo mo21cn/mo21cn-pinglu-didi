@@ -43,12 +43,15 @@ async def chat_json(
     system: str,
     user: str,
     temperature: float = 0.1,
+    mock_content: Any = None,
 ) -> LLMResult:
     """调用 LLM 并强制返回 JSON 对象。
 
     - 真实模式：``response_format={"type": "json_object"}`` 约束输出；
       响应体必须能 ``json.loads`` 出 dict，否则抛 ``bad_response``。
-    - Mock 模式：委托 ``_mock_chat_json``（规则模板，调用方需保证 system 语义自解释）。
+    - Mock 模式：默认走货源解析规则模板；调用方可传 ``mock_content``
+      （``Callable[[str], dict]``）注入自己的领域模板，保证各 Agent
+      在 LLM_MOCK 下输出结构与真实模式同构（CI 可全链路验证）。
     """
     settings = get_settings()
     import time
@@ -56,7 +59,7 @@ async def chat_json(
     started = time.monotonic()
 
     if settings.LLM_MOCK or not settings.LLM_API_KEY:
-        content = _mock_chat_json(user)
+        content = mock_content(user) if callable(mock_content) else _mock_chat_json(user)
         return LLMResult(
             content=content,
             raw=json.dumps(content, ensure_ascii=False),

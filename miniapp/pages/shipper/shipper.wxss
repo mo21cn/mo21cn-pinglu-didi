@@ -31,3 +31,13 @@
 .btn-primary { background: #0f7cff; color: #fff; font-size: 30rpx; border-radius: 16rpx; }
 .btn-mini { border-radius: 10rpx; font-size: 24rpx; }
 .btn-ghost { background: #f1f4f8; color: #6b7a8c; }
+
+/* 智能填写（一句话发货） */
+.ai-card { background: linear-gradient(135deg, #eef4ff, #f6f0ff); border: 1rpx solid rgba(15,124,255,.18); border-radius: 16rpx; padding: 24rpx; margin-bottom: 28rpx; }
+.ai-head { display: flex; align-items: center; gap: 10rpx; margin-bottom: 16rpx; flex-wrap: wrap; }
+.ai-icon { font-size: 30rpx; }
+.ai-title { font-size: 28rpx; font-weight: 600; color: #0f2540; }
+.ai-sub { font-size: 20rpx; color: #6b7a8c; }
+.ai-row { margin-bottom: 16rpx; }
+.ai-input { background: #fff; border-radius: 12rpx; padding: 18rpx 20rpx; font-size: 28rpx; color: #0f2540; width: auto; min-height: 80rpx; }
+.btn-ai { background: #0f7cff; color: #fff; }
