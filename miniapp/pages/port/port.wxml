@@ -1,18 +1,36 @@
-<!-- 港口工作台：泊位预约审核 / 泊位管理 -->
+<!--
+  港口工作台（v1）
+  注：用户正在构思二级页完整 UI，本期保留核心功能 + 顶部加"改造中"提示
+-->
 <view class="page">
-  <!-- Tab 切换 -->
-  <view class="tabs">
-    <view class="tab {{tab === 'appts' ? 'active' : ''}}" bindtap="switchTab" data-tab="appts">
-      预约审核{{apptTotal > 0 ? ' (' + apptTotal + ')' : ''}}
+  <view class="top-bar">
+    <view class="top-bar-row">
+      <view class="top-bar-logo">🏗</view>
+      <view class="top-bar-title">港口方工作台</view>
     </view>
-    <view class="tab {{tab === 'list' ? 'active' : ''}}" bindtap="switchTab" data-tab="list">泊位管理</view>
-    <view class="tab {{tab === 'new' ? 'active' : ''}}" bindtap="switchTab" data-tab="new">新建泊位</view>
+    <view class="top-bar-sub">泊位调度 · 港作协同</view>
   </view>
 
-  <!-- ============ 预约审核 ============ -->
+  <view class="dev-banner">
+    <view class="dev-banner-icon">🚧</view>
+    <view class="dev-banner-body">
+      <view class="dev-banner-title">二级页 UI 改造中</view>
+      <view class="dev-banner-sub">核心预约审核 / 泊位管理 / 新建泊位功能已可用，下版本升级视觉</view>
+    </view>
+  </view>
+
+  <view class="tabs">
+    <view class="tab {{tab === 'appts' ? 'tab-active' : ''}}" bindtap="switchTab" data-tab="appts">
+      预约审核{{apptTotal > 0 ? ' (' + apptTotal + ')' : ''}}
+    </view>
+    <view class="tab {{tab === 'list' ? 'tab-active' : ''}}" bindtap="switchTab" data-tab="list">泊位管理</view>
+    <view class="tab {{tab === 'new' ? 'tab-active' : ''}}" bindtap="switchTab" data-tab="new">新建泊位</view>
+  </view>
+
   <view wx:if="{{tab === 'appts'}}">
     <view wx:if="{{!loading && apptList.length === 0}}" class="empty">
-      <text>暂无待确认的泊位预约</text>
+      <view class="empty-icon">📅</view>
+      <view>暂无待确认的泊位预约</view>
     </view>
     <view wx:for="{{apptList}}" wx:key="id" class="card">
       <view class="card-head">
@@ -32,18 +50,16 @@
         <text>{{item.remark}}</text>
       </view>
       <view class="actions">
-        <button class="btn btn-primary" size="mini" data-id="{{item.id}}" bindtap="confirmAppt">
-          确认（锁定档期）
-        </button>
+        <button class="btn btn-primary" size="mini" data-id="{{item.id}}" bindtap="confirmAppt">确认（锁定档期）</button>
         <button class="btn btn-danger" size="mini" data-id="{{item.id}}" bindtap="rejectAppt">驳回</button>
       </view>
     </view>
   </view>
 
-  <!-- ============ 泊位管理 ============ -->
   <view wx:if="{{tab === 'list'}}">
     <view wx:if="{{!loading && berthList.length === 0}}" class="empty">
-      <text>暂无泊位，请先新建</text>
+      <view class="empty-icon">⚓</view>
+      <view>暂无泊位，请先新建</view>
     </view>
     <view wx:for="{{berthList}}" wx:key="id" class="card">
       <view class="card-head">
@@ -67,7 +83,6 @@
     </view>
   </view>
 
-  <!-- ============ 新建泊位 ============ -->
   <view wx:if="{{tab === 'new'}}" class="form">
     <view class="form-item">
       <text class="label">所属港口</text>

@@ -1,4 +1,4 @@
-// 港口工作台：泊位管理 / 预约审核
+// 港口工作台（v1 · 蓝紫渐变头 + 原核心功能保留）
 const { request } = require('../../utils/request')
 
 const PORTS = [
@@ -26,7 +26,6 @@ Page({
   data: {
     tab: 'appts',
     ports: PORTS,
-    // 泊位表单
     form: {
       port_code: 'NNG',
       berth_no: '',
@@ -36,7 +35,6 @@ Page({
       concurrent_capacity: '1'
     },
     portIndex: 0,
-    // 列表数据
     berthList: [],
     apptList: [],
     apptTotal: 0,
@@ -45,9 +43,7 @@ Page({
     loading: false
   },
 
-  onLoad() {
-    this.fetchAppts()
-  },
+  onLoad() { this.fetchAppts() },
 
   onShow() {
     if (this.data.tab === 'appts') this.fetchAppts()
@@ -67,13 +63,10 @@ Page({
     if (tab === 'appts') this.fetchAppts()
   },
 
-  // ---- 数据拉取 ----
   fetchBerths() {
     this.setData({ loading: true })
     request({ url: '/api/v1/port/berths', data: { size: 50 } })
-      .then((res) => {
-        this.setData({ berthList: res.items || [] })
-      })
+      .then((res) => this.setData({ berthList: res.items || [] }))
       .catch(() => {})
       .finally(() => this.setData({ loading: false }))
   },
@@ -81,14 +74,11 @@ Page({
   fetchAppts() {
     this.setData({ loading: true })
     request({ url: '/api/v1/port/appts-review', data: { status: 'pending', size: 50 } })
-      .then((res) => {
-        this.setData({ apptList: res.items || [], apptTotal: res.total || 0 })
-      })
+      .then((res) => this.setData({ apptList: res.items || [], apptTotal: res.total || 0 }))
       .catch(() => {})
       .finally(() => this.setData({ loading: false }))
   },
 
-  // ---- 表单事件 ----
   onInput(e) {
     const field = e.currentTarget.dataset.field
     this.setData({ [`form.${field}`]: e.detail.value })
@@ -99,7 +89,6 @@ Page({
     this.setData({ portIndex: idx, 'form.port_code': PORTS[idx].code })
   },
 
-  /** 新建泊位 */
   submitForm() {
     const f = this.data.form
     if (!f.berth_no) return wx.showToast({ title: '请填写泊位号', icon: 'none' })
@@ -131,7 +120,6 @@ Page({
       .finally(() => this.setData({ submitting: false }))
   },
 
-  // ---- 预约审核 ----
   confirmAppt(e) {
     const id = e.currentTarget.dataset.id
     request({ url: `/api/v1/port/appts/${id}/confirm`, method: 'POST' })
@@ -156,8 +144,5 @@ Page({
       .catch((err) => wx.showToast({ title: err.message || '操作失败', icon: 'none' }))
   },
 
-  // ---- 通用 ----
-  goBack() {
-    wx.navigateBack()
-  }
+  goBack() { wx.navigateBack() }
 })

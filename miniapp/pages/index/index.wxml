@@ -1,54 +1,72 @@
-<!-- 首页：登录 / 三角色工作台 -->
+<!--
+  首屏：角色选择浮窗（v1）
+-->
 <view class="page">
-  <view class="header">
-    <text class="title">平陆运河 · 滴滴打船</text>
-    <text class="subtitle">货—船—港 三合一撮合平台</text>
-  </view>
-
-  <!-- 未登录：微信一键登录 -->
-  <view wx:if="{{!isLoggedIn}}" class="login-card">
-    <view class="login-icon">⚓</view>
-    <text class="login-desc">登录后可发布货源、找船接单、协同港口作业</text>
-    <button class="btn-primary" loading="{{logging}}" bindtap="handleLogin">微信一键登录</button>
-  </view>
-
-  <!-- 已登录：用户信息 + 角色卡 -->
-  <block wx:else>
-    <view class="user-card">
-      <view class="user-row">
-        <text class="user-name">{{user.nickname || '船友'}}</text>
-        <text class="user-role">{{user.role_label}}</text>
-      </view>
-      <text class="user-logout" bindtap="handleLogout">退出登录</text>
+  <view class="brand-hero">
+    <view class="hero-logo-row">
+      <view class="hero-logo-mark">⛵</view>
+      <view class="hero-logo-text">新船帮 · XCB</view>
     </view>
+    <view class="hero-title">平陆运河 · 滴滴打船</view>
+    <view class="hero-sub">货 · 船 · 港 一站式撮合</view>
+    <view class="hero-deco hero-deco-1"></view>
+    <view class="hero-deco hero-deco-2"></view>
+  </view>
 
-    <view class="section-title">我的角色工作台</view>
-    <view class="role-list">
+  <view class="role-sheet">
+    <view class="sheet-handle"></view>
+    <view class="sheet-title">请选择您的身份</view>
+    <view class="sheet-sub">不同身份看到的工作台不同，请按实际选择</view>
+
+    <view class="role-grid">
       <view
-        wx:for="{{roles}}"
-        wx:key="key"
-        class="role-card {{currentRole === item.key ? 'role-active' : ''}}"
-        data-role="{{item.key}}"
-        data-page="{{item.page}}"
-        bindtap="handleEnterWorkspace"
+        class="role-card role-shipper {{pendingRole === 'shipper' ? 'role-pending' : ''}}"
+        data-role="shipper"
+        bindtap="onPickRole"
+        hover-class="role-card-hover"
       >
-        <view class="role-head">
-          <text class="role-label">{{item.label}}</text>
-          <text wx:if="{{currentRole === item.key}}" class="role-badge">当前</text>
-        </view>
-        <text class="role-desc">{{item.desc}}</text>
+        <view class="role-card-icon">🚢</view>
+        <view class="role-card-label">我是货主</view>
+        <view class="role-card-desc">发货找船 · 一句话生成货源</view>
+        <view class="role-card-tag">点此进入 ›</view>
+      </view>
+
+      <view
+        class="role-card role-owner {{pendingRole === 'owner' ? 'role-pending' : ''}}"
+        data-role="owner"
+        bindtap="onPickRole"
+        hover-class="role-card-hover"
+      >
+        <view class="role-card-icon">⚓</view>
+        <view class="role-card-label">我是船东</view>
+        <view class="role-card-desc">接单找货 · 海量货源抢单</view>
+        <view class="role-card-tag">点此进入 ›</view>
       </view>
     </view>
 
-    <view class="section-title">切换当前角色</view>
-    <view class="switch-row">
-      <button
-        wx:for="{{roles}}"
-        wx:key="key"
-        class="btn-switch {{currentRole === item.key ? 'btn-switch-active' : ''}}"
-        data-role="{{item.key}}"
-        bindtap="handleSwitchRole"
-      >{{item.label}}</button>
+    <view class="port-entry" bindtap="onPickRole" data-role="port" hover-class="port-entry-hover">
+      <text class="port-entry-icon">🏗</text>
+      <text class="port-entry-text">我是港口方</text>
+      <text class="port-entry-arrow">›</text>
     </view>
-  </block>
+  </view>
+
+  <view class="bottom-area">
+    <view class="other-title">其他登录方式</view>
+    <view class="other-row">
+      <view class="other-btn" bindtap="onOneClick" hover-class="other-btn-hover">
+        <view class="other-icon">📱</view>
+        <view class="other-text">一键登录</view>
+      </view>
+      <view class="other-btn" bindtap="onWechatLogin" hover-class="other-btn-hover">
+        <view class="other-icon other-icon-wechat">💬</view>
+        <view class="other-text">微信登录</view>
+      </view>
+    </view>
+    <view class="agreement">
+      登录即代表您同意
+      <text class="link">《用户服务协议》</text>和
+      <text class="link">《隐私政策》</text>
+    </view>
+  </view>
 </view>

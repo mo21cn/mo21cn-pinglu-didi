@@ -1,4 +1,5 @@
 {
   "usingComponents": {},
-  "navigationBarTitleText": "工作台"
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "滴滴打船"
 }
