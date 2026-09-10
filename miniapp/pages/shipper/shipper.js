@@ -60,7 +60,10 @@ Page({
     total: 0,
     statusLabels: STATUS_LABELS,
     submitting: false,
-    loading: false
+    loading: false,
+    // 智能填写（一句话发货）
+    aiText: '',
+    aiParsing: false
   },
 
   onLoad() {
@@ -112,6 +115,44 @@ Page({
     this.setData({ 'form.expect_date': e.detail.value })
   },
 
+  // ---- 智能填写：一句话发货（Agent 草稿回填，人工核对后提交） ----
+  aiParse() {
+    const text = (this.data.aiText || '').trim()
+    if (text.length < 4) return wx.showToast({ title: '请先描述货源（如：800吨水泥南宁到贵港）', icon: 'none' })
+    if (this.data.aiParsing) return
+    this.setData({ aiParsing: true })
+    request({ url: '/api/v1/agent/cargo-parse', method: 'POST', data: { text } })
+      .then((res) => {
+        const d = res.draft || {}
+        const patch = {}
+        // 直接字段
+        if (d.cargo_name) patch['form.cargo_name'] = d.cargo_name
+        if (d.weight_t) patch['form.weight_t'] = String(d.weight_t)
+        if (d.expect_date) patch['form.expect_date'] = d.expect_date
+        if (d.offer_price != null) patch['form.offer_price'] = String(d.offer_price)
+        // picker 索引同步（货类/起运港/目的港）
+        if (d.cargo_type) {
+          const i = CARGO_TYPES.findIndex((t) => t.key === d.cargo_type)
+          if (i >= 0) { patch.typeIndex = i; patch['form.cargo_type'] = d.cargo_type }
+        }
+        if (d.origin_port) {
+          const i = PORTS.findIndex((p) => p.key === d.origin_port)
+          if (i >= 0) { patch.originIndex = i; patch['form.origin_port'] = d.origin_port }
+        }
+        if (d.dest_port) {
+          const i = PORTS.findIndex((p) => p.key === d.dest_port)
+          if (i >= 0) { patch.destIndex = i; patch['form.dest_port'] = d.dest_port }
+        }
+        this.setData(patch)
+        const review = res.needs_review || []
+        const tips = { cargo_name: '货物名称', cargo_type: '货类', weight_t: '重量', origin_port: '起运港', dest_port: '目的港', expect_date: '装货日期', offer_price: '出价' }
+        const missing = review.map((k) => tips[k] || k).join('、')
+        wx.showToast({ title: missing ? `已填表，请补充：${missing}` : '已填表，请核对提交', icon: 'none', duration: 2500 })
+      })
+      .catch(() => {})
+      .finally(() => this.setData({ aiParsing: false }))
+  },
+
   /** 提交货源（默认直接发布进入撮合池） */
   submitForm() {
     const f = this.data.form
@@ -154,6 +195,17 @@ Page({
         this.fetchList()
       })
       .catch(() => {})
+  },
+
+  /** 已发布货源 → 跳转撮合页找候选船（可下单） */
+  onMatch(e) {
+    const id = e.currentTarget.dataset.id
+    wx.navigateTo({ url: `/pages/trade/match/match?mode=cargo&refId=${id}` })
+  },
+
+  /** 查看我的订单（支付/签收/撤单） */
+  goOrders() {
+    wx.navigateTo({ url: '/pages/trade/orders/orders' })
   },
 
   /** 角色不符时引导切换 */

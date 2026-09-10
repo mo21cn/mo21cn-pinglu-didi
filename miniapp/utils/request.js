@@ -16,10 +16,11 @@ function clearToken() {
 
 /**
  * 通用请求
- * @param {object} opts {url, method, data, auth} auth=true 时自动附带 Bearer token
+ * @param {object} opts {url, method, data, auth, silent} auth=true 时自动附带 Bearer token；
+ *   silent=true 时不自动弹错误 toast（供调用方自行处理预期内失败，如 404 探测）
  */
 function request(opts) {
-  const { url, method = 'GET', data = {}, auth = true } = opts
+  const { url, method = 'GET', data = {}, auth = true, silent = false } = opts
   return new Promise((resolve, reject) => {
     const header = { 'Content-Type': 'application/json' }
     if (auth && getToken()) {
@@ -39,12 +40,12 @@ function request(opts) {
           reject(new Error('unauthorized'))
         } else {
           const detail = (res.data && res.data.detail) || '请求失败'
-          wx.showToast({ title: String(detail), icon: 'none' })
+          if (!silent) wx.showToast({ title: String(detail), icon: 'none' })
           reject(new Error(String(detail)))
         }
       },
       fail(err) {
-        wx.showToast({ title: '网络异常，请稍后重试', icon: 'none' })
+        if (!silent) wx.showToast({ title: '网络异常，请稍后重试', icon: 'none' })
         reject(err)
       }
     })

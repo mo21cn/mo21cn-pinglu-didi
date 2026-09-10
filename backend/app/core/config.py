@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     """全局配置模型。字段可从对应 `.env.{APP_ENV}` 或系统环境变量读取。"""
 
     model_config = SettingsConfigDict(
-        env_file=f".env.{APP_ENV}",
+        # 多文件叠加：.env.{APP_ENV} 为环境基线，.env.local 为本机敏感值最高优先级覆盖
+        # （.env.local 已在 .gitignore，不入库；列表越靠后优先级越高）
+        env_file=(f".env.{APP_ENV}", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -73,6 +75,13 @@ class Settings(BaseSettings):
     # ---- 智能体 ----
     LLM_GATEWAY_URL: str = ""
     VECTOR_DB_URL: str = ""
+    # LLM 供应商（DeepSeek 等 OpenAI 兼容协议；LLM_MOCK=true 时走规则模板，供无 Key 开发/CI）
+    LLM_PROVIDER: str = "deepseek"
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://api.deepseek.com"
+    LLM_MODEL: str = "deepseek-chat"
+    LLM_MOCK: bool = False
+    LLM_TIMEOUT_SECONDS: int = 60
 
     @property
     def is_production(self) -> bool:

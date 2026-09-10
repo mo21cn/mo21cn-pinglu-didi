@@ -22,15 +22,38 @@
         <text wx:if="{{item.offer_price}}">¥ {{item.offer_price}}</text>
         <text wx:else>面议</text>
       </view>
-      <view wx:if="{{item.status === 'draft' || item.status === 'published'}}" class="card-actions">
+      <view wx:if="{{item.status === 'draft' || item.status === 'published' || item.status === 'matched' || item.status === 'shipped'}}" class="card-actions">
         <button wx:if="{{item.status === 'draft'}}" class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" data-action="publish" bindtap="onAction">发布</button>
-        <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" data-action="cancel" bindtap="onAction">取消</button>
+        <button wx:if="{{item.status === 'published'}}" class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onMatch">智能找船</button>
+        <button wx:if="{{item.status === 'matched' || item.status === 'shipped'}}" class="btn-mini btn-primary" size="mini" bindtap="goOrders">查看订单</button>
+        <button wx:if="{{item.status === 'draft' || item.status === 'published'}}" class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" data-action="cancel" bindtap="onAction">取消</button>
       </view>
     </view>
   </view>
 
   <!-- 发布表单 -->
   <view wx:if="{{tab === 'form'}}" class="form">
+    <!-- 智能填写：一句话发货（Agent 草稿回填，人工核对后提交） -->
+    <view class="ai-card">
+      <view class="ai-head">
+        <text class="ai-icon">✨</text>
+        <text class="ai-title">一句话发货</text>
+        <text class="ai-sub">AI 解析成草稿，自动填入下方表单</text>
+      </view>
+      <view class="ai-row">
+        <textarea
+          class="ai-input"
+          placeholder="如：我有800吨散装水泥，下周从南宁运到贵港，运费2万5"
+          value="{{aiText}}"
+          data-field="aiText"
+          bindinput="onInput"
+          maxlength="200"
+          auto-height
+        ></textarea>
+      </view>
+      <button class="btn-mini btn-ai" size="mini" loading="{{aiParsing}}" bindtap="aiParse">解析并填表</button>
+    </view>
+
     <view class="field">
       <text class="label">货物名称 *</text>
       <input class="input" placeholder="如：散装水泥" value="{{form.cargo_name}}" data-field="cargo_name" bindinput="onInput" />

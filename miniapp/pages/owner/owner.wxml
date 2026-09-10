@@ -3,6 +3,7 @@
   <view class="tabs">
     <view class="tab {{tab === 'list' ? 'tab-active' : ''}}" data-tab="list" bindtap="switchTab">我的船队（{{total}}）</view>
     <view class="tab {{tab === 'form' ? 'tab-active' : ''}}" data-tab="form" bindtap="switchTab">船舶备案</view>
+    <view class="tab" bindtap="goOrders">我的订单</view>
   </view>
 
   <!-- 船队列表 -->
@@ -23,6 +24,9 @@
         <text>有效期至 {{item.cert_expiry}}</text>
       </view>
       <view wx:if="{{item.status === 'rejected'}}" class="reject-reason">驳回原因：{{item.reject_reason}}</view>
+      <view wx:if="{{item.status === 'verified'}}" class="card-actions">
+        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onMatch">智能找货</button>
+      </view>
     </view>
   </view>
 

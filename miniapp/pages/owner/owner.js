@@ -109,6 +109,17 @@ Page({
       .finally(() => this.setData({ submitting: false }))
   },
 
+  /** 已过审船舶 → 跳转撮合页找候选货源 */
+  onMatch(e) {
+    const id = e.currentTarget.dataset.id
+    wx.navigateTo({ url: `/pages/trade/match/match?mode=ship&refId=${id}` })
+  },
+
+  /** 我的订单（启运/撤单） */
+  goOrders() {
+    wx.navigateTo({ url: '/pages/trade/orders/orders' })
+  },
+
   /** 角色不符时引导切换 */
   ensureRole() {
     const auth = require('../../utils/auth')
