@@ -46,6 +46,8 @@
         <text class="section-head-more" bindtap="resetFilter">查看全部 ›</text>
       </view>
 
+      <view wx:if="{{list.length}}" class="list-hint">「查看合同」进入合同页 · 长按订单卡快速预览</view>
+
       <view wx:if="{{loading && list.length === 0}}" class="empty">加载中...</view>
       <view wx:elif="{{list.length === 0}}" class="empty">
         <view class="empty-icon">📋</view>
@@ -53,7 +55,14 @@
       </view>
 
       <view wx:else class="order-list">
-        <view wx:for="{{list}}" wx:key="id" class="order-card" hover-class="row-hover">
+        <view
+          wx:for="{{list}}"
+          wx:key="id"
+          class="order-card"
+          hover-class="row-hover"
+          data-id="{{item.id}}"
+          bindlongpress="onPreviewContract"
+        >
           <view class="order-head">
             <view class="order-route">
               <text class="or-name">{{item.origin_label}}</text>
@@ -79,7 +88,7 @@
               wx:if="{{item.status === 'matched' || item.status === 'shipped'}}"
               class="act-ghost"
               data-id="{{item.id}}"
-              catchtap="onContract"
+              catchtap="onContractPage"
             >查看合同</view>
 
             <block wx:if="{{role === 'shipper'}}">
