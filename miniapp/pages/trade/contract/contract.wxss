@@ -136,40 +136,6 @@
   line-height: 1.6;
 }
 
-/* ---- 兜底态 ---- */
-.err-card {
-  background: #FFFFFF;
-  border-radius: 24rpx;
-  padding: 60rpx 28rpx;
-  text-align: center;
-  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
-}
-
-.err-title {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #0F2540;
-}
-
-.err-detail {
-  margin-top: 12rpx;
-  font-size: 25rpx;
-  color: #6B7A8C;
-  line-height: 1.6;
-}
-
-.err-btn {
-  display: inline-block;
-  margin-top: 32rpx;
-  padding: 0 48rpx;
-  height: 72rpx;
-  line-height: 72rpx;
-  border-radius: 16rpx;
-  background: linear-gradient(135deg, #3B5BDB, #7048E8);
-  color: #FFFFFF;
-  font-size: 28rpx;
-}
-
 /* ---- 底部固定操作条（提示行 + 按钮行）
    注：.bar-note / .bar-actions / .btn-disabled 已提升到 app.wxss 作为三级页共享工具类 ---- */
 .contract-bar {

@@ -192,51 +192,9 @@
 }
 
 /* ---- 页脚说明 ---- */
-.tl-foot {
-  padding: 18rpx 28rpx 24rpx;
-  border-top: 1rpx solid #F1F4F8;
-  font-size: 22rpx;
-  color: #98A6B8;
-  line-height: 1.6;
-}
-
 .tl-foot-plain {
   border-top: none;
   padding-top: 8rpx;
   font-size: 24rpx;
   color: #6B7A8C;
-}
-
-/* ---- 兜底态 ---- */
-.err-card {
-  background: #FFFFFF;
-  border-radius: 24rpx;
-  padding: 60rpx 28rpx;
-  text-align: center;
-  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
-}
-
-.err-title {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #0F2540;
-}
-
-.err-detail {
-  margin-top: 12rpx;
-  font-size: 25rpx;
-  color: #6B7A8C;
-  line-height: 1.6;
-}
-
-.err-btn {
-  display: inline-block;
-  margin-top: 32rpx;
-  padding: 0 48rpx;
-  height: 72rpx;
-  line-height: 72rpx;
-  border-radius: 16rpx;
-  background: linear-gradient(135deg, #3B5BDB, #7048E8);
-  color: #FFFFFF;
-  font-size: 28rpx;
 }
