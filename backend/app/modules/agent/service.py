@@ -9,6 +9,7 @@ Agent 无直写（工程底线 2）：本模块不 import cargo.service，不写
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -59,7 +60,7 @@ class AgentServiceError(Exception):
         self.kind = kind
 
 
-def _sanitize(field: str, value, today: date) -> tuple[object, bool]:
+def _sanitize(field: str, value: object, today: date) -> tuple[object, bool]:
     """单字段合法化过滤；返回 (清洗后值, 是否需人工复核)。"""
     if value is None:
         return None, True
@@ -98,10 +99,10 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
         db.commit()
         raise AgentServiceError(exc.kind, str(exc)) from exc
 
-    raw: dict = result.content
-    field_conf: dict = raw.get("field_confidence") or {}
+    raw: dict[str, Any] = result.content
+    field_conf: dict[str, Any] = raw.get("field_confidence") or {}
 
-    cleaned: dict = {}
+    cleaned: dict[str, Any] = {}
     needs_review: list[str] = []
     confidences: list[float] = []
 
@@ -169,7 +170,7 @@ def _build_system_prompt(question: str, *, top_k: int = 4) -> str:
     )
 
 
-def _mock_answer(question: str) -> dict:
+def _mock_answer(question: str) -> dict[str, str]:
     """客服导购的 LLM_MOCK 规则模板（关键词匹配，CI 用）。"""
     q = question.lower()
     if any(k in q for k in ("发货", "发布货源", "怎么发")):
@@ -203,7 +204,7 @@ def _mock_answer(question: str) -> dict:
 
 
 async def answer_question(
-    db: Session, *, user_id: int, question: str, history: list[dict]
+    db: Session, *, user_id: int, question: str, history: list[dict[str, str]]
 ) -> AssistantResult:
     """客服导购问答（审计落库，纯读零直写）。"""
     settings = get_settings()
@@ -276,7 +277,7 @@ CONTRACT_SYSTEM_PROMPT = """你是内河航运运输合同的法务助理。任�
 """
 
 
-def _mock_contract_clauses(_: str) -> dict:
+def _mock_contract_clauses(_: str) -> dict[str, list[dict[str, str]]]:
     """合同 Agent 的 LLM_MOCK 规则模板（固定标准条款，CI 用；编号由拼接层统一）。"""
     return {"supplementary_clauses": [
         {"title": "不可抗力", "text": "因洪水、大风、封航、政府管制等不可抗力导致无法履约的，受影响方应及时通知对方并提供证明，双方均免责；合同期限相应顺延或协商解除。"},
@@ -331,13 +332,21 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
     ).scalar_one_or_none()
     if not all((cargo, ship, shipper, owner)):
         raise AgentServiceError("bad_request", "订单关联数据不完整")
+    # 收窄 cargo/ship/shipper/owner 为非 None（mypy 不可推断 .get() 返回值，已显式 None 检查）
+    assert cargo is not None and ship is not None
+    assert shipper is not None and owner is not None
 
     # ---- 确定性部分（零 LLM）：主体条款 + 风险规则 ----
     main_text = contract_kernel.render_contract(
         order, cargo, ship, shipper, owner, payment
     )
     risks = [
-        ContractRisk(**r)
+        ContractRisk(
+            severity=r["severity"],  # type: ignore[arg-type]
+            title=r["title"],
+            detail=r["detail"],
+            suggestion=r["suggestion"],
+        )
         for r in contract_kernel.check_risks(order, cargo, ship, payment, _date.today())
     ]
 

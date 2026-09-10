@@ -5,13 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.ship import Ship
+from app.modules.ship.schemas import ShipCreate, ShipUpdate
 
 
 class ShipStateError(Exception):
     """状态机非法转移。"""
 
 
-def create_ship(db: Session, owner_id: int, data) -> Ship:
+def create_ship(db: Session, owner_id: int, data: ShipCreate) -> Ship:
     """船舶备案：新建即 pending_verify（待平台审核）。"""
     ship = Ship(
         owner_id=owner_id,
@@ -32,7 +33,7 @@ def create_ship(db: Session, owner_id: int, data) -> Ship:
     return ship
 
 
-def update_ship(db: Session, ship: Ship, data) -> Ship:
+def update_ship(db: Session, ship: Ship, data: ShipUpdate) -> Ship:
     """编辑备案：verified 状态下修改尺度/证书等关键信息 → 回到 pending_verify 重审。"""
     if ship.status == "rejected":
         raise ShipStateError("已驳回的备案不可编辑，请重新提交新备案")

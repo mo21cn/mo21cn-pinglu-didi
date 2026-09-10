@@ -32,7 +32,7 @@ class User(Base):
     avatar: Mapped[str] = mapped_column(String(512), default="", comment="头像 URL")
     phone: Mapped[str] = mapped_column(String(20), default="", comment="实名手机号（认证后回填）")
     # 角色列表，如 ["shipper", "owner"]；JSON 便于 MVP 阶段扩展（后期迁独立关联表）
-    roles: Mapped[list] = mapped_column(JSON, default=list, comment="已绑定角色列表")
+    roles: Mapped[list[str]] = mapped_column(JSON, default=list, comment="已绑定角色列表")
     current_role: Mapped[str] = mapped_column(String(16), default="shipper", comment="当前活跃角色")
     status: Mapped[str] = mapped_column(String(16), default="active", comment="active|banned")
     created_at: Mapped[datetime] = mapped_column(

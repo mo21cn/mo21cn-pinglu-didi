@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -45,7 +47,7 @@ async def cargo_parse(
     body: CargoParseRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     """货主口语描述 → 草稿；Agent 无直写，落库须走 /cargo/shipments。"""
     if user.current_role != "shipper":
         raise HTTPException(
@@ -70,7 +72,7 @@ async def assistant(
     body: AssistantRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     """平台客服/导购问答；纯读零直写，全角色可用。"""
     try:
         return await service.answer_question(
@@ -92,7 +94,7 @@ async def contract_generate(
     body: ContractGenerateRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     """订单参与方生成合同草稿；核心条款来自订单数据（零 LLM），草稿不落库。"""
     try:
         return await service.generate_contract(db, user_id=user.id, order_id=body.order_id)

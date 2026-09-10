@@ -9,10 +9,13 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.cargo import Cargo
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.cargo import service
@@ -35,7 +38,7 @@ def _require_shipper(user: User) -> None:
         )
 
 
-def _get_owned_or_404(db: Session, cargo_id: int, shipper_id: int):
+def _get_owned_or_404(db: Session, cargo_id: int, shipper_id: int) -> Cargo:
     cargo = service.get_owned(db, cargo_id, shipper_id)
     if cargo is None:
         raise HTTPException(status_code=404, detail="发货单不存在")
@@ -47,7 +50,7 @@ def create_shipment(
     body: CargoCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_shipper(user)
     try:
         return service.create_cargo(db, user.id, body)
@@ -62,7 +65,7 @@ def list_shipments(
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_shipper(user)
     total, items = service.list_my_cargo(db, user.id, cargo_status, page, size)
     return CargoListResponse(total=total, items=[CargoResponse.model_validate(c) for c in items])
@@ -73,7 +76,7 @@ def get_shipment(
     cargo_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_shipper(user)
     return _get_owned_or_404(db, cargo_id, user.id)
 
@@ -84,7 +87,7 @@ def update_shipment(
     body: CargoUpdate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_shipper(user)
     cargo = _get_owned_or_404(db, cargo_id, user.id)
     try:
@@ -100,7 +103,7 @@ def publish_shipment(
     cargo_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_shipper(user)
     cargo = _get_owned_or_404(db, cargo_id, user.id)
     try:
@@ -114,7 +117,7 @@ def cancel_shipment(
     cargo_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_shipper(user)
     cargo = _get_owned_or_404(db, cargo_id, user.id)
     try:
