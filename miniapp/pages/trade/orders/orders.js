@@ -23,7 +23,9 @@ Page({
       { key: 'cancelled', label: '已撤单' }
     ],
     activeStatus: '',
-    loading: false
+    loading: false,
+    // 合同预览弹层
+    contract: { show: false, orderId: 0, text: '', risks: [] }
   },
 
   onShow() {
@@ -150,5 +152,23 @@ Page({
           .catch(() => {})
       }
     })
+  },
+
+  // ---- 智能合同：草稿生成 + 风险提示（草稿不具法律效力） ----
+  onContract(e) {
+    const id = e.currentTarget.dataset.id
+    wx.showLoading({ title: '生成中...', mask: true })
+    request({ url: '/api/v1/agent/contract/generate', method: 'POST', data: { order_id: id } })
+      .then((res) => {
+        wx.hideLoading()
+        this.setData({
+          contract: { show: true, orderId: id, text: res.contract_text || '', risks: res.risks || [] }
+        })
+      })
+      .catch(() => wx.hideLoading())
+  },
+
+  closeContract() {
+    this.setData({ 'contract.show': false })
   }
 })

@@ -63,3 +63,32 @@ class AssistantResult(BaseModel):
     answer: str = Field(..., min_length=1, description="回答文本（Markdown 简易格式）")
     mocked: bool = Field(default=False, description="是否为规则模板输出（LLM_MOCK）")
     latency_ms: int = Field(default=0, description="回答耗时（毫秒）")
+
+
+class ContractGenerateRequest(BaseModel):
+    """合同生成请求。"""
+
+    order_id: int = Field(..., gt=0, description="订单 ID")
+
+
+class ContractRisk(BaseModel):
+    """单个风险点（由确定性规则引擎产生，零 LLM）。"""
+
+    severity: Literal["high", "medium", "low"] = Field(description="风险等级")
+    title: str = Field(description="风险标题")
+    detail: str = Field(description="风险说明（基于订单事实）")
+    suggestion: str = Field(description="处置建议")
+
+
+class ContractDraftResult(BaseModel):
+    """合同草稿生成结果。
+
+    安全设计：核心条款（金额/日期/港口/主体）由订单数据模板渲染；
+    LLM 仅产出补充条款文字。草稿不落库、不具法律效力。
+    """
+
+    order_id: int = Field(description="订单 ID")
+    contract_text: str = Field(description="合同草稿全文（Markdown）")
+    risks: list[ContractRisk] = Field(default_factory=list, description="风险点（确定性规则引擎）")
+    mocked: bool = Field(default=False, description="是否为规则模板输出（LLM_MOCK）")
+    latency_ms: int = Field(default=0, description="生成耗时（毫秒）")

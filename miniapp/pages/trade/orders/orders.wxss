@@ -22,3 +22,23 @@
 .btn-mini { border-radius: 10rpx; font-size: 24rpx; }
 .btn-primary { background: #0f7cff; color: #fff; }
 .btn-ghost { background: #f1f4f8; color: #6b7a8c; }
+
+/* ---- 智能合同弹层 ---- */
+.btn-contract { background: #fff; color: #9a6a00; border: 1rpx solid #e8d9a8; }
+.modal-mask { position: fixed; inset: 0; background: rgba(10, 20, 35, .55); z-index: 99; display: flex; align-items: flex-end; }
+.modal { width: 100%; max-height: 88vh; background: #fff; border-radius: 24rpx 24rpx 0 0; padding: 28rpx 28rpx 40rpx; box-sizing: border-box; display: flex; flex-direction: column; }
+.modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20rpx; }
+.modal-title { font-size: 30rpx; font-weight: 600; color: #0f2540; }
+.modal-close { font-size: 34rpx; color: #98a6b8; padding: 8rpx; }
+.risk-box { background: #fff8e6; border-radius: 14rpx; padding: 18rpx; margin-bottom: 16rpx; }
+.risk-title { font-size: 24rpx; color: #9a6a00; font-weight: 600; margin-bottom: 10rpx; }
+.risk-item { display: flex; gap: 10rpx; margin-bottom: 8rpx; align-items: flex-start; }
+.risk-sev { flex-shrink: 0; font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 999rpx; margin-top: 4rpx; }
+.risk-sev-high { color: #c0392b; background: rgba(192, 57, 43, .12); }
+.risk-sev-medium { color: #9a6a00; background: rgba(154, 106, 0, .12); }
+.risk-sev-low { color: #0a8f56; background: rgba(10, 143, 86, .12); }
+.risk-text { font-size: 24rpx; color: #5b4a1e; line-height: 1.5; }
+.contract-scroll { flex: 1; max-height: 52vh; background: #f6f8fa; border-radius: 14rpx; padding: 20rpx; box-sizing: border-box; }
+.contract-text { font-size: 24rpx; color: #0f2540; line-height: 1.7; white-space: pre-wrap; }
+.modal-foot { margin-top: 16rpx; text-align: center; }
+.modal-note { font-size: 20rpx; color: #98a6b8; }

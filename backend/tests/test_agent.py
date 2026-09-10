@@ -172,3 +172,161 @@ def test_audit_row_written_on_success_and_failure():
     assert fail_row.success is False
     assert fail_row.error_kind == "network"
     db.close()
+
+
+# ---------- F11 智能合同 ----------
+
+def _make_order(shipper, owner, client, **kw):
+    """货主建货源→船东备案船→撮合→下单，返回 order_id（走业务 API 全链路）。"""
+    from datetime import date, timedelta
+
+    tomorrow = (date.today() + timedelta(days=kw.get("days", 10))).isoformat()
+    cargo = client.post(
+        "/api/v1/cargo/shipments",
+        json={
+            "cargo_name": kw.get("cargo_name", "散装水泥"),
+            "cargo_type": kw.get("cargo_type", "bulk"),
+            "weight_t": 800,
+            "origin_port": "NNG",
+            "dest_port": "GGU",
+            "expect_date": tomorrow,
+            "publish_now": True,
+        },
+        headers=shipper["_headers"],
+    ).json()
+
+    ship = client.post(
+        "/api/v1/ship/registry",
+        json={
+            "ship_name": "平陆 001",
+            "ship_type": kw.get("ship_type", "bulk"),
+            "deadweight_t": 2000,
+            "length_m": 60,
+            "width_m": 12,
+            "draft_m": 3.5,
+            "home_port": "NNG",
+            "cert_no": "CERT-F11-001",
+            "cert_expiry": (date.today() + timedelta(days=kw.get("cert_days", 300))).isoformat(),
+        },
+        headers=owner["_headers"],
+    ).json()
+    client.post(
+        f"/api/v1/ship/registry/{ship['id']}/verify",
+        json={"approved": True},
+        headers=kw["port_headers"],
+    )
+
+    order = client.post(
+        f"/api/v1/match/cargos/{cargo['id']}/ships",
+        headers=shipper["_headers"],
+    )  # 探测（非必须）
+    order = client.post(
+        "/api/v1/order/orders",
+        json={"cargo_id": cargo["id"], "ship_id": ship["id"], "freight_price": kw.get("price", 25000)},
+        headers=shipper["_headers"],
+    )
+    assert order.status_code == 200, order.text
+    return order.json()["id"]
+
+
+def test_contract_generate_shipper_view(shipper, owner, port_user, client):
+    """货主视角：合同主体含订单确定性字段 + 四条补充条款 + 审计。"""
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"])
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["order_id"] == oid
+    assert body["mocked"] is True
+    text = body["contract_text"]
+    # 确定性核心条款（金额/日期/港口）来自订单数据而非 LLM
+    assert "25,000.00 元" in text
+    assert "南宁" in text and "贵港" in text
+    assert "平陆 001" in text
+    # 补充条款（mock 四条标准条款）
+    assert "不可抗力" in text and "争议解决" in text
+    # 未支付 → R1 命中
+    titles = [r["title"] for r in body["risks"]]
+    assert "运费未支付" in titles
+
+
+def test_contract_generate_owner_participant_ok(shipper, owner, port_user, client):
+    """船东（订单参与方）同样可生成。"""
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"])
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=owner["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_contract_generate_non_participant_rejected(
+    shipper, owner, port_user, client
+):
+    """非参与方（第三方货主）禁止生成。"""
+    from tests.conftest import _login
+
+    other = _login(client, f"other-{__import__('uuid').uuid4().hex[:8]}")
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"])
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+    )
+    assert resp.status_code == 400
+    assert "参与方" in resp.json()["detail"]
+
+
+def test_contract_risk_rules_hit(shipper, owner, port_user, client):
+    """风险规则引擎：面议未锁价 + 日期临近 + 证书临期 + 液货。"""
+    oid = _make_order(
+        shipper, owner, client,
+        port_headers=port_user["_headers"],
+        days=1,            # 装货日期临近（<3 天）
+        cert_days=10,      # 证书临期（<30 天）
+        cargo_type="tanker", ship_type="tanker",  # 液货
+        price=None,        # 面议未锁价
+    )
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    titles = [r["title"] for r in resp.json()["risks"]]
+    assert "运费未锁定" in titles
+    assert "装货日期临近" in titles
+    assert "船舶证书临期" in titles
+    assert "液货/危险品运输" in titles
+    assert "面议" in resp.json()["contract_text"]
+
+
+def test_contract_cancelled_order_rejected(shipper, owner, port_user, client):
+    """已撤销订单禁止生成。"""
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"])
+    resp = client.post(
+        f"/api/v1/order/orders/{oid}/cancel",
+        json={"reason": "测试"},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 400
+    assert "撤销" in resp.json()["detail"]
+
+
+def test_contract_order_not_found(shipper, client):
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": 99999},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 400

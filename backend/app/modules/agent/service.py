@@ -19,6 +19,8 @@ from app.modules.agent.llm import LLMError
 from app.modules.agent.schemas import (
     AssistantResult,
     CargoParseResult,
+    ContractDraftResult,
+    ContractRisk,
     ParsedCargoField,
 )
 from app.modules.cargo.schemas import PORT_CODES
@@ -239,6 +241,144 @@ async def answer_question(
 
     return AssistantResult(
         answer=answer,
+        mocked=result.mocked,
+        latency_ms=result.latency_ms,
+    )
+
+
+# ===========================================================================
+# 智能合同 Agent（F11）：订单 → 合同草稿 + 风险点提示（中风险场景）
+# 安全设计：核心条款由 contract.py 确定性模板渲染（金额/日期/港口零 LLM），
+# LLM 仅产出不可抗力/争议解决等补充条款文字（prompt 禁止具体数字日期）；
+# 风险点 100% 由规则引擎产生。草稿不落库、不具法律效力。
+# ===========================================================================
+
+CONTRACT_SYSTEM_PROMPT = """你是内河航运运输合同的法务助理。任务：基于给定订单事实，起草合同的标准补充条款。
+
+输出严格 JSON 对象：
+{"supplementary_clauses": [{"title": "条款标题", "text": "条款正文"}]}
+
+必须包含四条：1.不可抗力 2.违约与责任划分 3.争议解决 4.安全与环保责任。
+规则：
+1. 只写通用条款文字，**严禁出现任何具体金额、日期、港口名、船名、人名**（由主合同确定性条款承载）。
+2. 条款符合中华人民共和国民法典及国内水路运输相关法规的一般原则。
+3. 每条正文 50-120 字，专业、可执行。
+4. 只输出 JSON。
+"""
+
+
+def _mock_contract_clauses(_: str) -> dict:
+    """合同 Agent 的 LLM_MOCK 规则模板（固定标准条款，CI 用；编号由拼接层统一）。"""
+    return {"supplementary_clauses": [
+        {"title": "不可抗力", "text": "因洪水、大风、封航、政府管制等不可抗力导致无法履约的，受影响方应及时通知对方并提供证明，双方均免责；合同期限相应顺延或协商解除。"},
+        {"title": "违约与责任划分", "text": "甲方逾期备货或乙方逾期到船的，按日向对方支付违约金；运输途中货物毁损、灭失由乙方承担赔偿责任，甲方自行申报的货物性质不实导致的损失除外。"},
+        {"title": "争议解决", "text": "本合同履行发生争议的，双方应先行协商；协商不成的，提交平台调解或向合同签订地有管辖权的人民法院提起诉讼。"},
+        {"title": "安全与环保责任", "text": "乙方应确保船舶适航、证书有效，遵守航道与港口安全管理规定；双方共同落实货物遮盖与污染防治要求，杜绝污染物排入水体。"},
+    ]}
+
+
+async def generate_contract(db: Session, *, user_id: int, order_id: int) -> ContractDraftResult:
+    """订单 → 合同草稿 + 风险点（审计落库；Agent 无直写，草稿不落库）。"""
+    from datetime import date as _date
+
+    from sqlalchemy import select as _select
+
+    from app.models.cargo import Cargo
+    from app.models.order import Order
+    from app.models.payment import Payment
+    from app.models.ship import Ship
+    from app.models.user import User
+    from app.modules.agent import contract as contract_kernel
+
+    settings = get_settings()
+
+    record = AgentCall(
+        user_id=user_id,
+        agent_name="contract",
+        provider=settings.LLM_PROVIDER,
+        model=settings.LLM_MODEL,
+        prompt_digest=f"order:{order_id}",
+    )
+
+    order = db.get(Order, order_id)
+    if order is None:
+        raise AgentServiceError("bad_request", "订单不存在")
+    if user_id not in (order.shipper_id, order.owner_id):
+        raise AgentServiceError("bad_request", "仅订单参与方可生成合同")
+    if order.status == "cancelled":
+        record.success = False
+        record.error_kind = "bad_request"
+        record.response_digest = "cancelled order"
+        db.add(record)
+        db.commit()
+        raise AgentServiceError("bad_request", "订单已撤销，无法生成合同")
+
+    cargo = db.get(Cargo, order.cargo_id)
+    ship = db.get(Ship, order.ship_id)
+    shipper = db.get(User, order.shipper_id)
+    owner = db.get(User, order.owner_id)
+    payment = db.execute(
+        _select(Payment).where(Payment.order_id == order.id)
+    ).scalar_one_or_none()
+    if not all((cargo, ship, shipper, owner)):
+        raise AgentServiceError("bad_request", "订单关联数据不完整")
+
+    # ---- 确定性部分（零 LLM）：主体条款 + 风险规则 ----
+    main_text = contract_kernel.render_contract(
+        order, cargo, ship, shipper, owner, payment
+    )
+    risks = [
+        ContractRisk(**r)
+        for r in contract_kernel.check_risks(order, cargo, ship, payment, _date.today())
+    ]
+
+    # ---- LLM 部分：仅补充条款文字 ----
+    risk_titles = "、".join(r.title for r in risks) or "无"
+    fact_summary = (
+        f"订单号 {order.id}，货类 {cargo.cargo_type}，重量 {float(cargo.weight_t)} 吨，"
+        f"航线 {cargo.origin_port} 至 {cargo.dest_port}，状态 {order.status}，"
+        f"运费 {'已锁定' if order.freight_price is not None else '面议未锁定'}，"
+        f"已命中风险：{risk_titles}。请起草四条标准补充条款。"
+    )
+    try:
+        result = await llm_gateway.chat_json(
+            system=CONTRACT_SYSTEM_PROMPT,
+            user=fact_summary,
+            mock_content=_mock_contract_clauses,
+        )
+    except LLMError as exc:
+        # LLM 故障降级：合同主体与风险仍可用确定性结果返回（补充条款置默认）
+        record.success = False
+        record.error_kind = exc.kind
+        record.response_digest = str(exc)[:_DIGEST_LEN]
+        db.add(record)
+        db.commit()
+        raise AgentServiceError(exc.kind, str(exc)) from exc
+
+    clauses = result.content.get("supplementary_clauses") or []
+    _cn_nums = "七八九十"
+    supplement = "\n".join(
+        f"## {_cn_nums[i] if i < len(_cn_nums) else i + 7}、{c.get('title', '')}"
+        f"\n{c.get('text', '')}".strip()
+        for i, c in enumerate(clauses)
+        if isinstance(c, dict)
+    )
+    contract_text = main_text + (supplement + "\n" if supplement else "")
+    contract_text += (
+        "\n---\n*本草稿由平台智能合同 Agent 生成，核心条款来自订单数据，"
+        "补充条款由 AI 起草；签署前请人工审核。*"
+    )
+
+    record.mocked = result.mocked
+    record.latency_ms = result.latency_ms
+    record.response_digest = contract_text[:_DIGEST_LEN]
+    db.add(record)
+    db.commit()
+
+    return ContractDraftResult(
+        order_id=order.id,
+        contract_text=contract_text,
+        risks=risks,
         mocked=result.mocked,
         latency_ms=result.latency_ms,
     )
