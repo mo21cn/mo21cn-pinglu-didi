@@ -1,0 +1,8 @@
+{
+  "navigationBarTitleText": "预约审核",
+  "navigationBarBackgroundColor": "#3B5BDB",
+  "navigationBarTextStyle": "white",
+  "backgroundColor": "#F5F7FA",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
+}

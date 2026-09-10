@@ -1,0 +1,129 @@
+<!--
+  预约审核详情（L3 三级页）· 港域（F4）
+  结构：预约头卡 → 档期窗口 → 防超卖校验 → 状态机留痕 → 底栏操作
+  主线：把「确认这一刻会发生什么」摊开（行锁 + 重叠计数 + 容量判定，超容量 409）
+  入口：平台运营台 → 预约审核 → 预约卡
+-->
+<view class="page-sub">
+  <view class="page-content">
+    <view wx:if="{{loading}}" class="empty">
+      <view class="empty-icon">📅</view>
+      <view>预约详情加载中...</view>
+    </view>
+
+    <view wx:elif="{{error}}" class="err-card">
+      <view class="err-title">预约加载失败</view>
+      <view class="err-detail">{{error}}</view>
+      <view class="err-btn" bindtap="fetch">重新加载</view>
+    </view>
+
+    <block wx:else>
+      <!-- ① 预约头卡 -->
+      <view class="appt-card bg-brand-gradient">
+        <view class="appt-row">
+          <text class="appt-label">泊位预约</text>
+          <text class="appt-chip">{{statusLabel}}</text>
+        </view>
+        <view class="appt-title">船 #{{appt.ship_id}} 申请靠泊</view>
+        <view class="appt-sub">{{berthTitle}} 泊位</view>
+        <view class="appt-meta">
+          <text>预约 #{{appt.id}}</text>
+          <text class="appt-dot">·</text>
+          <text>提交 {{createdText}}</text>
+        </view>
+        <view class="appt-note">预约申请本身不锁定档期——只有港口方确认后，该时间窗才被计入占用。</view>
+      </view>
+
+      <!-- ② 档期窗口 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">申请档期窗口</text>
+          <text class="section-head-more" bindtap="goBerth">查看泊位档期 ›</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">计划靠泊</text>
+          <text class="field-value">{{planStartText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">计划离泊</text>
+          <text class="field-value">{{planEndText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">靠泊时长</text>
+          <text class="field-value">{{durationText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">申请备注</text>
+          <text class="field-value">{{appt.remark || '—'}}</text>
+        </view>
+      </view>
+
+      <!-- ③ 容量预检（仅待确认单需要；其余状态展示占用结论） -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">{{isPending ? '确认前容量预检' : '档期占用'}}</text>
+          <text class="chip {{checkChip}}">{{checkText}}</text>
+        </view>
+        <view wx:if="{{showCalc}}" class="calc">
+          <view class="calc-cell">
+            <view class="calc-num">{{overlapNow}}</view>
+            <view class="calc-cap">窗口内已确认</view>
+          </view>
+          <view class="calc-op">+</view>
+          <view class="calc-cell">
+            <view class="calc-num">1</view>
+            <view class="calc-cap">本次确认</view>
+          </view>
+          <view class="calc-op">≤</view>
+          <view class="calc-cell">
+            <view class="calc-num">{{capacity}}</view>
+            <view class="calc-cap">并发容量</view>
+          </view>
+        </view>
+        <view wx:else class="check-note">{{checkNote}}</view>
+        <view wx:if="{{conflict}}" class="warn-box">
+          当前窗口已占满，确认请求将被服务端拒绝（409 档期冲突）。此预检与服务端
+          <text class="mono">count_confirmed_overlap</text> 同口径，仅用于提前告知审核人。
+        </view>
+        <view wx:if="{{isPending}}" class="tl-foot">真正的一致性由服务端保证：确认时对泊位行加锁（FOR UPDATE），再统计重叠预约数，
+          达到并发容量即拒绝——预检只是把结果提前展示，不构成放行依据。</view>
+      </view>
+
+      <!-- ④ 状态机留痕 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">审核留痕</text>
+          <text class="chip chip-purple">确定性状态机</text>
+        </view>
+        <view class="tl">
+          <view wx:for="{{timeline}}" wx:key="key" class="tl-item {{item.done ? 'tl-done' : ''}}">
+            <view class="tl-rail">
+              <view class="tl-dot"></view>
+              <view wx:if="{{index < timeline.length - 1}}" class="tl-line"></view>
+            </view>
+            <view class="tl-body">
+              <view class="tl-title">{{item.title}}</view>
+              <view class="tl-time">{{item.time || '待发生'}}</view>
+              <view wx:if="{{item.note}}" class="tl-note">{{item.note}}</view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <view wx:if="{{!loading && !error}}" class="bottom-bar">
+    <view class="bar-note">{{barNote}}</view>
+    <view class="bar-actions">
+      <block wx:if="{{canReject}}">
+        <view class="btn-ghost" bindtap="onReject">驳回</view>
+        <view class="btn-primary {{canConfirm ? '' : 'btn-disabled'}}" bindtap="onConfirm">确认并锁定档期</view>
+      </block>
+      <view wx:elif="{{canComplete}}" class="btn-primary" bindtap="onComplete">核销完成</view>
+      <block wx:else>
+        <view class="btn-ghost btn-disabled" data-name="查看船舶档案" bindtap="onPlaceholder">船舶档案</view>
+        <view class="btn-primary btn-disabled" data-name="下载预约单" bindtap="onPlaceholder">下载预约单</view>
+      </block>
+    </view>
+  </view>
+</view>

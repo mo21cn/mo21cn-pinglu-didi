@@ -122,6 +122,23 @@ Page({
     this.setData({ view: 'service' })
   },
 
+  // ---- 三级页：泊位档期 / 预约审核详情 ----
+  /** 泊位卡 → 档期详情（只读甘特 + 硬约束校验链） */
+  goBerthDetail(e) {
+    const id = e.currentTarget.dataset.id
+    if (!id) return
+    wx.navigateTo({ url: '/pages/port/berth/berth?id=' + id })
+  },
+
+  /** 预约卡 → 审核详情；记录体走 Storage 缓存，免去单条查询端点 */
+  goApptDetail(e) {
+    const id = e.currentTarget.dataset.id
+    if (!id) return
+    const record = (this.data.apptList || []).filter((a) => a.id === id)[0]
+    if (record) wx.setStorageSync('port_appt_detail', { id, record })
+    wx.navigateTo({ url: '/pages/port/appt/appt?id=' + id })
+  },
+
   // ---- 运营台：预约审核 / 泊位管理 / 新建泊位 ----
   reloadOps() {
     if (this.data.tab === 'appts') this.fetchAppts()

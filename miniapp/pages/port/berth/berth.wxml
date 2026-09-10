@@ -1,0 +1,130 @@
+<!--
+  泊位档期详情（L3 三级页）· 港域（F4）
+  结构：泊位头卡 → 尺度与容量 → 已确认档期甘特 → 硬约束校验链 → 防超卖说明 → 底栏
+  主线：把「稀缺资源防超卖」可视化（pending 不占档期 / 确认时重叠计数 / 超容量 409）
+  入口：平台运营台 → 泊位管理 → 泊位卡
+-->
+<view class="page-sub">
+  <view class="page-content">
+    <view wx:if="{{loading}}" class="empty">
+      <view class="empty-icon">⚓</view>
+      <view>泊位档期加载中...</view>
+    </view>
+
+    <view wx:elif="{{error}}" class="err-card">
+      <view class="err-title">档期加载失败</view>
+      <view class="err-detail">{{error}}</view>
+      <view class="err-btn" bindtap="fetch">重新加载</view>
+    </view>
+
+    <block wx:else>
+      <!-- ① 泊位头卡 -->
+      <view class="berth-card bg-brand-gradient">
+        <view class="berth-row">
+          <text class="berth-label">泊位</text>
+          <text class="berth-chip">{{statusLabel}}</text>
+        </view>
+        <view class="berth-title">{{berthTitle}}</view>
+        <view class="berth-sub">{{berthSub}}</view>
+        <view class="berth-meta">
+          <text>泊位 #{{berth.id}}</text>
+          <text class="berth-dot">·</text>
+          <text>{{berth.port_code}} 港区</text>
+          <text class="berth-dot">·</text>
+          <text>并发 {{capacityText}}</text>
+        </view>
+        <view class="berth-note">档期以「已确认（confirmed）」预约为准——待确认申请不占档期，防止恶意占位。</view>
+      </view>
+
+      <!-- ② 尺度与容量 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">尺度约束与容量</text>
+          <text class="chip chip-purple">撮合硬约束同源</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">最大载重吨</text>
+          <text class="field-value">{{dwtText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">允许吃水</text>
+          <text class="field-value">{{draftText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">适靠船型</text>
+          <text class="field-value">{{typeText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">并发靠泊容量</text>
+          <text class="field-value">{{capacityText}}</text>
+        </view>
+      </view>
+
+      <!-- ③ 已确认档期甘特 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">已确认档期</text>
+          <text class="chip {{occupancyChip}}">峰值 {{occupancyText}}</text>
+        </view>
+
+        <view wx:if="{{!hasSchedule}}" class="gt-empty">
+          <view class="gt-empty-icon">📅</view>
+          <view class="gt-empty-text">该泊位暂无已确认的靠泊占用</view>
+          <view class="gt-empty-sub">船东提交申请后为「待确认」，港口方确认锁定时才写入档期</view>
+        </view>
+
+        <view wx:else class="gt">
+          <view wx:for="{{bars}}" wx:key="key" class="gt-row">
+            <view class="gt-meta">
+              <text class="gt-name">{{item.label}}</text>
+              <text class="gt-ship">{{item.ship}}</text>
+              <text class="gt-dur">{{item.duration}}</text>
+            </view>
+            <view class="gt-track">
+              <view class="gt-bar" style="left: {{item.left}}; width: {{item.width}};"></view>
+            </view>
+            <view class="gt-span">{{item.span}}</view>
+          </view>
+        </view>
+
+        <view class="tl-foot">档期区间 {{rangeText}} · 横条长度按靠泊时长等比换算，仅含已确认预约。</view>
+      </view>
+
+      <!-- ④ 硬约束校验链 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">预约前置校验链</text>
+          <text class="chip chip-muted">纯规则 · 零 LLM</text>
+        </view>
+        <view wx:for="{{rules}}" wx:key="key" class="rule">
+          <view class="rule-no">{{index + 1}}</view>
+          <view class="rule-body">
+            <view class="rule-title">{{item.title}}</view>
+            <view class="rule-note">{{item.note}}</view>
+          </view>
+        </view>
+        <view class="tl-foot">以上四条在船东提交申请的瞬间逐条比对，任一不满足即刻拒绝（HTTP 409），不会进入待确认队列。</view>
+      </view>
+
+      <!-- ⑤ 防超卖说明 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">防超卖三重设计</text>
+          <text class="chip chip-success">已落地</text>
+        </view>
+        <view class="tl-foot tl-foot-plain">
+          ① 申请（pending）不占档期，避免刷单式占位；② 港口方确认时对泊位行加锁，并统计与该窗口重叠的已确认预约数，
+          ③ 重叠数达到并发容量即拒绝（409 档期冲突）。撤销预约即刻释放档期，可被其他船舶重新占用。
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <view wx:if="{{!loading && !error}}" class="bottom-bar">
+    <view class="bar-note">展示页：泊位参数的编辑能力随港口对接一并开放</view>
+    <view class="bar-actions">
+      <view class="btn-ghost" bindtap="goBack">返回运营台</view>
+      <view class="btn-primary btn-disabled" data-name="编辑泊位" bindtap="onPlaceholder">编辑泊位</view>
+    </view>
+  </view>
+</view>
