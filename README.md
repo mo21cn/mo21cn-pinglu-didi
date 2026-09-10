@@ -83,7 +83,7 @@ uvicorn app.main:app --reload
 | S0 `[x]` | 地基：L3 路由注册 + 页面四件套骨架 + 静态校验脚本扩展 | `app.json`、`scripts/verify_miniapp.js` | 校验全绿 |
 | S1 `[x]` | **合同三级页 ★ Agent 亮点**（含订单页合同弹层双入口） | `pages/trade/contract/` | 真实订单出合同 + 风险点 + 占位底栏 |
 | S2 `[x]` | 交易闭环页组：支付详情、撮合结果页正式化 | `pages/trade/payment/`、`pages/trade/match/` | 单据状态机 + 四项评分拆解 |
-| S3 `[ ]` | 港口域详情页：泊位档期、预约审核详情（可裁剪） | `pages/port/berth/`、`pages/port/appt/` | 档期可视化 + 防超卖演示 |
+| S3 `[x]` | 港口域详情页：泊位档期、预约审核详情（展示性轻量化） | `pages/port/berth/`、`pages/port/appt/` | 档期甘特 + 容量预检 + 防超卖演示 |
 | S4 `[ ]` | 汇报打磨：三态兜底（加载/空/错误）+ 演示数据贯通 + 演示脚本 | 全局 | 演示路径可一次跑通 |
 
 **已完成批次记录**
@@ -93,6 +93,7 @@ uvicorn app.main:app --reload
 | S0 | PR #21 `ccf2727` | 16 JSON / 11 页面 / 41 路由 / 144 事件 | — |
 | S1 | PR #21 + #22 `6cb3a11` | 同上 + 事件处理函数存在性 | 订单 #1 → 200/885 字符/风险 0；#3 → 200/**2 项高风险**；已撤单 → 400；非参与方 → 400 |
 | S2 | 本次 PR | 16 JSON / **12 页面** / **43 路由** / **152 事件** | 支付全链：无单 404 → 发起 201 → 重复发起 409 → 模拟支付 200 → 幂等 paid_at 不变 → 撤单退款 refunded；面议拒发起 400；非参与方 404 |
+| S3 | 本次 PR | 18 JSON / **14 页面** / **46 路由** / **164 事件** | 港域档期：3 条重叠预约确认前两条成功、**第三条 409 档期冲突**；档期接口返回 3 条 confirmed（峰值 2/2 容量）；货主访问 `/port/appts` → 403。纯逻辑断言 **87 项通过**（真实载荷驱动） |
 
 **三者状态机口径（可直接用于汇报答辩）**
 
@@ -117,8 +118,8 @@ uvicorn app.main:app --reload
 | 撮合结果 `[x]` | 找船 | `POST /match/cargos/{id}/ships` |
 | 货源详情 / 编辑 | 找船 | `GET/PATCH /cargo/shipments/{id}` |
 | 船舶备案详情 | 找货 | `GET/PATCH /ship/registry/{id}` |
-| 泊位档期详情 | 港口 | `GET /port/berths/{id}/schedule` |
-| 预约审核详情 | 港口 | `GET /port/appts-review`、`POST /port/appts/{id}/confirm\|reject\|cancel\|complete` |
+| 泊位档期详情 `[x]` | 港口 | `GET /port/berths/{id}/schedule` |
+| 预约审核详情 `[x]` | 港口 | `GET /port/appts-review`、`POST /port/appts/{id}/confirm\|reject\|cancel\|complete` |
 | 客服对话 | 顶栏 | `POST /agent/assistant` |
 
 **B 档 · 需小改后端（3 项）**：订单详情·运输时间轴（`OrderOut` 缺 cargo/ship 摘要）、合同留痕/版本（需 `contracts` 表）、实名认证中心（需资质表）。

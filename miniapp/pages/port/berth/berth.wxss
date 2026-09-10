@@ -1,0 +1,242 @@
+/* 泊位档期详情（L3 三级页）· 港域
+   设计语言沿用 UI V2：蓝紫渐变 + 白卡 + 甘特条 */
+
+.page-sub {
+  padding-bottom: calc(240rpx + env(safe-area-inset-bottom));
+}
+
+/* ---- ① 泊位头卡 ---- */
+.berth-card {
+  border-radius: 24rpx;
+  padding: 32rpx 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 8rpx 32rpx rgba(59, 91, 219, 0.20);
+}
+
+.berth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.berth-label {
+  font-size: 26rpx;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 2rpx;
+}
+
+.berth-chip {
+  font-size: 20rpx;
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999rpx;
+  padding: 4rpx 18rpx;
+}
+
+.berth-title {
+  font-size: 52rpx;
+  font-weight: 700;
+  color: #FFFFFF;
+  line-height: 1.25;
+  margin: 14rpx 0 6rpx;
+  letter-spacing: 1rpx;
+}
+
+.berth-sub {
+  font-size: 26rpx;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.berth-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 14rpx;
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.berth-dot {
+  color: rgba(255, 255, 255, 0.40);
+}
+
+.berth-note {
+  margin-top: 20rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.20);
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.6;
+}
+
+/* ---- ③ 档期甘特 ---- */
+.gt {
+  padding: 16rpx 28rpx 8rpx;
+}
+
+.gt-row {
+  padding-bottom: 22rpx;
+}
+
+.gt-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+}
+
+.gt-name {
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.gt-ship {
+  font-size: 22rpx;
+  color: #6B7A8C;
+}
+
+.gt-dur {
+  margin-left: auto;
+  font-size: 22rpx;
+  color: #3B5BDB;
+}
+
+.gt-track {
+  position: relative;
+  height: 26rpx;
+  border-radius: 999rpx;
+  background: #F1F4F8;
+  overflow: hidden;
+}
+
+.gt-bar {
+  position: absolute;
+  top: 0;
+  height: 26rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+}
+
+.gt-span {
+  margin-top: 8rpx;
+  font-size: 21rpx;
+  color: #B7C2D0;
+}
+
+.gt-empty {
+  padding: 48rpx 28rpx;
+  text-align: center;
+}
+
+.gt-empty-icon {
+  font-size: 56rpx;
+}
+
+.gt-empty-text {
+  margin-top: 14rpx;
+  font-size: 27rpx;
+  font-weight: 500;
+  color: #3D4C63;
+}
+
+.gt-empty-sub {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #98A6B8;
+  line-height: 1.6;
+}
+
+/* ---- ④ 校验链 ---- */
+.rule {
+  display: flex;
+  gap: 16rpx;
+  padding: 18rpx 28rpx;
+  border-bottom: 1rpx solid #F1F4F8;
+}
+
+.rule:last-child {
+  border-bottom: none;
+}
+
+.rule-no {
+  width: 36rpx;
+  height: 36rpx;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(59, 91, 219, 0.10);
+  color: #3B5BDB;
+  font-size: 22rpx;
+  font-weight: 600;
+  text-align: center;
+  line-height: 36rpx;
+  margin-top: 4rpx;
+}
+
+.rule-body {
+  flex: 1;
+}
+
+.rule-title {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #0F2540;
+}
+
+.rule-note {
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: #98A6B8;
+  line-height: 1.5;
+}
+
+/* ---- 页脚说明 ---- */
+.tl-foot {
+  padding: 18rpx 28rpx 24rpx;
+  border-top: 1rpx solid #F1F4F8;
+  font-size: 22rpx;
+  color: #98A6B8;
+  line-height: 1.6;
+}
+
+.tl-foot-plain {
+  border-top: none;
+  padding-top: 8rpx;
+  font-size: 24rpx;
+  color: #6B7A8C;
+}
+
+/* ---- 兜底态 ---- */
+.err-card {
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  padding: 60rpx 28rpx;
+  text-align: center;
+  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
+}
+
+.err-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.err-detail {
+  margin-top: 12rpx;
+  font-size: 25rpx;
+  color: #6B7A8C;
+  line-height: 1.6;
+}
+
+.err-btn {
+  display: inline-block;
+  margin-top: 32rpx;
+  padding: 0 48rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  border-radius: 16rpx;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  color: #FFFFFF;
+  font-size: 28rpx;
+}

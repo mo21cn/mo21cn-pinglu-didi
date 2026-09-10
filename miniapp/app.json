@@ -10,6 +10,8 @@
     "pages/trade/contract/contract",
     "pages/trade/payment/payment",
     "pages/port/port",
+    "pages/port/berth/berth",
+    "pages/port/appt/appt",
     "pages/assistant/assistant",
     "pages/mine/mine"
   ],

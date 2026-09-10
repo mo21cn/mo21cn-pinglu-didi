@@ -73,7 +73,7 @@
         <view class="empty-icon">📅</view>
         <view>暂无待确认的泊位预约</view>
       </view>
-      <view wx:for="{{apptList}}" wx:key="id" class="section-card ops-card">
+      <view wx:for="{{apptList}}" wx:key="id" class="section-card ops-card" data-id="{{item.id}}" bindtap="goApptDetail" hover-class="hover-dim">
         <view class="ops-card-head">
           <text class="ops-card-title">船舶 #{{item.ship_id}} 申请泊位 #{{item.berth_id}}</text>
           <text class="badge badge-matched">{{statusLabels[item.status]}}</text>
@@ -81,9 +81,10 @@
         <view class="ops-row"><text class="ops-label">计划靠泊</text><text>{{item.plan_start}}</text></view>
         <view class="ops-row"><text class="ops-label">计划离泊</text><text>{{item.plan_end}}</text></view>
         <view wx:if="{{item.remark}}" class="ops-row"><text class="ops-label">备注</text><text>{{item.remark}}</text></view>
+        <view class="ops-link">查看审核详情 ›</view>
         <view class="ops-actions">
-          <view class="ops-btn ops-btn-danger" data-id="{{item.id}}" bindtap="rejectAppt">驳回</view>
-          <view class="ops-btn ops-btn-primary" data-id="{{item.id}}" bindtap="confirmAppt">确认（锁定档期）</view>
+          <view class="ops-btn ops-btn-danger" data-id="{{item.id}}" catchtap="rejectAppt">驳回</view>
+          <view class="ops-btn ops-btn-primary" data-id="{{item.id}}" catchtap="confirmAppt">确认（锁定档期）</view>
         </view>
       </view>
     </view>
@@ -93,7 +94,7 @@
         <view class="empty-icon">⚓</view>
         <view>暂无泊位，请先新建</view>
       </view>
-      <view wx:for="{{berthList}}" wx:key="id" class="section-card ops-card">
+      <view wx:for="{{berthList}}" wx:key="id" class="section-card ops-card" data-id="{{item.id}}" bindtap="goBerthDetail" hover-class="hover-dim">
         <view class="ops-card-head">
           <text class="ops-card-title">{{item.port_code}} - {{item.berth_no}} {{item.berth_name}}</text>
           <text class="badge {{item.status === 'active' ? 'badge-verified' : 'badge-cancelled'}}">
@@ -103,6 +104,7 @@
         <view class="ops-row"><text class="ops-label">最大载重</text><text>{{item.max_dwt}} 吨</text></view>
         <view class="ops-row"><text class="ops-label">允许吃水</text><text>{{item.max_draft}} 米</text></view>
         <view class="ops-row"><text class="ops-label">并发容量</text><text>{{item.concurrent_capacity}} 船位</text></view>
+        <view class="ops-link">查看档期与约束 ›</view>
       </view>
     </view>
 

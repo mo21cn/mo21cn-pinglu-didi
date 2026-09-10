@@ -208,6 +208,11 @@ page { background: #EDF2F6; }
   padding: 6rpx 0;
 }
 .ops-label { color: #8A99AC; }
+.ops-link {
+  margin-top: 14rpx;
+  font-size: 23rpx;
+  color: #3B5BDB;
+}
 .ops-actions {
   margin-top: 18rpx;
   padding-top: 16rpx;
