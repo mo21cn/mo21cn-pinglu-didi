@@ -13,10 +13,13 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.ship import Ship
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.ship import service
@@ -36,7 +39,7 @@ def _require_role(user: User, role: str, message: str) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
 
 
-def _get_ship_or_404(db: Session, ship_id: int) -> User:
+def _get_ship_or_404(db: Session, ship_id: int) -> Ship:
     ship = service.get_ship(db, ship_id)
     if ship is None:
         raise HTTPException(status_code=404, detail="船舶备案不存在")
@@ -48,7 +51,7 @@ def create_ship(
     body: ShipCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "owner", "该操作仅船东角色可用，请先切换角色")
     try:
         return service.create_ship(db, user.id, body)
@@ -63,7 +66,7 @@ def list_my_ships(
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "owner", "该操作仅船东角色可用，请先切换角色")
     total, items = service.list_my_ships(db, user.id, ship_status, page, size)
     return ShipListResponse(total=total, items=[ShipResponse.model_validate(s) for s in items])
@@ -75,7 +78,7 @@ def list_pending(
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     total, items = service.list_pending_ships(db, page, size)
     return ShipListResponse(total=total, items=[ShipResponse.model_validate(s) for s in items])
@@ -86,7 +89,7 @@ def get_ship(
     ship_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "owner", "该操作仅船东角色可用，请先切换角色")
     ship = _get_ship_or_404(db, ship_id)
     if ship.owner_id != user.id:
@@ -100,7 +103,7 @@ def update_ship(
     body: ShipUpdate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "owner", "该操作仅船东角色可用，请先切换角色")
     ship = _get_ship_or_404(db, ship_id)
     if ship.owner_id != user.id:
@@ -117,7 +120,7 @@ def verify_ship(
     body: ShipVerify,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     ship = _get_ship_or_404(db, ship_id)
     try:

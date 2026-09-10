@@ -50,7 +50,7 @@ class AssistantRequest(BaseModel):
     """客服导购请求（FAQ / 航线 / 用法咨询，纯读）。"""
 
     question: str = Field(..., min_length=2, max_length=512, description="用户问题")
-    history: list[dict] = Field(
+    history: list[dict[str, str]] = Field(
         default_factory=list,
         max_length=10,
         description="多轮上下文（[{role, content}]，最近 10 条）",

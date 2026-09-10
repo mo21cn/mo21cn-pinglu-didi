@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -68,7 +70,7 @@ def create_berth(
     body: BerthCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     try:
         return service.create_berth(db, body)
@@ -84,7 +86,7 @@ def list_berths(
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     total, items = service.list_berths(db, port_code, berth_status, page, size)
     return BerthListResponse(total=total, items=[BerthResponse.model_validate(b) for b in items])
@@ -96,7 +98,7 @@ def update_berth(
     body: BerthUpdate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     berth = _get_berth_or_404(db, berth_id)
     return service.update_berth(db, berth, body)
@@ -107,7 +109,7 @@ def berth_schedule(
     berth_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     berth = _get_berth_or_404(db, berth_id)
     confirmed = service.get_berth_schedule(db, berth)
@@ -129,7 +131,7 @@ def create_appt(
     body: BerthApptCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "owner", "该操作仅船东角色可用，请先切换角色")
     try:
         return service.create_appt(db, user.id, body)
@@ -145,7 +147,7 @@ def list_my_appts(
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "owner", "该操作仅船东角色可用，请先切换角色")
     total, items = service.list_my_appts(db, user.id, appt_status, page, size)
     return BerthApptListResponse(
@@ -163,7 +165,7 @@ def list_review(
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     total, items = service.list_berth_appts(db, berth_id, appt_status, page, size)
     return BerthApptListResponse(
@@ -176,7 +178,7 @@ def confirm_appt(
     appt_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     appt = _get_appt_or_404(db, appt_id)
     try:
@@ -193,7 +195,7 @@ def reject_appt(
     body: BerthApptReview,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     appt = _get_appt_or_404(db, appt_id)
     try:
@@ -207,7 +209,7 @@ def cancel_appt(
     appt_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "owner", "该操作仅船东角色可用，请先切换角色")
     appt = _get_appt_or_404(db, appt_id)
     try:
@@ -221,7 +223,7 @@ def complete_appt(
     appt_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     _require_role(user, "port", "该操作仅港口方角色可用")
     appt = _get_appt_or_404(db, appt_id)
     try:

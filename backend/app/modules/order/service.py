@@ -22,6 +22,7 @@ from app.models.cargo import Cargo
 from app.models.order import Order
 from app.models.ship import Ship
 from app.modules.match.engine import CargoInput, ShipInput, pair_violation
+from app.modules.order.schemas import OrderCreate
 
 ACTIVE_STATUSES = ("matched", "shipped")
 
@@ -58,7 +59,7 @@ def _engine_inputs(cargo: Cargo, ship: Ship) -> tuple[CargoInput, ShipInput]:
     )
 
 
-def create_order(db: Session, shipper_id: int, data) -> Order:
+def create_order(db: Session, shipper_id: int, data: OrderCreate) -> Order:
     """货主创建订单（基于撮合候选选船）。
 
     前置校验：

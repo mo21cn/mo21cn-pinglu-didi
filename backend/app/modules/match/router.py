@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -29,7 +31,7 @@ def match_cargo(
     cargo_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role != "shipper":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -53,7 +55,7 @@ def match_ship(
     ship_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role != "owner":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

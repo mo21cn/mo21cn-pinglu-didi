@@ -159,15 +159,15 @@ def _normalize(text: str) -> str:
     return _SPLIT_RE.sub("", text.lower())
 
 
-def _bigrams(text: str) -> Counter:
+def _bigrams(text: str) -> Counter[str]:
     """字符 bigram（单字文档退化为 unigram）。"""
     s = _normalize(text)
     if len(s) <= 1:
-        return Counter({s: 1}) if s else Counter()
+        return Counter({s: 1}) if s else Counter[str]()
     return Counter(s[i : i + 2] for i in range(len(s) - 1))
 
 
-def _cosine(a: Counter, b: Counter) -> float:
+def _cosine(a: Counter[str], b: Counter[str]) -> float:
     if not a or not b:
         return 0.0
     common = set(a) & set(b)
@@ -189,18 +189,26 @@ class KnowledgeIndex:
 
     def __init__(self, docs: list[KnowledgeDoc] | None = None) -> None:
         self._docs = list(docs or KNOWLEDGE_BASE)
-        self._doc_grams = [(d, _bigrams(f"{d.topic} {d.text}")) for d in self._docs]
+        self._doc_grams: list[tuple[KnowledgeDoc, Counter[str]]] = [
+            (d, _bigrams(f"{d.topic} {d.text}")) for d in self._docs
+        ]
         # 文档频率（含 bigram 出现的文档数）
-        df: Counter = Counter()
+        df: Counter[str] = Counter()
         for _, grams in self._doc_grams:
             df.update(grams.keys())
         n = max(len(self._doc_grams), 1)
         # idf 权重（平滑，避免除零）
-        self._idf = {t: math.log((n + 1) / (c + 1)) + 1.0 for t, c in df.items()}
+        self._idf: dict[str, float] = {
+            t: math.log((n + 1) / (c + 1)) + 1.0 for t, c in df.items()
+        }
 
-    def _score(self, query_grams: Counter, doc_grams: Counter) -> float:
-        qa = Counter({t: w * self._idf.get(t, 1.0) for t, w in query_grams.items()})
-        da = Counter({t: w * self._idf.get(t, 1.0) for t, w in doc_grams.items()})
+    def _score(self, query_grams: Counter[str], doc_grams: Counter[str]) -> float:
+        qa: Counter[str] = Counter(
+            {t: w * self._idf.get(t, 1.0) for t, w in query_grams.items()}
+        )
+        da: Counter[str] = Counter(
+            {t: w * self._idf.get(t, 1.0) for t, w in doc_grams.items()}
+        )
         return _cosine(qa, da)
 
     def search(

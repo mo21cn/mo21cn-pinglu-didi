@@ -99,9 +99,9 @@ def check_risks(
     ship: Ship,
     payment: Payment | None,
     today: date,
-) -> list[dict]:
+) -> list[dict[str, str]]:
     """确定性风险规则引擎（扫描订单事实，零 LLM）。"""
-    risks: list[dict] = []
+    risks: list[dict[str, str]] = []
 
     # R1 未支付就承运（资金风险）
     if order.status in ("matched", "shipped") and (payment is None or payment.status == "pending"):

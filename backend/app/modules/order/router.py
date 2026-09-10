@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -21,7 +23,7 @@ from app.modules.order.schemas import OrderCancel, OrderCreate, OrderListRespons
 router = APIRouter()
 
 
-def _get_order_or_404(db: Session, order_id: int, user: User):
+def _get_order_or_404(db: Session, order_id: int, user: User) -> Any:
     order = service.get_order(db, order_id)
     if order is None or not service.is_participant(order, user.id):
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -38,7 +40,7 @@ def create_order(
     data: OrderCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role != "shipper":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -59,7 +61,7 @@ def list_orders(
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role not in ("shipper", "owner"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -81,7 +83,7 @@ def get_order(
     order_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     return _get_order_or_404(db, order_id, user)
 
 
@@ -94,7 +96,7 @@ def ship_order(
     order_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role != "owner":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -118,7 +120,7 @@ def complete_order(
     order_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role != "shipper":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -143,7 +145,7 @@ def cancel_order(
     data: OrderCancel | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role not in ("shipper", "owner"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

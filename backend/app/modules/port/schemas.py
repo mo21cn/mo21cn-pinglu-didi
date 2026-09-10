@@ -20,7 +20,11 @@ class BerthCreate(BaseModel):
     max_dwt: float = Field(..., gt=0, le=50000, description="允许靠泊最大载重吨")
     max_draft: float = Field(..., gt=0, le=15, description="泊位允许吃水（米）")
     allowed_ship_types: list[Literal["bulk", "general", "container", "tanker"]] = Field(
-        default_factory=lambda: ["bulk"], min_length=1, description="适靠船型"
+        default_factory=lambda: list[Literal["bulk", "general", "container", "tanker"]](
+            ["bulk"]
+        ),
+        min_length=1,
+        description="适靠船型",
     )
     concurrent_capacity: int = Field(default=1, ge=1, le=4, description="并发靠泊容量")
 

@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -23,7 +25,7 @@ from app.modules.payment.schemas import PaymentCreate, PaymentMockPay, PaymentOu
 router = APIRouter()
 
 
-def _get_payment_or_404(db: Session, payment_id: int, user: User):
+def _get_payment_or_404(db: Session, payment_id: int, user: User) -> Any:
     payment = service.get_payment(db, payment_id)
     if payment is None or not service.is_participant(payment, user.id):
         raise HTTPException(status_code=404, detail="支付单不存在")
@@ -40,7 +42,7 @@ def create_payment(
     data: PaymentCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     if user.current_role != "shipper":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -59,7 +61,7 @@ def get_payment(
     payment_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     return _get_payment_or_404(db, payment_id, user)
 
 
@@ -72,7 +74,7 @@ def get_payment_by_order(
     order_id: int,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     order = get_order(db, order_id)
     if order is None or user.id not in (order.shipper_id, order.owner_id):
         raise HTTPException(status_code=404, detail="订单不存在")
@@ -92,7 +94,7 @@ def mock_pay(
     data: PaymentMockPay | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Any:
     payment = _get_payment_or_404(db, payment_id, user)
     if payment.payer_id != user.id:
         raise HTTPException(status_code=404, detail="支付单不存在")
