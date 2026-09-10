@@ -200,3 +200,10 @@ page { background: #F5F7FA; }
 .contract-text { font-size: 24rpx; color: #3D4C63; line-height: 1.8; white-space: pre-wrap; }
 .modal-foot { padding-top: 18rpx; text-align: center; }
 .modal-note { font-size: 21rpx; color: #A8B4C4; }
+
+/* 合同双入口提示（卡片按钮 → 三级页 / 长按 → 弹层快速预览） */
+.list-hint {
+  padding: 0 28rpx 12rpx;
+  font-size: 22rpx;
+  color: #A8B4C4;
+}

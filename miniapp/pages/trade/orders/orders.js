@@ -1,5 +1,6 @@
 // 06 我的订单（底栏二级页）
-// 统计行（全部/待承运/运输中/已完成/已撤单）+ 待处理事项 + 订单列表 + 合同弹层
+// 统计行（全部/待承运/运输中/已完成/已撤单）+ 待处理事项 + 订单列表
+// 合同双入口：卡片「查看合同」→ 三级页 pages/trade/contract（完整版）；长按订单卡 → 弹层快速预览
 // 注：订单接口仅返回 cargo_id/ship_id → 用「我的货源 / 我的船队」列表做 enrich 展示路线。
 //     若拿不到货源详情（如船东视角），降级显示「货源 #id」。
 const { request } = require('../../../utils/request')
@@ -276,6 +277,18 @@ Page({
         })
       })
       .catch(() => wx.hideLoading())
+  },
+
+  /** 「查看合同」→ 合同三级页（L3 完整版：Agent 头卡 + 风险卡 + 正文 + 签署占位） */
+  onContractPage(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    if (!id) return
+    wx.navigateTo({ url: '/pages/trade/contract/contract?order_id=' + id })
+  },
+
+  /** 长按订单卡 → 弹层快速预览（与三级页同源同接口，仅展示粒度更轻） */
+  onPreviewContract(e) {
+    this.onContract(e)
   },
 
   closeContract() {

@@ -5,9 +5,11 @@
  * 检查项：
  *   1. 所有 .json 语法可解析
  *   2. app.json 注册的页面四件套（.js/.json/.wxml/.wxss）齐全
- *   3. tabBar（含 custom）配置合法：≤5 项、页面已注册、custom 组件文件存在
- *   4. 路由引用可达：页面/wxml 中出现的 /pages/... 必须在 app.json 注册
- *   5. tabBar 页面用 switchTab、非 tabBar 页面用 navigateTo（错用会导致静默失败）
+ *   3. 页面路径规范（pages/ 下、文件名与所在目录同名）＋ 无重复注册
+ *   4. tabBar（含 custom）配置合法：≤5 项、页面已注册、custom 组件文件存在
+ *   5. 路由引用可达：页面/wxml 中出现的 /pages/... 必须在 app.json 注册
+ *   6. tabBar 页面用 switchTab、非 tabBar 页面用 navigateTo（错用会导致静默失败）
+ *   7. wxml 事件绑定的方法在同名 .js 中已定义（抓事件名写错/漏定义）
  *
  * 用法：node scripts/verify_miniapp.js
  * 退出码：0 通过 / 1 有问题
@@ -55,6 +57,18 @@ for (const p of pages) {
   }
 }
 
+// 页面路径规范：必须在 pages/ 下，且文件名与所在目录同名（pages/<域>/<页>/<页>）
+for (const p of pages) {
+  const base = path.basename(p)
+  if (p.split('/')[0] !== 'pages') errors.push(`[CONV] 页面不在 pages/ 下: ${p}`)
+  if (base !== path.basename(path.dirname(p))) {
+    errors.push(`[CONV] 路径与文件名不一致: ${p}（应为 .../${base}/${base}）`)
+  }
+}
+
+const dupPages = Array.from(new Set((appJson.pages || []).filter((p, i, arr) => arr.indexOf(p) !== i)))
+if (dupPages.length) errors.push(`[PAGE] 重复注册: ${dupPages.join(', ')}`)
+
 if (appJson.tabBar && appJson.tabBar.custom) {
   for (const ext of ['.js', '.json', '.wxml', '.wxss']) {
     if (!fs.existsSync(path.join(ROOT, 'custom-tab-bar', 'index' + ext))) {
@@ -97,8 +111,32 @@ for (const f of files.filter((x) => x.endsWith('.js') || x.endsWith('.wxml'))) {
   }
 }
 
+// ---- 4. wxml 事件处理函数存在性（抓「事件名写错/方法漏定义」这类静默失败） ----
+const handlerRe = /\b(?:capture-)?(?:bind|catch)(?::)?([a-zA-Z]+)\s*=\s*"([^"]*)"/g
+checked.handlers = 0
+
+for (const f of files.filter((x) => x.endsWith('.wxml'))) {
+  const jsPath = f.replace(/\.wxml$/, '.js')
+  if (!fs.existsSync(jsPath)) continue
+  const wxml = fs.readFileSync(f, 'utf8')
+  const js = fs.readFileSync(jsPath, 'utf8')
+  const rel = path.relative(ROOT, f)
+
+  let h
+  handlerRe.lastIndex = 0
+  while ((h = handlerRe.exec(wxml))) {
+    const name = (h[2] || '').trim()
+    if (!name || name.indexOf('{{') !== -1) continue
+    checked.handlers++
+    const defined = new RegExp('(^|[^\\w.$])' + name + '\\s*[(:]').test(js)
+    if (!defined) errors.push(`[EVENT] ${rel} 绑定了未定义的方法: ${name}`)
+  }
+}
+
 // ---- 输出 ----
-console.log(`检查完成：JSON ${checked.json} 个 / 路由引用 ${checked.routes} 处 / 页面 ${pages.size} 个`)
+console.log(
+  `检查完成：JSON ${checked.json} 个 / 页面 ${pages.size} 个 / 路由引用 ${checked.routes} 处 / 事件绑定 ${checked.handlers} 处`
+)
 if (errors.length) {
   console.log(`\n发现 ${errors.length} 个问题：`)
   errors.forEach((e) => console.log('  - ' + e))
