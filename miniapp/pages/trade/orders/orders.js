@@ -46,6 +46,7 @@ Page({
     rawList: [],
     list: [],
     loading: false,
+    error: '',
     contract: { show: false, orderId: 0, text: '', risks: [] }
   },
 
@@ -73,11 +74,12 @@ Page({
   },
 
   // ---- 数据 ----
+  /** 订单为主资源（失败即报错）；货源/船队仅用于卡片富化，取不到时降级 */
   fetchAll() {
-    this.setData({ loading: true })
+    this.setData({ loading: true, error: '' })
     const safe = (url) => request({ url, data: { size: 100 } }).catch(() => ({ items: [] }))
     Promise.all([
-      safe('/api/v1/order/orders'),
+      request({ url: '/api/v1/order/orders', data: { size: 100 } }),
       safe('/api/v1/cargo/shipments'),
       safe('/api/v1/ship/registry')
     ])
@@ -91,7 +93,9 @@ Page({
         this.setData({ rawList })
         this.applyView()
       })
-      .catch(() => {})
+      .catch((err) => {
+        this.setData({ error: (err && err.message) || '订单加载失败，请稍后重试' })
+      })
       .finally(() => this.setData({ loading: false }))
   },
 

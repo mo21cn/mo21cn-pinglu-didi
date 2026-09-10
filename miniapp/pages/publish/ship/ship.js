@@ -29,6 +29,7 @@ Page({
   data: {
     ships: [],
     shipLoading: false,
+    shipError: '',
     shipLabel: '',
     shipBrief: '',
     selectedShipId: 0,
@@ -52,13 +53,13 @@ Page({
   },
 
   fetchShips() {
-    this.setData({ shipLoading: true })
+    this.setData({ shipLoading: true, shipError: '' })
     request({ url: '/api/v1/ship/registry', data: { size: 50 } })
       .then((res) => {
         const ships = (res.items || []).filter((s) => s.status === 'verified')
         this.setData({ ships })
       })
-      .catch(() => {})
+      .catch((err) => this.setData({ shipError: (err && err.message) || '船舶列表加载失败' }))
       .finally(() => this.setData({ shipLoading: false }))
   },
 

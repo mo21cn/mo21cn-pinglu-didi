@@ -117,7 +117,15 @@
         <text>返回货源大厅</text>
       </view>
 
-      <view wx:if="{{shipLoading && shipList.length === 0}}" class="empty">加载中...</view>
+      <view wx:if="{{shipLoading && shipList.length === 0}}" class="empty">
+        <view class="empty-icon">⏳</view>
+        <view>船队加载中...</view>
+      </view>
+      <view wx:elif="{{shipError}}" class="err-card">
+        <view class="err-title">船队加载失败</view>
+        <view class="err-detail">{{shipError}}</view>
+        <view class="err-btn" bindtap="fetchShipList">重新加载</view>
+      </view>
       <view wx:elif="{{shipList.length === 0}}" class="section-card">
         <view class="empty">
           <view class="empty-icon">⚓</view>

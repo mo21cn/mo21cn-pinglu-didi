@@ -213,6 +213,10 @@ page { background: #EDF2F6; }
   font-size: 23rpx;
   color: #3B5BDB;
 }
+/* 运营台内的筛选条：与 tab 行贴合，去掉共享 filter-bar 的默认左右内边距 */
+.ops-filter {
+  padding: 0 24rpx 16rpx;
+}
 .ops-actions {
   margin-top: 18rpx;
   padding-top: 16rpx;
