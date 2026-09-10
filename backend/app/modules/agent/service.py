@@ -135,29 +135,38 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
 
 # ===========================================================================
 # 客服导购 Agent（F10）：FAQ / 航线 / 用法咨询，纯读零直写
-# 知识注入：MVP 阶段平台知识硬编码进 system prompt（后续替换点 → RAG 检索）
+# 知识注入：F12 起改为 RAG 检索式注入（knowledge.py 检索 top-k → 动态拼装
+# system prompt），不再整包硬编码；embedding 向量检索留替换点
 # ===========================================================================
 
-ASSISTANT_SYSTEM_PROMPT = """你是平陆运河"滴滴打船"平台的智能客服助手，帮助用户解答平台用法、航线与业务咨询。
-
-## 平台知识库
-【三角色】货主（发货找船）/ 船东（接单找货，船舶需先提交审核，关键信息变更会自动降级重审）/ 港口方（泊位调度与船舶审核）。
-【主流程】货主发布货源（可直接发布进撮合池）→ 智能撮合（硬约束过滤+评分排序，只推荐不出单）→ 货主选定下单 →
-支付运费 → 船东启运 → 货主签收完成；撮合后任意一方可撤单（已付款自动全额退款）。
-【支付】运费由货主支付，撤单自动退款；MVP 阶段为模拟支付，后续接入微信支付。
-【航线港口（13 个）】内河：南宁 NNG（运河江海联运枢纽）、贵港 GGU（内河第一大港）、梧州 WUZ（东向大湾区门户）、
-来宾 BIN、柳州 LZH、百色 BSZ、崇左 CHZ、桂林 GXL、贺州 HEZ、玉林 YUL；海港：钦州 QNZ、防城港 FCG、北海 BHZ（北部湾三港区）。
-【船型与货类】散货 bulk（水泥/矿/煤/砂石/粮）、件杂货 general（钢材/设备）、集装箱 container、液货 tanker（油品/化工，
-仅液货船可承运）、其他 other。
-【撮合逻辑】硬约束（船舶已认证、证书覆盖装货期、载重足额、船型货类兼容）+ 评分（载重利用率/船型适配/船籍港就近/证书余量）。
+ASSISTANT_RULES_PROMPT = """你是平陆运河"滴滴打船"平台的智能客服助手，帮助用户解答平台用法、航线与业务咨询。
 
 ## 回答规则
 1. 只回答与平台/航运业务相关问题；无关问题礼貌引导回业务话题。
-2. 事实以知识库为准，不确定的就说"建议咨询平台人工客服"，不要编造数字（运价行情等）。
+2. 事实以下方提供的【参考资料】为准；参考资料未覆盖的就说"建议咨询平台人工客服"，不要编造数字（运价行情等）。
 3. 简明扼要，可用简短列表；中文回答，100-200 字为宜。
 4. 纯咨询只读：不承诺代替用户执行任何写操作（下单/支付/审核），引导用户自行操作。
 5. 输出格式：严格 JSON 对象 {"answer": "回答文本"}，answer 内可用换行符 \\n 组织列表。
 """
+
+
+def _build_system_prompt(question: str, *, top_k: int = 4) -> str:
+    """RAG 拼装：检索 top-k 相关知识文档注入 prompt。
+
+    - 命中不足 2 条时回退核心文档（角色 + 主流程），保证基本事实覆盖；
+    - 检索层为确定性词法匹配（knowledge.py），embedding 替换点见该模块。
+    """
+    from app.modules.agent.knowledge import KNOWLEDGE_BASE, search_knowledge
+
+    hits = search_knowledge(question, top_k=top_k)
+    if len(hits) < 2:
+        core_ids = {"roles", "flow-main"}
+        hits = [(d, 0.0) for d in KNOWLEDGE_BASE if d.id in core_ids]
+    refs = "\n".join(f"- {d.topic}：{d.text}" for d, _score in hits)
+    return (
+        f"{ASSISTANT_RULES_PROMPT}\n"
+        f"## 参考资料（平台知识库检索结果）\n{refs}\n"
+    )
 
 
 def _mock_answer(question: str) -> dict:
@@ -216,9 +225,9 @@ async def answer_question(
     user_content = f"（最近对话，供参考）\n{context}\n\n当前问题：{question}" if context else question
 
     try:
-        # 复用 chat_json：要求 LLM 以 {"answer": "..."} 结构化输出（统一网关出口）
+        # RAG：按问题检索相关知识，动态拼装 system prompt
         result = await llm_gateway.chat_json(
-            system=ASSISTANT_SYSTEM_PROMPT,
+            system=_build_system_prompt(question),
             user=user_content,
             mock_content=_mock_answer,
         )
