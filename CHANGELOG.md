@@ -3,6 +3,60 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-09-10
+
+RAG 知识检索 + 底部客服对话入口（F12-F13）：Agent 从 prompt 硬编码转检索式注入，小程序底部 tabBar 接通客服。
+
+### 新增
+
+- **F12 RAG 知识检索**（PR #15）：
+  - `knowledge.py`：知识库 chunk 化 25 篇（13 港一港一篇 + 角色/主流程/
+    发布/支付/合同/五货类/撮合规则/船舶认证），支持单港精确命中
+  - 检索引擎 = 字符 bigram TF-IDF 余弦（纯标准库、零外部依赖、
+    确定性可测、预计算索引微秒级查询）
+  - assistant prompt 拆为规则 prompt + RAG 动态拼装（top-4 检索注入
+    「参考资料」节；召回 <2 自动回退 roles+flow-main 核心文档）
+  - EMBEDDING_PROVIDER 为向量检索替换点（后续接真实 embedding 仅
+    换 search 实现层，文档层与拼装逻辑零改动）
+- **F13 底部客服对话入口**（PR #16）：
+  - `pages/assistant/` 四件套：聊天气泡 UI（user-select 可复制、换行保留）
+    + 5 个高频问句快捷 chip + Storage 持久化（chat_history_v1，最多 50 条）
+    + 多轮上下文（最近 6 轮）+ 自动滚到底 + 错误态降级
+  - `app.json` tabBar 4 项 = 首页 / 客服 / 消息 / 我的（首项 text
+    工作台→首页，与角色卡入口语义对齐）
+  - 顶部说明栏明示「纯只读，AI 不代替您执行任何写操作」
+  - 后端零改动：F9/F10 已落定 assistant 只读 + AgentCall 审计
+- chat_json 网关 mock_content 注入参数（PR #11 起）：各 Agent 在
+  LLM_MOCK 下输出与真实模式同构，CI 可全链路验证
+
+### 演示版范围（本里程碑起）
+
+主功能框架（前后端）已完整交付：**5 个核心域**（auth/cargo/ship/
+port/match/order/payment）+ **3 个 Agent**（货源解析/客服导购/智能
+合同）+ **1 个 RAG 知识检索层** + **完整小程序入口**。后续进入
+**前端 + UI 打磨 + 测试**阶段。
+
+- 合规初筛：暂不开发独立 Agent，**下放至客服导购响应**（RAG 知识库
+  内可承载禁运品/风险词等提示，无须独立 endpoint）
+- 撮合 Stage2（泊位档期 + 空驶成本）：暂搁，匹配精度可由 Stage1
+  引擎与 Agent 协同补足
+
+### 验证
+
+- 全量 117 tests passed，ruff 全绿，CI 双绿
+- 真实 DeepSeek 冒烟：RAG 检索注入可观测、回答严格基于检索资料、
+  运价等未覆盖信息正确拒答
+- F12+F11+F13 协同：液货咨询回答自动带「合同标注风险」自然衔接
+
+### 已知限制
+
+- 演示模式（LLM_MOCK=false + DeepSeek 真实调用）仅本机联调
+- 合同草稿无签署/存证流程（后续接电子签）
+- assistant 检索为词法（bigram TF-IDF），未接真实向量
+- 小程序 UI 联调仍需用户侧真机/模拟器验证
+- 撮合 Stage1 引擎，无泊位档期/空驶成本建模
+- fix/e2e-ui 分支（tabBar 旧版）未合入
+
 ## [0.3.0] - 2026-09-10
 
 智能合同 Agent（F11）：中风险场景三重防线范式落地，Agent 版图 3/5。
