@@ -1,0 +1,158 @@
+<!--
+  支付详情（L3 三级页）· 支付域（F7）
+  结构：金额头卡（金额 + 单据状态）→ 支付单信息 → 资金状态留痕时间轴
+        → 关联订单摘要 → 底部固定操作条
+  主线：一张单据的完整资金留痕，展示「资金流与订单流一致性由确定性内核驱动」
+  入口：订单卡「去支付」/「支付详情」
+-->
+<view class="page-sub">
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{loading}}" class="empty">
+      <view class="empty-icon">💳</view>
+      <view>支付单加载中...</view>
+    </view>
+
+    <!-- 兜底态 -->
+    <view wx:elif="{{error}}" class="err-card">
+      <view class="err-title">支付详情加载失败</view>
+      <view class="err-detail">{{error}}</view>
+      <view class="err-btn" bindtap="fetch">重新加载</view>
+    </view>
+
+    <block wx:else>
+      <!-- ① 金额头卡 -->
+      <view class="amount-card bg-brand-gradient">
+        <view class="amount-row">
+          <text class="amount-label">订单运费</text>
+          <text class="amount-chip">{{statusLabel}}</text>
+        </view>
+        <view class="amount-num">
+          <text wx:if="{{amountPrefix}}" class="amount-cny">{{amountPrefix}}</text>{{amountText}}
+        </view>
+        <view class="amount-meta">
+          <text>订单 #{{orderId}}</text>
+          <text class="amount-dot">·</text>
+          <text>{{channelLabel}}</text>
+          <text class="amount-dot">·</text>
+          <text>{{orderStatusLabel}}</text>
+        </view>
+        <view class="amount-note">运费金额在创建支付单时锁定，此后订单字段变化不影响本单金额。</view>
+      </view>
+
+      <!-- ② 尚无支付单 -->
+      <view wx:if="{{!paid}}" class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">该订单尚无支付单</text>
+          <text class="chip chip-muted">未发起</text>
+        </view>
+        <view class="nocp-body">
+          <view class="nocp-text">发起支付后将生成待支付单据，运费金额随即锁定，并进入资金状态留痕。</view>
+          <view class="nocp-hint">{{barNote}}</view>
+        </view>
+      </view>
+
+      <!-- ③ 支付单信息 -->
+      <view wx:else class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">支付单信息</text>
+          <text class="chip {{statusChip}}">{{statusLabel}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">支付单号</text>
+          <text class="field-value">#{{paid.id}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">支付渠道</text>
+          <text class="field-value">{{channelLabel}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">付款方</text>
+          <text class="field-value">用户 #{{paid.payer_id}}（货主）</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">收款方</text>
+          <text class="field-value">用户 #{{paid.payee_id}}（船东）</text>
+        </view>
+        <view wx:if="{{paid.transaction_no}}" class="field-row">
+          <text class="field-label">支付流水号</text>
+          <text class="field-value mono">{{paid.transaction_no}}</text>
+        </view>
+        <view wx:if="{{paid.refund_no}}" class="field-row">
+          <text class="field-label">退款流水号</text>
+          <text class="field-value mono">{{paid.refund_no}}</text>
+        </view>
+      </view>
+
+      <!-- ④ 资金状态留痕 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">资金状态留痕</text>
+          <text class="chip chip-purple">确定性状态机</text>
+        </view>
+        <view class="tl">
+          <view
+            wx:for="{{timeline}}"
+            wx:key="key"
+            class="tl-item {{item.done ? 'tl-done' : ''}}"
+          >
+            <view class="tl-rail">
+              <view class="tl-dot"></view>
+              <view wx:if="{{index < timeline.length - 1}}" class="tl-line"></view>
+            </view>
+            <view class="tl-body">
+              <view class="tl-title">{{item.title}}</view>
+              <view class="tl-time">{{item.time || '待发生'}}</view>
+              <view wx:if="{{item.note}}" class="tl-note">{{item.note}}</view>
+            </view>
+          </view>
+        </view>
+        <view class="tl-foot">
+          资金流与订单流的一致性由确定性内核驱动：撤单时已付款自动全额退款、待付款直接关闭，
+          平台不开放独立退款端点，避免两条状态机各说各话。
+        </view>
+      </view>
+
+      <!-- ⑤ 关联订单摘要 -->
+      <view wx:if="{{order}}" class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">关联订单</text>
+          <text class="section-head-more" bindtap="goOrder">前往订单页 ›</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">订单号</text>
+          <text class="field-value">#{{order.id}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">订单状态</text>
+          <text class="field-value">{{orderStatusLabel}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">货物</text>
+          <text class="field-value">{{cargoText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">承运船舶</text>
+          <text class="field-value">{{shipText}}</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">成交时间</text>
+          <text class="field-value">{{order.matched_at ? order.matched_at : '—'}}</text>
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <!-- 底部固定操作条 -->
+  <view wx:if="{{!loading && !error}}" class="bottom-bar pay-bar">
+    <view class="bar-note">{{barNote}}</view>
+    <view class="bar-actions">
+      <view wx:if="{{canPay}}" class="btn-primary" bindtap="onMockPay">模拟支付成功</view>
+      <view wx:elif="{{canCreate}}" class="btn-primary" bindtap="onCreate">发起支付</view>
+      <block wx:else>
+        <view class="btn-ghost btn-disabled" data-name="下载支付凭证" bindtap="onPlaceholder">下载支付凭证</view>
+        <view class="btn-primary btn-disabled" data-name="在线退款" bindtap="onPlaceholder">在线退款</view>
+      </block>
+    </view>
+  </view>
+</view>

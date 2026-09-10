@@ -80,11 +80,29 @@ uvicorn app.main:app --reload
 
 | 批次 | 内容 | 交付物（页面/文件） | 验收 |
 |---|---|---|---|
-| S0 `[ ]` | 地基：L3 路由注册 + 页面四件套骨架 + 静态校验脚本扩展 | `app.json`、`scripts/verify_miniapp.js` | 校验全绿 |
-| S1 `[ ]` | **合同三级页 ★ Agent 亮点**（含订单页合同弹层双入口） | `pages/trade/contract/` | 真实订单出合同 + 风险点 + 占位底栏 |
-| S2 `[ ]` | 交易闭环页组：支付详情、撮合结果页正式化 | `pages/trade/payment/`、`pages/trade/match/` | 单据状态机 + 四项评分拆解 |
+| S0 `[x]` | 地基：L3 路由注册 + 页面四件套骨架 + 静态校验脚本扩展 | `app.json`、`scripts/verify_miniapp.js` | 校验全绿 |
+| S1 `[x]` | **合同三级页 ★ Agent 亮点**（含订单页合同弹层双入口） | `pages/trade/contract/` | 真实订单出合同 + 风险点 + 占位底栏 |
+| S2 `[x]` | 交易闭环页组：支付详情、撮合结果页正式化 | `pages/trade/payment/`、`pages/trade/match/` | 单据状态机 + 四项评分拆解 |
 | S3 `[ ]` | 港口域详情页：泊位档期、预约审核详情（可裁剪） | `pages/port/berth/`、`pages/port/appt/` | 档期可视化 + 防超卖演示 |
 | S4 `[ ]` | 汇报打磨：三态兜底（加载/空/错误）+ 演示数据贯通 + 演示脚本 | 全局 | 演示路径可一次跑通 |
+
+**已完成批次记录**
+
+| 批次 | 提交 | 静态校验 | 真实接口冒烟 |
+|---|---|---|---|
+| S0 | PR #21 `ccf2727` | 16 JSON / 11 页面 / 41 路由 / 144 事件 | — |
+| S1 | PR #21 + #22 `6cb3a11` | 同上 + 事件处理函数存在性 | 订单 #1 → 200/885 字符/风险 0；#3 → 200/**2 项高风险**；已撤单 → 400；非参与方 → 400 |
+| S2 | 本次 PR | 16 JSON / **12 页面** / **43 路由** / **152 事件** | 支付全链：无单 404 → 发起 201 → 重复发起 409 → 模拟支付 200 → 幂等 paid_at 不变 → 撤单退款 refunded；面议拒发起 400；非参与方 404 |
+
+**三者状态机口径（可直接用于汇报答辩）**
+
+| 域 | 状态机 | 幂等 / 并发防线 | 留痕 |
+|---|---|---|---|
+| 订单 F6 | `matched → shipped → completed` / `matched → cancelled` | 货源至多一个 active 订单（创建时 `FOR UPDATE` 锁货源行） | 五时间戳 |
+| 支付 F7 | `pending → paid` / `pending → closed` / `paid → refunded` | 一订单一支付单（`order_id` 唯一约束 + 锁订单行）；回调幂等（重复回调不改 `paid_at`） | 双流水号 + 四时间戳 |
+| 撮合 F5 | 无状态（只读推荐，不落库不出单） | 硬约束 CSP 先行过滤；纯函数内核结果可复现 | — |
+
+**支付三级页的展示主线**：一张单据的完整资金留痕（创建锁价 → 支付 → 退款/关闭），用来证明「资金流与订单流一致性由确定性内核驱动」——退款不开放独立端点，只由撤单联动，避免两条状态机各说各话。
 
 **节奏约定**：一个批次 = 一个 feature 分支 = 一个 PR，CI 双绿后 squash 合入 develop；本地平铺分支名、推送映射远程斜杠名；每完成一个页面四件套立即 `git add`（防 file-rollback）。
 
@@ -94,9 +112,9 @@ uvicorn app.main:app --reload
 
 | 三级页 | 挂载点 | 依据接口 |
 |---|---|---|
-| 合同详情 ★ | 订单 | `POST /agent/contract/generate` |
-| 支付详情 | 订单 | `GET /payment/payments/{id}`、`GET /payment/payments/order/{oid}` |
-| 撮合结果 | 找船 | `POST /match/cargos/{id}/ships` |
+| 合同详情 ★ `[x]` | 订单 | `POST /agent/contract/generate` |
+| 支付详情 `[x]` | 订单 | `GET /payment/payments/{id}`、`GET /payment/payments/order/{oid}` |
+| 撮合结果 `[x]` | 找船 | `POST /match/cargos/{id}/ships` |
 | 货源详情 / 编辑 | 找船 | `GET/PATCH /cargo/shipments/{id}` |
 | 船舶备案详情 | 找货 | `GET/PATCH /ship/registry/{id}` |
 | 泊位档期详情 | 港口 | `GET /port/berths/{id}/schedule` |
@@ -124,3 +142,6 @@ uvicorn app.main:app --reload
 - **主线三条**：身份切换 → 货主发单/船东找货 → 支付·合同·客服闭环。
 - **技术亮点**：合同 Agent（LLM 零数字：模板渲染核心条款 + 规则引擎产风险）、港口防超卖（行锁 + 重叠计数）、RAG 客服（25 chunk 检索）、自定义 tabBar（随角色变化）。
 - **数据准备**：`WECHAT_MOCK=true` 时 Storage 设 `dev_login_code`（`seed-shipper`/`seed-owner`/`seed-port`）快速切身份。
+- **三级页看点**：合同预览（Agent 头卡「核心条款零 LLM」+ 风险卡）、支付详情（金额头卡 + 资金状态留痕时间轴）、撮合结果（引擎头卡「确定性内核 · 零 LLM」+ 四项评分进度条 + 未入局原因）。
+- **演示用种子数据**（dev 库已就绪）：订单 #4 = 待承运/¥28000/**支付单待支付**（现场点「模拟支付」）；订单 #5 = 已撤单/**已退款**（展示撤单联动退款）；订单 #1 = 已完成/已支付；订单 #3 = 面议单（展示「面议拒发起支付」的兜底文案）。登录身份用 `seed-shipper`（订单 #4/#5 属于该身份）。
+- **汇报前提醒**：后端以 `LLM_MOCK=true` 起，避免合同页依赖外网（见 TODO-03：合同 Agent 在 LLM 故障时返回 503，注释所述「降级返回」与代码不符）。

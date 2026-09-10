@@ -380,3 +380,29 @@ page {
 }
 .bottom-bar .btn-ghost { flex: 1; height: 88rpx; line-height: 88rpx; text-align: center; }
 .bottom-bar .btn-primary { flex: 2; height: 88rpx; line-height: 88rpx; }
+
+/* ---- 底部固定条：提示行 + 按钮行（合同页 / 支付页等三级页共用） ---- */
+.bar-note {
+  font-size: 22rpx;
+  color: #98A6B8;
+  text-align: center;
+  line-height: 1.5;
+}
+.bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+.bar-actions .btn-ghost,
+.bar-actions .btn-primary {
+  text-align: center;
+}
+.bar-actions .btn-ghost {
+  height: 88rpx;
+  line-height: 88rpx;
+}
+.bar-actions .btn-primary {
+  height: 88rpx;
+  line-height: 88rpx;
+}
+.btn-disabled { opacity: 0.45; }
