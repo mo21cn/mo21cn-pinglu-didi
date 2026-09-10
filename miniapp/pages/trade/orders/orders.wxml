@@ -42,6 +42,36 @@
         <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" bindtap="onCancel">撤单</button>
         <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onShip">确认启运</button>
       </view>
+
+      <!-- 双方：智能合同（草稿生成 + 风险提示，不具法律效力） -->
+      <view wx:if="{{item.status === 'matched' || item.status === 'shipped'}}" class="card-actions">
+        <button class="btn-mini btn-contract" size="mini" data-id="{{item.id}}" bindtap="onContract">生成合同</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 合同预览弹层 -->
+  <view wx:if="{{contract.show}}" class="modal-mask" bindtap="closeContract">
+    <view class="modal" catchtap="">
+      <view class="modal-head">
+        <text class="modal-title">运输合同草稿 · 订单 #{{contract.orderId}}</text>
+        <text class="modal-close" bindtap="closeContract">✕</text>
+      </view>
+
+      <view wx:if="{{contract.risks.length}}" class="risk-box">
+        <view class="risk-title">⚠️ 风险提示（{{contract.risks.length}}）</view>
+        <view wx:for="{{contract.risks}}" wx:key="title" class="risk-item">
+          <text class="risk-sev risk-sev-{{item.severity}}">{{item.severity === 'high' ? '高' : item.severity === 'medium' ? '中' : '低'}}</text>
+          <text class="risk-text">{{item.title}}：{{item.detail}}</text>
+        </view>
+      </view>
+
+      <scroll-view scroll-y class="contract-scroll">
+        <text class="contract-text" user-select>{{contract.text}}</text>
+      </scroll-view>
+      <view class="modal-foot">
+        <text class="modal-note">草稿不具法律效力，签署前请人工审核</text>
+      </view>
     </view>
   </view>
 </view>
