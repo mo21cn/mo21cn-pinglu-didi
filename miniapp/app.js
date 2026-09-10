@@ -13,7 +13,11 @@ App({
     // 依据后端返回的角色信息设置 this.globalData.role，并缓存登录态
   },
 
-  // 按角色路由到对应工作台（三角色合一的核心）
+  /**
+   * 按角色路由到对应工作台（三角色合一的核心）
+   * 注：v0.4 后工作台入口已统一为 tabBar，无需 navigateTo，
+   *     但保留给首屏角色选择弹窗在 wx.switchTab 之前做角色切换。
+   */
   routeByRole(role) {
     const map = {
       shipper: '/pages/shipper/shipper',
@@ -22,5 +26,15 @@ App({
     }
     if (!map[role]) return '/pages/index/index'
     return map[role]
+  },
+
+  /**
+   * 工作台入口映射（用于首屏角色选择浮窗）
+   * 与 tabBar 同步
+   */
+  workspacePages: {
+    shipper: '/pages/shipper/shipper',
+    owner: '/pages/owner/owner',
+    port: '/pages/port/port'
   }
 })

@@ -1,12 +1,160 @@
-/* app.wxss —— 全局样式 */
+/* ==========================================================================
+ * 滴滴打船 · 全局样式（v1 设计语言：蓝紫渐变 · 卡片化 · 顶栏图标行）
+ * ==========================================================================
+ * 设计令牌：
+ *   主色 蓝 → 紫 渐变   #3B5BDB → #7048E8
+ *   辅色 浅蓝             #5C7CFA
+ *   辅色 浅紫             #845EF7
+ *   文字 深              #0F2540
+ *   文字 次              #6B7A8C
+ *   文字 弱              #98A6B8
+ *   背景                #F5F7FA
+ *   卡片                #FFFFFF
+ *   阴影 蓝调            0 4rpx 24rpx rgba(61, 90, 219, .08)
+ * ==========================================================================
+ */
+
+/* 微信小程序 CSS 变量支持有限，改为原子类 + 直接色值 */
+
 page {
   background-color: #F5F7FA;
   font-size: 28rpx;
-  color: #212121;
+  color: #0F2540;
   line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
 }
 
-/* 主题色（与后端/设计令牌一致） */
-.color-primary { color: #1565C0; }
-.color-text { color: #212121; }
-.color-secondary { color: #616161; }
+/* ---- 主题色（与设计令牌一致） ---- */
+.color-primary { color: #3B5BDB; }
+.color-purple { color: #7048E8; }
+.color-text { color: #0F2540; }
+.color-secondary { color: #6B7A8C; }
+.color-muted { color: #98A6B8; }
+.color-danger { color: #FA5252; }
+.color-warning { color: #F08C00; }
+.color-success { color: #12B886; }
+
+/* ---- 蓝紫渐变背景（品牌头部 / 按钮） ---- */
+.bg-brand-gradient {
+  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
+}
+
+.bg-brand-soft {
+  /* 浅蓝紫，用于品牌色卡片底（找船/找货首页顶栏弱化版） */
+  background: linear-gradient(135deg, #EDF1FF 0%, #F2EBFF 100%);
+}
+
+.text-brand-gradient {
+  /* 仅 WebKit 支持，小程序里主要做按钮文字（用 color 兜底） */
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- 通用卡片 ---- */
+.card {
+  background: #FFFFFF;
+  border-radius: 20rpx;
+  padding: 28rpx;
+  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
+}
+
+.card-tight {
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  padding: 20rpx;
+  box-shadow: 0 2rpx 12rpx rgba(61, 90, 219, 0.06);
+}
+
+/* ---- 通用按钮 ---- */
+.btn-primary {
+  width: 100%;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  color: #FFFFFF;
+  font-size: 30rpx;
+  border-radius: 16rpx;
+  font-weight: 500;
+  letter-spacing: 2rpx;
+}
+.btn-primary[disabled] { opacity: .5; }
+
+.btn-ghost {
+  background: #FFFFFF;
+  color: #3B5BDB;
+  font-size: 28rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(59, 91, 219, .25);
+}
+
+.btn-mini {
+  border-radius: 10rpx;
+  font-size: 24rpx;
+}
+
+/* ---- 通用 chips（状态徽标 / 筛选标签） ---- */
+.chip {
+  display: inline-block;
+  padding: 6rpx 18rpx;
+  font-size: 22rpx;
+  border-radius: 999rpx;
+  background: rgba(59, 91, 219, .08);
+  color: #3B5BDB;
+}
+.chip-purple { background: rgba(112, 72, 232, .08); color: #7048E8; }
+.chip-warn { background: rgba(240, 140, 0, .10); color: #F08C00; }
+.chip-danger { background: rgba(250, 82, 82, .10); color: #FA5252; }
+.chip-success { background: rgba(18, 184, 134, .10); color: #12B886; }
+.chip-muted { background: #F1F4F8; color: #6B7A8C; }
+
+/* ---- 通用状态徽标（订单 / 货源 / 船舶） ---- */
+.badge { font-size: 20rpx; padding: 4rpx 16rpx; border-radius: 999rpx; }
+.badge-draft { color: #98A6B8; background: #F1F4F8; }
+.badge-published { color: #3B5BDB; background: rgba(59, 91, 219, .10); }
+.badge-matched { color: #F08C00; background: rgba(240, 140, 0, .10); }
+.badge-shipped { color: #7048E8; background: rgba(112, 72, 232, .10); }
+.badge-completed { color: #12B886; background: rgba(18, 184, 134, .10); }
+.badge-cancelled { color: #FA5252; background: rgba(250, 82, 82, .10); }
+.badge-pending_verify { color: #F08C00; background: rgba(240, 140, 0, .10); }
+.badge-verified { color: #12B886; background: rgba(18, 184, 134, .10); }
+.badge-rejected { color: #FA5252; background: rgba(250, 82, 82, .10); }
+
+/* ---- 通用空状态 ---- */
+.empty {
+  text-align: center;
+  color: #98A6B8;
+  padding: 120rpx 0;
+  font-size: 26rpx;
+}
+.empty-icon {
+  font-size: 80rpx;
+  display: block;
+  margin-bottom: 16rpx;
+  opacity: .5;
+}
+
+/* ---- 通用分隔 ---- */
+.divider {
+  height: 1rpx;
+  background: #EEF1F6;
+  margin: 24rpx 0;
+}
+
+/* ---- 通用 flex 工具 ---- */
+.row { display: flex; align-items: center; }
+.row-between { display: flex; align-items: center; justify-content: space-between; }
+.col { display: flex; flex-direction: column; }
+.flex-1 { flex: 1; }
+.gap-8 { gap: 8rpx; }
+.gap-12 { gap: 12rpx; }
+.gap-16 { gap: 16rpx; }
+.gap-20 { gap: 20rpx; }
+.gap-24 { gap: 24rpx; }
+
+/* ---- 通用文本 ---- */
+.t-h1 { font-size: 44rpx; font-weight: 700; color: #0F2540; }
+.t-h2 { font-size: 36rpx; font-weight: 600; color: #0F2540; }
+.t-h3 { font-size: 30rpx; font-weight: 600; color: #0F2540; }
+.t-body { font-size: 28rpx; color: #0F2540; }
+.t-caption { font-size: 24rpx; color: #6B7A8C; }
+.t-small { font-size: 22rpx; color: #98A6B8; }

@@ -1,56 +1,120 @@
-<!-- 订单列表页：角色视角 + 交易操作 -->
+<!--
+  订单二级页（v1）
+-->
 <view class="page">
-  <view class="filters">
-    <view
-      wx:for="{{statusFilter}}"
-      wx:key="key"
-      class="filter {{activeStatus === item.key ? 'filter-active' : ''}}"
-      data-key="{{item.key}}"
-      bindtap="switchStatus"
-    >{{item.label}}</view>
-  </view>
-
-  <view wx:if="{{loading}}" class="empty">加载中...</view>
-  <view wx:elif="{{list.length === 0}}" class="empty">暂无订单</view>
-
-  <view class="list">
-    <view wx:for="{{list}}" wx:key="id" class="card">
-      <view class="card-head">
-        <text class="card-title">订单 #{{item.id}}</text>
-        <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+  <view class="user-banner">
+    <view class="banner-row">
+      <view class="banner-left">
+        <view class="banner-avatar">{{userInitials}}</view>
+        <view class="banner-info">
+          <view class="banner-greeting">{{greeting}}，{{userName}}</view>
+          <view class="banner-sub">当前角色：{{roleLabel}}</view>
+        </view>
       </view>
-      <view class="card-row">
-        <text>货源 #{{item.cargo_id}} · 船舶 #{{item.ship_id}}</text>
-        <text wx:if="{{item.freight_price}}">¥ {{item.freight_price}}</text>
-        <text wx:else>面议</text>
-      </view>
-      <view class="card-row">
-        <text>成交：{{item.matched_at}}</text>
-      </view>
-
-      <!-- 货主操作 -->
-      <view wx:if="{{role === 'shipper' && item.status === 'matched'}}" class="card-actions">
-        <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" bindtap="onCancel">撤单</button>
-        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onPay">支付运费</button>
-      </view>
-      <view wx:if="{{role === 'shipper' && item.status === 'shipped'}}" class="card-actions">
-        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onComplete">确认签收</button>
-      </view>
-
-      <!-- 船东操作 -->
-      <view wx:if="{{role === 'owner' && item.status === 'matched'}}" class="card-actions">
-        <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" bindtap="onCancel">撤单</button>
-        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onShip">确认启运</button>
-      </view>
-
-      <!-- 双方：智能合同（草稿生成 + 风险提示，不具法律效力） -->
-      <view wx:if="{{item.status === 'matched' || item.status === 'shipped'}}" class="card-actions">
-        <button class="btn-mini btn-contract" size="mini" data-id="{{item.id}}" bindtap="onContract">生成合同</button>
+      <view class="banner-stat">
+        <view class="stat-num">{{stats.pending}}</view>
+        <view class="stat-label">待办</view>
       </view>
     </view>
   </view>
 
-  <!-- 合同预览弹层 -->
+  <view class="status-tabs">
+    <view
+      wx:for="{{statusTabs}}"
+      wx:key="key"
+      class="status-tab {{activeStatus === item.key ? 'status-tab-active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="switchStatus"
+      hover-class="status-tab-hover"
+    >
+      <text>{{item.label}}</text>
+      <view wx:if="{{item.count > 0}}" class="status-tab-count">{{item.count}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{!activeStatus}}" class="todo-section">
+    <view class="todo-title">待处理事项</view>
+    <view class="todo-list">
+      <view
+        wx:for="{{todoList}}"
+        wx:key="key"
+        class="todo-card {{item.urgent ? 'todo-urgent' : ''}}"
+        data-action="{{item.action}}"
+        bindtap="onTodoTap"
+        hover-class="todo-card-hover"
+      >
+        <view class="todo-icon">{{item.icon}}</view>
+        <view class="todo-body">
+          <view class="todo-item-title">{{item.title}}</view>
+          <view class="todo-item-sub">{{item.sub}}</view>
+        </view>
+        <view class="todo-arrow">›</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:else>
+    <view wx:if="{{loading && list.length === 0}}" class="empty-state">加载中...</view>
+    <view wx:elif="{{list.length === 0}}" class="empty-state">
+      <view class="empty-icon">📋</view>
+      <view>暂无{{statusLabels[activeStatus] || ''}}订单</view>
+    </view>
+
+    <view wx:else class="order-list">
+      <view
+        wx:for="{{list}}"
+        wx:key="id"
+        class="order-card"
+        hover-class="order-card-hover"
+      >
+        <view class="order-head">
+          <text class="order-id">订单 #{{item.id}}</text>
+          <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+        </view>
+
+        <view class="order-route">
+          <view class="route-stop">
+            <view class="route-dot route-dot-blue"></view>
+            <text class="route-name">{{item.cargo_name || ('货源 #' + item.cargo_id)}}</text>
+          </view>
+          <view class="route-arrow">→</view>
+          <view class="route-stop">
+            <view class="route-dot route-dot-purple"></view>
+            <text class="route-name">船舶 #{{item.ship_id}}</text>
+          </view>
+        </view>
+
+        <view class="order-meta">
+          <view class="meta-row">
+            <text class="meta-label">成交</text>
+            <text class="meta-value">{{item.matched_at}}</text>
+          </view>
+          <view class="meta-row">
+            <text class="meta-label">运费</text>
+            <text class="meta-value {{item.freight_price ? 'meta-price' : ''}}">
+              {{item.freight_price ? '¥ ' + item.freight_price : '面议'}}
+            </text>
+          </view>
+        </view>
+
+        <view class="order-actions">
+          <block wx:if="{{role === 'shipper'}}">
+            <view wx:if="{{item.status === 'matched'}}" class="action-btn-ghost" data-id="{{item.id}}" catchtap="onCancel">撤单</view>
+            <view wx:if="{{item.status === 'matched'}}" class="action-btn-primary" data-id="{{item.id}}" catchtap="onPay">支付运费</view>
+            <view wx:if="{{item.status === 'shipped'}}" class="action-btn-primary" data-id="{{item.id}}" catchtap="onComplete">确认签收</view>
+          </block>
+          <block wx:if="{{role === 'owner'}}">
+            <view wx:if="{{item.status === 'matched'}}" class="action-btn-ghost" data-id="{{item.id}}" catchtap="onCancel">撤单</view>
+            <view wx:if="{{item.status === 'matched'}}" class="action-btn-primary" data-id="{{item.id}}" catchtap="onShip">确认启运</view>
+          </block>
+          <view wx:if="{{item.status === 'matched' || item.status === 'shipped'}}" class="action-btn-contract" data-id="{{item.id}}" catchtap="onContract">📄 合同</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="content-bottom-space"></view>
+
   <view wx:if="{{contract.show}}" class="modal-mask" bindtap="closeContract">
     <view class="modal" catchtap="">
       <view class="modal-head">

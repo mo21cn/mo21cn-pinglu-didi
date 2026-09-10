@@ -1,4 +1,89 @@
-<!-- mine 页面（占位） -->
+<!--
+  我的工作台（v1 · 占位骨架）
+-->
 <view class="page">
-  <text>mine 工作台</text>
+  <view class="user-banner">
+    <view class="banner-bg"></view>
+    <view class="banner-content">
+      <view class="avatar">{{userInitials}}</view>
+      <view class="user-info">
+        <view class="user-name">{{userName}}</view>
+        <view class="user-role-tag">{{roleLabel}}</view>
+      </view>
+      <view class="user-edit" bindtap="onEditProfile" hover-class="user-edit-hover">
+        <text>编辑</text>
+      </view>
+    </view>
+
+    <view class="stats-row">
+      <view class="stat-cell">
+        <view class="stat-num">{{stats.cargo || 0}}</view>
+        <view class="stat-label">货源</view>
+      </view>
+      <view class="stat-divider"></view>
+      <view class="stat-cell">
+        <view class="stat-num">{{stats.ship || 0}}</view>
+        <view class="stat-label">船舶</view>
+      </view>
+      <view class="stat-divider"></view>
+      <view class="stat-cell">
+        <view class="stat-num">{{stats.order || 0}}</view>
+        <view class="stat-label">订单</view>
+      </view>
+      <view class="stat-divider"></view>
+      <view class="stat-cell">
+        <view class="stat-num">{{stats.done || 0}}</view>
+        <view class="stat-label">完成</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="dev-banner">
+    <view class="dev-banner-icon">🚧</view>
+    <view class="dev-banner-body">
+      <view class="dev-banner-title">我的二级页 UI 构思中</view>
+      <view class="dev-banner-sub">当前展示基础骨架，下版本升级：实名认证 / 钱包 / 设置 / 客服等模块</view>
+    </view>
+  </view>
+
+  <view class="card section-card">
+    <view class="section-title">切换身份</view>
+    <view class="role-switch-row">
+      <view
+        wx:for="{{roleList}}"
+        wx:key="key"
+        class="role-chip {{currentRole === item.key ? 'role-chip-active' : ''}}"
+        data-role="{{item.key}}"
+        bindtap="onSwitchRole"
+        hover-class="role-chip-hover"
+      >
+        <text class="role-chip-icon">{{item.icon}}</text>
+        <text class="role-chip-label">{{item.label}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card section-card">
+    <view class="section-title">常用功能</view>
+    <view class="entry-grid">
+      <view
+        wx:for="{{entryList}}"
+        wx:key="key"
+        class="entry-item {{item.dev ? 'entry-dev' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="onEntry"
+        hover-class="entry-hover"
+      >
+        <view class="entry-icon">{{item.icon}}</view>
+        <view class="entry-label">{{item.label}}</view>
+        <view wx:if="{{item.dev}}" class="entry-tag">开发中</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="logout-row">
+    <view class="logout-btn" bindtap="onLogout" hover-class="logout-btn-hover">退出登录</view>
+  </view>
+
+  <view class="bottom-version">v0.4.0 · UI 改版 v1 · 2026.09</view>
 </view>
