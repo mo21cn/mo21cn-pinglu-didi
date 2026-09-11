@@ -52,6 +52,23 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
+### 验证脚本
+
+```bash
+# 小程序静态校验（JSON 语法 / 页面四件套 / tabBar / 路由可达 / 事件处理函数存在性）
+node scripts/verify_miniapp.js
+
+# 前端动态校验（拉真实后端载荷驱动 13 个页面的取数与装饰逻辑，CI 可跑）
+node scripts/verify_frontend_e2e.js
+
+# 真机走查（需开发者工具「设置 → 安全设置 → 服务端口」已开启）
+# 前置：后端已起 + 已执行 backend/scripts/seed_demo.py
+MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
+```
+
+> `verify_miniapp_device.js` 依赖 `miniprogram-automator`（未入库），按需 `npm i -g miniprogram-automator`；
+> 付费点击等会产生副作用的步骤默认关闭，用 `WALK_PAY=1` 显式开启。
+
 ## 工程规范（务必先读）
 
 | 规范 | 文档 |
@@ -98,7 +115,8 @@ uvicorn app.main:app --reload
 | S2 | 本次 PR | 16 JSON / **12 页面** / **43 路由** / **152 事件** | 支付全链：无单 404 → 发起 201 → 重复发起 409 → 模拟支付 200 → 幂等 paid_at 不变 → 撤单退款 refunded；面议拒发起 400；非参与方 404 |
 | S3 | 本次 PR | 18 JSON / **14 页面** / **46 路由** / **164 事件** | 港域档期：3 条重叠预约确认前两条成功、**第三条 409 档期冲突**；档期接口返回 3 条 confirmed（峰值 2/2 容量）；货主访问 `/port/appts` → 403。纯逻辑断言 **87 项通过**（真实载荷驱动） |
 | S4 | 本次 PR | 18 JSON / 14 页面 / 46 路由 / **170 事件** | 三态兜底补齐 4 页；样式去重净减 242 行；`seed_demo.py` 改造为幂等（连跑两次全"复用"、零重复数据），播下 4 态订单 + 4 条预约并复现 409 |
-| 走查 | 本次 PR | `scripts/verify_frontend_e2e.js` | **169 项断言全绿**：在真实后端拉真载荷驱动 13 个页面的取数/装饰逻辑（不抛异常、不卡 loading、不误报错误、关键列表有数据），并核对「模板读的字段 vs 产出字段」——全站无渲染空白；顺带复现甘特几何边界、支付金额取锁定值、预约容量预检与服务端同口径 |
+| 走查 | PR #26 `2bac9b1` | `scripts/verify_frontend_e2e.js` | **169 项断言全绿**：在真实后端拉真载荷驱动 13 个页面的取数/装饰逻辑（不抛异常、不卡 loading、不误报错误、关键列表有数据），并核对「模板读的字段 vs 产出字段」——全站无渲染空白；顺带复现甘特几何边界、支付金额取锁定值、预约容量预检与服务端同口径 |
+| 真机走查 | 本次 PR | `scripts/verify_miniapp_device.js` | **70 项断言全绿、运行期零 console 报错**：驱动真实模拟器逐屏真实点击并截图，覆盖三角色工作台、支付三级页、合同三级页与弹层、撮合双向下单确认、港口运营台（预约 409 拦截、档期甘特峰值 2/2） |
 
 **三者状态机口径（可直接用于汇报答辩）**
 
