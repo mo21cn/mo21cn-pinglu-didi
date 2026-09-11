@@ -62,6 +62,9 @@ python scripts/seed_demo.py
 
 ### 验证脚本
 
+> 前四条**已纳入 CI**（`.github/workflows/ci.yml` 的 `frontend-static` + `frontend-e2e` 两个 job），
+> push / 开 PR 即自动执行；真机走查依赖微信开发者工具，无法在 CI 运行，仍由本机执行。
+
 ```bash
 # 小程序静态校验（JSON 语法 / 页面四件套 / tabBar / 路由可达 / 事件处理函数存在性）
 node scripts/verify_miniapp.js
