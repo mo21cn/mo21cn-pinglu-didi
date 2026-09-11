@@ -1,10 +1,14 @@
-"""智能体域路由（F9-F11）。
+"""智能体域路由（F9-F20）。
 
 - POST /api/v1/agent/cargo-parse    货源解析（自然语言 → 结构化草稿，货主角色）
 - POST /api/v1/agent/assistant      客服导购问答（FAQ/航线/用法，纯读，全角色）
 - POST /api/v1/agent/contract/generate  合同草稿生成（订单参与方，核心条款零 LLM）
+- POST /api/v1/agent/compliance/cargo   货源合规初筛（发布前预检，货主角色）
+- POST /api/v1/agent/compliance/ship    船舶备案合规初筛（备案前预检，船东角色）
+- POST /api/v1/agent/route          统一入口：意图路由 → 派发到上述领域 Agent
 
-后续迭代挂载：运营分析 / 合规初筛 等 Agent。
+合规初筛与合同风险点均为**确定性规则引擎**产物（零 LLM）；
+Router 只做分派，不代用户执行任何写操作（工程底线 2）。
 """
 from __future__ import annotations
 
@@ -19,10 +23,15 @@ from app.modules.agent import service
 from app.modules.agent.schemas import (
     AssistantRequest,
     AssistantResult,
+    CargoComplianceRequest,
     CargoParseRequest,
     CargoParseResult,
+    ComplianceResult,
     ContractDraftResult,
     ContractGenerateRequest,
+    RouteRequest,
+    RouteResult,
+    ShipComplianceRequest,
 )
 from app.modules.agent.service import AgentServiceError
 from app.modules.auth.dependencies import get_current_user
@@ -103,3 +112,64 @@ async def contract_generate(
         if exc.kind == "bad_request":
             code = status.HTTP_400_BAD_REQUEST
         raise HTTPException(status_code=code, detail=str(exc)) from exc
+
+
+@router.post(
+    "/compliance/cargo",
+    response_model=ComplianceResult,
+    summary="货源合规初筛（发布前即时预检）",
+)
+def compliance_cargo(
+    body: CargoComplianceRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """货源合规预检；确定性规则引擎，只出结论不阻断写入。"""
+    if user.current_role != "shipper":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="货源合规预检仅货主角色可用，请先切换角色",
+        )
+    return service.screen_cargo_compliance(db, user_id=user.id, req=body)
+
+
+@router.post(
+    "/compliance/ship",
+    response_model=ComplianceResult,
+    summary="船舶备案合规初筛（备案前即时预检）",
+)
+def compliance_ship(
+    body: ShipComplianceRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """船舶备案合规预检；确定性规则引擎，只出结论不阻断写入。"""
+    if user.current_role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="船舶合规预检仅船东角色可用，请先切换角色",
+        )
+    return service.screen_ship_compliance(db, user_id=user.id, req=body)
+
+
+@router.post(
+    "/route",
+    response_model=RouteResult,
+    summary="统一入口：意图路由 → 派发领域 Agent",
+)
+async def route(
+    body: RouteRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """一句自然语言 → 意图分类 → 单跳派发。
+
+    派发失败不报错（返回 dispatched=False + 引导语），便于前端给出可执行下一步。
+    """
+    return await service.route_request(
+        db,
+        user_id=user.id,
+        role=user.current_role,
+        text=body.text,
+        order_id=body.order_id,
+    )

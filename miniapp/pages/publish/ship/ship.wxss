@@ -91,3 +91,12 @@ page { background: #F5F7FA; }
   font-size: 22rpx;
   color: #B7C2D0;
 }
+
+/* ---- 合规预检入口（F17） ---- */
+.checks { margin: 0 24rpx 8rpx; }
+.checks-btn {
+  height: 76rpx; line-height: 76rpx; text-align: center;
+  font-size: 25rpx; color: #3B5BDB; background: #EEF2FF;
+  border: 1rpx solid #DFE4FA; border-radius: 16rpx;
+}
+.checks-btn-hover { background: #E2E9FD; }

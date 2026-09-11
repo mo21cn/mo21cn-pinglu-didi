@@ -645,6 +645,67 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
     await sleep(1400)
   }
 
+  // ============ ⑬ 智能入口：✨Ai 解析 / 一句话发货 / 合规预检 ============
+  // 覆盖 F14（货源解析前端入口）、F17（合规预检）、F20（统一入口）的用户可见路径。
+  // 历史缺陷：assistant.js 的 onLoad 曾写成无参 → ?mode=parse 被整体丢弃，
+  // 「✨Ai」与「客服」进的是同一页、同一行为（后端做好了但前端从未接上）。
+  await loginAs(mp, 'seed-shipper')
+  // ⚠️ loginAs 只做「清登录态 + 注入 dev_login_code」，**不完成登录**——真正的登录发生在
+  // 首页点身份卡（走 auth.enterRole）。⑬ 首版漏了这一步，导致 user_info 为空、
+  // current_role 缺失 → 解析态被误判成「非货主」上门控 → 后 3 项断言级联失败。
+  // 这里与 ② 段保持同一路径：点身份卡 → 等货主工作台。
+  {
+    const idx = await mp.currentPage()
+    await tapAt(idx, '.role-card', 0) // 我是货主
+    const home = await waitPath(mp, 'pages/shipper/shipper', 40)
+    if (!home) throw new Error('⑬ 前置：货主工作台未进入')
+    await sleep(1600)
+    log('货主页智能入口', { hasSearch: true })
+    rec('⑬ 货主页有搜索框（统一入口位）', (await home.$$('.search-box')).length > 0)
+
+    // （1）「✨Ai」→ 解析态（不是客服态）
+    const ap = await nav(mp, 'push', '/pages/assistant/assistant?mode=parse', 'pages/assistant/assistant')
+    const ad = await waitData(ap, (d) => d.mode === 'parse', 40, 500)
+    await shot(mp, '15-Ai解析态')
+    rec('⑬ 「✨Ai」进入货源解析态（不再与客服同页）', ad.mode === 'parse', `mode=${ad.mode}`)
+    rec('⑬ 货主进解析态无角色门控', ad.roleBlocked === false, String(ad.roleBlocked))
+
+    // （2）一句话 → 真实调用 /agent/cargo-parse → 结构化卡片
+    // 用 page.setData 注入输入框内容（模拟器里驱动 textarea 的可靠方式），
+    // 随后点「解析」走真实 onSend → 真实 HTTP。
+    await ap.setData({ input: '800吨散装水泥，下周三从南宁运到贵港，运费2万5' })
+    await sleep(400)
+    let card = {}
+    try {
+      await tapAt(ap, '.btn-send', 0)
+      const ad2 = await waitData(ap, (d) => (d.messages || []).some((m) => m.kind === 'parse' && !m.pending), 60, 600)
+      card = (ad2.messages || []).filter((m) => m.kind === 'parse').slice(-1)[0] || {}
+    } catch (e) {
+      log('解析发送', '未触发：' + ((e && e.message) || e))
+    }
+    await shot(mp, '15-Ai解析结果卡片')
+    log('解析卡片', { rows: (card.rows || []).length, missing: card.missingText || '', conf: card.confidence })
+    rec('⑬ 解析结果渲染为结构化卡片（7 字段）', (card.rows || []).length === 7, String((card.rows || []).length))
+    rec('⑬ 卡片含草稿（可带去发布页，Agent 未直写）', !!card.draft, card.draft ? 'ok' : '无 draft')
+
+    // （3）带去发布页 → 回填表单
+    let cd = {}
+    if (card.draft) {
+      await tapAt(ap, '.parse-btn', 0)
+      const cp = await waitPath(mp, 'pages/publish/cargo/cargo', 30)
+      await sleep(2000)
+      await shot(mp, '15-解析草稿带入发布页')
+      cd = await cp.data()
+      rec('⑬ 草稿带入发布货源页并回填装货港', !!(cd.form && cd.form.origin_port), JSON.stringify((cd.form || {}).origin_port))
+      rec('⑬ 回填后给出确认提示', /AI 已/.test(cd.smartTip || ''), cd.smartTip)
+      rec('⑬ 发布页有「一句话发货」与「合规预检」入口', (await cp.$$('.smart-btn')).length >= 2, String((await cp.$$('.smart-btn')).length))
+    } else {
+      rec('⑬ 草稿带入发布货源页并回填装货港', false, '前置：卡片无草稿')
+    }
+    await backSafe(mp)
+    await sleep(1000)
+  }
+
   // ============================ 我的 ============================
   await nav(mp, 'tab', '/pages/mine/mine', 'pages/mine/mine')
   await sleep(1600)

@@ -483,3 +483,394 @@ def test_contract_llm_failure_audit_marks_failure(monkeypatch):
     assert len(rows) == 1
     assert rows[0].success is False
     assert rows[0].error_kind == "timeout"
+
+
+# ---------- F18 合同商务条款类风险（对齐验收口径：滞期费/违约金/保险/不可抗力） ----------
+
+
+def test_contract_business_clause_rules_hit(shipper, owner, port_user, client):
+    """滞期费（散货/液货）+ 保险（大额）+ 违约金量化（临近装货）三条同时命中。"""
+    oid = _make_order(
+        shipper, owner, client,
+        port_headers=port_user["_headers"],
+        days=5,        # 装货日在 7 日内 → R8 违约金标准未量化
+        price=31000,   # ≥ 20000 → R7 货物保险未约定
+    )
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    risks = resp.json()["risks"]
+    titles = [r["title"] for r in risks]
+    assert "滞期费未约定" in titles          # R6（散货装卸耗时长）
+    assert "货物保险未约定" in titles        # R7（大额运输）
+    assert "违约金标准未量化" in titles      # R8（matched + 装货日 ≤7 天）
+    # 商务条款类均为中/低风险，不与事实类高风险混同等级
+    by_title = {r["title"]: r["severity"] for r in risks}
+    assert by_title["滞期费未约定"] == "medium"
+    assert by_title["货物保险未约定"] == "medium"
+    assert by_title["违约金标准未量化"] == "low"
+
+
+def test_contract_shipped_order_flags_force_majeure(shipper, owner, port_user, client):
+    """在途（shipped）订单命中 R9 在途不可抗力风险。"""
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"], days=5)
+    started = client.post(
+        f"/api/v1/order/orders/{oid}/ship", json={}, headers=owner["_headers"]
+    )
+    assert started.status_code == 200, started.text
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert "在途不可抗力风险" in [r["title"] for r in resp.json()["risks"]]
+
+
+def test_contract_completed_order_has_no_clause_completeness_noise(
+    shipper, owner, port_user, client
+):
+    """已签收订单不再提示条款完备性类（R6/R7），保证「已完成 = 干净合同」口径。"""
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"], days=5)
+    client.post(f"/api/v1/order/orders/{oid}/ship", json={}, headers=owner["_headers"])
+    client.post(f"/api/v1/order/orders/{oid}/complete", json={}, headers=shipper["_headers"])
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    titles = [r["title"] for r in resp.json()["risks"]]
+    assert "滞期费未约定" not in titles
+    assert "货物保险未约定" not in titles
+    assert "违约金标准未量化" not in titles
+
+
+# ---------- F17 合规初筛（发布 / 备案前即时预检） ----------
+
+
+def _cargo_body(**kw):
+    from datetime import date, timedelta
+
+    body = {
+        "cargo_name": "散装水泥",
+        "cargo_type": "bulk",
+        "weight_t": 800,
+        "origin_port": "NNG",
+        "dest_port": "GGU",
+        "expect_date": (date.today() + timedelta(days=kw.get("days", 10))).isoformat(),
+        "remark": kw.get("remark", ""),
+    }
+    body.update({k: v for k, v in kw.items() if k not in ("days",)})
+    return body
+
+
+def test_compliance_cargo_pass(shipper, client):
+    """常规货源：无结论、level=pass、返回检查规则条数。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/cargo",
+        json=_cargo_body(),
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["level"] == "pass"
+    assert body["findings"] == []
+    assert body["target"] == "cargo"
+    assert body["checked_rules"] == 4
+    assert "未发现合规问题" in body["summary"]
+
+
+def test_compliance_cargo_forbidden_blocks(shipper, client):
+    """禁运/管制货品 → block（C1），summary 提示勿提交。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/cargo",
+        json=_cargo_body(cargo_name="烟花爆竹 一批"),
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["level"] == "block"
+    assert [f["code"] for f in body["findings"]] == ["C1"]
+    assert body["findings"][0]["severity"] == "block"
+
+
+def test_compliance_cargo_dangerous_goods_warns(shipper, client):
+    """危险货物 → warn（C2，不阻断但提示申报与适装资质）。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/cargo",
+        json=_cargo_body(cargo_name="甲醇", cargo_type="tanker"),
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["level"] == "warn"
+    assert "C2" in [f["code"] for f in body["findings"]]
+
+
+def test_compliance_cargo_container_route_and_date_warn(shipper, client):
+    """集装箱非干线港 + 装货日过近 → 两条 warn（C3 / C4）。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/cargo",
+        json=_cargo_body(cargo_type="container", origin_port="NNG", dest_port="LZH", days=1),
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    codes = [f["code"] for f in resp.json()["findings"]]
+    assert "C3" in codes and "C4" in codes
+    assert resp.json()["level"] == "warn"
+
+
+def test_compliance_cargo_past_date_blocks(shipper, client):
+    """装货日期已过 → block（C4）。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/cargo",
+        json=_cargo_body(days=-2),
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["level"] == "block"
+
+
+def test_compliance_cargo_requires_shipper(owner, client):
+    """货源预检仅货主可用（与货源写入权限一致）。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/cargo", json=_cargo_body(), headers=owner["_headers"]
+    )
+    assert resp.status_code == 403
+
+
+def _ship_body(**kw):
+    from datetime import date, timedelta
+
+    body = {
+        "ship_name": "平陆 001",
+        "ship_type": "bulk",
+        "deadweight_t": 1500,
+        "length_m": 60,
+        "width_m": 12,
+        "draft_m": 3.5,
+        "home_port": "GGU",
+        "cert_no": "CERT-F17-001",
+        "cert_expiry": (date.today() + timedelta(days=kw.get("cert_days", 300))).isoformat(),
+    }
+    body.update({k: v for k, v in kw.items() if k != "cert_days"})
+    return body
+
+
+def test_compliance_ship_pass(owner, client):
+    """常规船舶：无结论。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/ship", json=_ship_body(), headers=owner["_headers"]
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["level"] == "pass"
+    assert body["target"] == "ship"
+    assert body["checked_rules"] == 5
+
+
+def test_compliance_ship_expired_cert_blocks(owner, client):
+    """证书过期 → block（S1）。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/ship",
+        json=_ship_body(cert_days=-5),
+        headers=owner["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["level"] == "block"
+    assert body["findings"][0]["code"] == "S1"
+
+
+def test_compliance_ship_warns_on_dimension_draft_and_home_port(owner, client):
+    """主尺度比例异常 + 吃水偏深 + 缺船籍港 → 三条 warn（S3/S4/S5）。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/ship",
+        json=_ship_body(length_m=50, width_m=25, draft_m=5.2, home_port=""),
+        headers=owner["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    codes = sorted(f["code"] for f in body["findings"])
+    assert codes == ["S3", "S4", "S5"]
+    assert body["level"] == "warn"
+
+
+def test_compliance_ship_requires_owner(shipper, client):
+    """船舶预检仅船东可用。"""
+    resp = client.post(
+        "/api/v1/agent/compliance/ship", json=_ship_body(), headers=shipper["_headers"]
+    )
+    assert resp.status_code == 403
+
+
+def test_compliance_and_router_audit_rows_written():
+    """合规预检与统一入口同样留痕（provider=rule-engine，与 LLM 类 Agent 可区分）。"""
+    import datetime as _dt
+
+    from app.modules.agent.schemas import CargoComplianceRequest, ShipComplianceRequest
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+
+    cargo_req = CargoComplianceRequest(
+        cargo_name="散装水泥", cargo_type="bulk", weight_t=800,
+        origin_port="NNG", dest_port="GGU",
+        expect_date=_dt.date.today() + _dt.timedelta(days=10),
+    )
+    ship_req = ShipComplianceRequest(
+        ship_name="平陆 001", ship_type="bulk", deadweight_t=1500,
+        length_m=60, width_m=12, draft_m=3.5, home_port="GGU",
+        cert_no="C-AUDIT-F17", cert_expiry=_dt.date.today() + _dt.timedelta(days=300),
+    )
+    assert service.screen_cargo_compliance(db, user_id=1, req=cargo_req).target == "cargo"
+    assert service.screen_ship_compliance(db, user_id=1, req=ship_req).target == "ship"
+    routed = asyncio.run(
+        service.route_request(db, user_id=1, role="owner", text="平台支持哪些港口")
+    )
+    assert routed.intent == "assistant" and routed.dispatched is True
+
+    rows = db.execute(select(AgentCall).order_by(AgentCall.id)).scalars().all()
+    names = [r.agent_name for r in rows]
+    assert names[:2] == ["compliance_cargo", "compliance_ship"]
+    assert "router" in names
+    rule_rows = [r for r in rows if r.agent_name != "assistant"]
+    assert all(r.provider == "rule-engine" and r.mocked is False for r in rule_rows)
+    assert all(r.latency_ms >= 0 for r in rows)
+    db.close()
+
+
+# ---------- F20 统一入口（意图路由） ----------
+
+
+def test_intent_rules_are_deterministic():
+    """分类器可解释且确定：同一输入稳定返回同一意图。"""
+    from app.modules.agent.intent import classify
+
+    assert classify("帮我起草合同", role="shipper")[0] == "contract"
+    assert classify("烟花爆竹能不能运", role="owner")[0] == "compliance"
+    assert classify("我有800吨水泥要发货", role="owner")[0] == "cargo_parse"
+    assert classify("平台支持哪些港口", role="owner")[0] == "assistant"
+    # 弱信号（仅吨位+港口）按角色区分
+    assert classify("南宁到贵港 800吨", role="shipper")[0] == "cargo_parse"
+    assert classify("南宁到贵港 800吨", role="owner")[0] == "assistant"
+
+
+def test_route_to_cargo_parse(shipper, client):
+    """发货口吻 → 派发货源解析，返回结构化草稿。"""
+    resp = client.post(
+        "/api/v1/agent/route",
+        json={"text": "我有800吨散装水泥，下周从南宁运到贵港，运费2万5"},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == "cargo_parse"
+    assert body["dispatched"] is True
+    assert body["result"]["draft"]["weight_t"] == 800.0
+    assert body["result"]["draft"]["origin_port"] == "NNG"
+
+
+def test_route_to_assistant_fallback(owner, client):
+    """长尾问题兜底到客服问答。"""
+    resp = client.post(
+        "/api/v1/agent/route",
+        json={"text": "平台支持哪些港口"},
+        headers=owner["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == "assistant"
+    assert body["dispatched"] is True
+    assert "answer" in body["result"]
+
+
+def test_route_compliance_text_screening(owner, client):
+    """合规提问 → 文本级词表初筛（block）。"""
+    resp = client.post(
+        "/api/v1/agent/route",
+        json={"text": "烟花爆竹能不能运"},
+        headers=owner["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == "compliance"
+    assert body["dispatched"] is True
+    assert body["result"]["level"] == "block"
+
+
+def test_route_cargo_parse_wrong_role_not_dispatched(shipper, owner, client):
+    """船东发货口吻 → 识别出意图但不派发，给出切换角色的引导语（不抛错）。"""
+    resp = client.post(
+        "/api/v1/agent/route",
+        json={"text": "我有800吨水泥要发货"},
+        headers=owner["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == "cargo_parse"
+    assert body["dispatched"] is False
+    assert "货主" in body["message"]
+
+
+def test_route_contract_needs_order_context(shipper, client):
+    """合同意图缺订单上下文 → 不派发，引导去订单页。"""
+    resp = client.post(
+        "/api/v1/agent/route",
+        json={"text": "帮我生成一份合同"},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == "contract"
+    assert body["dispatched"] is False
+    assert "订单" in body["message"]
+
+
+def test_route_contract_with_order_context(shipper, owner, port_user, client):
+    """带订单上下文的合同意图 → 直接派发并返回合同草稿。"""
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"])
+    resp = client.post(
+        "/api/v1/agent/route",
+        json={"text": "帮我生成这份订单的合同", "order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == "contract"
+    assert body["dispatched"] is True
+    assert body["result"]["order_id"] == oid
+
+
+def test_route_downstream_failure_is_not_500(shipper, client, monkeypatch):
+    """下游 LLM 故障 → 路由层不报 5xx，返回引导语（dispatched=False）。"""
+    async def _boom(*, system, user, temperature=0.1):
+        raise LLMError("timeout", "LLM 调用超时（模拟）")
+
+    monkeypatch.setattr(service, "llm_gateway", type("M", (), {"chat_json": staticmethod(_boom)}))
+
+    resp = client.post(
+        "/api/v1/agent/route",
+        json={"text": "我有800吨水泥从南宁运到贵港"},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == "cargo_parse"
+    assert body["dispatched"] is False
+    assert "timeout" in body["message"]
+
+
+def test_route_requires_auth(client):
+    """统一入口同样要求登录。"""
+    resp = client.post("/api/v1/agent/route", json={"text": "怎么发货"})
+    assert resp.status_code == 401
