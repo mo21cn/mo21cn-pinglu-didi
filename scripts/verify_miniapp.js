@@ -21,6 +21,9 @@ const ROOT = path.resolve(__dirname, '..', 'miniapp')
 let errors = []
 const checked = { json: 0, js: 0, routes: 0 }
 
+// 个人/本机私有文件：不入库，也不计入统计（否则本地与 CI 的数量对不上）
+const IGNORE_FILES = new Set(['project.private.config.json'])
+
 function walk(dir, out = []) {
   for (const name of fs.readdirSync(dir)) {
     const p = path.join(dir, name)
@@ -29,7 +32,7 @@ function walk(dir, out = []) {
     if (st.isDirectory()) {
       if (name === 'node_modules' || name === '.git') continue
       walk(p, out)
-    } else out.push(p)
+    } else if (!IGNORE_FILES.has(name)) out.push(p)
   }
   return out
 }
