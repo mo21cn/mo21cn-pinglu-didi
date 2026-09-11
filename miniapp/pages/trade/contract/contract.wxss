@@ -1,0 +1,169 @@
+/* 合同预览（L3 三级页）· 智能合同 Agent
+   设计语言沿用 UI V2：蓝紫渐变 + 白卡 + 蓝紫双色风险徽标 */
+
+/* 底部固定条含"提示行 + 按钮行"，留白加大 */
+.page-sub {
+  padding-bottom: calc(280rpx + env(safe-area-inset-bottom));
+}
+
+/* ---- ① Agent 头卡 ---- */
+.agent-card {
+  border-radius: 24rpx;
+  padding: 32rpx 28rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 8rpx 32rpx rgba(59, 91, 219, 0.20);
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.agent-name {
+  font-size: 28rpx;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 2rpx;
+}
+
+.agent-chip {
+  font-size: 20rpx;
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999rpx;
+  padding: 4rpx 16rpx;
+}
+
+.agent-title {
+  font-size: 44rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+  margin: 16rpx 0 12rpx;
+  letter-spacing: 2rpx;
+}
+
+.agent-desc {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.65;
+}
+
+.agent-meta {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 24rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.20);
+  font-size: 22rpx;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.agent-dot {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ---- ② 风险卡 ---- */
+.risk-list {
+  padding: 0 28rpx 12rpx;
+}
+
+.risk-item {
+  border-radius: 16rpx;
+  background: #FAFBFD;
+  padding: 22rpx 24rpx;
+  margin-bottom: 16rpx;
+}
+
+.risk-head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 10rpx;
+}
+
+.risk-sev {
+  flex-shrink: 0;
+  width: 40rpx;
+  height: 40rpx;
+  line-height: 40rpx;
+  text-align: center;
+  border-radius: 10rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.risk-sev-high { background: #FA5252; }
+.risk-sev-medium { background: #F08C00; }
+.risk-sev-low { background: #98A6B8; }
+
+.risk-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.risk-detail {
+  font-size: 25rpx;
+  color: #3D4C63;
+  line-height: 1.65;
+}
+
+.risk-sug {
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  color: #3B5BDB;
+  line-height: 1.6;
+}
+
+.risk-none {
+  padding: 24rpx 28rpx 28rpx;
+  font-size: 25rpx;
+  color: #12B886;
+}
+
+/* ---- ③ 正文卡 ---- */
+.contract-body {
+  padding: 4rpx 28rpx 20rpx;
+}
+
+.contract-foot {
+  padding: 20rpx 28rpx 24rpx;
+  border-top: 1rpx solid #F1F4F8;
+  font-size: 22rpx;
+  color: #98A6B8;
+  line-height: 1.6;
+}
+
+/* ---- 底部固定操作条（提示行 + 按钮行）
+   注：.bar-note / .bar-actions / .btn-disabled 已提升到 app.wxss 作为三级页共享工具类 ---- */
+.contract-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12rpx;
+}
+
+/* ---- 降级提示（LLM 故障回退内置标准条款）---- */
+.degrade-note {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  background: rgba(240, 140, 0, 0.08);
+  border: 1rpx solid rgba(240, 140, 0, 0.28);
+  border-radius: 20rpx;
+  padding: 22rpx 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.degrade-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #B36A00;
+}
+
+.degrade-desc {
+  font-size: 23rpx;
+  line-height: 1.6;
+  color: #8A6420;
+}

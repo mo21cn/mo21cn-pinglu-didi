@@ -1,0 +1,20 @@
+{
+  "timestamp_utc": "2026-09-10T03:54:06.835018+00:00",
+  "python": "3.12.13 (main, Aug  7 2026, 02:26:41) [MSC v.1944 64 bit (AMD64)]",
+  "executable": "E:\\pinglu-didi\\.venv\\Scripts\\python.exe",
+  "checks": {
+    "pytest": {
+      "exit_code": 0,
+      "log": "pytest.log"
+    },
+    "ruff": {
+      "exit_code": 0,
+      "log": "ruff.log"
+    },
+    "mypy": {
+      "exit_code": 1,
+      "log": "mypy.log"
+    }
+  },
+  "mypy_policy": "recorded_nonblocking_as_in_existing_ci"
+}

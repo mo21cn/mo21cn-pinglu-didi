@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.models.order import Order
 from app.models.payment import Payment
+from app.modules.payment.schemas import PaymentCreate
 
 
 class PaymentStateError(Exception):
@@ -32,7 +33,7 @@ class PaymentConflictError(Exception):
     """订单已有支付单（防重复支付拦截）。"""
 
 
-def create_payment(db: Session, payer_id: int, data) -> Payment:
+def create_payment(db: Session, payer_id: int, data: PaymentCreate) -> Payment:
     """货主对 matched 订单发起支付（创建 pending 支付单）。
 
     前置校验：

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models.port import Berth, BerthAppt
 from app.models.ship import Ship
+from app.modules.port.schemas import BerthApptCreate, BerthCreate, BerthUpdate
 
 
 class PortStateError(Exception):
@@ -28,7 +29,7 @@ class BerthConflictError(Exception):
 
 # ---------- 泊位 ----------
 
-def create_berth(db: Session, data) -> Berth:
+def create_berth(db: Session, data: BerthCreate) -> Berth:
     """新建泊位（默认 active）。"""
     exists = db.execute(
         select(Berth).where(
@@ -53,7 +54,7 @@ def create_berth(db: Session, data) -> Berth:
     return berth
 
 
-def update_berth(db: Session, berth: Berth, data) -> Berth:
+def update_berth(db: Session, berth: Berth, data: BerthUpdate) -> Berth:
     """编辑泊位。已有 confirmed 预约不受影响，新预约按新参数校验。"""
     changes = data.model_dump(exclude_unset=True)
     for field, value in changes.items():
@@ -108,7 +109,7 @@ def count_confirmed_overlap(db: Session, berth_id: int, start: datetime, end: da
     return db.execute(stmt).scalar_one()
 
 
-def create_appt(db: Session, applier_id: int, data) -> BerthAppt:
+def create_appt(db: Session, applier_id: int, data: BerthApptCreate) -> BerthAppt:
     """船东申请泊位预约。
 
     硬校验（撮合 Stage1 约束前置）：

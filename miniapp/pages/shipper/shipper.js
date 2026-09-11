@@ -1,220 +1,386 @@
-// 货主工作台：发布货源 + 我的货源列表
+// 货主端首页（02）· 找船
+// 我要发货（港口/货物/用船需求/运输方式）→ 创建货源 → 跳撮合「查看匹配船源」
 const { request } = require('../../utils/request')
-const { switchRole } = require('../../utils/auth')
+const auth = require('../../utils/auth')
+const { syncTabBar } = require('../../utils/tabbar')
+// 13 个港口的全站唯一来源（微信 showActionSheet 的 itemList 上限 6，港口选择改走 port-picker 组件）
+const { PORTS } = require('../../utils/ports')
+// 统一智能入口（F20 路由 / F19 全局入口）
+const { openSmartEntry } = require('../../utils/agent-entry')
+const { fmtDate, fmtDateOffset } = require('../../utils/dates')
 
-const CARGO_TYPES = [
-  { key: 'bulk', label: '散货' },
-  { key: 'general', label: '件杂货' },
-  { key: 'container', label: '集装箱' },
-  { key: 'tanker', label: '液货' },
-  { key: 'other', label: '其他' }
+// 业务常量唯一来源（第三方审计 P3-4：原为页面本地复制）
+const { CARGO_TYPES, PACKS, SHIP_TYPES_ANY: SHIP_TYPES } = require('../../utils/constants')
+
+// 推荐船源（演示数据：货主视角暂无撮合上下文时展示）
+const HOT_SHIPS = [
+  { name: '桂航008', type_label: '散货船',    deadweight_t: 2000, home_label: '南宁可装', certified: true },
+  { name: '西江016', type_label: '散货船',    deadweight_t: 3000, home_label: '南宁可装', certified: true },
+  { name: '平陆018', type_label: '集装箱船',  deadweight_t: 1500, home_label: '贵港可装', certified: true }
 ]
 
-const PORTS = [
-  { key: 'NNG', label: '南宁' },
-  { key: 'GGU', label: '贵港' },
-  { key: 'WUZ', label: '梧州' },
-  { key: 'BIN', label: '来宾' },
-  { key: 'LZH', label: '柳州' },
-  { key: 'BSZ', label: '百色' },
-  { key: 'CHZ', label: '崇左' },
-  { key: 'GXL', label: '桂林' },
-  { key: 'HEZ', label: '贺州' },
-  { key: 'YUL', label: '玉林' },
-  { key: 'QNZ', label: '钦州（海港）' },
-  { key: 'FCG', label: '防城港（海港）' },
-  { key: 'BHZ', label: '北海（海港）' }
+// 推荐航线（演示数据）
+const HOT_ROUTES = [
+  { key: 'r1', from: 'NNG', from_label: '南宁', to: 'GGU', to_label: '贵港' },
+  { key: 'r2', from: 'NNG', from_label: '南宁', to: 'QNZ', to_label: '钦州' },
+  { key: 'r3', from: 'GGU', from_label: '贵港', to: 'WUZ', to_label: '梧州' },
+  { key: 'r4', from: 'NNG', from_label: '南宁', to: 'FCG', to_label: '防城港' }
 ]
-
-const STATUS_LABELS = {
-  draft: '草稿',
-  published: '已发布',
-  matched: '已撮合',
-  shipped: '运输中',
-  completed: '已完成',
-  cancelled: '已取消'
-}
 
 Page({
   data: {
-    tab: 'list',            // list=我的货源 form=发布货源
-    // 表单
+    roleLabel: '货主',
+    userCode: '',            // 顶栏用户 ID（用户1024）——与「我的」页同一口径
+    defaultPortLabel: '南宁 · 平塘港',
+    defaultPortKey: 'NNG',
     form: {
       cargo_name: '',
       cargo_type: 'bulk',
       weight_t: '',
       origin_port: 'NNG',
-      dest_port: 'GGU',
+      origin_label: '南宁 · 平塘港',
+      dest_port: '',
+      dest_label: '',
       expect_date: '',
-      offer_price: '',
-      remark: ''
+      offer_price: ''
     },
-    cargoTypes: CARGO_TYPES,
-    ports: PORTS,
-    originIndex: 0,
-    destIndex: 1,
-    typeIndex: 0,
-    today: '',
-    // 列表
-    list: [],
-    total: 0,
-    statusLabels: STATUS_LABELS,
-    submitting: false,
-    loading: false,
-    // 智能填写（一句话发货）
-    aiText: '',
-    aiParsing: false
+    panel: '',
+    cargoTypeLabel: '散货',
+    packLabel: '',
+    shipTypeLabel: '',
+    carryMode: 'ftl',
+    cargoBrief: '品类 · 吨数',
+    reqBrief: '船型 · 装货日期',
+    hotShips: HOT_SHIPS,
+    hotRoutes: HOT_ROUTES,
+    myCargoTotal: 0,
+    publishing: false,
+
+    // 港口选择弹层（port-picker 组件）
+    ppVisible: false,
+    ppTitle: '选择港口',
+    ppTip: '',
+    ppCurrent: '',
+    ppPorts: PORTS,
+    ppAction: '',
+    // 校验失败时高亮的字段（origin | dest | weight | date），用于给出可视化的下一步指引
+    miss: ''
   },
 
   onLoad() {
-    const now = new Date()
-    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-    const iso = tomorrow.toISOString().slice(0, 10)
-    this.setData({ today: iso, 'form.expect_date': iso })
-    this.fetchList()
+    const d = new Date(Date.now() + 24 * 3600 * 1000)
+    this.setData({ 'form.expect_date': fmtDate(d) })
+    this.refreshBrief()
+    this.fetchMyCargoCount()
   },
 
   onShow() {
-    if (this.data.tab === 'list') this.fetchList()
+    syncTabBar(this)
+    this.fetchIdentity()
+    this.fetchMyCargoCount()
   },
 
-  switchTab(e) {
-    this.setData({ tab: e.currentTarget.dataset.tab })
-    if (this.data.tab === 'list') this.fetchList()
+  onPullDownRefresh() {
+    this.fetchMyCargoCount()
+    wx.stopPullDownRefresh()
   },
 
-  /** 拉取我的货源列表 */
-  fetchList() {
-    this.setData({ loading: true })
-    request({ url: '/api/v1/cargo/shipments', data: { size: 50 } })
-      .then((res) => {
-        this.setData({ list: res.items || [], total: res.total || 0 })
-      })
-      .catch(() => {})
-      .finally(() => this.setData({ loading: false }))
+  // ---- 副标题摘要 ----
+  refreshBrief() {
+    const f = this.data.form
+    const cargoBrief = (f.cargo_name || this.data.cargoTypeLabel) + (f.weight_t ? ' · ' + f.weight_t + ' 吨' : '')
+    const reqBrief = (this.data.shipTypeLabel || '不限船型') + (f.expect_date ? ' · ' + f.expect_date.slice(5) + ' 装' : '')
+    this.setData({ cargoBrief, reqBrief })
   },
 
-  // ---- 表单事件 ----
+  // ---- 顶栏 ----
+  // 港口选择统一走 port-picker 组件（13 个港口超过 wx.showActionSheet 的 itemList 上限 6，
+  // 用它选择会直接 fail 且无兜底 —— 表现为「点了没反应/没有下拉选择」）
+  pickDefaultPort() {
+    this.openPortPicker({
+      title: '常用港口',
+      tip: '选中后作为默认装货港',
+      current: this.data.defaultPortKey,
+      action: 'defaultPort'
+    })
+  },
+
+  // 切角色：仅保留「货主 ⇄ 船东」互切（港口方入口已按 UI 评审下线）
+  onSwitchRole() {
+    wx.showModal({
+      title: '切换身份',
+      content: '切换到「船东（找货）」，进入船东工作台。',
+      confirmText: '切换',
+      success: (res) => {
+        if (!res.confirm) return
+        // 走 auth.enterRole（而非裸 switchRole）：开发期会同时换到该角色的演示账号，
+        // 否则切过去是空账号，订单/货源列表全空
+        auth.enterRole('owner')
+          .then(() => wx.switchTab({ url: '/pages/owner/owner' }))
+          .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
+      }
+    })
+  },
+
+  // ---- 港口选择弹层：统一入口 ----
+  openPortPicker(opts) {
+    this.setData({
+      ppTitle: opts.title || '选择港口',
+      ppTip: opts.tip || '',
+      ppCurrent: opts.current || '',
+      ppPorts: opts.ports || PORTS,
+      ppAction: opts.action || '',
+      ppVisible: true
+    })
+  },
+
+  onPortPicked(e) {
+    const { key, label } = e.detail
+    const action = this.data.ppAction
+    const patch = { ppVisible: false, miss: '' }
+    if (action === 'defaultPort') {
+      patch.defaultPortKey = key
+      patch.defaultPortLabel = label
+      patch['form.origin_port'] = key
+      patch['form.origin_label'] = label
+    } else if (action === 'origin') {
+      patch['form.origin_port'] = key
+      patch['form.origin_label'] = label
+    } else if (action === 'dest') {
+      patch['form.dest_port'] = key
+      patch['form.dest_label'] = label
+    }
+    this.setData(patch, () => {
+      // 闭环：选完港口自动继续（仅装/卸货港需要就地补选，其余字段在面板内填写）
+      if (action === 'origin' || action === 'dest') this.onFindShips()
+    })
+  },
+
+  onPortPickerClose() {
+    this.setData({ ppVisible: false })
+  },
+
+  // 统一智能入口（F20）：搜索框走意图路由，「✨Ai」直达货源解析态
+  goSearch() { openSmartEntry({ title: '智能搜索', placeholder: '搜货/搜船/问用法——用一句话描述' }) },
+  goAI() { wx.navigateTo({ url: '/pages/assistant/assistant?mode=parse' }) },
+  goAssistant() { wx.navigateTo({ url: '/pages/assistant/assistant' }) },
+
+  // ---- 表单 ----
   onInput(e) {
     const field = e.currentTarget.dataset.field
-    this.setData({ [`form.${field}`]: e.detail.value })
-  },
-  onTypePick(e) {
-    const idx = Number(e.detail.value)
-    this.setData({ typeIndex: idx, 'form.cargo_type': CARGO_TYPES[idx].key })
-  },
-  onOriginPick(e) {
-    const idx = Number(e.detail.value)
-    this.setData({ originIndex: idx, 'form.origin_port': PORTS[idx].key })
-  },
-  onDestPick(e) {
-    const idx = Number(e.detail.value)
-    this.setData({ destIndex: idx, 'form.dest_port': PORTS[idx].key })
-  },
-  onDatePick(e) {
-    this.setData({ 'form.expect_date': e.detail.value })
+    const patch = { [`form.${field}`]: e.detail.value }
+    // 补全后清掉高亮
+    if (this.data.miss && this.missKeyOf(field) === this.data.miss) patch.miss = ''
+    this.setData(patch, () => this.refreshBrief())
   },
 
-  // ---- 智能填写：一句话发货（Agent 草稿回填，人工核对后提交） ----
-  aiParse() {
-    const text = (this.data.aiText || '').trim()
-    if (text.length < 4) return wx.showToast({ title: '请先描述货源（如：800吨水泥南宁到贵港）', icon: 'none' })
-    if (this.data.aiParsing) return
-    this.setData({ aiParsing: true })
-    request({ url: '/api/v1/agent/cargo-parse', method: 'POST', data: { text } })
-      .then((res) => {
-        const d = res.draft || {}
-        const patch = {}
-        // 直接字段
-        if (d.cargo_name) patch['form.cargo_name'] = d.cargo_name
-        if (d.weight_t) patch['form.weight_t'] = String(d.weight_t)
-        if (d.expect_date) patch['form.expect_date'] = d.expect_date
-        if (d.offer_price != null) patch['form.offer_price'] = String(d.offer_price)
-        // picker 索引同步（货类/起运港/目的港）
-        if (d.cargo_type) {
-          const i = CARGO_TYPES.findIndex((t) => t.key === d.cargo_type)
-          if (i >= 0) { patch.typeIndex = i; patch['form.cargo_type'] = d.cargo_type }
-        }
-        if (d.origin_port) {
-          const i = PORTS.findIndex((p) => p.key === d.origin_port)
-          if (i >= 0) { patch.originIndex = i; patch['form.origin_port'] = d.origin_port }
-        }
-        if (d.dest_port) {
-          const i = PORTS.findIndex((p) => p.key === d.dest_port)
-          if (i >= 0) { patch.destIndex = i; patch['form.dest_port'] = d.dest_port }
-        }
-        this.setData(patch)
-        const review = res.needs_review || []
-        const tips = { cargo_name: '货物名称', cargo_type: '货类', weight_t: '重量', origin_port: '起运港', dest_port: '目的港', expect_date: '装货日期', offer_price: '出价' }
-        const missing = review.map((k) => tips[k] || k).join('、')
-        wx.showToast({ title: missing ? `已填表，请补充：${missing}` : '已填表，请核对提交', icon: 'none', duration: 2500 })
-      })
-      .catch(() => {})
-      .finally(() => this.setData({ aiParsing: false }))
+  /** 表单字段 → miss 高亮键 */
+  missKeyOf(field) {
+    return { weight_t: 'weight', expect_date: 'date', origin_port: 'origin', dest_port: 'dest' }[field] || ''
   },
 
-  /** 提交货源（默认直接发布进入撮合池） */
-  submitForm() {
+  togglePanel(e) {
+    const panel = e.currentTarget.dataset.panel
+    this.setData({ panel: this.data.panel === panel ? '' : panel })
+  },
+
+  pickCargoType() {
+    wx.showActionSheet({
+      itemList: CARGO_TYPES.map((t) => t.label),
+      success: (res) => {
+        const t = CARGO_TYPES[res.tapIndex]
+        this.setData({ cargoTypeLabel: t.label, 'form.cargo_type': t.key }, () => this.refreshBrief())
+      }
+    })
+  },
+
+  pickPack() {
+    wx.showActionSheet({
+      itemList: PACKS,
+      success: (res) => this.setData({ packLabel: PACKS[res.tapIndex] })
+    })
+  },
+
+  pickShipType() {
+    wx.showActionSheet({
+      itemList: SHIP_TYPES.map((t) => t.label),
+      success: (res) => {
+        const t = SHIP_TYPES[res.tapIndex]
+        this.setData({ shipTypeLabel: t.key ? t.label : '' }, () => this.refreshBrief())
+      }
+    })
+  },
+
+  pickOrigin() {
+    this.openPortPicker({
+      title: '选择装货港',
+      tip: '选完自动继续校验',
+      current: this.data.form.origin_port,
+      action: 'origin'
+    })
+  },
+
+  pickDest() {
+    this.openPortPicker({
+      title: '选择卸货港',
+      tip: '选完自动继续校验',
+      current: this.data.form.dest_port,
+      action: 'dest'
+    })
+  },
+
+  pickDate() {
+    const today = fmtDate()
+    wx.showActionSheet({
+      itemList: ['今天', '明天', '后天', '一周内'],
+      success: (res) => {
+        const offsets = [0, 1, 2, 7]
+        // 本地日期（toISOString 是 UTC，凌晨会取到「昨天」，第三方审计 P2-3）
+        this.setData({ 'form.expect_date': fmtDateOffset(offsets[res.tapIndex]), miss: '' }, () => this.refreshBrief())
+      },
+      fail: () => {
+        // 用户取消：保留已有日期
+        if (!this.data.form.expect_date) this.setData({ 'form.expect_date': today })
+      }
+    })
+  },
+
+  pickCarryMode(e) {
+    this.setData({ carryMode: e.currentTarget.dataset.mode })
+  },
+
+  // ---- 查看匹配船源：创建货源（直接发布）→ 跳撮合页 ----
+  // 校验失败不再是「只弹 toast 的死路」，而是把用户带到能补全的位置：
+  //   · 缺装/卸货港 → 直接拉起港口选择面板（选完自动回到本函数继续）
+  //   · 缺吨数/日期 → 自动展开对应面板（货物资料 / 用船需求）并高亮该字段
+  onFindShips() {
+    if (this.data.publishing) return
     const f = this.data.form
-    if (!f.cargo_name) return wx.showToast({ title: '请填写货物名称', icon: 'none' })
-    if (!f.weight_t || Number(f.weight_t) <= 0) return wx.showToast({ title: '请填写有效吨位', icon: 'none' })
-    if (f.origin_port === f.dest_port) return wx.showToast({ title: '起讫港不能相同', icon: 'none' })
 
-    if (this.data.submitting) return
-    this.setData({ submitting: true })
+    if (!f.origin_port) {
+      return this.openPortPicker({ title: '请选择装货港', tip: '选完自动继续校验', current: '', action: 'origin' })
+    }
+    if (!f.dest_port) {
+      return this.openPortPicker({ title: '请选择卸货港', tip: '选完自动继续校验', current: '', action: 'dest' })
+    }
+    if (f.origin_port === f.dest_port) {
+      this.setData({ miss: 'dest' })
+      return wx.showToast({ title: '装货港与卸货港不能相同', icon: 'none' })
+    }
+    if (!f.weight_t || Number(f.weight_t) <= 0) {
+      this.setData({ panel: 'cargo', miss: 'weight' })
+      return wx.showToast({ title: '请在「货物资料」填写吨数（已为你展开）', icon: 'none', duration: 2200 })
+    }
+    if (!f.expect_date) {
+      this.setData({ panel: 'req', miss: 'date' })
+      return wx.showToast({ title: '请在「用船需求」选择装货日期（已为你展开）', icon: 'none', duration: 2200 })
+    }
+
+    this.setData({ miss: '' })
+    const parts = []
+    if (this.data.packLabel) parts.push('包装：' + this.data.packLabel)
+    if (this.data.shipTypeLabel) parts.push('所需船型：' + this.data.shipTypeLabel)
+    parts.push(this.data.carryMode === 'ftl' ? '整船运输' : '拼船运输')
+
+    this.setData({ publishing: true })
     request({
       url: '/api/v1/cargo/shipments',
       method: 'POST',
       data: {
-        cargo_name: f.cargo_name,
+        cargo_name: f.cargo_name || (this.data.cargoTypeLabel + '货'),
         cargo_type: f.cargo_type,
         weight_t: Number(f.weight_t),
         origin_port: f.origin_port,
         dest_port: f.dest_port,
         expect_date: f.expect_date,
         offer_price: f.offer_price ? Number(f.offer_price) : null,
-        remark: f.remark,
+        remark: parts.join(' · '),
         publish_now: true
       }
     })
-      .then(() => {
+      .then((cargo) => {
         wx.showToast({ title: '货源已发布', icon: 'success' })
-        this.setData({ tab: 'list' })
-        this.fetchList()
+        this.fetchMyCargoCount()
+        wx.navigateTo({ url: `/pages/trade/match/match?mode=cargo&refId=${cargo.id}` })
       })
-      .catch(() => {})
-      .finally(() => this.setData({ submitting: false }))
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
+      .finally(() => this.setData({ publishing: false }))
   },
 
-  /** 草稿发布 / 取消 */
-  onAction(e) {
-    const { id, action } = e.currentTarget.dataset
-    request({ url: `/api/v1/cargo/shipments/${id}/${action}`, method: 'POST' })
-      .then(() => {
-        wx.showToast({ title: action === 'publish' ? '已发布' : '已取消', icon: 'success' })
-        this.fetchList()
+  // ---- 推荐船源 / 航线 ----
+  onShipTap() {
+    wx.showToast({ title: '请先填写「我要发货」再查看匹配', icon: 'none', duration: 2000 })
+  },
+
+  onMoreShips() {
+    wx.showToast({ title: '更多船源 · 发布货源后由撮合引擎推荐', icon: 'none', duration: 2000 })
+  },
+
+  onRouteTap(e) {
+    const item = e.currentTarget.dataset.item
+    this.setData({
+      'form.origin_port': item.from,
+      'form.origin_label': this.labelOf(item.from, item.from_label),
+      'form.dest_port': item.to,
+      'form.dest_label': this.labelOf(item.to, item.to_label)
+    })
+    wx.showToast({ title: `已预填 ${item.from_label} → ${item.to_label}`, icon: 'none' })
+  },
+
+  labelOf(key, fallback) {
+    const p = PORTS.find((x) => x.key === key)
+    return p ? p.label : fallback
+  },
+
+  onMoreRoutes() {
+    wx.showToast({ title: '更多航线开发中', icon: 'none' })
+  },
+
+  // ---- 顶栏身份（用户头像 + 用户 ID + 常用港）----
+  /** 用户 ID 与「我的」页同一口径（用户+user_id），缺失时给中性占位，不显示 "用户undefined" */
+  fetchIdentity() {
+    const user = auth.getUser() || {}
+    this.setData({ userCode: user.user_id ? '用户' + user.user_id : '未登录' })
+  },
+
+  /** 头像 → 「我的」（tabBar 页，必须 switchTab） */
+  goMine() {
+    wx.switchTab({ url: '/pages/mine/mine' })
+  },
+
+  // ---- 我的货源 ----
+  fetchMyCargoCount() {
+    request({ url: '/api/v1/cargo/shipments', data: { size: 1 } })
+      .then((res) => this.setData({ myCargoTotal: res.total || 0 }))
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
+  },
+
+  goMyCargo() {
+    wx.showLoading({ title: '加载中...', mask: true })
+    request({ url: '/api/v1/cargo/shipments', data: { size: 50 } })
+      .then((res) => {
+        wx.hideLoading()
+        const items = res.items || []
+        if (items.length === 0) return wx.showToast({ title: '暂无货源', icon: 'none' })
+        const content = items
+          .slice(0, 5)
+          .map((it, i) => `${i + 1}. ${it.cargo_name} ${it.weight_t}吨 ${it.origin_port}→${it.dest_port}（${this.statusText(it.status)}）`)
+          .join('\n')
+        wx.showModal({
+          title: `我的货源（${items.length}）`,
+          content: content + (items.length > 5 ? '\n...' : ''),
+          showCancel: false,
+          confirmText: '知道了'
+        })
       })
-      .catch(() => {})
+      .catch(() => wx.hideLoading())
   },
 
-  /** 已发布货源 → 跳转撮合页找候选船（可下单） */
-  onMatch(e) {
-    const id = e.currentTarget.dataset.id
-    wx.navigateTo({ url: `/pages/trade/match/match?mode=cargo&refId=${id}` })
-  },
-
-  /** 查看我的订单（支付/签收/撤单） */
-  goOrders() {
-    wx.navigateTo({ url: '/pages/trade/orders/orders' })
-  },
-
-  /** 角色不符时引导切换 */
-  ensureRole() {
-    const auth = require('../../utils/auth')
-    const user = auth.getUser()
-    if (user && user.current_role !== 'shipper') {
-      return switchRole('shipper')
+  statusText(status) {
+    const map = {
+      draft: '草稿', published: '已发布', matched: '已撮合',
+      shipped: '运输中', completed: '已完成', cancelled: '已取消'
     }
-    return Promise.resolve()
+    return map[status] || status
   }
 })

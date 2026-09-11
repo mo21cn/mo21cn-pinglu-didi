@@ -1,12 +1,560 @@
-/* app.wxss —— 全局样式 */
+/* ==========================================================================
+ * 船好多（平陆运河 · 滴滴打船）· 全局样式
+ * 设计语言 v2：蓝紫渐变 · 卡片化 · 顶栏图标行 · 自定义 tabBar
+ * ==========================================================================
+ * 设计令牌：
+ *   主色 蓝 → 紫 渐变   #3B5BDB → #7048E8
+ *   辅色 浅蓝             #5C7CFA
+ *   辅色 浅紫             #845EF7
+ *   文字 深              #0F2540
+ *   文字 次              #6B7A8C
+ *   文字 弱              #98A6B8
+ *   背景                #F5F7FA
+ *   卡片                #FFFFFF
+ *   阴影 蓝调            0 4rpx 24rpx rgba(61, 90, 219, .08)
+ *   tabBar 高度          108rpx + 安全区
+ * ==========================================================================
+ */
+
+/* 微信小程序 CSS 变量支持有限，改为原子类 + 直接色值 */
+
 page {
   background-color: #F5F7FA;
   font-size: 28rpx;
-  color: #212121;
+  color: #0F2540;
+  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+}
+
+/* ---- 主题色（与设计令牌一致） ---- */
+.color-primary { color: #3B5BDB; }
+.color-purple { color: #7048E8; }
+.color-text { color: #0F2540; }
+.color-secondary { color: #6B7A8C; }
+.color-muted { color: #98A6B8; }
+.color-danger { color: #FA5252; }
+.color-warning { color: #F08C00; }
+.color-success { color: #12B886; }
+
+/* ---- 蓝紫渐变背景（品牌头部 / 按钮） ---- */
+.bg-brand-gradient {
+  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
+}
+
+.bg-brand-soft {
+  /* 浅蓝紫，用于品牌色卡片底（找船/找货首页顶栏弱化版） */
+  background: linear-gradient(135deg, #EDF1FF 0%, #F2EBFF 100%);
+}
+
+/* （第三方审计 P3-13：原 .text-brand-gradient 无引用，死样式已删除） */
+
+/* ---- 通用卡片 ---- */
+.card {
+  background: #FFFFFF;
+  border-radius: 20rpx;
+  padding: 28rpx;
+  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
+}
+
+.card-tight {
+  background: #FFFFFF;
+  border-radius: 16rpx;
+  padding: 20rpx;
+  box-shadow: 0 2rpx 12rpx rgba(61, 90, 219, 0.06);
+}
+
+/* ---- 通用按钮 ---- */
+.btn-primary {
+  width: 100%;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  color: #FFFFFF;
+  font-size: 30rpx;
+  border-radius: 16rpx;
+  font-weight: 500;
+  letter-spacing: 2rpx;
+}
+.btn-primary[disabled] { opacity: .5; }
+
+.btn-ghost {
+  background: #FFFFFF;
+  color: #3B5BDB;
+  font-size: 28rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid rgba(59, 91, 219, .25);
+}
+
+.btn-mini {
+  border-radius: 10rpx;
+  font-size: 24rpx;
+}
+
+/* ---- 通用 chips（状态徽标 / 筛选标签） ---- */
+.chip {
+  display: inline-block;
+  padding: 6rpx 18rpx;
+  font-size: 22rpx;
+  border-radius: 999rpx;
+  background: rgba(59, 91, 219, .08);
+  color: #3B5BDB;
+}
+.chip-purple { background: rgba(112, 72, 232, .08); color: #7048E8; }
+.chip-warn { background: rgba(240, 140, 0, .10); color: #F08C00; }
+.chip-danger { background: rgba(250, 82, 82, .10); color: #FA5252; }
+.chip-success { background: rgba(18, 184, 134, .10); color: #12B886; }
+.chip-muted { background: #F1F4F8; color: #6B7A8C; }
+
+/* ---- 通用状态徽标（订单 / 货源 / 船舶） ---- */
+.badge { font-size: 20rpx; padding: 4rpx 16rpx; border-radius: 999rpx; }
+.badge-draft { color: #98A6B8; background: #F1F4F8; }
+.badge-published { color: #3B5BDB; background: rgba(59, 91, 219, .10); }
+.badge-matched { color: #F08C00; background: rgba(240, 140, 0, .10); }
+.badge-shipped { color: #7048E8; background: rgba(112, 72, 232, .10); }
+.badge-completed { color: #12B886; background: rgba(18, 184, 134, .10); }
+.badge-cancelled { color: #FA5252; background: rgba(250, 82, 82, .10); }
+.badge-pending_verify { color: #F08C00; background: rgba(240, 140, 0, .10); }
+.badge-verified { color: #12B886; background: rgba(18, 184, 134, .10); }
+.badge-rejected { color: #FA5252; background: rgba(250, 82, 82, .10); }
+
+/* ---- 通用空状态 ---- */
+.empty {
+  text-align: center;
+  color: #98A6B8;
+  padding: 120rpx 0;
+  font-size: 26rpx;
+}
+.empty-icon {
+  font-size: 80rpx;
+  display: block;
+  margin-bottom: 16rpx;
+  opacity: .5;
+}
+
+/* ---- 通用分隔 ---- */
+.divider {
+  height: 1rpx;
+  background: #EEF1F6;
+  margin: 24rpx 0;
+}
+
+/* ---- 通用 flex 工具 ---- */
+.row { display: flex; align-items: center; }
+.row-between { display: flex; align-items: center; justify-content: space-between; }
+.col { display: flex; flex-direction: column; }
+.flex-1 { flex: 1; }
+.gap-8 { gap: 8rpx; }
+.gap-12 { gap: 12rpx; }
+.gap-16 { gap: 16rpx; }
+.gap-20 { gap: 20rpx; }
+.gap-24 { gap: 24rpx; }
+
+/* ---- 通用文本 ---- */
+.t-h1 { font-size: 44rpx; font-weight: 700; color: #0F2540; }
+.t-h2 { font-size: 36rpx; font-weight: 600; color: #0F2540; }
+.t-h3 { font-size: 30rpx; font-weight: 600; color: #0F2540; }
+.t-body { font-size: 28rpx; color: #0F2540; }
+.t-caption { font-size: 24rpx; color: #6B7A8C; }
+.t-small { font-size: 22rpx; color: #98A6B8; }
+
+/* ==========================================================================
+ * UI V2 新增：页面容器 / 卡片区块 / 表单行 / 分段单选 / 筛选条
+ * ========================================================================== */
+
+/* 页面容器：底部为自定义 tabBar 留白（108rpx + 安全区） */
+.page {
+  min-height: 100vh;
+  background: #F5F7FA;
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+/* 二级页（无 tabBar）底部留白 */
+.page-sub {
+  min-height: 100vh;
+  background: #F5F7FA;
+  padding-bottom: calc(180rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.page-content {
+  padding: 0 24rpx;
+}
+
+/* 区块卡片（白底 · 大圆角 · 内部无 padding，由内部行控制） */
+.section-card {
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
+  margin-bottom: 24rpx;
+  overflow: hidden;
+}
+
+/* 区块头（标题 + 右侧"更多"） */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 28rpx 12rpx;
+}
+.section-head-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+.section-head-more {
+  font-size: 24rpx;
+  color: #98A6B8;
+}
+
+/* 编号标题（发布页 01/02/03/04） */
+.block-title {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 28rpx 28rpx 8rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+.block-title-no {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  border-radius: 10rpx;
+  padding: 2rpx 12rpx;
+}
+
+/* 表单行（左标签 / 右值 或 输入） */
+.field-row {
+  display: flex;
+  align-items: center;
+  min-height: 96rpx;
+  padding: 0 28rpx;
+  border-bottom: 1rpx solid #F1F4F8;
+}
+.field-row:last-child { border-bottom: none; }
+.field-label {
+  width: 200rpx;
+  flex-shrink: 0;
+  font-size: 28rpx;
+  color: #0F2540;
+}
+.field-value {
+  flex: 1;
+  text-align: right;
+  font-size: 28rpx;
+  color: #0F2540;
+}
+.field-value-placeholder { color: #B7C2D0; }
+.field-caret { color: #C3CCD8; font-size: 26rpx; margin-left: 8rpx; }
+.field-input {
+  flex: 1;
+  text-align: right;
+  font-size: 28rpx;
+  color: #0F2540;
+}
+.input-ph { color: #B7C2D0; }
+
+/* 半宽字段行（两个并排） */
+.field-half-row { display: flex; }
+.field-half {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 96rpx;
+  padding: 0 28rpx;
+}
+.field-half + .field-half { border-left: 1rpx solid #F1F4F8; }
+.field-half .field-label { width: auto; margin-right: 12rpx; }
+
+/* 分段单选（整船运输 / 拼船运输；运费面议 / 一口价） */
+.seg-row {
+  display: flex;
+  gap: 20rpx;
+  padding: 12rpx 28rpx 8rpx;
+}
+.seg-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  height: 76rpx;
+  border-radius: 14rpx;
+  border: 1rpx solid #E3E9F2;
+  background: #FAFBFD;
+  font-size: 26rpx;
+  color: #6B7A8C;
+}
+.seg-item-active {
+  border-color: #5C7CFA;
+  background: rgba(92, 124, 250, .08);
+  color: #3B5BDB;
+  font-weight: 600;
+}
+.seg-radio {
+  width: 26rpx;
+  height: 26rpx;
+  border-radius: 50%;
+  border: 2rpx solid #C3CCD8;
+  box-sizing: border-box;
+}
+.seg-item-active .seg-radio {
+  border: 8rpx solid #3B5BDB;
+}
+
+/* 筛选条（船东找货） */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 0 28rpx 20rpx;
+}
+.filter-pill {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  height: 60rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: #F4F6FB;
+  font-size: 25rpx;
+  color: #3D4C63;
+}
+.filter-pill-active {
+  background: rgba(59, 91, 219, .10);
+  color: #3B5BDB;
+  font-weight: 600;
+}
+.filter-sort {
+  display: flex;
+  align-items: center;
+  gap: 28rpx;
+  padding: 0 28rpx 20rpx;
+  font-size: 26rpx;
+  color: #6B7A8C;
+}
+.filter-sort-active { color: #3B5BDB; font-weight: 600; }
+
+/* 结果计数文本 */
+.result-count { font-size: 24rpx; color: #98A6B8; }
+
+/* 占位提示条（"后续开放"） */
+.soon-tip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 20rpx;
+  color: #98A6B8;
+  background: #F1F4F8;
+  border-radius: 999rpx;
+  padding: 2rpx 14rpx;
+}
+.preview-tip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 20rpx;
+  color: #7048E8;
+  background: rgba(112, 72, 232, .10);
+  border-radius: 999rpx;
+  padding: 2rpx 14rpx;
+}
+
+/* 底部固定操作条（发布页 保存草稿 / 确认发布） */
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
+  background: #FFFFFF;
+  box-shadow: 0 -4rpx 24rpx rgba(61, 90, 219, .08);
+}
+.bottom-bar .btn-ghost { flex: 1; height: 88rpx; line-height: 88rpx; text-align: center; }
+/* text-align 不可省：.btn-primary 基础样式只给了背景/字号，未给对齐，
+   底部固定条下的主按钮（如发布页「确认发布」）会左对齐 */
+.bottom-bar .btn-primary { flex: 2; height: 88rpx; line-height: 88rpx; text-align: center; }
+
+/* ---- 底部固定条：提示行 + 按钮行（合同页 / 支付页等三级页共用） ---- */
+.bar-note {
+  font-size: 22rpx;
+  color: #98A6B8;
+  text-align: center;
+  line-height: 1.5;
+}
+.bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+.bar-actions .btn-ghost,
+.bar-actions .btn-primary {
+  text-align: center;
+}
+.bar-actions .btn-ghost {
+  height: 88rpx;
+  line-height: 88rpx;
+}
+.bar-actions .btn-primary {
+  height: 88rpx;
+  line-height: 88rpx;
+}
+.btn-disabled { opacity: 0.45; }
+
+/* ==================== 三级页通用块 ==================== */
+
+/* ---- 三态兜底：错误态卡片（合同/支付/撮合/泊位/预约等三级页共用） ---- */
+.err-card {
+  background: #FFFFFF;
+  border-radius: 24rpx;
+  padding: 60rpx 28rpx;
+  text-align: center;
+  box-shadow: 0 4rpx 24rpx rgba(61, 90, 219, 0.08);
+}
+.err-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+.err-detail {
+  margin-top: 12rpx;
+  font-size: 25rpx;
+  color: #6B7A8C;
+  line-height: 1.6;
+}
+.err-btn {
+  display: inline-block;
+  margin-top: 32rpx;
+  padding: 0 48rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  border-radius: 16rpx;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  color: #FFFFFF;
+  font-size: 28rpx;
+}
+
+/* ---- 留痕时间轴（支付详情 / 预约审核 等三级页共用） ---- */
+.tl {
+  padding: 8rpx 28rpx 20rpx;
+}
+.tl-item {
+  display: flex;
+  gap: 20rpx;
+}
+.tl-rail {
+  width: 32rpx;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.tl-dot {
+  width: 20rpx;
+  height: 20rpx;
+  border-radius: 50%;
+  background: #E3E9F2;
+  margin-top: 10rpx;
+  flex-shrink: 0;
+}
+.tl-line {
+  width: 2rpx;
+  flex: 1;
+  background: #EEF1F6;
+  margin-top: 6rpx;
+}
+.tl-item.tl-done .tl-dot {
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  box-shadow: 0 0 0 6rpx rgba(59, 91, 219, 0.12);
+}
+.tl-body {
+  flex: 1;
+  padding-bottom: 28rpx;
+}
+.tl-item:last-child .tl-body {
+  padding-bottom: 4rpx;
+}
+.tl-title {
+  font-size: 27rpx;
+  font-weight: 500;
+  color: #98A6B8;
+}
+.tl-item.tl-done .tl-title {
+  font-weight: 600;
+  color: #0F2540;
+}
+.tl-time {
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  color: #B7C2D0;
+}
+.tl-item.tl-done .tl-time {
+  color: #6B7A8C;
+}
+.tl-note {
+  margin-top: 6rpx;
+  font-size: 21rpx;
+  color: #98A6B8;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.tl-foot {
+  padding: 18rpx 28rpx 24rpx;
+  border-top: 1rpx solid #F1F4F8;
+  font-size: 22rpx;
+  color: #98A6B8;
   line-height: 1.6;
 }
 
-/* 主题色（与后端/设计令牌一致） */
-.color-primary { color: #1565C0; }
-.color-text { color: #212121; }
-.color-secondary { color: #616161; }
+/* ==================== 用户头像（矢量占位） ====================
+   货主/船东工作台顶栏共用：纯 CSS 画的人像剪影，无图片资源、任意分辨率不糊。
+   接入真实头像后把 .avatar-vec 换成 <image> 即可（容器尺寸/圆角不变）。 */
+.top-user {
+  display: flex;
+  align-items: center;
+  margin-right: 12rpx;
+  flex: none;
+}
+.avatar-vec {
+  position: relative;
+  width: 66rpx;
+  height: 66rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
+  overflow: hidden;
+  flex: none;
+  box-shadow: 0 2rpx 10rpx rgba(61, 90, 219, .18);
+}
+.av-head {
+  position: absolute;
+  left: 50%;
+  top: 13rpx;
+  width: 21rpx;
+  height: 21rpx;
+  margin-left: -10.5rpx;
+  border-radius: 50%;
+  background: #FFFFFF;
+}
+.av-body {
+  position: absolute;
+  left: 50%;
+  top: 40rpx;
+  width: 40rpx;
+  height: 32rpx;
+  margin-left: -20rpx;
+  border-radius: 20rpx 20rpx 0 0;
+  background: #FFFFFF;
+}
+.top-user-id {
+  margin-left: 12rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #14233B;
+  max-width: 190rpx;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+

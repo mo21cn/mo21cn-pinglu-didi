@@ -1,0 +1,78 @@
+/* 自定义 tabBar（UI V2） */
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  background: #FFFFFF;
+  border-top-left-radius: 28rpx;
+  border-top-right-radius: 28rpx;
+  box-shadow: 0 -6rpx 30rpx rgba(61, 90, 219, 0.10);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tabbar-inner {
+  display: flex;
+  align-items: center;
+  height: 108rpx;
+}
+
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rpx;
+  position: relative;
+  height: 108rpx;
+}
+
+.tab-item-hover { opacity: .65; }
+
+.tab-icon {
+  font-size: 38rpx;
+  line-height: 1.1;
+  opacity: .55;
+  transition: all .15s ease;
+}
+
+.tab-active .tab-icon {
+  opacity: 1;
+  transform: translateY(-2rpx) scale(1.06);
+}
+
+.tab-label {
+  font-size: 20rpx;
+  color: #98A6B8;
+  line-height: 1.2;
+}
+
+.tab-active .tab-label {
+  color: #3B5BDB;
+  font-weight: 600;
+}
+
+/* ---- 中间凸起发布钮 ---- */
+.tab-center .center-btn {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
+  color: #FFFFFF;
+  font-size: 52rpx;
+  line-height: 84rpx;
+  text-align: center;
+  margin-top: -48rpx;
+  box-shadow: 0 10rpx 22rpx rgba(80, 78, 220, 0.38);
+}
+
+.tab-center .tab-label {
+  font-size: 20rpx;
+  color: #5C6B80;
+}
+
+.tab-center.tab-active .center-btn {
+  box-shadow: 0 12rpx 26rpx rgba(80, 78, 220, 0.52);
+}

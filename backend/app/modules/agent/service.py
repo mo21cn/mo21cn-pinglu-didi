@@ -8,20 +8,29 @@ Agent 无直写（工程底线 2）：本模块不 import cargo.service，不写
 """
 from __future__ import annotations
 
+import time
 from datetime import date
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.agent import AgentCall
+from app.modules.agent import compliance as compliance_kernel
+from app.modules.agent import intent as intent_router
 from app.modules.agent import llm as llm_gateway
 from app.modules.agent.llm import LLMError
 from app.modules.agent.schemas import (
     AssistantResult,
+    CargoComplianceRequest,
     CargoParseResult,
+    ComplianceFinding,
+    ComplianceResult,
     ContractDraftResult,
     ContractRisk,
     ParsedCargoField,
+    RouteResult,
+    ShipComplianceRequest,
 )
 from app.modules.cargo.schemas import PORT_CODES
 
@@ -59,7 +68,7 @@ class AgentServiceError(Exception):
         self.kind = kind
 
 
-def _sanitize(field: str, value, today: date) -> tuple[object, bool]:
+def _sanitize(field: str, value: object, today: date) -> tuple[object, bool]:
     """单字段合法化过滤；返回 (清洗后值, 是否需人工复核)。"""
     if value is None:
         return None, True
@@ -98,10 +107,10 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
         db.commit()
         raise AgentServiceError(exc.kind, str(exc)) from exc
 
-    raw: dict = result.content
-    field_conf: dict = raw.get("field_confidence") or {}
+    raw: dict[str, Any] = result.content
+    field_conf: dict[str, Any] = raw.get("field_confidence") or {}
 
-    cleaned: dict = {}
+    cleaned: dict[str, Any] = {}
     needs_review: list[str] = []
     confidences: list[float] = []
 
@@ -169,7 +178,7 @@ def _build_system_prompt(question: str, *, top_k: int = 4) -> str:
     )
 
 
-def _mock_answer(question: str) -> dict:
+def _mock_answer(question: str) -> dict[str, str]:
     """客服导购的 LLM_MOCK 规则模板（关键词匹配，CI 用）。"""
     q = question.lower()
     if any(k in q for k in ("发货", "发布货源", "怎么发")):
@@ -203,7 +212,7 @@ def _mock_answer(question: str) -> dict:
 
 
 async def answer_question(
-    db: Session, *, user_id: int, question: str, history: list[dict]
+    db: Session, *, user_id: int, question: str, history: list[dict[str, str]]
 ) -> AssistantResult:
     """客服导购问答（审计落库，纯读零直写）。"""
     settings = get_settings()
@@ -268,6 +277,8 @@ CONTRACT_SYSTEM_PROMPT = """你是内河航运运输合同的法务助理。任�
 {"supplementary_clauses": [{"title": "条款标题", "text": "条款正文"}]}
 
 必须包含四条：1.不可抗力 2.违约与责任划分 3.争议解决 4.安全与环保责任。
+若给定事实中已命中「滞期费未约定 / 货物保险未约定 / 违约金标准未量化 / 在途不可抗力」类风险，
+请再追加对应条款（条款数不超过六条）。
 规则：
 1. 只写通用条款文字，**严禁出现任何具体金额、日期、港口名、船名、人名**（由主合同确定性条款承载）。
 2. 条款符合中华人民共和国民法典及国内水路运输相关法规的一般原则。
@@ -276,7 +287,7 @@ CONTRACT_SYSTEM_PROMPT = """你是内河航运运输合同的法务助理。任�
 """
 
 
-def _mock_contract_clauses(_: str) -> dict:
+def _mock_contract_clauses(_: str) -> dict[str, list[dict[str, str]]]:
     """合同 Agent 的 LLM_MOCK 规则模板（固定标准条款，CI 用；编号由拼接层统一）。"""
     return {"supplementary_clauses": [
         {"title": "不可抗力", "text": "因洪水、大风、封航、政府管制等不可抗力导致无法履约的，受影响方应及时通知对方并提供证明，双方均免责；合同期限相应顺延或协商解除。"},
@@ -331,13 +342,21 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
     ).scalar_one_or_none()
     if not all((cargo, ship, shipper, owner)):
         raise AgentServiceError("bad_request", "订单关联数据不完整")
+    # 收窄 cargo/ship/shipper/owner 为非 None（mypy 不可推断 .get() 返回值，已显式 None 检查）
+    assert cargo is not None and ship is not None
+    assert shipper is not None and owner is not None
 
     # ---- 确定性部分（零 LLM）：主体条款 + 风险规则 ----
     main_text = contract_kernel.render_contract(
         order, cargo, ship, shipper, owner, payment
     )
     risks = [
-        ContractRisk(**r)
+        ContractRisk(
+            severity=r["severity"],  # type: ignore[arg-type]
+            title=r["title"],
+            detail=r["detail"],
+            suggestion=r["suggestion"],
+        )
         for r in contract_kernel.check_risks(order, cargo, ship, payment, _date.today())
     ]
 
@@ -349,22 +368,30 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
         f"运费 {'已锁定' if order.freight_price is not None else '面议未锁定'}，"
         f"已命中风险：{risk_titles}。请起草四条标准补充条款。"
     )
+    degraded = False
+    degraded_reason: str | None = None
+    mocked = False
+    latency_ms = 0
+    clauses: list[dict[str, str]] = []
     try:
         result = await llm_gateway.chat_json(
             system=CONTRACT_SYSTEM_PROMPT,
             user=fact_summary,
             mock_content=_mock_contract_clauses,
         )
+        clauses = result.content.get("supplementary_clauses") or []
+        mocked = result.mocked
+        latency_ms = result.latency_ms
     except LLMError as exc:
-        # LLM 故障降级：合同主体与风险仍可用确定性结果返回（补充条款置默认）
+        # LLM 故障降级（TODO-10）：主体条款与风险点均为确定性结果，本就不依赖 LLM；
+        # 补充条款回退内置标准模板，接口仍返回 200 并置 degraded=True，
+        # 避免外网抖动导致整页不可用；审计照实记 success=False + error_kind。
+        degraded = True
+        degraded_reason = exc.kind
+        clauses = _mock_contract_clauses("")["supplementary_clauses"]
         record.success = False
         record.error_kind = exc.kind
-        record.response_digest = str(exc)[:_DIGEST_LEN]
-        db.add(record)
-        db.commit()
-        raise AgentServiceError(exc.kind, str(exc)) from exc
 
-    clauses = result.content.get("supplementary_clauses") or []
     _cn_nums = "七八九十"
     supplement = "\n".join(
         f"## {_cn_nums[i] if i < len(_cn_nums) else i + 7}、{c.get('title', '')}"
@@ -373,13 +400,18 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
         if isinstance(c, dict)
     )
     contract_text = main_text + (supplement + "\n" if supplement else "")
+    if degraded:
+        contract_text += (
+            "\n---\n*注：补充条款未能由 AI 起草（LLM 暂不可用），"
+            "已回退平台内置标准条款；核心条款与风险提示不受影响。*\n"
+        )
     contract_text += (
         "\n---\n*本草稿由平台智能合同 Agent 生成，核心条款来自订单数据，"
         "补充条款由 AI 起草；签署前请人工审核。*"
     )
 
-    record.mocked = result.mocked
-    record.latency_ms = result.latency_ms
+    record.mocked = mocked
+    record.latency_ms = latency_ms
     record.response_digest = contract_text[:_DIGEST_LEN]
     db.add(record)
     db.commit()
@@ -388,6 +420,200 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
         order_id=order.id,
         contract_text=contract_text,
         risks=risks,
-        mocked=result.mocked,
-        latency_ms=result.latency_ms,
+        mocked=mocked,
+        latency_ms=latency_ms,
+        degraded=degraded,
+        degraded_reason=degraded_reason,
+    )
+
+
+# ===========================================================================
+# 合规初筛（F17）：确定性规则引擎（零 LLM）+ 审计留痕
+# 定位：发布货源 / 船舶备案前的即时预检。只出结论与建议，不阻断写入。
+# ===========================================================================
+
+
+def _audit_compliance(
+    db: Session, *, user_id: int, agent_name: str, digest: str, latency_ms: int
+) -> None:
+    """合规预检的审计留痕（工程底线 3：全链路可回溯）。
+
+    合规初筛不走 LLM，故 ``mocked=False``、``provider="rule-engine"``，
+    与 LLM 类 Agent 的调用在审计表里可一眼区分。
+    """
+    db.add(AgentCall(
+        user_id=user_id,
+        agent_name=agent_name,
+        provider="rule-engine",
+        model="deterministic",
+        mocked=False,
+        prompt_digest=digest[:_DIGEST_LEN],
+        response_digest="",
+        latency_ms=latency_ms,
+        success=True,
+    ))
+    db.commit()
+
+
+def _to_compliance_result(
+    target: str, raw: dict[str, Any]
+) -> ComplianceResult:
+    """规则引擎 dict 输出 → pydantic（收敛一次，两条链路共用）。"""
+    findings = [
+        ComplianceFinding(
+            code=str(f["code"]),
+            severity=str(f["severity"]),  # type: ignore[arg-type]
+            title=str(f["title"]),
+            detail=str(f["detail"]),
+            suggestion=str(f["suggestion"]),
+        )
+        for f in raw.get("findings") or []
+    ]
+    return ComplianceResult(
+        target=target,  # type: ignore[arg-type]
+        level=str(raw.get("level") or "pass"),  # type: ignore[arg-type]
+        summary=compliance_kernel.summarize(raw),
+        findings=findings,
+        checked_rules=int(raw.get("checked_rules") or 0),
+    )
+
+
+def screen_cargo_compliance(
+    db: Session, *, user_id: int, req: CargoComplianceRequest
+) -> ComplianceResult:
+    """货源合规初筛（C1–C4）。"""
+    started = time.monotonic()
+    raw = compliance_kernel.screen_cargo(
+        cargo_name=req.cargo_name,
+        cargo_type=req.cargo_type,
+        origin_port=req.origin_port,
+        dest_port=req.dest_port,
+        expect_date=req.expect_date,
+        remark=req.remark,
+    )
+    _audit_compliance(
+        db,
+        user_id=user_id,
+        agent_name="compliance_cargo",
+        digest=f"{req.cargo_name}|{req.cargo_type}|{req.origin_port}->{req.dest_port}",
+        latency_ms=int((time.monotonic() - started) * 1000),
+    )
+    return _to_compliance_result("cargo", raw)
+
+
+def screen_ship_compliance(
+    db: Session, *, user_id: int, req: ShipComplianceRequest
+) -> ComplianceResult:
+    """船舶备案合规初筛（S1–S5）。"""
+    started = time.monotonic()
+    raw = compliance_kernel.screen_ship(
+        ship_name=req.ship_name,
+        ship_type=req.ship_type,
+        deadweight_t=req.deadweight_t,
+        length_m=req.length_m,
+        width_m=req.width_m,
+        draft_m=req.draft_m,
+        home_port=req.home_port,
+        cert_no=req.cert_no,
+        cert_expiry=req.cert_expiry,
+    )
+    _audit_compliance(
+        db,
+        user_id=user_id,
+        agent_name="compliance_ship",
+        digest=f"{req.ship_name}|{req.ship_type}|{req.cert_no}",
+        latency_ms=int((time.monotonic() - started) * 1000),
+    )
+    return _to_compliance_result("ship", raw)
+
+
+# ===========================================================================
+# 统一入口（F20 Router）：一句自然语言 → 意图 → 派发到对应领域 Agent
+# 工程底线 2 不变：Router 只做分派，写操作一律仍由用户在业务页确认后提交。
+# ===========================================================================
+
+
+async def route_request(
+    db: Session,
+    *,
+    user_id: int,
+    role: str,
+    text: str,
+    order_id: int | None = None,
+    history: list[dict[str, str]] | None = None,
+) -> RouteResult:
+    """意图路由 + 单跳派发（不做多 Agent 编排，编排为计划延后项）。
+
+    派发失败（角色不匹配 / 缺上下文 / 下游 LLM 故障）**不抛异常**：
+    返回 ``dispatched=False`` + 引导语，让前端能给出可执行的下一步，
+    而不是把一份 502/504 丢给用户。
+    """
+    started = time.monotonic()
+    intent, confidence, matched = intent_router.classify(
+        text, role=role, order_id=order_id
+    )
+    target = intent_router.TARGETS[intent]
+    result: dict[str, Any] | None = None
+    dispatched = False
+    message = ""
+
+    try:
+        if intent == "cargo_parse":
+            if role != "shipper":
+                message = "货源解析仅货主角色可用，请先切换到货主后再描述货源。"
+            else:
+                parsed = await parse_cargo(db, user_id=user_id, text=text)
+                result = parsed.model_dump(mode="json")
+                dispatched = True
+
+        elif intent == "contract":
+            if order_id is None:
+                message = "请先在「订单」中打开需要生成合同的订单，再让我起草合同。"
+            else:
+                draft = await generate_contract(db, user_id=user_id, order_id=order_id)
+                result = draft.model_dump(mode="json")
+                dispatched = True
+
+        elif intent == "compliance":
+            raw = compliance_kernel.screen_cargo_text(text)
+            payload = _to_compliance_result("text", raw).model_dump(mode="json")
+            result = payload
+            dispatched = True
+            message = str(payload["summary"])
+
+        else:  # assistant
+            answer = await answer_question(
+                db, user_id=user_id, question=text, history=history or []
+            )
+            result = answer.model_dump(mode="json")
+            dispatched = True
+
+    except AgentServiceError as exc:
+        message = (
+            f"已识别为「{intent}」，但下游 Agent 暂不可用（{exc.kind}）："
+            f"{exc}。可稍后重试或手动操作相应页面。"
+        )
+
+    db.add(AgentCall(
+        user_id=user_id,
+        agent_name="router",
+        provider="rule-engine",
+        model="deterministic",
+        mocked=False,
+        prompt_digest=text[:_DIGEST_LEN],
+        response_digest=f"intent={intent} dispatched={dispatched}",
+        latency_ms=int((time.monotonic() - started) * 1000),
+        success=dispatched,
+        error_kind=None if dispatched else "not_dispatched",
+    ))
+    db.commit()
+
+    return RouteResult(
+        intent=intent,
+        confidence=confidence,
+        matched=matched,
+        dispatched=dispatched,
+        target=target,
+        message=message,
+        result=result,
     )

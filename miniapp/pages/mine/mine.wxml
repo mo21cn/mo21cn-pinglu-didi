@@ -1,4 +1,117 @@
-<!-- mine 页面（占位） -->
+<!--
+  08 我的（底栏二级页）
+  用户卡 + 会员卡 + 资产行 + 常用功能网格（多数为原型占位）
+  底部保留：切换身份 / 退出登录（已开发能力出口）
+-->
 <view class="page">
-  <text>mine 工作台</text>
+  <view class="head-bg">
+    <view class="nav" style="padding-top: {{statusBarHeight}}px">
+      <view class="nav-inner">
+        <text class="nav-title">我的</text>
+        <view class="nav-preview" bindtap="onPreviewTip" hover-class="hover-dim">功能预览</view>
+      </view>
+    </view>
+
+    <!-- 用户卡 -->
+    <view class="user-card" bindtap="onEditProfile" hover-class="hover-dim">
+      <view class="avatar">{{userInitials}}</view>
+      <view class="user-body">
+        <view class="user-name">{{userName}}</view>
+        <view class="user-phone">📱 {{phoneText}}</view>
+        <view class="user-tags">
+          <text class="tag-warn">未实名</text>
+          <text class="tag-plain">人气值：0</text>
+        </view>
+      </view>
+      <view class="user-right">
+        <view class="bell" catchtap="onBell" hover-class="hover-dim">
+          <text class="bell-icon">🔔</text>
+          <view class="bell-red"></view>
+        </view>
+        <text class="user-caret">›</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="page-content">
+    <!-- 会员卡 -->
+    <view class="vip-card">
+      <view class="vip-left">
+        <view class="vip-title">邀您升级会员</view>
+        <view class="vip-sub">解锁更多会员权益</view>
+      </view>
+      <view class="vip-right">
+        <view class="vip-btn" catchtap="onUpgrade" hover-class="vip-btn-hover">去升级</view>
+        <view class="vip-tag">即将开放</view>
+      </view>
+    </view>
+
+    <!-- 资产行 -->
+    <view class="section-card assets">
+      <view class="asset-cell" data-key="balance" bindtap="onAssetTap" hover-class="row-hover">
+        <view class="asset-num">0.00</view>
+        <view class="asset-label">账户余额 ›</view>
+      </view>
+      <view class="asset-line"></view>
+      <view class="asset-cell" data-key="fuel" bindtap="onAssetTap" hover-class="row-hover">
+        <view class="asset-num">0.00</view>
+        <view class="asset-label">优惠油电 ›</view>
+      </view>
+      <view class="asset-line"></view>
+      <view class="asset-cell" data-key="bank" bindtap="onAssetTap" hover-class="row-hover">
+        <view class="asset-num asset-num-weak">未维护</view>
+        <view class="asset-label">银行卡 ›</view>
+      </view>
+    </view>
+
+    <!-- 常用功能 -->
+    <view class="section-card">
+      <view class="section-head">
+        <text class="section-head-title">常用功能</text>
+      </view>
+      <view class="fn-grid">
+        <view
+          wx:for="{{functions}}"
+          wx:key="key"
+          class="fn-item {{item.warn ? 'fn-item-warn' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onFunction"
+          hover-class="row-hover"
+        >
+          <view class="fn-icon">
+            {{item.icon}}
+            <view wx:if="{{item.badge}}" class="fn-badge">{{item.badge}}</view>
+          </view>
+          <view class="fn-label {{item.warn ? 'fn-label-warn' : ''}}">{{item.label}}</view>
+        </view>
+      </view>
+      <view class="fn-foot">除「退出」外，以上功能为原型占位，后续开放</view>
+    </view>
+
+    <!-- 账号（已开发能力出口） -->
+    <view class="section-card">
+      <view class="section-head">
+        <text class="section-head-title">账号</text>
+        <text class="section-head-more">当前身份：{{roleLabel}}</text>
+      </view>
+      <view class="role-switch-row">
+        <view
+          wx:for="{{roleList}}"
+          wx:key="key"
+          class="role-chip {{currentRole === item.key ? 'role-chip-active' : ''}}"
+          data-role="{{item.key}}"
+          bindtap="onSwitchRole"
+          hover-class="row-hover"
+        >
+          <text class="role-chip-icon">{{item.icon}}</text>
+          <text class="role-chip-label">{{item.label}}</text>
+        </view>
+      </view>
+      <view class="logout-row">
+        <view class="logout-btn" bindtap="onLogout" hover-class="hover-dim">退出登录</view>
+      </view>
+    </view>
+
+    <view class="version">v0.5.0 · UI V2 · 2026.09</view>
+  </view>
 </view>

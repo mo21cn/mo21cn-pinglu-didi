@@ -1,1 +1,218 @@
-.page { padding: 32rpx; }
+/* 08 我的（底栏二级页） */
+page { background: #F5F7FA; }
+
+.hover-dim { opacity: .6; }
+.row-hover { background: #F5F8FF; }
+
+/* ---- 头部渐变 + 导航 ---- */
+.head-bg {
+  background: linear-gradient(180deg, #E6EDFF 0%, #F1F5FF 62%, #F5F7FA 100%);
+  padding-bottom: 8rpx;
+}
+.nav-inner {
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.nav-title { font-size: 34rpx; font-weight: 600; color: #14233B; }
+/* 注意：微信胶囊按钮占据导航右上角（约 562~736rpx），原先 right:28rpx 会被完全遮住 →
+   「功能预览」在真机/模拟器里根本看不见（属于看不见的假入口）。故左移到胶囊左侧安全区。 */
+.nav-preview {
+  position: absolute;
+  right: 200rpx;
+  font-size: 21rpx;
+  color: #7048E8;
+  background: rgba(112, 72, 232, .10);
+  border-radius: 999rpx;
+  padding: 4rpx 18rpx;
+}
+
+/* ---- 用户卡 ---- */
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  padding: 12rpx 32rpx 28rpx;
+}
+.avatar {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  color: #FFFFFF;
+  font-size: 48rpx;
+  line-height: 120rpx;
+  text-align: center;
+  box-shadow: 0 8rpx 20rpx rgba(61, 90, 219, .28);
+  flex-shrink: 0;
+}
+.user-body { flex: 1; min-width: 0; }
+.user-name { font-size: 38rpx; font-weight: 700; color: #14233B; }
+.user-phone { margin-top: 8rpx; font-size: 25rpx; color: #7C8CA0; }
+.user-tags { margin-top: 12rpx; display: flex; gap: 12rpx; }
+.tag-warn {
+  font-size: 21rpx;
+  color: #F08C00;
+  background: rgba(240, 140, 0, .10);
+  border-radius: 999rpx;
+  padding: 2rpx 16rpx;
+}
+.tag-plain {
+  font-size: 21rpx;
+  color: #8A99AC;
+  background: #F1F4F8;
+  border-radius: 999rpx;
+  padding: 2rpx 16rpx;
+}
+.user-right { display: flex; align-items: center; gap: 12rpx; }
+.bell { position: relative; font-size: 38rpx; padding: 6rpx; }
+.bell-red {
+  position: absolute;
+  right: 2rpx;
+  top: 4rpx;
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background: #FA5252;
+}
+.user-caret { font-size: 38rpx; color: #C3CCD8; font-weight: 300; }
+
+.page-content { padding: 0 24rpx; }
+
+/* ---- 会员卡 ---- */
+.vip-card {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
+  border-radius: 24rpx;
+  padding: 28rpx 32rpx;
+  box-shadow: 0 10rpx 26rpx rgba(80, 78, 220, .28);
+  margin-bottom: 24rpx;
+}
+.vip-left { flex: 1; }
+.vip-title { font-size: 32rpx; font-weight: 700; color: #FFFFFF; }
+.vip-sub { margin-top: 8rpx; font-size: 23rpx; color: rgba(255, 255, 255, .82); }
+.vip-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10rpx; }
+.vip-btn {
+  height: 64rpx;
+  line-height: 64rpx;
+  padding: 0 32rpx;
+  border-radius: 999rpx;
+  background: #FFFFFF;
+  color: #3B5BDB;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+.vip-btn-hover { opacity: .85; }
+.vip-tag { font-size: 20rpx; color: rgba(255, 255, 255, .85); }
+
+/* ---- 资产行 ---- */
+.assets {
+  display: flex;
+  align-items: center;
+  padding: 28rpx 0;
+}
+.asset-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+.asset-num { font-size: 32rpx; font-weight: 700; color: #14233B; }
+.asset-num-weak { font-size: 26rpx; color: #98A6B8; font-weight: 500; }
+.asset-label { font-size: 22rpx; color: #8A99AC; }
+.asset-line { width: 1rpx; height: 56rpx; background: #EEF1F6; }
+
+/* ---- 常用功能 ---- */
+.fn-grid {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 8rpx 12rpx 16rpx;
+}
+.fn-item {
+  width: 25%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10rpx;
+  padding: 20rpx 0;
+  border-radius: 16rpx;
+}
+.fn-icon {
+  position: relative;
+  width: 84rpx;
+  height: 84rpx;
+  border-radius: 22rpx;
+  background: #F4F7FD;
+  font-size: 38rpx;
+  line-height: 84rpx;
+  text-align: center;
+}
+.fn-badge {
+  position: absolute;
+  right: -8rpx;
+  top: -8rpx;
+  font-size: 18rpx;
+  color: #FFFFFF;
+  background: #FA5252;
+  border-radius: 999rpx;
+  padding: 0 10rpx;
+  line-height: 26rpx;
+}
+.fn-label { font-size: 23rpx; color: #3D4C63; }
+
+/* 「退出」为已开发能力出口，用弱红做视觉区分（其余为占位） */
+.fn-item-warn .fn-icon { background: #FDF2F3; }
+.fn-label-warn { color: #C0455A; }
+.fn-foot {
+  padding: 8rpx 0 28rpx;
+  text-align: center;
+  font-size: 21rpx;
+  color: #A8B4C4;
+}
+
+/* ---- 账号 ---- */
+.role-switch-row {
+  display: flex;
+  gap: 16rpx;
+  padding: 8rpx 24rpx 20rpx;
+}
+.role-chip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  height: 76rpx;
+  border-radius: 16rpx;
+  background: #F7F9FD;
+  border: 1rpx solid #EDF1F8;
+  font-size: 26rpx;
+  color: #6B7A8C;
+}
+.role-chip-active {
+  border-color: #5C7CFA;
+  background: rgba(92, 124, 250, .08);
+  color: #3B5BDB;
+  font-weight: 600;
+}
+.role-chip-icon { font-size: 28rpx; }
+.logout-row { padding: 0 24rpx 28rpx; }
+.logout-btn {
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  border-radius: 18rpx;
+  background: #FFF5F5;
+  color: #FA5252;
+  font-size: 28rpx;
+}
+.version {
+  padding: 4rpx 0 40rpx;
+  text-align: center;
+  font-size: 21rpx;
+  color: #B7C2D0;
+}

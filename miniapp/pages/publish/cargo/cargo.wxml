@@ -1,0 +1,133 @@
+<!--
+  04 发布货物（货主端二级页）
+  01 运输路线 / 02 货物信息 / 03 用船与时间 / 04 运费与备注
+  底部：保存草稿 · 确认发布
+-->
+<view class="page-sub">
+  <!-- 智能填写（F14 货源解析）+ 合规预检（F17）：Agent 只出草稿与结论，发布仍由用户确认 -->
+  <view class="smart-card">
+    <view class="smart-head">
+      <text class="smart-icon">✨</text>
+      <view class="smart-head-text">
+        <view class="smart-title">智能填写货源</view>
+        <view class="smart-sub">一句话描述货物与航线，AI 解析后回填下方表单</view>
+      </view>
+    </view>
+    <view class="smart-actions">
+      <view class="smart-btn smart-btn-main" bindtap="onSmartFill" hover-class="smart-btn-hover">
+        {{parsing ? '解析中…' : '一句话发货'}}
+      </view>
+      <view class="smart-btn" bindtap="onComplianceCheck" hover-class="smart-btn-hover">发布前合规预检</view>
+    </view>
+    <view wx:if="{{smartTip}}" class="smart-tip {{smartMissing.length ? 'smart-tip-warn' : ''}}">{{smartTip}}</view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">01</text><text>运输路线</text></view>
+    <view class="field-row {{missTip.origin_port ? 'field-row-miss' : ''}}" bindtap="pickOrigin" hover-class="row-hover">
+      <text class="field-label">装货港</text>
+      <text class="field-value {{form.origin_label ? '' : 'field-value-placeholder'}}">{{form.origin_label || '请选择装货港'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+    <view class="field-row {{missTip.dest_port ? 'field-row-miss' : ''}}" bindtap="pickDest" hover-class="row-hover">
+      <text class="field-label">卸货港</text>
+      <text class="field-value {{form.dest_label ? '' : 'field-value-placeholder'}}">{{form.dest_label || '请选择目的港'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">02</text><text>货物信息</text></view>
+    <view class="field-row {{missTip.cargo_name ? 'field-row-miss' : ''}}">
+      <text class="field-label">货物名称</text>
+      <input class="field-input" placeholder="请输入货物名称" value="{{form.cargo_name}}" data-field="cargo_name" bindinput="onInput" placeholder-class="input-ph" maxlength="32" />
+    </view>
+    <view class="field-row {{missTip.cargo_type ? 'field-row-miss' : ''}}" bindtap="pickCargoType" hover-class="row-hover">
+      <text class="field-label">货物类型</text>
+      <text class="field-value">{{cargoTypeLabel}}</text>
+      <text class="field-caret">›</text>
+    </view>
+    <view class="field-row {{missTip.weight_t ? 'field-row-miss' : ''}}">
+      <text class="field-label">重量（吨）</text>
+      <input class="field-input" type="digit" placeholder="请输入重量" value="{{form.weight_t}}" data-field="weight_t" bindinput="onInput" placeholder-class="input-ph" />
+    </view>
+    <view class="field-row" bindtap="pickPack" hover-class="row-hover">
+      <text class="field-label">包装方式</text>
+      <text class="field-value {{packLabel ? '' : 'field-value-placeholder'}}">{{packLabel || '请选择包装方式'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">03</text><text>用船与时间</text></view>
+    <view class="field-row {{missTip.expect_date ? 'field-row-miss' : ''}}" bindtap="pickDate" hover-class="row-hover">
+      <text class="field-label">期望装货日期</text>
+      <text class="field-value {{form.expect_date ? '' : 'field-value-placeholder'}}">{{form.expect_date || '请选择日期'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+    <view class="field-row" bindtap="pickShipType" hover-class="row-hover">
+      <text class="field-label">所需船型</text>
+      <text class="field-value {{shipTypeLabel ? '' : 'field-value-placeholder'}}">{{shipTypeLabel || '按货物条件匹配'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">04</text><text>运费与备注</text></view>
+    <view class="seg-row price-seg">
+      <view class="seg-item {{priceMode === 'negotiable' ? 'seg-item-active' : ''}}" data-mode="negotiable" bindtap="pickPriceMode">
+        <view class="seg-radio"></view>
+        <text>运费面议</text>
+      </view>
+      <view class="seg-item {{priceMode === 'fixed' ? 'seg-item-active' : ''}}" data-mode="fixed" bindtap="pickPriceMode">
+        <view class="seg-radio"></view>
+        <text>一口价</text>
+      </view>
+    </view>
+    <view class="field-row {{missTip.offer_price ? 'field-row-miss' : ''}}">
+      <text class="field-label">参考运费（元）</text>
+      <input
+        class="field-input"
+        type="digit"
+        placeholder="{{priceMode === 'fixed' ? '请输入一口价' : '选填 · 供船东参考'}}"
+        value="{{form.offer_price}}"
+        data-field="offer_price"
+        bindinput="onInput"
+        placeholder-class="input-ph"
+      />
+    </view>
+    <view class="remark-box">
+      <textarea
+        class="remark-input"
+        placeholder="请输入补充说明（选填）"
+        value="{{form.remark}}"
+        data-field="remark"
+        bindinput="onInput"
+        maxlength="200"
+        placeholder-class="input-ph"
+      />
+      <view class="remark-count">{{remarkLen}}/200</view>
+    </view>
+  </view>
+
+  <view class="confirm-row" bindtap="toggleConfirm" hover-class="row-hover">
+    <view class="check-box {{confirmed ? 'check-box-on' : ''}}">{{confirmed ? '✓' : ''}}</view>
+    <text class="confirm-text">已确认货物信息真实准确</text>
+  </view>
+
+  <view class="bottom-bar">
+    <view class="btn-ghost" bindtap="saveDraft" hover-class="hover-dim">保存草稿</view>
+    <view class="btn-primary" bindtap="publish" hover-class="cta-hover">确认发布</view>
+  </view>
+
+  <!-- 港口选择弹层（13 项 · 原生 showActionSheet 上限 6 项不可用） -->
+  <port-picker
+    visible="{{ppVisible}}"
+    title="{{ppTitle}}"
+    tip="{{ppTip}}"
+    current="{{ppCurrent}}"
+    ports="{{ppPorts}}"
+    bind:select="onPortPicked"
+    bind:close="onPortPickerClose"
+  />
+</view>

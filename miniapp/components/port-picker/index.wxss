@@ -1,0 +1,65 @@
+/* 港口选择弹层（组件内样式隔离，不依赖 app.wxss） */
+.pp-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: rgba(20, 35, 59, .35);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.pp-sheet {
+  background: #FFFFFF;
+  border-top-left-radius: 32rpx;
+  border-top-right-radius: 32rpx;
+  padding: 18rpx 24rpx calc(24rpx + env(safe-area-inset-bottom));
+  animation: pp-up .26s ease-out;
+}
+
+@keyframes pp-up {
+  from { transform: translateY(60rpx); opacity: .4; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.pp-handle {
+  width: 72rpx;
+  height: 8rpx;
+  border-radius: 8rpx;
+  background: #E3E9F2;
+  margin: 0 auto 18rpx;
+}
+
+.pp-head { padding: 0 8rpx 14rpx; }
+.pp-title { display: block; font-size: 32rpx; font-weight: 700; color: #14233B; }
+.pp-tip { display: block; margin-top: 6rpx; font-size: 23rpx; color: #A8B4C4; }
+
+.pp-scroll { max-height: 56vh; }
+
+.pp-item {
+  display: flex;
+  align-items: center;
+  height: 92rpx;
+  padding: 0 20rpx;
+  border-radius: 16rpx;
+}
+.pp-item-hover { background: #F5F8FF; }
+.pp-item-on { background: #F2F6FF; }
+.pp-item-label { flex: 1; font-size: 29rpx; color: #3D4C63; }
+.pp-item-on .pp-item-label { color: #3B5BDB; font-weight: 600; }
+.pp-item-check { font-size: 28rpx; color: #3B5BDB; }
+
+.pp-cancel {
+  margin-top: 12rpx;
+  height: 92rpx;
+  line-height: 92rpx;
+  text-align: center;
+  font-size: 30rpx;
+  color: #6B7A8C;
+  background: #F6F8FB;
+  border-radius: 16rpx;
+}
+.pp-cancel-hover { opacity: .7; }

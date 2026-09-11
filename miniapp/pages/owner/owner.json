@@ -1,4 +1,7 @@
 {
-  "usingComponents": {},
-  "navigationBarTitleText": "owner"
+  "usingComponents": {
+    "port-picker": "/components/port-picker/index"
+  },
+  "navigationBarTitleText": "找货",
+  "enablePullDownRefresh": true
 }

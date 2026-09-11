@@ -1,75 +1,233 @@
-<!-- 船东工作台：我的船队 / 船舶备案 -->
+<!--
+  船东端首页（03）· 找货
+  顶栏 → 搜索/Ai/客服 → 货源大厅（筛选/排序 + 货源卡）→ 我的船队入口
+-->
 <view class="page">
-  <view class="tabs">
-    <view class="tab {{tab === 'list' ? 'tab-active' : ''}}" data-tab="list" bindtap="switchTab">我的船队（{{total}}）</view>
-    <view class="tab {{tab === 'form' ? 'tab-active' : ''}}" data-tab="form" bindtap="switchTab">船舶备案</view>
-    <view class="tab" bindtap="goOrders">我的订单</view>
+  <!-- 顶栏 -->
+  <view class="top">
+    <view class="top-row1">
+      <!-- 用户头像（矢量占位）+ 用户 ID：点击进「我的」 -->
+      <view class="top-user" bindtap="goMine" hover-class="hover-dim">
+        <view class="avatar-vec">
+          <view class="av-head"></view>
+          <view class="av-body"></view>
+        </view>
+        <text class="top-user-id">{{userCode}}</text>
+      </view>
+      <view class="top-loc" bindtap="pickDefaultPort" hover-class="hover-dim">
+        <text class="loc-dot">📍</text>
+        <text class="loc-text">{{defaultPortLabel}}</text>
+        <text class="caret">▾</text>
+      </view>
+      <view class="top-role" bindtap="onSwitchRole" hover-class="hover-dim">
+        <text class="top-role-label">船东</text>
+        <text class="caret">▾</text>
+      </view>
+    </view>
+
+    <view class="top-row2">
+      <view class="search-box" bindtap="goSearch" hover-class="search-box-hover">
+        <text class="search-ico">🔍</text>
+        <text class="search-ph">搜索货源、航线</text>
+      </view>
+      <view class="top-act" bindtap="goAI" hover-class="hover-dim">
+        <view class="act-glyph">✨</view>
+        <text class="act-label">Ai</text>
+      </view>
+      <view class="top-act" bindtap="goAssistant" hover-class="hover-dim">
+        <view class="act-glyph">💬</view>
+        <text class="act-label">客服</text>
+      </view>
+    </view>
   </view>
 
-  <!-- 船队列表 -->
-  <view wx:if="{{tab === 'list'}}" class="list">
-    <view wx:if="{{loading}}" class="empty">加载中...</view>
-    <view wx:elif="{{list.length === 0}}" class="empty">暂无船舶，点击"船舶备案"提交第一艘船</view>
-    <view wx:for="{{list}}" wx:key="id" class="card">
-      <view class="card-head">
-        <text class="card-title">{{item.ship_name}}</text>
-        <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+  <view class="page-content">
+    <!-- ==================== 货源大厅 ==================== -->
+    <block wx:if="{{view === 'hall'}}">
+      <view class="section-card">
+        <view class="block-title">货源大厅</view>
+
+        <view class="filter-bar">
+          <view class="filter-pill {{originKey ? 'filter-pill-active' : ''}}" bindtap="pickOriginFilter" hover-class="hover-dim">
+            <text>{{originLabel}}</text>
+            <text class="pill-caret">▾</text>
+          </view>
+          <view class="filter-pill {{destKey ? 'filter-pill-active' : ''}}" bindtap="pickDestFilter" hover-class="hover-dim">
+            <text>{{destLabel}}</text>
+            <text class="pill-caret">▾</text>
+          </view>
+          <view class="filter-pill {{shipTypeKey ? 'filter-pill-active' : ''}}" bindtap="pickShipTypeFilter" hover-class="hover-dim">
+            <text>{{shipTypeLabel}}</text>
+            <text class="pill-caret">▾</text>
+          </view>
+        </view>
+
+        <view class="filter-sort">
+          <text class="sort-item {{sortKey === 'latest' ? 'filter-sort-active' : ''}}" data-sort="latest" bindtap="pickSort">最新发布</text>
+          <text class="sort-item {{sortKey === 'distance' ? 'filter-sort-active' : ''}}" data-sort="distance" bindtap="pickSort">距离优先</text>
+          <view class="sort-icon-btn" bindtap="onFilterMore" hover-class="hover-dim">
+            <text>▽ 筛选</text>
+          </view>
+        </view>
+
+        <view wx:if="{{list.length === 0}}" class="empty">
+          <view class="empty-icon">📭</view>
+          <view>暂无符合条件的货源</view>
+        </view>
+
+        <view wx:else class="cargo-list">
+          <view
+            wx:for="{{list}}"
+            wx:key="id"
+            class="cargo-card"
+            hover-class="cargo-card-hover"
+          >
+            <view class="cargo-route">
+              <text class="cr-name">{{item.origin_label}}</text>
+              <text class="cr-arrow">→</text>
+              <text class="cr-name">{{item.dest_label}}</text>
+              <text class="cr-price">{{item.price_label}}</text>
+            </view>
+            <view class="cargo-mid">
+              <text class="cargo-name">{{item.cargo_name}}</text>
+              <text class="cargo-sep">·</text>
+              <text class="cargo-weight">{{item.weight_t}} 吨</text>
+            </view>
+            <view class="cargo-foot">
+              <view class="cargo-owner">
+                <text class="owner-name">{{item.owner_label}}</text>
+                <text class="owner-time">{{item.time_ago}}发布</text>
+              </view>
+              <view class="btn-view" data-item="{{item}}" catchtap="onViewCargo" hover-class="btn-view-hover">查看货源</view>
+            </view>
+          </view>
+        </view>
       </view>
-      <view class="card-row">
-        <text>载重 {{item.deadweight_t}} 吨 · 吃水 {{item.draft_m}} 米</text>
-        <text>{{item.length_m}} × {{item.width_m}} 米</text>
+
+      <!-- 我的船队入口（原型未列位置，保留已开发能力） -->
+      <view class="section-card my-entry-card">
+        <view class="my-entry" bindtap="goFleet" hover-class="row-hover">
+          <view class="my-entry-icon">🚢</view>
+          <view class="my-entry-body">
+            <view class="my-entry-title">我的船队 / 船舶备案</view>
+            <view class="my-entry-sub">{{shipCount}} 艘 · 已认证 {{verifiedCount}} 艘</view>
+          </view>
+          <text class="my-entry-caret">›</text>
+        </view>
       </view>
-      <view class="card-row">
-        <text>证书：{{item.cert_no}}</text>
-        <text>有效期至 {{item.cert_expiry}}</text>
+    </block>
+
+    <!-- ==================== 我的船队 ==================== -->
+    <block wx:if="{{view === 'fleet'}}">
+      <view class="back-row" bindtap="backToHall" hover-class="hover-dim">
+        <text class="back-arrow">‹</text>
+        <text>返回货源大厅</text>
       </view>
-      <view wx:if="{{item.status === 'rejected'}}" class="reject-reason">驳回原因：{{item.reject_reason}}</view>
-      <view wx:if="{{item.status === 'verified'}}" class="card-actions">
-        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onMatch">智能找货</button>
+
+      <view wx:if="{{shipLoading && shipList.length === 0}}" class="empty">
+        <view class="empty-icon">⏳</view>
+        <view>船队加载中...</view>
       </view>
-    </view>
+      <view wx:elif="{{shipError}}" class="err-card">
+        <view class="err-title">船队加载失败</view>
+        <view class="err-detail">{{shipError}}</view>
+        <view class="err-btn" bindtap="fetchShipList">重新加载</view>
+      </view>
+      <view wx:elif="{{shipList.length === 0}}" class="section-card">
+        <view class="empty">
+          <view class="empty-icon">⚓</view>
+          <view>暂无船舶</view>
+          <view class="empty-sub">点击下方按钮备案第一艘船</view>
+        </view>
+      </view>
+
+      <view wx:else>
+        <view wx:for="{{shipList}}" wx:key="id" class="section-card ship-card">
+          <view class="ship-card-head">
+            <text class="ship-card-name">{{item.ship_name}}</text>
+            <text class="badge badge-{{item.status}}">{{shipStatusLabel(item.status)}}</text>
+          </view>
+          <view class="ship-card-row">
+            <text>载重 {{item.deadweight_t}} 吨 · 吃水 {{item.draft_m}} 米</text>
+            <text>{{item.length_m}} × {{item.width_m}} 米</text>
+          </view>
+          <view class="ship-card-row">
+            <text>证书：{{item.cert_no}}</text>
+          </view>
+          <view wx:if="{{item.status === 'rejected'}}" class="reject-reason">驳回原因：{{item.reject_reason}}</view>
+          <view wx:if="{{item.status === 'verified'}}" class="ship-card-actions">
+            <view class="btn-secondary" catchtap="onShipMatch" data-id="{{item.id}}">智能找货</view>
+          </view>
+        </view>
+      </view>
+
+      <view class="add-ship-row">
+        <view class="btn-ghost btn-block" bindtap="goRegistry">+ 备案新船舶</view>
+      </view>
+    </block>
+
+    <!-- ==================== 船舶备案表单 ==================== -->
+    <block wx:if="{{view === 'registry'}}">
+      <view class="back-row" bindtap="goFleet" hover-class="hover-dim">
+        <text class="back-arrow">‹</text>
+        <text>返回我的船队</text>
+      </view>
+
+      <view class="section-card">
+        <view class="block-title">船舶备案</view>
+        <view class="form-tip">提交后由平台审核，审核通过后方可接单</view>
+
+        <view class="field-row">
+          <text class="field-label">船名 *</text>
+          <input class="field-input" placeholder="如：平陆001" value="{{regForm.ship_name}}" data-field="ship_name" bindinput="onRegInput" placeholder-class="input-ph" />
+        </view>
+        <view class="field-row" bindtap="pickShipType" hover-class="row-hover">
+          <text class="field-label">船型</text>
+          <text class="field-value">{{regShipTypeLabel}}</text>
+          <text class="field-caret">›</text>
+        </view>
+        <view class="field-row">
+          <text class="field-label">载重吨 *</text>
+          <input class="field-input" type="digit" placeholder="如：2000" value="{{regForm.deadweight_t}}" data-field="deadweight_t" bindinput="onRegInput" placeholder-class="input-ph" />
+        </view>
+        <view class="field-half-row">
+          <view class="field-half">
+            <text class="field-label">船长（米）</text>
+            <input class="field-input" type="digit" placeholder="88" value="{{regForm.length_m}}" data-field="length_m" bindinput="onRegInput" placeholder-class="input-ph" />
+          </view>
+          <view class="field-half">
+            <text class="field-label">船宽（米）</text>
+            <input class="field-input" type="digit" placeholder="13.6" value="{{regForm.width_m}}" data-field="width_m" bindinput="onRegInput" placeholder-class="input-ph" />
+          </view>
+        </view>
+        <view class="field-row">
+          <text class="field-label">满载吃水 *</text>
+          <input class="field-input" type="digit" placeholder="如：3.8" value="{{regForm.draft_m}}" data-field="draft_m" bindinput="onRegInput" placeholder-class="input-ph" />
+        </view>
+        <view class="field-row">
+          <text class="field-label">证书号 *</text>
+          <input class="field-input" placeholder="如：CERT-2026-0001" value="{{regForm.cert_no}}" data-field="cert_no" bindinput="onRegInput" placeholder-class="input-ph" />
+        </view>
+        <view class="field-row">
+          <text class="field-label">证书有效期 *</text>
+          <input class="field-input" placeholder="如：2027-12-31" value="{{regForm.cert_expiry}}" data-field="cert_expiry" bindinput="onRegInput" placeholder-class="input-ph" />
+        </view>
+      </view>
+
+      <view class="submit-row">
+        <button class="btn-primary btn-block" loading="{{regSubmitting}}" bindtap="submitRegForm">提交备案（待审核）</button>
+      </view>
+    </block>
   </view>
 
-  <!-- 备案表单 -->
-  <view wx:if="{{tab === 'form'}}" class="form">
-    <view class="field">
-      <text class="label">船名 *</text>
-      <input class="input" placeholder="如：平陆001" value="{{form.ship_name}}" data-field="ship_name" bindinput="onInput" />
-    </view>
-    <view class="field">
-      <text class="label">船型</text>
-      <picker mode="selector" range="{{shipTypes}}" range-key="label" value="{{typeIndex}}" bindchange="onTypePick">
-        <view class="picker">{{shipTypes[typeIndex].label}}</view>
-      </picker>
-    </view>
-    <view class="field">
-      <text class="label">载重吨（吨）*</text>
-      <input class="input" type="digit" placeholder="如：2000" value="{{form.deadweight_t}}" data-field="deadweight_t" bindinput="onInput" />
-    </view>
-    <view class="field-row">
-      <view class="field field-half">
-        <text class="label">船长（米）</text>
-        <input class="input" type="digit" placeholder="如：88" value="{{form.length_m}}" data-field="length_m" bindinput="onInput" />
-      </view>
-      <view class="field field-half">
-        <text class="label">船宽（米）</text>
-        <input class="input" type="digit" placeholder="如：13.6" value="{{form.width_m}}" data-field="width_m" bindinput="onInput" />
-      </view>
-    </view>
-    <view class="field">
-      <text class="label">满载吃水（米）*（撮合硬约束核心）</text>
-      <input class="input" type="digit" placeholder="如：3.8" value="{{form.draft_m}}" data-field="draft_m" bindinput="onInput" />
-    </view>
-    <view class="field">
-      <text class="label">船舶检验证书号 *</text>
-      <input class="input" placeholder="如：CERT-2026-0001" value="{{form.cert_no}}" data-field="cert_no" bindinput="onInput" />
-    </view>
-    <view class="field">
-      <text class="label">证书有效期至 *</text>
-      <picker mode="date" value="{{form.cert_expiry}}" bindchange="onExpiryPick">
-        <view class="picker">{{form.cert_expiry || '请选择日期'}}</view>
-      </picker>
-    </view>
-    <button class="btn-primary btn-submit" loading="{{submitting}}" bindtap="submitForm">提交备案（待平台审核）</button>
-  </view>
+  <!-- 港口选择弹层（13 项 · 原生 showActionSheet 上限 6 项不可用） -->
+  <port-picker
+    visible="{{ppVisible}}"
+    title="{{ppTitle}}"
+    tip="{{ppTip}}"
+    current="{{ppCurrent}}"
+    ports="{{ppPorts}}"
+    bind:select="onPortPicked"
+    bind:close="onPortPickerClose"
+  />
 </view>

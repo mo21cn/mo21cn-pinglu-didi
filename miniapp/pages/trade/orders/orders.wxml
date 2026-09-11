@@ -1,56 +1,141 @@
-<!-- 订单列表页：角色视角 + 交易操作 -->
+<!--
+  06 我的订单（底栏二级页）
+  统计行（全部/待承运/运输中/已完成/已撤单）→ 待处理事项 → 最近订单
+-->
 <view class="page">
-  <view class="filters">
-    <view
-      wx:for="{{statusFilter}}"
-      wx:key="key"
-      class="filter {{activeStatus === item.key ? 'filter-active' : ''}}"
-      data-key="{{item.key}}"
-      bindtap="switchStatus"
-    >{{item.label}}</view>
+  <!-- 自定义导航栏（本页 navigationStyle:custom，必须自绘）
+       缺失时统计行会直接顶到状态栏下方 / 被胶囊遮挡，表现为「功能超出页面框架」。
+       statusBarHeight 由 onLoad 取 wx.getWindowInfo，与「我的」页同一做法。
+       注意：导航右侧**不放**消息铃铛——胶囊按钮就压在右上角（约 right 28rpx 处），
+       放了也是被遮住看不见，属于假入口。 -->
+  <view class="nav" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <text class="nav-title">我的订单</text>
+    </view>
   </view>
 
-  <view wx:if="{{loading}}" class="empty">加载中...</view>
-  <view wx:elif="{{list.length === 0}}" class="empty">暂无订单</view>
+  <!-- 统计行 -->
+  <view class="stat-row">
+    <view
+      wx:for="{{stats}}"
+      wx:key="key"
+      class="stat-cell {{activeKey === item.key ? 'stat-cell-active' : ''}}"
+      data-key="{{item.key}}"
+      bindtap="switchStat"
+      hover-class="stat-cell-hover"
+    >
+      <view class="stat-num">{{item.count}}</view>
+      <view class="stat-label">{{item.label}}</view>
+    </view>
+  </view>
 
-  <view class="list">
-    <view wx:for="{{list}}" wx:key="id" class="card">
-      <view class="card-head">
-        <text class="card-title">订单 #{{item.id}}</text>
-        <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+  <view class="page-content">
+    <!-- 待处理事项 -->
+    <view wx:if="{{todoList.length}}" class="section-card">
+      <view class="section-head">
+        <text class="section-head-title">待处理事项</text>
       </view>
-      <view class="card-row">
-        <text>货源 #{{item.cargo_id}} · 船舶 #{{item.ship_id}}</text>
-        <text wx:if="{{item.freight_price}}">¥ {{item.freight_price}}</text>
-        <text wx:else>面议</text>
+      <view
+        wx:for="{{todoList}}"
+        wx:key="key"
+        class="todo-row"
+        data-key="{{item.key}}"
+        bindtap="onTodoTap"
+        hover-class="row-hover"
+      >
+        <view class="todo-ico">{{item.icon}}</view>
+        <view class="todo-title">{{item.title}}</view>
+        <view class="todo-count">{{item.count}} 笔</view>
+        <text class="todo-caret">›</text>
       </view>
-      <view class="card-row">
-        <text>成交：{{item.matched_at}}</text>
+    </view>
+
+    <!-- 订单列表 -->
+    <view class="section-card">
+      <view class="section-head">
+        <text class="section-head-title">{{activeKey ? activeLabel + '订单' : '最近订单'}}</text>
+        <text class="section-head-more" bindtap="resetFilter">查看全部 ›</text>
       </view>
 
-      <!-- 货主操作 -->
-      <view wx:if="{{role === 'shipper' && item.status === 'matched'}}" class="card-actions">
-        <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" bindtap="onCancel">撤单</button>
-        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onPay">支付运费</button>
+      <view wx:if="{{list.length}}" class="list-hint">「查看合同 / 支付详情」进入三级页 · 长按订单卡快速预览合同</view>
+
+      <view wx:if="{{loading && list.length === 0}}" class="empty">
+        <view class="empty-icon">⏳</view>
+        <view>订单加载中...</view>
       </view>
-      <view wx:if="{{role === 'shipper' && item.status === 'shipped'}}" class="card-actions">
-        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onComplete">确认签收</button>
+      <view wx:elif="{{error}}" class="err-card">
+        <view class="err-title">订单加载失败</view>
+        <view class="err-detail">{{error}}</view>
+        <view class="err-btn" bindtap="fetchAll">重新加载</view>
+      </view>
+      <view wx:elif="{{list.length === 0}}" class="empty">
+        <view class="empty-icon">📋</view>
+        <view>暂无{{activeLabel}}订单</view>
       </view>
 
-      <!-- 船东操作 -->
-      <view wx:if="{{role === 'owner' && item.status === 'matched'}}" class="card-actions">
-        <button class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" bindtap="onCancel">撤单</button>
-        <button class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onShip">确认启运</button>
-      </view>
+      <view wx:else class="order-list">
+        <view
+          wx:for="{{list}}"
+          wx:key="id"
+          class="order-card"
+          hover-class="row-hover"
+          data-id="{{item.id}}"
+          bindlongpress="onPreviewContract"
+        >
+          <view class="order-head">
+            <view class="order-route">
+              <text class="or-name">{{item.origin_label}}</text>
+              <text class="or-arrow">→</text>
+              <text class="or-name">{{item.dest_label}}</text>
+            </view>
+            <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+          </view>
 
-      <!-- 双方：智能合同（草稿生成 + 风险提示，不具法律效力） -->
-      <view wx:if="{{item.status === 'matched' || item.status === 'shipped'}}" class="card-actions">
-        <button class="btn-mini btn-contract" size="mini" data-id="{{item.id}}" bindtap="onContract">生成合同</button>
+          <view class="order-mid">
+            <text class="order-cargo">{{item.cargo_name}}</text>
+            <text class="order-sep">·</text>
+            <text class="order-weight">{{item.weight_text}}</text>
+          </view>
+
+          <view class="order-sub">
+            <text>{{item.date_text}}</text>
+            <text class="order-price">{{item.freight_price ? '¥ ' + item.freight_price : '运费面议'}}</text>
+          </view>
+
+          <view class="order-actions">
+            <view
+              wx:if="{{item.status !== 'cancelled'}}"
+              class="act-ghost"
+              data-id="{{item.id}}"
+              catchtap="onContractPage"
+            >查看合同</view>
+
+            <view
+              wx:if="{{item.status !== 'matched'}}"
+              class="act-ghost"
+              data-id="{{item.id}}"
+              catchtap="onPayPage"
+            >支付详情</view>
+
+            <block wx:if="{{role === 'shipper'}}">
+              <view wx:if="{{item.status === 'matched'}}" class="act-ghost" data-id="{{item.id}}" catchtap="onCancel">撤单</view>
+              <view wx:if="{{item.status === 'matched'}}" class="act-primary" data-id="{{item.id}}" catchtap="onPayPage">去支付</view>
+              <view wx:if="{{item.status === 'shipped'}}" class="act-primary" data-id="{{item.id}}" catchtap="onComplete">确认收货</view>
+              <view wx:if="{{item.status === 'completed' || item.status === 'cancelled'}}" class="act-ghost" data-id="{{item.id}}" catchtap="onDetail">查看详情</view>
+            </block>
+
+            <block wx:if="{{role === 'owner'}}">
+              <view wx:if="{{item.status === 'matched'}}" class="act-ghost" data-id="{{item.id}}" catchtap="onCancel">撤单</view>
+              <view wx:if="{{item.status === 'matched'}}" class="act-primary" data-id="{{item.id}}" catchtap="onShip">确认启运</view>
+              <view wx:if="{{item.status !== 'matched'}}" class="act-ghost" data-id="{{item.id}}" catchtap="onDetail">查看详情</view>
+            </block>
+          </view>
+        </view>
       </view>
     </view>
   </view>
 
-  <!-- 合同预览弹层 -->
+  <!-- 合同弹层（F11 智能合同 Agent） -->
   <view wx:if="{{contract.show}}" class="modal-mask" bindtap="closeContract">
     <view class="modal" catchtap="">
       <view class="modal-head">

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="8ts7Sunm9ZD8tciY9VASnI">
+<head data-page-node-id="8gxAWW6fIfjQk3nAPFI0nL">
+<meta charset="UTF-8" data-page-node-id="jtAyZ01IWz1ZPSbcEOvrPl">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="UFO8jrajCoQjtES3MWDMLE">
+<title>三级页冲刺 S1 · 合同三级页效果预览</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: #F5F7FA; color: #0F2540;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+  .tag {
+    font-size: 12px; padding: 3px 12px; border-radius: 999px;
+    background: rgba(59,91,219,.08); color: #3B5BDB;
+  }
+  .tag.purple { background: rgba(112,72,232,.10); color: #7048E8; }
+  .tag.green { background: rgba(18,184,134,.10); color: #12B886; }
+  h2 { font-size: 16px; font-weight: 600; margin: 36px 0 14px; }
+  .phones { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+
+  /* ---- 手机框 ---- */
+  .phone {
+    width: 340px; background: #FFFFFF; border-radius: 22px; overflow: hidden;
+    box-shadow: 0 8px 32px rgba(61,90,219,.12); display: flex; flex-direction: column;
+  }
+  .p-nav {
+    background: #3B5BDB; color: #fff; font-size: 13px; text-align: center;
+    padding: 10px 0; flex-shrink: 0;
+  }
+  .p-body { padding: 14px; background: #F5F7FA; height: 560px; overflow: hidden; }
+  .p-bar {
+    background: #fff; border-top: 1px solid #EEF1F6; padding: 8px 14px 12px;
+    display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+  }
+  .bar-note { font-size: 11px; color: #98A6B8; text-align: center; }
+  .bar-actions { display: flex; gap: 10px; }
+  .btn { flex: 1; text-align: center; height: 38px; line-height: 38px; border-radius: 10px; font-size: 13px; }
+  .btn-ghost { background: #fff; border: 1px solid rgba(59,91,219,.25); color: #3B5BDB; }
+  .btn-primary { flex: 1.6; background: linear-gradient(135deg,#3B5BDB,#7048E8); color: #fff; }
+  .disabled { opacity: .45; }
+
+  /* ---- Agent 头卡 ---- */
+  .agent {
+    background: linear-gradient(135deg,#3B5BDB,#7048E8); border-radius: 14px;
+    padding: 16px; color: #fff; margin-bottom: 12px;
+  }
+  .agent-row { display: flex; justify-content: space-between; align-items: center; }
+  .agent-name { font-size: 12px; color: rgba(255,255,255,.85); letter-spacing: 1px; }
+  .agent-chip { font-size: 10px; background: rgba(255,255,255,.22); border-radius: 999px; padding: 2px 9px; }
+  .agent-title { font-size: 21px; font-weight: 600; margin: 7px 0 6px; }
+  .agent-desc { font-size: 11.5px; color: rgba(255,255,255,.82); line-height: 1.6; }
+  .agent-meta {
+    margin-top: 12px; padding-top: 10px; font-size: 11px; color: rgba(255,255,255,.78);
+    border-top: 1px solid rgba(255,255,255,.20); display: flex; gap: 7px; flex-wrap: wrap;
+  }
+
+  /* ---- 卡片 ---- */
+  .card { background: #fff; border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  .card-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px 6px; }
+  .card-title { font-size: 14px; font-weight: 600; }
+  .card-more { font-size: 11.5px; color: #98A6B8; }
+  .risk-list { padding: 0 14px 6px; }
+  .risk-item { background: #FAFBFD; border-radius: 10px; padding: 11px 12px; margin-bottom: 9px; }
+  .risk-head { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+  .sev { width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 5px; color: #fff; font-size: 11px; font-weight: 600; }
+  .sev-high { background: #FA5252; }
+  .sev-medium { background: #F08C00; }
+  .sev-low { background: #98A6B8; }
+  .risk-title { font-size: 13px; font-weight: 600; }
+  .risk-detail { font-size: 12px; color: #3D4C63; }
+  .risk-sug { font-size: 11.5px; color: #3B5BDB; margin-top: 4px; }
+  .risk-none { padding: 10px 14px 14px; font-size: 12px; color: #12B886; }
+  .chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: #F1F4F8; color: #6B7A8C; }
+  .chip-danger { background: rgba(250,82,82,.10); color: #FA5252; }
+  .chip-warn { background: rgba(240,140,0,.10); color: #F08C00; }
+
+  .contract { padding: 2px 14px 12px; }
+  .c-h1 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+  .c-quote { font-size: 11px; color: #8A94A6; background: #F7F9FC; border-radius: 6px; padding: 7px 9px; margin-bottom: 10px; line-height: 1.6; }
+  .c-h2 { font-size: 12.5px; font-weight: 600; color: #3B5BDB; margin: 12px 0 5px; padding-left: 8px; border-left: 3px solid #5C7CFA; }
+  .c-p { font-size: 11.5px; color: #3A4256; line-height: 1.75; margin: 0 0 6px; }
+  .c-li { font-size: 11.5px; color: #3A4256; line-height: 1.75; }
+  .c-hr { height: 1px; background: #EEF1F6; margin: 12px 0; }
+  .c-note { font-size: 11px; color: #98A6B8; }
+  .err { background: #fff; border-radius: 14px; padding: 34px 14px; text-align: center; }
+  .err-title { font-size: 14px; font-weight: 600; }
+  .err-detail { font-size: 12px; color: #6B7A8C; margin-top: 6px; }
+  .err-btn { display: inline-block; margin-top: 16px; padding: 0 22px; height: 34px; line-height: 34px; border-radius: 9px; background: linear-gradient(135deg,#3B5BDB,#7048E8); color: #fff; font-size: 12.5px; }
+
+  .cap { text-align: center; font-size: 12px; color: #6B7A8C; margin-top: 10px; }
+  .cap b { color: #0F2540; font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  th, td { text-align: left; padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #F1F4F8; }
+  th { background: #FAFBFD; font-weight: 600; font-size: 12.5px; color: #3D4C63; }
+  tr:last-child td { border-bottom: none; }
+  .ok { color: #12B886; font-weight: 600; }
+  .warn { color: #F08C00; font-weight: 600; }
+  .note { background: rgba(240,140,0,.07); border-radius: 12px; padding: 14px 16px; font-size: 13px; color: #6B4A00; }
+</style>
+</head>
+<body data-page-node-id="HXcHOjIlvNpVfaAQ4uvfdG">
+<div class="wrap" data-page-node-id="21nTu5DXh3KS10ByPU7PiQ">
+  <h1 data-page-node-id="TU9wBuaNVs5FKaFxKoSPwZ">三级页冲刺 S1 · 合同三级页效果预览</h1>
+  <div class="meta" data-page-node-id="3VkSQU4rbu9BrQXMUSsTOH">
+    <span class="tag green" data-page-node-id="XPOGw7EwfkgzWVJYgULo2p">PR #21 已合并</span>
+    <span class="tag green" data-page-node-id="o7jqyEIlxRL28E7Y24DgTy">PR #22 保真修复</span>
+    <span class="tag" data-page-node-id="mV140xitwgF7oTNFwEHfDT">develop = ccf2727</span>
+    <span class="tag purple" data-page-node-id="cwDs05G3IBTMrAF5LbZ4c8">零后端改动（A 方案）</span>
+    <span class="tag" data-page-node-id="6jAg0OKbERqYD6F75aKDYz">页面 pages/trade/contract</span>
+  </div>
+
+  <h2 data-page-node-id="ncjH8Z92LNSWtQAYXjyo0z">三种状态（数据取自真实接口返回）</h2>
+  <div class="phones" data-page-node-id="ycxqJdAR9BJ6aswpQYCluC">
+    <!-- ① 命中风险 -->
+    <div data-page-node-id="rggghZeMNLOqGHrmGUCroA">
+      <div class="phone" data-page-node-id="dSiqC8AgmjmJEAtWrqlgbU">
+        <div class="p-nav" data-page-node-id="ZpZwHAtGyS1VV85t1fxBqU">合同预览 · 订单 #3</div>
+        <div class="p-body" data-page-node-id="sxbJpXocGHrp6jJ2tGWbiK">
+          <div class="agent" data-page-node-id="AuFMsZWPfzfDydRRkMShNY">
+            <div class="agent-row" data-page-node-id="28XNMAPugGqaXV9pEXWh5b">
+              <span class="agent-name" data-page-node-id="uTYJGCGvjVABsCCN6oRq7A">智能合同 Agent</span>
+              <span class="agent-chip" data-page-node-id="XqJhBMPxfmjq0ZebheXIT1">规则模板</span>
+            </div>
+            <div class="agent-title" data-page-node-id="dveiCDCXpeQLOGBtoq0BvB">核心条款零 LLM</div>
+            <div class="agent-desc" data-page-node-id="Vle10sfBnTF3IemZPEzuku">甲乙方／货物／航线／运费／船舶由订单数据模板渲染，风险点由规则引擎扫描；LLM 只撰写补充条款文字，禁止输出任何数字与日期。</div>
+            <div class="agent-meta" data-page-node-id="daCnm8d4YIqtrSaf4sKqtM"><span data-page-node-id="wdhCT3ioWhuC3qoNe8GWUp">订单 #3</span><span data-page-node-id="VgWltWcmAoveVSWLI9WhoE">·</span><span data-page-node-id="3SiiBP6Cg3CfCJnVcMNV9R">耗时 0 ms</span><span data-page-node-id="uoZZcfOssIWjYKwLW6mIQs">·</span><span data-page-node-id="F2kV0S9MT9xdI2onPhLWRY">命中风险 2 项</span></div>
+          </div>
+
+          <div class="card" data-page-node-id="HLx5RQb96w5mHk8gNIveq2">
+            <div class="card-head" data-page-node-id="ECUaC4XoHvJe8HaQDdTS0b"><span class="card-title" data-page-node-id="Uksc5VxpTStZXerUjvIktx">风险提示（2）</span><span class="chip chip-danger" data-page-node-id="xNytVC3bX3zeW2P1TDorCW">高风险 2</span></div>
+            <div class="risk-list" data-page-node-id="Bw4NXHMoIrmSwhLbcMy2Ax">
+              <div class="risk-item" data-page-node-id="I9NjMtAHcSMjNIqQAq3IOE">
+                <div class="risk-head" data-page-node-id="CE1zXXmTiyRrRduTqCdfnA"><span class="sev sev-high" data-page-node-id="1nDaxmhabcbTu0F8QA1tYb">高</span><span class="risk-title" data-page-node-id="QoBbihbSAKoUOcBCrO6RQX">运费未支付</span></div>
+                <div class="risk-detail" data-page-node-id="iBnlzExMqX3Aoai47ATbbz">订单处于承运流程但运费尚未支付，先运后付存在资金回收风险。</div>
+                <div class="risk-sug" data-page-node-id="wSR9nu9MZH8YICGWZtkDqu">建议：建议在合同中约定'启运前付清运费'，并在支付完成后再行启运。</div>
+              </div>
+              <div class="risk-item" data-page-node-id="chL4Bn6mayQSjMYzBgXtAU">
+                <div class="risk-head" data-page-node-id="aT2g1zSGFn1Z17VCS1IzIe"><span class="sev sev-high" data-page-node-id="E7ktRkx9guP1CDvAPkZfJ0">高</span><span class="risk-title" data-page-node-id="LDFiL6rFkJXS1HxjSwLeCH">运费未锁定</span></div>
+                <div class="risk-detail" data-page-node-id="4tFs7xb2lgMsLGIfdrThON">订单成交价为面议，合同无确定金额条款，易产生结算纠纷。</div>
+                <div class="risk-sug" data-page-node-id="YzQaFuCFy5GWLjNBVSRijr">建议：建议双方先议定运费并回填订单，再生成正式合同。</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" data-page-node-id="vAo7YYfl3rBk4gCJrVRTHw">
+            <div class="card-head" data-page-node-id="eiE35LqmQegUsigQBrCE47"><span class="card-title" data-page-node-id="bqvJ9wrBGJzaXEV66BvK4b">合同正文（草稿）</span><span class="card-more" data-page-node-id="55Xczd2V4sEYPhJR785RnN">复制全文</span></div>
+            <div class="contract" data-page-node-id="nhTKHKeVwuLH78Z4Wom3u8">
+              <div class="c-h1" data-page-node-id="TQM8qWnIGlG36CvXGsQlQU">内河货物运输合同（草稿）</div>
+              <div class="c-quote" data-page-node-id="RCM2TfAqh8OxDOxqLGtJqt">本合同由"滴滴打船"平台根据订单 3 自动生成草稿，<b data-page-node-id="c9PQaMt7zAG52m32hf0TPQ">不具法律效力</b>，仅供双方核对；正式合同以线下签署或后续电子签章版本为准。</div>
+              <div class="c-h2" data-page-node-id="D8hg3AyKxCYF3kZpNFQHn9">一、合同双方</div>
+              <div class="c-li" data-page-node-id="8auddo6D4i4JY1fdqpwCVZ">· <b data-page-node-id="r5jH6XCwYaop8lBaolNppb">甲方（托运人/货主）</b>：货主冒烟</div>
+              <div class="c-li" data-page-node-id="AWr8ptBQdXoqtttHAZVDQj">· <b data-page-node-id="xAY4lkqs1zhwqAKFES32Ze">乙方（承运人/船东）</b>：用户（ID：2）</div>
+              <div class="c-h2" data-page-node-id="KtLh4cJFEzqcNpSPA9WiK9">二、货物</div>
+              <div class="c-li" data-page-node-id="cB6iKkZVbRNrwM7Op49FEM">· 货物名称：E2E 冒烟化肥 800 吨</div>
+              <div class="c-li" data-page-node-id="OFFVMfuafr9AjuDyVMOJzj">· 货类：散货　重量：800.00 吨</div>
+              <div class="c-h2" data-page-node-id="sfemdzWmv9ZkmPMXL0nmeR">三、运输航线与期限</div>
+              <div class="c-li" data-page-node-id="YYv08eTevuIL2KSL3mjID9">· 航线：南宁（NNG） → 梧州（WUZ）</div>
+              <div class="c-li" data-page-node-id="69QMU6Tz0D7MFKHwZqLcnr">· 期望装货日期：2026-09-18</div>
+              <div class="c-h2" data-page-node-id="sA3laYWL6hf1yP6YvrPu4I">四、承运船舶</div>
+              <div class="c-li" data-page-node-id="ECkqxUorPrAEcB7g4oonhH">· 船名：桂平航 6688　散货船</div>
+              <div class="c-li" data-page-node-id="c7GHYaL6b7OxGYyk85hQGq">· 载重吨：1,500.00 吨</div>
+            </div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="qVs7UIGp0H4wUgB8xn3SDP">
+          <div class="bar-note" data-page-node-id="PiOVBRo1DxB6JgJwKC9plR">签署与 PDF 导出即将开放</div>
+          <div class="bar-actions" data-page-node-id="Ctc3fW6ARSrzfwbYVWhwVe">
+            <div class="btn btn-ghost disabled" data-page-node-id="mwFddw0eoK9cntVbAOrQKT">下载 PDF</div>
+            <div class="btn btn-primary disabled" data-page-node-id="WAL2WVck3xtGyp5syhpxJl">在线签署</div>
+          </div>
+        </div>
+      </div>
+      <div class="cap" data-page-node-id="gBeoAmHxYsSKvClzlMivwU"><b data-page-node-id="I7agXM1NkEDc3neji6iESk">① 命中高风险</b><br data-page-node-id="kNnqhCYEScMX8f0ZJyC47Y">已撮合未支付 · 面议未锁价</div>
+    </div>
+
+    <!-- ② 未命中 -->
+    <div data-page-node-id="yRsqLAqcr5fO8gBCPL3lbU">
+      <div class="phone" data-page-node-id="BKul6vdrP9KU5fpZCFFwY5">
+        <div class="p-nav" data-page-node-id="6J277lBc2puBBHcUSiuyCE">合同预览 · 订单 #1</div>
+        <div class="p-body" data-page-node-id="YfJIpStE4yEDGHWg1FaW23">
+          <div class="agent" data-page-node-id="WnAPmYbTRJEnYLP3IefXSr">
+            <div class="agent-row" data-page-node-id="YGx601eyEg54dX14a79KHG">
+              <span class="agent-name" data-page-node-id="maRYxArdLg1WwHGXmi8d0O">智能合同 Agent</span>
+              <span class="agent-chip" data-page-node-id="MolTSnJ9bGTsG88bjvI3RX">规则模板</span>
+            </div>
+            <div class="agent-title" data-page-node-id="1KEcyWiRIwf0o86S4CwN45">核心条款零 LLM</div>
+            <div class="agent-desc" data-page-node-id="Ij1DQEHMakzHU6WU4E8eyt">甲乙方／货物／航线／运费／船舶由订单数据模板渲染，风险点由规则引擎扫描；LLM 只撰写补充条款文字，禁止输出任何数字与日期。</div>
+            <div class="agent-meta" data-page-node-id="EanMoFmzsaw64ZvuPVUfPg"><span data-page-node-id="cNZztLvcVHDu3MgaYn4zs3">订单 #1</span><span data-page-node-id="RhFEyQHpghqTCOnFwtIOGP">·</span><span data-page-node-id="M7h7bnkscNu1Hi9SzLFt4w">耗时 0 ms</span><span data-page-node-id="hoigqwQQhnFOcRyF6HcZ5b">·</span><span data-page-node-id="W3q2JtxjGcWlivJcp58CKu">命中风险 0 项</span></div>
+          </div>
+
+          <div class="card" data-page-node-id="zpMfwEOAn1vITygPvVCs4F">
+            <div class="card-head" data-page-node-id="58NFcXd106IDOAUn4jhfyl"><span class="card-title" data-page-node-id="cH734uf7DSvfI82R63Bzq6">风险提示（0）</span><span class="chip" data-page-node-id="e0QswnXyDYlngVm1fkcDuM">已完成</span></div>
+            <div class="risk-none" data-page-node-id="xejkcxgQ7ZgGI3BGhGxR4j">规则引擎未命中风险点，条款无异常</div>
+          </div>
+
+          <div class="card" data-page-node-id="bHEuurCJrpcixbptzFIYaz">
+            <div class="card-head" data-page-node-id="9AmnQLk1T8RpZw8jPks5zB"><span class="card-title" data-page-node-id="w3mcJNlgfgcNEaziAIho7M">合同正文（草稿）</span><span class="card-more" data-page-node-id="r7OhGsmQqN81Eg5m4mw720">复制全文</span></div>
+            <div class="contract" data-page-node-id="MycAsOcSFGwRtBVuyVGYLx">
+              <div class="c-h1" data-page-node-id="mCb2RTnjJBWpWjpJn0Qqqc">内河货物运输合同（草稿）</div>
+              <div class="c-quote" data-page-node-id="6NlOmbUVA9vtxmxGUpULmq">本合同由"滴滴打船"平台根据订单 1 自动生成草稿，<b data-page-node-id="uQmJl6ArHu8P5sTmVyDi2A">不具法律效力</b>，仅供双方核对。</div>
+              <div class="c-h2" data-page-node-id="PDYEAsFh0pWwn5XP00TXgs">五、运费与支付</div>
+              <div class="c-li" data-page-node-id="XjPyZo0418FC5JCUdTg7be">· 成交运费：35,500.00 元（人民币）</div>
+              <div class="c-li" data-page-node-id="OVKHaL30WQYAPZy2Xt3oFq">· 支付状态：已支付（平台已收运费）</div>
+              <div class="c-h2" data-page-node-id="DTlvQMWJUZT7NP03hv1XOe">六、签收与完结</div>
+              <div class="c-p" data-page-node-id="qyLuyf85XdLLLNDx5hJHar">货物运抵目的港后，甲方（或其书面委托的收货人）应当场验收；验收无异议视为签收，订单转为"已签收"完结。货物有异议的，双方按平台留痕记录协商处理。</div>
+              <div class="c-hr" data-page-node-id="LUS0d8lCppp4Dwj96fbkbh"></div>
+              <div class="c-h2" data-page-node-id="KcgQTfrPBxA45bWrAvjsWe">七、不可抗力</div>
+              <div class="c-p" data-page-node-id="JhZ7TAEZtt1XWwVx05nUcd">因洪水、大风、封航、政府管制等不可抗力导致无法履约的，受影响方应及时通知对方并提供证明，双方均免责。</div>
+              <div class="c-h2" data-page-node-id="zErfZxeBxTkoB6t5OG9HVQ">八、违约与责任划分</div>
+              <div class="c-p" data-page-node-id="tnfQX1jbUOz33EMjqEAAlt">甲方逾期备货或乙方逾期到船的，按日向对方支付违约金；运输途中货物毁损、灭失由乙方承担赔偿责任。</div>
+            </div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="QlGq1QmJhO0aUEla86QXE1">
+          <div class="bar-note" data-page-node-id="XbAF75uRIWcBd1lPJGP3Pi">签署与 PDF 导出即将开放</div>
+          <div class="bar-actions" data-page-node-id="FMwImdaeLJwA2cyAQiVNAG">
+            <div class="btn btn-ghost disabled" data-page-node-id="jkGMFVZXkSwcW3SHHBJ1n8">下载 PDF</div>
+            <div class="btn btn-primary disabled" data-page-node-id="bW62uvjHCoLPThY96UDdhQ">在线签署</div>
+          </div>
+        </div>
+      </div>
+      <div class="cap" data-page-node-id="z19VWI5S7YutcXBY6BmSsK"><b data-page-node-id="SO6yLk0oRftcbZep0klYtA">② 未命中风险</b><br data-page-node-id="mQL94XU3R9bUdrW9UNDrYs">已签收 + 已支付 · 金额已锁定</div>
+    </div>
+
+    <!-- ③ 错误态 -->
+    <div data-page-node-id="GNTJ1TapJLKlgqcG9yyZVh">
+      <div class="phone" data-page-node-id="uSmL8TWRQlhiGYTTTMbCKA">
+        <div class="p-nav" data-page-node-id="SUWNCSGh41baSpvpiuA25i">合同预览 · 订单 #2</div>
+        <div class="p-body" data-page-node-id="85Oh5oFU7141EuVUEs1OQR">
+          <div class="err" data-page-node-id="0ZWHFooEgttkEdbQTd1Dnk">
+            <div class="err-title" data-page-node-id="X52ekfcatnFdmJ7iqkeZds">合同生成失败</div>
+            <div class="err-detail" data-page-node-id="KIwox4hnY1x5wYt7OKLECG">订单已撤销，无法生成合同</div>
+            <div class="err-btn" data-page-node-id="y9W11me993NItY2Cw13MWb">重新生成</div>
+          </div>
+        </div>
+        <div class="p-bar" data-page-node-id="AVEy7CCwqZx48USSgCg0mK">
+          <div class="bar-note" data-page-node-id="uGN9JHUqVTP9GdeEZGmBcj">签署与 PDF 导出即将开放</div>
+          <div class="bar-actions" data-page-node-id="mDmijOE09t0qFQYdOkWmq0">
+            <div class="btn btn-ghost disabled" data-page-node-id="ZeL7naE3Fs5EPEJGpsrZUN">下载 PDF</div>
+            <div class="btn btn-primary disabled" data-page-node-id="eE4aMqkO1nnmFeU34H9W8g">在线签署</div>
+          </div>
+        </div>
+      </div>
+      <div class="cap" data-page-node-id="twSsv480zVtNxoUY0SQmsW"><b data-page-node-id="lMXHENCiCV8WRJxhzFw1rU">③ 兜底错误态</b><br data-page-node-id="KZIO4i0U8OuaRCN6XcJjwY">已撤单订单 · 接口返回 400</div>
+    </div>
+  </div>
+
+  <h2 data-page-node-id="iw1Sntk5r2jjUvPCfDS67D">双入口（含合同弹层）</h2>
+  <table data-page-node-id="4N5T6YJXVT5iBxmDy4hITl">
+    <tr data-page-node-id="1cyF6HrpIVAaclP3TbHTZM"><th style="width:34%" data-page-node-id="HSDGGS8W3E4RLcf2ClH0ub">入口</th><th data-page-node-id="zw1kBWgDuJJCgy8bBftgXK">交互</th><th style="width:26%" data-page-node-id="QkDnNw8QRDi2AihmdKh1ai">落地</th></tr>
+    <tr data-page-node-id="GSpu8fHpr77YLpBMEuPhuP"><td data-page-node-id="lJM2C9FqGYtvovknkMxQBH">订单卡「查看合同」</td><td data-page-node-id="l6VwhLQDYtDNoB34HglcIF">点击 → 进三级页（完整版：Agent 头卡 + 风险卡 + 正文 + 占位底栏）</td><td data-page-node-id="jv0Fgdohpov9iDcWllQfNd"><span class="ok" data-page-node-id="7qMhwnphM5e8yEEelLQn0r">navigateTo</span> 三级页</td></tr>
+    <tr data-page-node-id="U80ww71pslBrCW7ANMQzXJ"><td data-page-node-id="IYWx1xeyz4vcEZHMEMmEsL">订单卡长按</td><td data-page-node-id="uSOxOcnzzyCGz23aBNgm3S">弹出页内弹层快速预览（沿用 F11 弹层，含风险摘要 + 全文）</td><td data-page-node-id="5pythbqheJYbgeH7EwP2og"><span class="ok" data-page-node-id="xAyyUM9z5VaGF2dDaXmvMS">保留原弹层</span></td></tr>
+    <tr data-page-node-id="NkURb7hkf2TtDrxNJa5jGD"><td data-page-node-id="K7HqJ8ztvVyVys77ssnH56">列表上方提示行</td><td data-page-node-id="u4vITMM7sJSPm2FD7vWZP2">「查看合同」进入合同页 · 长按订单卡快速预览（让长按手势可被发现）</td><td data-page-node-id="CCqqMQJd0IJ0eTfa3Mu1iN"><span class="ok" data-page-node-id="8q26AkYCCR1Qpoi0GFPdYH">新增</span></td></tr>
+  </table>
+
+  <h2 data-page-node-id="vovvbf0L2mYJMDjZ4t62SI">验证结果（真实接口冒烟 + 渲染器校验）</h2>
+  <table data-page-node-id="OE2Cdc8AyucS7kjPAC8HAG">
+    <tr data-page-node-id="3DtMwHVXms2cWtUXc15nyk"><th style="width:44%" data-page-node-id="Dv8vnBnKgOjYh9JaJhHF1q">检查项</th><th data-page-node-id="d6gQLErRuUM7ARzGcGxGqO">结果</th></tr>
+    <tr data-page-node-id="E7xRgI2smS53vZdyPbBEhu"><td data-page-node-id="oPDGf0r725CUVT8rHoiRQj">静态校验 verify_miniapp.js</td><td data-page-node-id="St7BlA5jQowpnNC7ALguYD"><span class="ok" data-page-node-id="vmffLUg03J1Sr7eColXTx4">全绿</span>：16 JSON / 11 页面 / 41 路由 / 144 事件绑定</td></tr>
+    <tr data-page-node-id="tQb2fROAfo89lmIkynEUjg"><td data-page-node-id="Y26qbVGInMs2n99CaXXRuX">JS 语法 node --check</td><td data-page-node-id="vr1yZs9F6dGOHcTmTMZsNN"><span class="ok" data-page-node-id="iCPbu3ohZjSHwSMTc5v2uJ">全部通过</span></td></tr>
+    <tr data-page-node-id="4Vajtqo5wYoeimSXw7CJBf"><td data-page-node-id="1LnEKilcMwLAbXWEK76zCl">已签收订单生成合同</td><td data-page-node-id="AW1fXBD6KXMlHpfGCAN1vF"><span class="ok" data-page-node-id="KXLRkNNby9vOgDHo5V6JwF">200</span> · 885 字符 · 10 章节 · 风险 0 项</td></tr>
+    <tr data-page-node-id="UQ1wVG5saM9SeUi9aOdGn6"><td data-page-node-id="WGkd3sZJ1bt6sZoA3PC4Ys">已撮合未支付订单</td><td data-page-node-id="Va5KrD2zFXsTkzUo32kkIq"><span class="ok" data-page-node-id="4jIA9Ek63cZXrmyRe5MdxO">200</span> · 命中 2 项高风险（未支付 / 未锁价）</td></tr>
+    <tr data-page-node-id="bbpSqZQ6Zv4KhP3qXho8lX"><td data-page-node-id="dSH4I8AEt8ZX8wNx35ADXQ">已撤销订单</td><td data-page-node-id="6d8OcoxvibBknIXFN5IgTV"><span class="ok" data-page-node-id="EWQHMMB2n0I8YKiJblb3ag">400</span> 订单已撤销，无法生成合同（页面错误态）</td></tr>
+    <tr data-page-node-id="gtaMnFmNWHuvpZfvbpyAgL"><td data-page-node-id="nYlC2Ij5pGiOGiIY7LLPZV">非参与方（港口身份）</td><td data-page-node-id="8uwHHVsoBF78Chv0GzIjkb"><span class="ok" data-page-node-id="8CHat7DiUHmfJAroE5KAxO">400</span> 仅订单参与方可生成合同（鉴权生效）</td></tr>
+    <tr data-page-node-id="Ou1j3haMGmqeIcbKenRL4S"><td data-page-node-id="yZcfOH8DjK4C0dWOsD5aYO">Markdown → rich-text 渲染器</td><td data-page-node-id="o843xvuwKWvkKsculeEwpz"><span class="ok" data-page-node-id="9R5MFdkaVXpuCOHlXiHzBR">残留语法 0</span> · div 19/19 平衡 · ul 5/5 平衡 · 尖括号全转义</td></tr>
+    <tr data-page-node-id="Vg3Uo5bN0HWXFym10Bsx9M"><td data-page-node-id="I2T6kZOa6Mj51SsJM8ia9g">软换行合并（PR #22）</td><td data-page-node-id="rGzrDyH1RCwgngt4CHxAe0"><span class="ok" data-page-node-id="7baefPUkKtejxvou0jS4Ln">已修复</span>：长段落不再被拆成两段</td></tr>
+  </table>
+
+  <h2 data-page-node-id="dPplnQyBnOtS0zON2q63jb">汇报前要注意的一件事</h2>
+  <div class="note" data-page-node-id="zV6lytaxypSSYfaC8aqvx0">
+    合同接口在 <b data-page-node-id="eCCoQRwRTD6y6sC1Jv7ewS">LLM 故障时返回 503</b>（后端 <code data-page-node-id="19AR4M3On1Xpk5iJR4nwgD">service.generate_contract</code> 直接抛错，注释里写的"降级返回确定性结果"与代码不符），页面会落到错误态。<br data-page-node-id="7TB2vn3qvB9aR3N87n3En1">
+    <b data-page-node-id="jnxTq1BAJaSD6KyxfWDZ4O">建议</b>：汇报当天以 <code data-page-node-id="7iSJrVX4vWgvB7do9Ojbx8">LLM_MOCK=true</code> 起后端，演示即不依赖外网，且输出与真实模式同构（<code data-page-node-id="HpkuGvh1UCFQsj9z6AbX6w">mocked=true</code> 会在头卡显示"规则模板"）。<br data-page-node-id="gX4E1MC0F2uNG3zV7Ht3ej">
+    <b data-page-node-id="YetoaOd4Jr64Y1pErffkK1">止损方案</b>：若要彻底消除这个耦合，需要走 B 方案（新增 <code data-page-node-id="AlsgAd1aJEww6hCwbxzRij">contracts</code> 表 + GET 读快照），已在 README 迭代需求 TODO-03 记录。
+  </div>
+
+  <h2 data-page-node-id="QInU04x33lBBPjeZlOoFBc">下一步</h2>
+  <table data-page-node-id="Z7ASvxz0nNqeJEqAoVsQFs">
+    <tr data-page-node-id="bgpznkU6GkADijSJw8HdTm"><th style="width:16%" data-page-node-id="qmBbgaWgry0RsBc1AepObg">批次</th><th data-page-node-id="OImnGF2CGi5yiTGDblgyZQ">内容</th><th style="width:22%" data-page-node-id="9slw33rzyYJdW2SGj9AoND">状态</th></tr>
+    <tr data-page-node-id="n3B9BZUAEOOdSaCDRaXGAB"><td data-page-node-id="IHPHXbYltYYrO4ah9PYu2d">S0</td><td data-page-node-id="t53FKAy0x4LrLeBXyjxTbD">地基：L3 路由 + 校验脚本扩展</td><td data-page-node-id="Lg20YwWtrjZi7ge9Ux6ig1"><span class="ok" data-page-node-id="3vlaCTwY41sz8XJTGPfPdW">已完成</span></td></tr>
+    <tr data-page-node-id="vTkB5sGdDprQQlelnDEDlj"><td data-page-node-id="2p4DOGR7HcoY29wXy2bauP">S1</td><td data-page-node-id="CicdNIVQX1BHJO4pjREIUE">合同三级页 ★（含合同弹层双入口）</td><td data-page-node-id="BCrzhAWorJAgtLzBFkY2iF"><span class="ok" data-page-node-id="z9yp9p9hPczWupF3ExvUsY">已完成</span></td></tr>
+    <tr data-page-node-id="8xspLrEpvrCWB1ho6ci2r8"><td data-page-node-id="TOrNx4tqNIK9wFCbwLDCZt">S2</td><td data-page-node-id="COQZalKUvzjQZgs4Fg8e0A">支付详情 + 撮合结果正式化</td><td data-page-node-id="tGMm1xRsR7yxWoP66uOJOq"><span class="warn" data-page-node-id="CG3Pd6j6Hb6NY4ONSz5m17">待开跑</span></td></tr>
+    <tr data-page-node-id="n5KOxuCZ92AjtuZfgicovY"><td data-page-node-id="XjXMmPMRCtv9FEtnkqWQnz">S3</td><td data-page-node-id="05uTs945Bos1NwXCfloh1c">泊位档期 + 预约审核详情（可裁剪）</td><td data-page-node-id="ATSaTz4DBeHSeIORUZJtNS"><span class="warn" data-page-node-id="Eip3FgdFqQfyIEPntIZSpa">待开跑</span></td></tr>
+    <tr data-page-node-id="eLGmTVDSD4D93ORM7Pc29Y"><td data-page-node-id="n85zJF1jEZ3cG0kr3umiWc">S4</td><td data-page-node-id="tp7v1Doxj4UCwEiUh4unaQ">三态兜底 + 演示数据贯通 + 走查</td><td data-page-node-id="xNnNyWZ9gtS1qODwBnznW5"><span class="warn" data-page-node-id="ufcXlI6wE8lhMUfjdZWSc9">待开跑</span></td></tr>
+  </table>
+</div>
+</body>
+</html>

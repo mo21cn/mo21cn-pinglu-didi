@@ -1,0 +1,88 @@
+<!--
+  合同预览（L3 三级页）· 智能合同 Agent（F11）
+  结构：Agent 头卡（架构亮点）→ 风险卡（规则引擎命中）→ 正文卡（确定性模板渲染）
+        → 底部固定条（签署 / PDF 占位）
+  入口：订单页「查看合同」；订单页弹层为快速预览版
+-->
+<view class="page-sub">
+  <view class="page-content">
+    <!-- 生成中 -->
+    <view wx:if="{{loading}}" class="empty">
+      <view class="empty-icon">📄</view>
+      <view>智能合同 Agent 生成中...</view>
+    </view>
+
+    <!-- 兜底态 -->
+    <view wx:elif="{{error}}" class="err-card">
+      <view class="err-title">合同生成失败</view>
+      <view class="err-detail">{{error}}</view>
+      <view class="err-btn" bindtap="generate">重新生成</view>
+    </view>
+
+    <block wx:else>
+      <!-- ① Agent 头卡：架构亮点 -->
+      <view class="agent-card bg-brand-gradient">
+        <view class="agent-row">
+          <text class="agent-name">智能合同 Agent</text>
+          <text class="agent-chip">{{degraded ? '降级模板' : (mocked ? '规则模板' : 'LLM 已接入')}}</text>
+        </view>
+        <view class="agent-title">核心条款零 LLM</view>
+        <view class="agent-desc">甲乙方／货物／航线／运费／船舶由订单数据模板渲染，风险点由规则引擎扫描；LLM 只撰写补充条款文字，禁止输出任何数字与日期。</view>
+        <view class="agent-meta">
+          <text>订单 #{{orderId}}</text>
+          <text class="agent-dot">·</text>
+          <text>耗时 {{latencyMs}} ms</text>
+          <text class="agent-dot">·</text>
+          <text>命中风险 {{riskCount}} 项</text>
+        </view>
+      </view>
+
+      <!-- 降级提示：LLM 故障已回退内置标准条款（TODO-10） -->
+      <view wx:if="{{degraded}}" class="degrade-note">
+        <text class="degrade-title">已降级 · 补充条款由平台内置标准模板生成</text>
+        <text class="degrade-desc">AI 服务当前不可用（{{degradedReason}}）。主体条款与风险提示不受影响，服务恢复后可重新生成。</text>
+      </view>
+
+      <!-- ② 风险卡：确定性规则引擎 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">风险提示（{{riskCount}}）</text>
+          <text wx:if="{{highCount}}" class="chip chip-danger">高风险 {{highCount}}</text>
+        </view>
+
+        <view wx:if="{{!riskCount}}" class="risk-none">规则引擎未命中风险点，条款无异常</view>
+        <view wx:else class="risk-list">
+          <view wx:for="{{risks}}" wx:key="title" class="risk-item">
+            <view class="risk-head">
+              <text class="risk-sev risk-sev-{{item.severity}}">{{item.sev_label}}</text>
+              <text class="risk-title">{{item.title}}</text>
+            </view>
+            <view class="risk-detail">{{item.detail}}</view>
+            <view class="risk-sug">建议：{{item.suggestion}}</view>
+          </view>
+        </view>
+      </view>
+
+      <!-- ③ 正文卡：模板渲染的合同全文 -->
+      <view class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">合同正文（草稿）</text>
+          <text class="section-head-more" bindtap="onCopy">复制全文</text>
+        </view>
+        <view class="contract-body">
+          <rich-text nodes="{{contractHtml}}" user-select></rich-text>
+        </view>
+        <view class="contract-foot">合同草稿由平台按订单数据自动生成，不具法律效力；正式文本以线下签署或后续电子签章版本为准。</view>
+      </view>
+    </block>
+  </view>
+
+  <!-- 底部固定操作条：签署 / PDF 为占位能力 -->
+  <view class="bottom-bar contract-bar">
+    <view class="bar-note">签署与 PDF 导出即将开放</view>
+    <view class="bar-actions">
+      <view class="btn-ghost btn-disabled" data-name="下载 PDF" bindtap="onPlaceholder">下载 PDF</view>
+      <view class="btn-primary btn-disabled" data-name="在线签署" bindtap="onPlaceholder">在线签署</view>
+    </view>
+  </view>
+</view>

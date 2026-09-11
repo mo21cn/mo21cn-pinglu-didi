@@ -1,0 +1,92 @@
+........................................................................ [ 61%]
+.............................................                            [100%]
+============================== warnings summary ===============================
+..\.venv\Lib\site-packages\fastapi\testclient.py:1
+  E:\pinglu-didi\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+..\.venv\Lib\site-packages\starlette\testclient.py:53
+  E:\pinglu-didi\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+app\main.py:31
+  E:\pinglu-didi\backend\app\main.py:31: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+..\.venv\Lib\site-packages\fastapi\applications.py:4681
+  E:\pinglu-didi\.venv\Lib\site-packages\fastapi\applications.py:4681: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+-------- generated xml file: E:\pinglu-didi\tmp\baseline-a\pytest.xml ---------
+
+---------- coverage: platform win32, python 3.12.13-final-0 ----------
+Name                               Stmts   Miss  Cover   Missing
+----------------------------------------------------------------
+app\__init__.py                        0      0   100%
+app\core\__init__.py                   0      0   100%
+app\core\config.py                    50     48     4%   12-91, 94-103
+app\core\database.py                  16      4    75%   34-38
+app\core\security.py                  18      1    94%   45
+app\main.py                           29      0   100%
+app\models\__init__.py                 8      0   100%
+app\models\agent.py                   19      0   100%
+app\models\cargo.py                   21      0   100%
+app\models\order.py                   21      0   100%
+app\models\payment.py                 21      0   100%
+app\models\port.py                    34      0   100%
+app\models\ship.py                    22      0   100%
+app\models\user.py                    21      0   100%
+app\modules\__init__.py                0      0   100%
+app\modules\agent\__init__.py          2      0   100%
+app\modules\agent\contract.py         39      2    95%   127, 144
+app\modules\agent\knowledge.py        56      3    95%   166, 172, 211
+app\modules\agent\llm.py              75     27    64%   70-109, 160, 164
+app\modules\agent\router.py           34      2    94%   79-80
+app\modules\agent\schemas.py          40      0   100%
+app\modules\agent\service.py         163     26    84%   70-74, 181, 186, 195-201, 236-243, 333, 358-365
+app\modules\auth\__init__.py           2      0   100%
+app\modules\auth\dependencies.py      22      2    91%   30, 40
+app\modules\auth\router.py            36      2    94%   34-35
+app\modules\auth\schemas.py           26      0   100%
+app\modules\auth\service.py           49     18    63%   41-66
+app\modules\cargo\__init__.py          2      0   100%
+app\modules\cargo\router.py           59      2    97%   94-95
+app\modules\cargo\schemas.py          59      2    97%   51, 73
+app\modules\cargo\service.py          52      4    92%   47-48, 50-51
+app\modules\match\__init__.py          2      0   100%
+app\modules\match\engine.py          103      9    91%   91, 157-158, 167-168, 170-173, 176-177
+app\modules\match\router.py           33      1    97%   64
+app\modules\match\schemas.py          35      0   100%
+app\modules\match\service.py          29      0   100%
+app\modules\order\__init__.py          2      0   100%
+app\modules\order\router.py           67      6    91%   64, 72-73, 105, 129, 148
+app\modules\order\schemas.py          30      0   100%
+app\modules\order\service.py          84      4    95%   75, 83, 100, 179
+app\modules\payment\__init__.py        2      0   100%
+app\modules\payment\router.py         46      0   100%
+app\modules\payment\schemas.py        23      0   100%
+app\modules\payment\service.py        54      1    98%   46
+app\modules\port\__init__.py           2      0   100%
+app\modules\port\router.py            97      7    93%   53, 60, 167-169, 229-230
+app\modules\port\schemas.py           79      2    97%   83, 85
+app\modules\port\service.py          120     15    88%   75, 93, 123, 129, 174, 206, 216, 245-256
+app\modules\ship\__init__.py           2      0   100%
+app\modules\ship\router.py            59      7    88%   42, 55-56, 94, 107, 110-111
+app\modules\ship\schemas.py           52      0   100%
+app\modules\ship\service.py           50      1    98%   38
+----------------------------------------------------------------
+TOTAL                               1967    196    90%
+
+117 passed, 4 warnings in 21.73s
+BASELINE_ISOLATION {"app_env": "test", "database_url": "sqlite://", "wechat_mock": true, "llm_mock": true, "external_http_attempts": 0}

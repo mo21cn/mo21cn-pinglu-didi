@@ -1,0 +1,26 @@
+<!-- 港口选择弹层（底部滑出 · 滚动列表） -->
+<view wx:if="{{visible}}" class="pp-mask" bindtap="onMaskTap" catchtouchmove="noop">
+  <view class="pp-sheet" catchtap="noop">
+    <view class="pp-handle"></view>
+    <view class="pp-head">
+      <text class="pp-title">{{title}}</text>
+      <text wx:if="{{tip}}" class="pp-tip">{{tip}}</text>
+    </view>
+
+    <scroll-view class="pp-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view
+        wx:for="{{list}}"
+        wx:key="key"
+        class="pp-item {{current === item.key ? 'pp-item-on' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="onPick"
+        hover-class="pp-item-hover"
+      >
+        <text class="pp-item-label">{{item.label}}</text>
+        <text wx:if="{{current === item.key}}" class="pp-item-check">✓</text>
+      </view>
+    </scroll-view>
+
+    <view class="pp-cancel" bindtap="onCancelTap" hover-class="pp-cancel-hover">取消</view>
+  </view>
+</view>

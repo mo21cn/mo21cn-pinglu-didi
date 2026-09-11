@@ -50,7 +50,7 @@ class Berth(Base):
     max_dwt: Mapped[float] = mapped_column(Numeric(10, 2), comment="允许靠泊最大载重吨")
     max_draft: Mapped[float] = mapped_column(Numeric(6, 2), comment="泊位水深允许吃水（米）")
     # 适靠船型（JSON 数组，取值同 Ship.ship_type：bulk/general/container/tanker）
-    allowed_ship_types: Mapped[list] = mapped_column(JSON, default=list, comment="适靠船型")
+    allowed_ship_types: Mapped[list[str]] = mapped_column(JSON, default=list, comment="适靠船型")
     # 并发容量：同一时间窗内最多允许的 confirmed 预约数（物理泊位多为 1）
     concurrent_capacity: Mapped[int] = mapped_column(Integer, default=1, comment="并发靠泊容量")
     # active | inactive

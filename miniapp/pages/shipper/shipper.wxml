@@ -1,101 +1,223 @@
-<!-- 货主工作台：我的货源 / 发布货源 -->
+<!--
+  货主端首页（02）· 找船
+  顶栏（常用港 + 角色）→ 搜索/Ai/客服 → 我要发货 → 推荐船源 → 推荐航线
+-->
 <view class="page">
-  <view class="tabs">
-    <view class="tab {{tab === 'list' ? 'tab-active' : ''}}" data-tab="list" bindtap="switchTab">我的货源（{{total}}）</view>
-    <view class="tab {{tab === 'form' ? 'tab-active' : ''}}" data-tab="form" bindtap="switchTab">发布货源</view>
-  </view>
-
-  <!-- 列表 -->
-  <view wx:if="{{tab === 'list'}}" class="list">
-    <view wx:if="{{loading}}" class="empty">加载中...</view>
-    <view wx:elif="{{list.length === 0}}" class="empty">暂无货源，点击"发布货源"发布第一单</view>
-    <view wx:for="{{list}}" wx:key="id" class="card">
-      <view class="card-head">
-        <text class="card-title">{{item.cargo_name}}</text>
-        <text class="badge badge-{{item.status}}">{{statusLabels[item.status]}}</text>
+  <!-- 顶栏 -->
+  <view class="top">
+    <view class="top-row1">
+      <!-- 用户头像（矢量占位）+ 用户 ID：点击进「我的」 -->
+      <view class="top-user" bindtap="goMine" hover-class="hover-dim">
+        <view class="avatar-vec">
+          <view class="av-head"></view>
+          <view class="av-body"></view>
+        </view>
+        <text class="top-user-id">{{userCode}}</text>
       </view>
-      <view class="card-row">
-        <text>{{item.weight_t}} 吨 · {{item.origin_port}} → {{item.dest_port}}</text>
+      <view class="top-loc" bindtap="pickDefaultPort" hover-class="hover-dim">
+        <text class="loc-dot">📍</text>
+        <text class="loc-text">{{defaultPortLabel}}</text>
+        <text class="caret">▾</text>
       </view>
-      <view class="card-row">
-        <text>期望装货：{{item.expect_date}}</text>
-        <text wx:if="{{item.offer_price}}">¥ {{item.offer_price}}</text>
-        <text wx:else>面议</text>
+      <view class="top-role" bindtap="onSwitchRole" hover-class="hover-dim">
+        <text class="top-role-label">{{roleLabel}}</text>
+        <text class="caret">▾</text>
       </view>
-      <view wx:if="{{item.status === 'draft' || item.status === 'published' || item.status === 'matched' || item.status === 'shipped'}}" class="card-actions">
-        <button wx:if="{{item.status === 'draft'}}" class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" data-action="publish" bindtap="onAction">发布</button>
-        <button wx:if="{{item.status === 'published'}}" class="btn-mini btn-primary" size="mini" data-id="{{item.id}}" bindtap="onMatch">智能找船</button>
-        <button wx:if="{{item.status === 'matched' || item.status === 'shipped'}}" class="btn-mini btn-primary" size="mini" bindtap="goOrders">查看订单</button>
-        <button wx:if="{{item.status === 'draft' || item.status === 'published'}}" class="btn-mini btn-ghost" size="mini" data-id="{{item.id}}" data-action="cancel" bindtap="onAction">取消</button>
-      </view>
-    </view>
-  </view>
-
-  <!-- 发布表单 -->
-  <view wx:if="{{tab === 'form'}}" class="form">
-    <!-- 智能填写：一句话发货（Agent 草稿回填，人工核对后提交） -->
-    <view class="ai-card">
-      <view class="ai-head">
-        <text class="ai-icon">✨</text>
-        <text class="ai-title">一句话发货</text>
-        <text class="ai-sub">AI 解析成草稿，自动填入下方表单</text>
-      </view>
-      <view class="ai-row">
-        <textarea
-          class="ai-input"
-          placeholder="如：我有800吨散装水泥，下周从南宁运到贵港，运费2万5"
-          value="{{aiText}}"
-          data-field="aiText"
-          bindinput="onInput"
-          maxlength="200"
-          auto-height
-        ></textarea>
-      </view>
-      <button class="btn-mini btn-ai" size="mini" loading="{{aiParsing}}" bindtap="aiParse">解析并填表</button>
     </view>
 
-    <view class="field">
-      <text class="label">货物名称 *</text>
-      <input class="input" placeholder="如：散装水泥" value="{{form.cargo_name}}" data-field="cargo_name" bindinput="onInput" />
-    </view>
-    <view class="field">
-      <text class="label">货类</text>
-      <picker mode="selector" range="{{cargoTypes}}" range-key="label" value="{{typeIndex}}" bindchange="onTypePick">
-        <view class="picker">{{cargoTypes[typeIndex].label}}</view>
-      </picker>
-    </view>
-    <view class="field">
-      <text class="label">重量（吨）*</text>
-      <input class="input" type="digit" placeholder="如：800" value="{{form.weight_t}}" data-field="weight_t" bindinput="onInput" />
-    </view>
-    <view class="field-row">
-      <view class="field field-half">
-        <text class="label">起运港 *</text>
-        <picker mode="selector" range="{{ports}}" range-key="label" value="{{originIndex}}" bindchange="onOriginPick">
-          <view class="picker">{{ports[originIndex].label}}</view>
-        </picker>
+    <view class="top-row2">
+      <view class="search-box" bindtap="goSearch" hover-class="search-box-hover">
+        <text class="search-ico">🔍</text>
+        <text class="search-ph">搜索船源、航线</text>
       </view>
-      <view class="field field-half">
-        <text class="label">目的港 *</text>
-        <picker mode="selector" range="{{ports}}" range-key="label" value="{{destIndex}}" bindchange="onDestPick">
-          <view class="picker">{{ports[destIndex].label}}</view>
-        </picker>
+      <view class="top-act" bindtap="goAI" hover-class="hover-dim">
+        <view class="act-glyph act-ai">✨</view>
+        <text class="act-label">Ai</text>
+      </view>
+      <view class="top-act" bindtap="goAssistant" hover-class="hover-dim">
+        <view class="act-glyph act-cs">💬</view>
+        <text class="act-label">客服</text>
       </view>
     </view>
-    <view class="field">
-      <text class="label">期望装货日期 *</text>
-      <picker mode="date" start="{{today}}" value="{{form.expect_date}}" bindchange="onDatePick">
-        <view class="picker">{{form.expect_date}}</view>
-      </picker>
-    </view>
-    <view class="field">
-      <text class="label">运费出价（元，可空为面议）</text>
-      <input class="input" type="digit" placeholder="如：25000" value="{{form.offer_price}}" data-field="offer_price" bindinput="onInput" />
-    </view>
-    <view class="field">
-      <text class="label">备注</text>
-      <textarea class="textarea" placeholder="装卸要求、货物特性等" value="{{form.remark}}" data-field="remark" bindinput="onInput" maxlength="255"></textarea>
-    </view>
-    <button class="btn-primary btn-submit" loading="{{submitting}}" bindtap="submitForm">发布货源（进入撮合池）</button>
   </view>
+
+  <view class="page-content">
+    <!-- 我要发货 -->
+    <view class="section-card">
+      <view class="block-title">我要发货</view>
+
+      <view class="field-row {{miss === 'origin' ? 'field-row-miss' : ''}}" bindtap="pickOrigin" hover-class="row-hover">
+        <text class="field-label">装货港</text>
+        <view class="loc-value">
+          <text class="pin pin-blue">●</text>
+          <text class="field-value {{form.origin_label ? '' : 'field-value-placeholder'}}">{{form.origin_label || '请选择装货港'}}</text>
+        </view>
+        <text class="field-caret">›</text>
+      </view>
+
+      <view class="field-row {{miss === 'dest' ? 'field-row-miss' : ''}}" bindtap="pickDest" hover-class="row-hover">
+        <text class="field-label">卸货港</text>
+        <view class="loc-value">
+          <text class="pin pin-purple">●</text>
+          <text class="field-value {{form.dest_label ? '' : 'field-value-placeholder'}}">{{form.dest_label || '请选择目的港'}}</text>
+        </view>
+        <text class="field-caret">›</text>
+      </view>
+
+      <!-- 双列：货物资料 / 用船需求 -->
+      <view class="dual-row">
+        <view class="dual-item {{panel === 'cargo' ? 'dual-item-active' : ''}} {{miss === 'weight' ? 'dual-item-miss' : ''}}" bindtap="togglePanel" data-panel="cargo" hover-class="row-hover">
+          <view class="dual-body">
+            <view class="dual-label">货物资料</view>
+            <view class="dual-value">{{cargoBrief}}</view>
+          </view>
+          <text class="dual-caret">{{panel === 'cargo' ? '⌃' : '›'}}</text>
+        </view>
+        <view class="dual-item {{panel === 'req' ? 'dual-item-active' : ''}} {{miss === 'date' ? 'dual-item-miss' : ''}}" bindtap="togglePanel" data-panel="req" hover-class="row-hover">
+          <view class="dual-body">
+            <view class="dual-label">用船需求</view>
+            <view class="dual-value">{{reqBrief}}</view>
+          </view>
+          <text class="dual-caret">{{panel === 'req' ? '⌃' : '›'}}</text>
+        </view>
+      </view>
+
+      <!-- 展开面板：货物资料 -->
+      <view wx:if="{{panel === 'cargo'}}" class="panel">
+        <view class="field-row field-row-sm">
+          <text class="field-label">货物名称</text>
+          <input class="field-input" placeholder="如：水泥熟料" value="{{form.cargo_name}}" data-field="cargo_name" bindinput="onInput" placeholder-class="input-ph" />
+        </view>
+        <view class="field-row field-row-sm" bindtap="pickCargoType" hover-class="row-hover">
+          <text class="field-label">货物类型</text>
+          <text class="field-value">{{cargoTypeLabel}}</text>
+          <text class="field-caret">›</text>
+        </view>
+        <view class="field-row field-row-sm">
+          <text class="field-label">重量（吨）</text>
+          <input class="field-input" type="digit" placeholder="如：1200" value="{{form.weight_t}}" data-field="weight_t" bindinput="onInput" placeholder-class="input-ph" />
+        </view>
+        <view class="field-row field-row-sm" bindtap="pickPack" hover-class="row-hover">
+          <text class="field-label">包装方式</text>
+          <text class="field-value {{packLabel ? '' : 'field-value-placeholder'}}">{{packLabel || '请选择包装方式'}}</text>
+          <text class="field-caret">›</text>
+        </view>
+      </view>
+
+      <!-- 展开面板：用船需求 -->
+      <view wx:if="{{panel === 'req'}}" class="panel">
+        <view class="field-row field-row-sm" bindtap="pickDate" hover-class="row-hover">
+          <text class="field-label">期望装货日期</text>
+          <text class="field-value">{{form.expect_date || '请选择日期'}}</text>
+          <text class="field-caret">›</text>
+        </view>
+        <view class="field-row field-row-sm" bindtap="pickShipType" hover-class="row-hover">
+          <text class="field-label">所需船型</text>
+          <text class="field-value {{shipTypeLabel ? '' : 'field-value-placeholder'}}">{{shipTypeLabel || '按货物条件匹配'}}</text>
+          <text class="field-caret">›</text>
+        </view>
+        <view class="field-row field-row-sm">
+          <text class="field-label">参考运费（元）</text>
+          <input class="field-input" type="digit" placeholder="可空 · 空为面议" value="{{form.offer_price}}" data-field="offer_price" bindinput="onInput" placeholder-class="input-ph" />
+        </view>
+      </view>
+
+      <!-- 运输方式 -->
+      <view class="seg-row">
+        <view class="seg-item {{carryMode === 'ftl' ? 'seg-item-active' : ''}}" data-mode="ftl" bindtap="pickCarryMode">
+          <view class="seg-radio"></view>
+          <text>整船运输</text>
+        </view>
+        <view class="seg-item {{carryMode === 'ltl' ? 'seg-item-active' : ''}}" data-mode="ltl" bindtap="pickCarryMode">
+          <view class="seg-radio"></view>
+          <text>拼船运输</text>
+        </view>
+      </view>
+
+      <view class="card-cta btn-primary" bindtap="onFindShips" hover-class="cta-hover">查看匹配船源</view>
+      <view class="card-tip">出单前不产生费用 · 由确定性撮合引擎按运力/船型/航线打分</view>
+    </view>
+
+    <!-- 推荐船源 -->
+    <view class="section-card">
+      <view class="section-head">
+        <text class="section-head-title">推荐船源</text>
+        <text class="section-head-more" bindtap="onMoreShips">查看更多 ›</text>
+      </view>
+      <view class="ship-list">
+        <view
+          wx:for="{{hotShips}}"
+          wx:key="name"
+          class="ship-item"
+          data-item="{{item}}"
+          bindtap="onShipTap"
+          hover-class="row-hover"
+        >
+          <view class="ship-thumb">🚢</view>
+          <view class="ship-body">
+            <view class="ship-name-row">
+              <text class="ship-name">{{item.name}}</text>
+              <text wx:if="{{item.certified}}" class="chip chip-success">已认证</text>
+            </view>
+            <view class="ship-meta">{{item.type_label}} · {{item.deadweight_t}} 吨</view>
+          </view>
+          <view class="ship-side">
+            <text class="ship-home">{{item.home_label}}</text>
+            <text class="ship-link">查看详情 ›</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 推荐航线 -->
+    <view class="section-card">
+      <view class="section-head">
+        <text class="section-head-title">推荐航线</text>
+        <text class="section-head-more" bindtap="onMoreRoutes">查看更多 ›</text>
+      </view>
+      <view class="route-list">
+        <view
+          wx:for="{{hotRoutes}}"
+          wx:key="key"
+          class="route-item"
+          data-item="{{item}}"
+          bindtap="onRouteTap"
+          hover-class="row-hover"
+        >
+          <view class="route-body">
+            <view class="route-names">
+              <text class="route-name">{{item.from_label}}</text>
+              <text class="route-arrow">→</text>
+              <text class="route-name">{{item.to_label}}</text>
+            </view>
+            <view class="route-sub">查看沿线船源</view>
+          </view>
+          <text class="route-caret">›</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 我的货源（已开发能力入口，原型未列位置） -->
+    <view class="section-card my-entry-card">
+      <view class="my-entry" bindtap="goMyCargo" hover-class="row-hover">
+        <view class="my-entry-icon">📋</view>
+        <view class="my-entry-body">
+          <view class="my-entry-title">我的货源</view>
+          <view class="my-entry-sub">{{myCargoTotal}} 条 · 查看 / 撤单</view>
+        </view>
+        <text class="route-caret">›</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 港口选择弹层（13 项 · 原生 showActionSheet 上限 6 项不可用） -->
+  <port-picker
+    visible="{{ppVisible}}"
+    title="{{ppTitle}}"
+    tip="{{ppTip}}"
+    current="{{ppCurrent}}"
+    ports="{{ppPorts}}"
+    bind:select="onPortPicked"
+    bind:close="onPortPickerClose"
+  />
 </view>

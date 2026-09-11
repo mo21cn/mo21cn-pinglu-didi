@@ -1,0 +1,137 @@
+<!--
+  05 发布空船（船东端二级页）
+  01 选择船舶 / 02 当前运力 / 03 期望航线 / 04 报价与备注
+  注：后端暂无「空船发布」接口 → 表单可完整填写，提交时占位提示并落本机草稿
+-->
+<view class="page-sub">
+  <view class="preview-banner">
+    <text class="preview-tag">功能预览</text>
+    <text class="preview-text">空船大厅接口开发中 · 当前提交将保存为本机草稿</text>
+  </view>
+
+  <!-- 合规预检（F17）：备案/发布前的即时预检，只出结论不阻断 -->
+  <view class="checks">
+    <view class="checks-btn" bindtap="onComplianceCheck" hover-class="checks-btn-hover">
+      🛡 船舶合规预检（证书 / 主尺度 / 吃水）
+    </view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">01</text><text>选择船舶</text></view>
+
+    <view wx:if="{{shipLoading}}" class="empty">
+      <view class="empty-icon">⏳</view>
+      <view>船舶加载中...</view>
+    </view>
+
+    <view wx:elif="{{shipError}}" class="err-card">
+      <view class="err-title">船舶列表加载失败</view>
+      <view class="err-detail">{{shipError}}</view>
+      <view class="err-btn" bindtap="fetchShips">重新加载</view>
+    </view>
+
+    <view wx:elif="{{ships.length === 0}}" class="no-ship">
+      <view class="no-ship-text">暂无已认证船舶，请先完成船舶备案并通过审核</view>
+      <view class="no-ship-btn" bindtap="goRegistry" hover-class="hover-dim">前往船舶备案</view>
+    </view>
+
+    <view wx:else>
+      <view class="field-row" bindtap="pickShip" hover-class="row-hover">
+        <text class="field-label">选择船舶</text>
+        <text class="field-value {{shipLabel ? '' : 'field-value-placeholder'}}">{{shipLabel || '请选择船舶'}}</text>
+        <text class="field-caret">›</text>
+      </view>
+      <view wx:if="{{shipLabel}}" class="ship-brief">
+        <text>{{shipBrief}}</text>
+        <text class="chip chip-success">已认证</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">02</text><text>当前运力</text></view>
+    <view class="field-row" bindtap="pickCurrentPort" hover-class="row-hover">
+      <text class="field-label">当前停靠港</text>
+      <text class="field-value {{form.current_port_label ? '' : 'field-value-placeholder'}}">{{form.current_port_label || '请选择停靠港'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+    <view class="field-row">
+      <text class="field-label">可用载重（吨）</text>
+      <input class="field-input" type="digit" placeholder="请输入可用载重" value="{{form.available_t}}" data-field="available_t" bindinput="onInput" placeholder-class="input-ph" />
+    </view>
+    <view class="field-row" bindtap="pickDate" hover-class="row-hover">
+      <text class="field-label">空船可用日期</text>
+      <text class="field-value {{form.available_date ? '' : 'field-value-placeholder'}}">{{form.available_date || '请选择日期'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">03</text><text>期望航线</text></view>
+    <view class="field-row" bindtap="pickOrigin" hover-class="row-hover">
+      <text class="field-label">出发港</text>
+      <text class="field-value {{form.origin_label ? '' : 'field-value-placeholder'}}">{{form.origin_label || '请选择出发港'}}</text>
+      <text class="field-caret">›</text>
+    </view>
+    <view class="field-row" bindtap="pickDest" hover-class="row-hover">
+      <text class="field-label">目的港（可选）</text>
+      <text class="field-value {{form.dest_label ? '' : 'field-value-placeholder'}}">{{form.dest_label || '请选择目的港'}}</text>
+      <view class="no-limit-tag" catchtap="setAnyPort">不同港</view>
+    </view>
+    <view class="field-note">不指定目的港时，按「不同港」向全网货主曝光</view>
+  </view>
+
+  <view class="section-card">
+    <view class="block-title"><text class="block-title-no">04</text><text>报价与备注</text></view>
+    <view class="seg-row">
+      <view class="seg-item {{priceMode === 'negotiable' ? 'seg-item-active' : ''}}" data-mode="negotiable" bindtap="pickPriceMode">
+        <view class="seg-radio"></view>
+        <text>运费面议</text>
+      </view>
+      <view class="seg-item {{priceMode === 'fixed' ? 'seg-item-active' : ''}}" data-mode="fixed" bindtap="pickPriceMode">
+        <view class="seg-radio"></view>
+        <text>参考报价</text>
+      </view>
+    </view>
+    <view class="field-row">
+      <text class="field-label">参考运费（元）</text>
+      <input
+        class="field-input"
+        type="digit"
+        placeholder="{{priceMode === 'fixed' ? '请输入参考报价' : '选填 · 供货主参考'}}"
+        value="{{form.offer_price}}"
+        data-field="offer_price"
+        bindinput="onInput"
+        placeholder-class="input-ph"
+      />
+    </view>
+    <view class="remark-box">
+      <textarea
+        class="remark-input"
+        placeholder="请输入补充说明（选填）"
+        value="{{form.remark}}"
+        data-field="remark"
+        bindinput="onInput"
+        maxlength="200"
+        placeholder-class="input-ph"
+      />
+      <view class="remark-count">{{remarkLen}}/200</view>
+    </view>
+  </view>
+
+  <view class="bottom-bar">
+    <view class="btn-ghost" bindtap="saveDraft" hover-class="hover-dim">保存草稿</view>
+    <view class="btn-primary" bindtap="publish" hover-class="cta-hover">发布空船信息</view>
+  </view>
+
+  <!-- 港口选择弹层（13 项 · 原生 showActionSheet 上限 6 项不可用） -->
+  <port-picker
+    visible="{{ppVisible}}"
+    title="{{ppTitle}}"
+    tip="{{ppTip}}"
+    current="{{ppCurrent}}"
+    ports="{{ppPorts}}"
+    bind:select="onPortPicked"
+    bind:close="onPortPickerClose"
+  />
+</view>

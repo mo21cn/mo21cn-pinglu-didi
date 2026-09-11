@@ -1,54 +1,61 @@
-<!-- 首页：登录 / 三角色工作台 -->
+<!--
+  首位屏（01）：身份选择浮窗
+  不设主页——进入即选身份，点击直接进入专属工作台
+-->
 <view class="page">
-  <view class="header">
-    <text class="title">平陆运河 · 滴滴打船</text>
-    <text class="subtitle">货—船—港 三合一撮合平台</text>
-  </view>
+  <!--
+    品牌头图（设计稿导出：平陆运河航拍 +「船好多」标识 + 标语）
+    替代原先「纯 CSS 模拟底图 + 图文 logo」的头部，头图自带品牌标识，
+    故去掉左上角原有的 ⛵ 图标与「船好多」文字、以及下方标语行。
+  -->
+  <image class="brand-hero" src="/assets/home-hero.jpg" mode="aspectFill" />
 
-  <!-- 未登录：微信一键登录 -->
-  <view wx:if="{{!isLoggedIn}}" class="login-card">
-    <view class="login-icon">⚓</view>
-    <text class="login-desc">登录后可发布货源、找船接单、协同港口作业</text>
-    <button class="btn-primary" loading="{{logging}}" bindtap="handleLogin">微信一键登录</button>
-  </view>
+  <!-- 身份选择浮窗 -->
+  <view class="role-sheet">
+    <view class="sheet-handle"></view>
+    <view class="sheet-title">请选择您的身份</view>
+    <view class="sheet-sub">选择后直接进入专属工作台</view>
 
-  <!-- 已登录：用户信息 + 角色卡 -->
-  <block wx:else>
-    <view class="user-card">
-      <view class="user-row">
-        <text class="user-name">{{user.nickname || '船友'}}</text>
-        <text class="user-role">{{user.role_label}}</text>
-      </view>
-      <text class="user-logout" bindtap="handleLogout">退出登录</text>
+    <!-- 后端连通性预检：连不上时提前说明，而不是等点完身份再报「登录失败」 -->
+    <view wx:if="{{backendDown}}" class="sheet-warn" bindtap="probeBackend" hover-class="hover-dim">
+      ⚠️ 未连接后端 127.0.0.1:8000 · 点此重试
     </view>
 
-    <view class="section-title">我的角色工作台</view>
     <view class="role-list">
       <view
-        wx:for="{{roles}}"
-        wx:key="key"
-        class="role-card {{currentRole === item.key ? 'role-active' : ''}}"
-        data-role="{{item.key}}"
-        data-page="{{item.page}}"
-        bindtap="handleEnterWorkspace"
+        class="role-card {{pendingRole === 'shipper' ? 'role-card-pending' : ''}}"
+        data-role="shipper"
+        bindtap="onPickRole"
+        hover-class="role-card-hover"
       >
-        <view class="role-head">
-          <text class="role-label">{{item.label}}</text>
-          <text wx:if="{{currentRole === item.key}}" class="role-badge">当前</text>
+        <view class="role-icon role-icon-shipper">📦</view>
+        <view class="role-body">
+          <view class="role-name">我是货主</view>
+          <view class="role-desc">发货找船，查看推荐航线</view>
         </view>
-        <text class="role-desc">{{item.desc}}</text>
+        <view class="role-arrow">›</view>
+      </view>
+
+      <view
+        class="role-card {{pendingRole === 'owner' ? 'role-card-pending' : ''}}"
+        data-role="owner"
+        bindtap="onPickRole"
+        hover-class="role-card-hover"
+      >
+        <view class="role-icon role-icon-owner">🚢</view>
+        <view class="role-body">
+          <view class="role-name">我是船东</view>
+          <view class="role-desc">寻找货源，发布空船</view>
+        </view>
+        <view class="role-arrow">›</view>
       </view>
     </view>
+  </view>
 
-    <view class="section-title">切换当前角色</view>
-    <view class="switch-row">
-      <button
-        wx:for="{{roles}}"
-        wx:key="key"
-        class="btn-switch {{currentRole === item.key ? 'btn-switch-active' : ''}}"
-        data-role="{{item.key}}"
-        bindtap="handleSwitchRole"
-      >{{item.label}}</button>
+  <view wx:if="{{logging}}" class="loading-mask">
+    <view class="loading-box">
+      <view class="loading-spinner"></view>
+      <text class="loading-text">正在进入工作台…</text>
     </view>
-  </block>
+  </view>
 </view>

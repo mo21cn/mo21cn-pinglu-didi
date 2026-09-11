@@ -1,8 +1,15 @@
 <view class="page">
-  <!-- 顶部说明 -->
+  <!-- 顶部说明（文案由 MODE_META 按模式注入：客服 / 解析 / 搜索） -->
   <view class="banner">
-    <view class="banner-title">平台智能客服</view>
-    <view class="banner-sub">咨询发货/找船/支付/航线/船型等问题，纯只读，AI 不代替您执行任何写操作</view>
+    <view class="banner-title">{{bannerTitle}}</view>
+    <view class="banner-sub">{{bannerSub}}</view>
+  </view>
+
+  <!-- 解析态下的角色门控（货源解析仅货主可用） -->
+  <view wx:if="{{mode === 'parse' && roleBlocked}}" class="gate">
+    <view class="gate-title">货源解析仅货主可用</view>
+    <view class="gate-sub">当前身份不是货主。可切换到货主身份后再描述货源，或用「客服」咨询其他问题。</view>
+    <view class="gate-btn" bindtap="onSwitchToShipper" hover-class="gate-btn-hover">切换为货主</view>
   </view>
 
   <!-- 消息列表 -->
@@ -15,23 +22,68 @@
   >
     <!-- 空状态 -->
     <view wx:if="{{emptyHint}}" class="empty">
-      <view class="empty-icon">💬</view>
-      <view class="empty-title">有什么可以帮您？</view>
-      <view class="empty-sub">试试问：</view>
-      <view class="empty-chip" bindtap="onQuickAsk" data-q="怎么发布货源？">怎么发布货源？</view>
-      <view class="empty-chip" bindtap="onQuickAsk" data-q="钦州港能走什么货？">钦州港能走什么货？</view>
-      <view class="empty-chip" bindtap="onQuickAsk" data-q="液货用什么船拉？">液货用什么船拉？</view>
-      <view class="empty-chip" bindtap="onQuickAsk" data-q="撤单了运费退吗？">撤单了运费退吗？</view>
-      <view class="empty-chip" bindtap="onQuickAsk" data-q="智能撮合怎么评分？">智能撮合怎么评分？</view>
+      <view class="empty-icon">{{emptyIcon}}</view>
+      <view class="empty-title">{{emptyTitle}}</view>
+      <view class="empty-sub">{{emptySub}}</view>
+      <view
+        wx:for="{{chips}}"
+        wx:key="*this"
+        class="empty-chip {{chipWide ? 'empty-chip-parse' : ''}}"
+        bindtap="onQuickAsk"
+        data-q="{{item}}"
+      >{{item}}</view>
     </view>
 
-    <block wx:for="{{messages}}" wx:key="ts" wx:for-index="i">
-      <view id="msg-{{i}}" class="msg-row {{item.role === 'user' ? 'right' : 'left'}}">
+    <block wx:for="{{messages}}" wx:key="id" wx:for-index="i">
+      <view class="msg-row {{item.role === 'user' ? 'right' : 'left'}}">
         <view class="avatar {{item.role === 'user' ? 'avatar-user' : 'avatar-bot'}}">
-          {{item.role === 'user' ? '我' : '客'}}
+          {{item.role === 'user' ? '我' : botBadge}}
         </view>
-        <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-bot'}} {{item.pending ? 'bubble-pending' : ''}} {{item.error ? 'bubble-error' : ''}}">
+
+        <!-- 解析结果卡片（结构化草稿，可一键带去发布页） -->
+        <view wx:if="{{item.kind === 'parse' && !item.pending}}" class="parse-card">
+          <view class="parse-head">
+            <text class="parse-title">解析结果</text>
+            <text class="parse-conf">置信度 {{item.confidence}}%</text>
+          </view>
+          <view class="parse-row" wx:for="{{item.rows}}" wx:for-item="row" wx:key="key">
+            <text class="parse-label">{{row.label}}</text>
+            <text class="parse-value {{row.missing ? 'parse-value-miss' : ''}}">{{row.value}}</text>
+          </view>
+          <view wx:if="{{item.hasMissing}}" class="parse-warn">待补充确认：{{item.missingText}}</view>
+          <view wx:if="{{item.draft}}" class="parse-btn" data-idx="{{i}}" bindtap="onUseDraft" hover-class="parse-btn-hover">
+            带去发布页填写 ›
+          </view>
+        </view>
+
+        <!-- 合规预检卡片（F17 结论：三档 + 逐条依据 + 建议） -->
+        <view wx:elif="{{item.kind === 'compliance' && !item.pending}}" class="comp-card comp-card-{{item.level}}">
+          <view class="comp-head">
+            <text class="comp-title">{{item.compTitle}}</text>
+            <text class="comp-badge comp-badge-{{item.level}}">{{item.levelLabel}}</text>
+          </view>
+          <view wx:if="{{item.summary}}" class="comp-summary">{{item.summary}}</view>
+          <view wx:for="{{item.findings}}" wx:for-item="f" wx:key="code" class="comp-row">
+            <view class="comp-row-head">
+              <text class="comp-sev comp-sev-{{f.severity}}">{{f.severityLabel}}</text>
+              <text class="comp-row-title">{{f.title}}</text>
+            </view>
+            <view class="comp-row-detail">{{f.detail}}</view>
+            <view class="comp-row-tip">建议：{{f.suggestion}}</view>
+          </view>
+          <view wx:if="{{!item.findings.length}}" class="comp-clean">未发现合规风险</view>
+        </view>
+
+        <view wx:else class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-bot'}} {{item.pending ? 'bubble-pending' : ''}} {{item.error ? 'bubble-error' : ''}}">
+          <!-- 路由结果标注：识别到的意图 + 置信度（F20 的路由能力要让人看得见） -->
+          <view wx:if="{{item.intentLabel}}" class="route-meta">
+            已识别：{{item.intentLabel}}<text wx:if="{{item.confidence}}"> · {{item.confidence}}%</text>
+          </view>
           <text user-select="{{true}}" space="emsp" decode="{{true}}" class="bubble-text">{{item.text}}</text>
+          <!-- 未派发（如非货主描述货源）：给「下一步能做什么」，而不是一句报错 -->
+          <view wx:if="{{item.needRole}}" class="parse-btn" data-idx="{{i}}" bindtap="onSwitchForRetry" hover-class="parse-btn-hover">
+            切换为货主并重试 ›
+          </view>
           <view wx:if="{{item.mocked === false && item.latency}}" class="bubble-meta">DeepSeek · {{item.latency}}ms</view>
         </view>
       </view>
@@ -45,7 +97,7 @@
       value="{{input}}"
       bindinput="onInput"
       bindconfirm="onSend"
-      placeholder="描述您的问题，按回车发送"
+      placeholder="{{inputPlaceholder}}"
       placeholder-class="ph"
       auto-height
       maxlength="500"
@@ -62,7 +114,7 @@
         size="mini"
         bindtap="onSend"
         hover-class="btn-send-hover"
-      >{{sending ? '发送中' : '发送'}}</button>
+      >{{sending ? busyLabel : sendLabel}}</button>
     </view>
   </view>
 </view>

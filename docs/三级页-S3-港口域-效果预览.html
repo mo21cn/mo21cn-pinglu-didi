@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三级页冲刺 S3 · 港口域详情 效果预览</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: #F5F7FA; color: #0F2540;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; line-height: 1.6;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+  .tag { font-size: 12px; padding: 3px 12px; border-radius: 999px; background: rgba(59,91,219,.08); color: #3B5BDB; }
+  .tag.purple { background: rgba(112,72,232,.10); color: #7048E8; }
+  .tag.green { background: rgba(18,184,134,.10); color: #12B886; }
+  .tag.warn { background: rgba(240,140,0,.10); color: #F08C00; }
+  .tag.gray { background: #F1F4F8; color: #6B7A8C; }
+  .tag.red { background: rgba(250,82,82,.10); color: #FA5252; }
+  h2 { font-size: 16px; font-weight: 600; margin: 40px 0 6px; }
+  .sub { font-size: 13px; color: #6B7A8C; margin: 0 0 16px; }
+  .phones { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+  .cap { font-size: 12.5px; font-weight: 600; color: #3D4C63; margin: 0 0 8px; }
+  .cap span { font-weight: 400; color: #98A6B8; }
+
+  .phone { width: 340px; background: #FFFFFF; border-radius: 22px; overflow: hidden;
+    box-shadow: 0 8px 32px rgba(61,90,219,.12); display: flex; flex-direction: column; }
+  .p-nav { background: #3B5BDB; color: #fff; font-size: 13px; text-align: center; padding: 10px 0; flex-shrink: 0; }
+  .p-body { padding: 14px; background: #F5F7FA; height: 588px; overflow: hidden; }
+  .p-bar { background: #fff; border-top: 1px solid #EEF1F6; padding: 9px 14px 12px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+  .b-note { font-size: 11px; color: #98A6B8; text-align: center; line-height: 1.5; }
+  .b-acts { display: flex; gap: 10px; }
+  .btn { flex: 1; text-align: center; height: 38px; line-height: 38px; border-radius: 10px; font-size: 13px; }
+  .btn-ghost { background: #fff; border: 1px solid rgba(59,91,219,.25); color: #3B5BDB; }
+  .btn-primary { flex: 1; background: linear-gradient(135deg,#3B5BDB,#7048E8); color: #fff; }
+  .disabled { opacity: .45; }
+
+  .hero { background: linear-gradient(135deg,#3B5BDB,#7048E8); border-radius: 14px; padding: 16px; color: #fff; margin-bottom: 12px; }
+  .hero-row { display: flex; justify-content: space-between; align-items: center; }
+  .hero-name { font-size: 12px; color: rgba(255,255,255,.85); letter-spacing: 1px; }
+  .hero-chip { font-size: 10px; background: rgba(255,255,255,.22); border-radius: 999px; padding: 2px 9px; }
+  .hero-title { font-size: 21px; font-weight: 600; margin: 7px 0 4px; line-height: 1.3; }
+  .hero-big { font-size: 30px; font-weight: 700; line-height: 1.25; margin: 6px 0 4px; letter-spacing: .5px; }
+  .hero-desc { font-size: 11.5px; color: rgba(255,255,255,.82); line-height: 1.6; }
+  .hero-meta { font-size: 10.5px; color: rgba(255,255,255,.78); display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .hero-note { margin-top: 11px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.20); font-size: 10.5px; color: rgba(255,255,255,.78); line-height: 1.6; }
+
+  .card { background: #fff; border-radius: 14px; margin-bottom: 11px; overflow: hidden; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  .card-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px 6px; }
+  .card-title { font-size: 14px; font-weight: 600; }
+  .card-more { font-size: 11.5px; color: #3B5BDB; }
+  .chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: #F1F4F8; color: #6B7A8C; }
+  .chip-warn { background: rgba(240,140,0,.10); color: #F08C00; }
+  .chip-success { background: rgba(18,184,134,.10); color: #12B886; }
+  .chip-purple { background: rgba(112,72,232,.10); color: #7048E8; }
+  .chip-danger { background: rgba(250,82,82,.10); color: #FA5252; }
+
+  .frow { display: flex; align-items: center; min-height: 34px; padding: 0 14px; border-bottom: 1px solid #F1F4F8; }
+  .frow:last-child { border-bottom: none; }
+  .flabel { width: 84px; flex-shrink: 0; font-size: 12.5px; color: #3D4C63; }
+  .fval { flex: 1; text-align: right; font-size: 12.5px; color: #0F2540; }
+  .mono { font-family: Consolas, Menlo, monospace; font-size: 10.5px; word-break: break-all; color: #3D4C63; }
+
+  /* ---- 甘特 ---- */
+  .gt { padding: 6px 14px 4px; }
+  .gt-row { padding-bottom: 12px; }
+  .gt-meta { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+  .gt-name { font-size: 12.5px; font-weight: 600; }
+  .gt-ship { font-size: 11px; color: #6B7A8C; }
+  .gt-dur { margin-left: auto; font-size: 11px; color: #3B5BDB; }
+  .gt-track { position: relative; height: 13px; border-radius: 999px; background: #F1F4F8; overflow: hidden; }
+  .gt-bar { position: absolute; top: 0; height: 13px; border-radius: 999px; background: linear-gradient(135deg,#3B5BDB,#7048E8); }
+  .gt-span { margin-top: 3px; font-size: 10.5px; color: #B7C2D0; }
+  .gt-empty { padding: 26px 14px; text-align: center; }
+  .gt-empty-i { font-size: 28px; }
+  .gt-empty-t { font-size: 13px; font-weight: 500; color: #3D4C63; margin-top: 7px; }
+  .gt-empty-s { font-size: 11px; color: #98A6B8; margin-top: 5px; line-height: 1.6; }
+
+  /* ---- 校验链 ---- */
+  .rule { display: flex; gap: 9px; padding: 9px 14px; border-bottom: 1px solid #F1F4F8; }
+  .rule:last-child { border-bottom: none; }
+  .rule-no { width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%; background: rgba(59,91,219,.10);
+    color: #3B5BDB; font-size: 11px; font-weight: 600; text-align: center; line-height: 18px; margin-top: 2px; }
+  .rule-t { font-size: 12.5px; font-weight: 500; }
+  .rule-n { font-size: 10.5px; color: #98A6B8; margin-top: 2px; line-height: 1.55; }
+
+  .tl { padding: 4px 14px 12px; }
+  .tl-item { display: flex; gap: 10px; }
+  .tl-rail { width: 16px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
+  .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: #E3E9F2; margin-top: 5px; flex-shrink: 0; }
+  .tl-line { width: 1px; flex: 1; background: #EEF1F6; margin-top: 3px; }
+  .tl-done .tl-dot { background: linear-gradient(135deg,#3B5BDB,#7048E8); box-shadow: 0 0 0 3px rgba(59,91,219,.12); }
+  .tl-body { flex: 1; padding-bottom: 14px; }
+  .tl-item:last-child .tl-body { padding-bottom: 2px; }
+  .tl-title { font-size: 12.5px; font-weight: 500; color: #98A6B8; }
+  .tl-done .tl-title { font-weight: 600; color: #0F2540; }
+  .tl-time { font-size: 10.5px; color: #B7C2D0; margin-top: 2px; }
+  .tl-done .tl-time { color: #6B7A8C; }
+  .tl-note { font-size: 10px; color: #98A6B8; margin-top: 2px; word-break: break-all; }
+  .tl-foot { padding: 9px 14px 12px; border-top: 1px solid #F1F4F8; font-size: 10.5px; color: #98A6B8; line-height: 1.6; }
+
+  /* ---- 容量算式 ---- */
+  .calc { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 11px; }
+  .calc-cell { flex: 1; text-align: center; }
+  .calc-num { font-size: 24px; font-weight: 700; color: #3B5BDB; line-height: 1.2; }
+  .calc-cap { font-size: 10.5px; color: #98A6B8; margin-top: 3px; }
+  .calc-op { width: 24px; text-align: center; font-size: 15px; color: #B7C2D0; }
+  .check-note { padding: 11px 14px 12px; font-size: 12.5px; color: #3D4C63; line-height: 1.7; }
+  .warn-box { margin: 0 14px 6px; padding: 8px 10px; border-radius: 8px; background: rgba(250,82,82,.08); color: #C92A2A; font-size: 11px; line-height: 1.65; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 2px 12px rgba(61,90,219,.06); font-size: 13px; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #F1F4F8; vertical-align: top; }
+  th { background: #FAFBFD; font-weight: 600; font-size: 12.5px; color: #3D4C63; }
+  tr:last-child td { border-bottom: none; }
+  code { background: #F4F6FB; border-radius: 4px; padding: 1px 5px; font-family: Consolas, Menlo, monospace; font-size: 12px; color: #3B5BDB; }
+  .ok { color: #12B886; font-weight: 600; }
+  .warn { color: #F08C00; font-weight: 600; }
+  .box { background: #fff; border-radius: 14px; padding: 16px 18px; box-shadow: 0 2px 12px rgba(61,90,219,.06); }
+  .box ul { margin: 8px 0 0; padding-left: 20px; }
+  .box li { font-size: 13px; margin-bottom: 5px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>三级页冲刺 S3 · 港口域详情 效果预览</h1>
+  <div class="meta">
+    <span class="tag">零后端改动</span>
+    <span class="tag purple">泊位档期 + 预约审核</span>
+    <span class="tag green">防超卖可视化</span>
+    <span class="tag warn">展示性轻量化</span>
+    <span class="tag gray">分支 S3-port-detail</span>
+  </div>
+
+  <p class="sub">
+    本批次把 F4 港域已开发能力（泊位尺度约束、预约五态状态机、防超卖三重设计）从「运营台的卡片列表」
+    提升为两级详情页。因港口侧尚未开始对接，本页定位为<b>展示性</b>：只读档期 + 参数解读 + 容量预检，
+    不改写业务口径，全部复用现有端点，后端 0 行改动。
+  </p>
+
+  <h2>01 · 泊位档期详情 <code>pages/port/berth</code></h2>
+  <p class="sub">数据源：<code>GET /api/v1/port/berths/{id}/schedule</code>（返回泊位参数 + 全部 confirmed 预约）。入口：平台运营台 → 泊位管理 → 泊位卡。</p>
+
+  <div class="phones">
+    <div>
+      <p class="cap">满档期样本 <span>· 3 条已确认 · 峰值 2/2 容量</span></p>
+      <div class="phone">
+        <div class="p-nav">泊位档期</div>
+        <div class="p-body">
+          <div class="hero">
+            <div class="hero-row">
+              <span class="hero-name">泊位</span>
+              <span class="hero-chip">可用</span>
+            </div>
+            <div class="hero-big">NNG · PT-01</div>
+            <div class="hero-desc">平塘港区1号多用途泊位</div>
+            <div class="hero-meta"><span>泊位 #1</span><span>·</span><span>NNG 港区</span><span>·</span><span>并发 2 船位</span></div>
+            <div class="hero-note">档期以「已确认（confirmed）」预约为准——待确认申请不占档期，防止恶意占位。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">尺度约束与容量</span><span class="chip chip-purple">撮合硬约束同源</span></div>
+            <div class="frow"><span class="flabel">最大载重吨</span><span class="fval">3000 吨</span></div>
+            <div class="frow"><span class="flabel">允许吃水</span><span class="fval">6 米</span></div>
+            <div class="frow"><span class="flabel">适靠船型</span><span class="fval">散货船 / 集装箱船 / 件杂货船</span></div>
+            <div class="frow"><span class="flabel">并发靠泊容量</span><span class="fval">2 船位</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">已确认档期</span><span class="chip chip-danger">峰值 2 / 2 船位</span></div>
+            <div class="gt">
+              <div class="gt-row">
+                <div class="gt-meta"><span class="gt-name">预约 #1</span><span class="gt-ship">船 #1</span><span class="gt-dur">10 小时</span></div>
+                <div class="gt-track"><div class="gt-bar" style="left:0%;width:12.5%"></div></div>
+                <div class="gt-span">09-13 07:39 → 09-13 17:39</div>
+              </div>
+              <div class="gt-row">
+                <div class="gt-meta"><span class="gt-name">预约 #2</span><span class="gt-ship">船 #1</span><span class="gt-dur">16 小时</span></div>
+                <div class="gt-track"><div class="gt-bar" style="left:5%;width:20%"></div></div>
+                <div class="gt-span">09-13 11:39 → 09-14 03:39</div>
+              </div>
+              <div class="gt-row">
+                <div class="gt-meta"><span class="gt-name">预约 #4</span><span class="gt-ship">船 #1</span><span class="gt-dur">8 小时</span></div>
+                <div class="gt-track"><div class="gt-bar" style="left:90%;width:10%"></div></div>
+                <div class="gt-span">09-16 07:39 → 09-16 15:39</div>
+              </div>
+            </div>
+            <div class="tl-foot">档期区间 09-13 07:39 ~ 09-16 15:39 · 横条长度按靠泊时长等比换算，仅含已确认预约。</div>
+          </div>
+        </div>
+        <div class="p-bar">
+          <div class="b-note">展示页：泊位参数的编辑能力随港口对接一并开放</div>
+          <div class="b-acts"><div class="btn btn-ghost">返回运营台</div><div class="btn btn-primary disabled">编辑泊位</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="cap">空档期样本 <span>· 无 confirmed 占用</span></p>
+      <div class="phone">
+        <div class="p-nav">泊位档期</div>
+        <div class="p-body">
+          <div class="hero">
+            <div class="hero-row"><span class="hero-name">泊位</span><span class="hero-chip">可用</span></div>
+            <div class="hero-big">GGU · S3-EMPTY</div>
+            <div class="hero-desc">空档期样本泊位</div>
+            <div class="hero-meta"><span>泊位 #2</span><span>·</span><span>GGU 港区</span><span>·</span><span>并发 1 船位</span></div>
+            <div class="hero-note">档期以「已确认（confirmed）」预约为准——待确认申请不占档期，防止恶意占位。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">已确认档期</span><span class="chip">暂无占用</span></div>
+            <div class="gt-empty">
+              <div class="gt-empty-i">📅</div>
+              <div class="gt-empty-t">该泊位暂无已确认的靠泊占用</div>
+              <div class="gt-empty-s">船东提交申请后为「待确认」，港口方确认锁定时才写入档期</div>
+            </div>
+            <div class="tl-foot">档期区间 — · 横条长度按靠泊时长等比换算，仅含已确认预约。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">预约前置校验链</span><span class="chip">纯规则 · 零 LLM</span></div>
+            <div class="rule"><div class="rule-no">1</div><div><div class="rule-t">船舶须已通过备案审核</div><div class="rule-n">待审核 / 已驳回的船舶不得预约</div></div></div>
+            <div class="rule"><div class="rule-no">2</div><div><div class="rule-t">船舶载重吨 ≤ 泊位上限</div><div class="rule-n">吨位咬合，超限直接拒绝</div></div></div>
+            <div class="rule"><div class="rule-no">3</div><div><div class="rule-t">船舶吃水 ≤ 泊位允许吃水</div><div class="rule-n">防止搁浅，按证书吃水比对</div></div></div>
+            <div class="rule"><div class="rule-no">4</div><div><div class="rule-t">船型须在适靠船型内</div><div class="rule-n">散货 / 件杂货 / 集装箱 / 油船 白名单</div></div></div>
+            <div class="tl-foot">以上四条在船东提交申请的瞬间逐条比对，任一不满足即刻拒绝（HTTP 409），不会进入待确认队列。</div>
+          </div>
+        </div>
+        <div class="p-bar">
+          <div class="b-note">展示页：泊位参数的编辑能力随港口对接一并开放</div>
+          <div class="b-acts"><div class="btn btn-ghost">返回运营台</div><div class="btn btn-primary disabled">编辑泊位</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>02 · 预约审核详情 <code>pages/port/appt</code></h2>
+  <p class="sub">数据源：跳转前经 Storage 携带审批记录体 + <code>GET /api/v1/port/berths/{id}/schedule</code> 取容量上下文（失败自动降级）。入口：平台运营台 → 预约审核 → 预约卡。</p>
+
+  <div class="phones">
+    <div>
+      <p class="cap">待确认 · 预检判定冲突 <span>· 样本 #3</span></p>
+      <div class="phone">
+        <div class="p-nav">预约审核</div>
+        <div class="p-body">
+          <div class="hero">
+            <div class="hero-row"><span class="hero-name">泊位预约</span><span class="hero-chip">待确认</span></div>
+            <div class="hero-title">船 #1 申请靠泊</div>
+            <div class="hero-desc">NNG · PT-01 泊位</div>
+            <div class="hero-meta"><span>预约 #3</span><span>·</span><span>提交 09-11 07:39</span></div>
+            <div class="hero-note">预约申请本身不锁定档期——只有港口方确认后，该时间窗才被计入占用。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">申请档期窗口</span><span class="card-more">查看泊位档期 ›</span></div>
+            <div class="frow"><span class="flabel">计划靠泊</span><span class="fval">09-13 13:39</span></div>
+            <div class="frow"><span class="flabel">计划离泊</span><span class="fval">09-13 21:39</span></div>
+            <div class="frow"><span class="flabel">靠泊时长</span><span class="fval">8 小时</span></div>
+            <div class="frow"><span class="flabel">申请备注</span><span class="fval">探针预约 3</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">确认前容量预检</span><span class="chip chip-danger">重叠 2 / 容量 2</span></div>
+            <div class="calc">
+              <div class="calc-cell"><div class="calc-num">2</div><div class="calc-cap">窗口内已确认</div></div>
+              <div class="calc-op">+</div>
+              <div class="calc-cell"><div class="calc-num">1</div><div class="calc-cap">本次确认</div></div>
+              <div class="calc-op">≤</div>
+              <div class="calc-cell"><div class="calc-num">2</div><div class="calc-cap">并发容量</div></div>
+            </div>
+            <div class="warn-box">当前窗口已占满，确认请求将被服务端拒绝（409 档期冲突）。此预检与服务端 <span class="mono">count_confirmed_overlap</span> 同口径，仅用于提前告知审核人。</div>
+            <div class="tl-foot">真正的一致性由服务端保证：确认时对泊位行加锁（FOR UPDATE），再统计重叠预约数，达到并发容量即拒绝——预检只是把结果提前展示，不构成放行依据。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">审核留痕</span><span class="chip chip-purple">确定性状态机</span></div>
+            <div class="tl">
+              <div class="tl-item tl-done"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line"></div></div>
+                <div class="tl-body"><div class="tl-title">船东提交预约申请</div><div class="tl-time">09-11 07:39</div><div class="tl-note">申请阶段为「待确认」，不占用档期</div></div></div>
+              <div class="tl-item"><div class="tl-rail"><div class="tl-dot"></div></div>
+                <div class="tl-body"><div class="tl-title">等待港口方审核</div><div class="tl-time">待发生</div><div class="tl-note">确认即锁定档期；驳回则注明原因退回</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="p-bar">
+          <div class="b-note">当前窗口已占满 2 船位，确认将被拒绝（409 档期冲突），建议驳回或协调改期</div>
+          <div class="b-acts"><div class="btn btn-ghost">驳回</div><div class="btn btn-primary disabled">确认并锁定档期</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="cap">已锁定 <span>· 预检自动切换为「占用结论」</span></p>
+      <div class="phone">
+        <div class="p-nav">预约审核</div>
+        <div class="p-body">
+          <div class="hero">
+            <div class="hero-row"><span class="hero-name">泊位预约</span><span class="hero-chip">已锁定</span></div>
+            <div class="hero-title">船 #1 申请靠泊</div>
+            <div class="hero-desc">NNG · PT-01 泊位</div>
+            <div class="hero-meta"><span>预约 #1</span><span>·</span><span>提交 09-11 07:39</span></div>
+            <div class="hero-note">预约申请本身不锁定档期——只有港口方确认后，该时间窗才被计入占用。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">档期占用</span><span class="chip chip-success">已占用档期</span></div>
+            <div class="check-note">该预约已确认为有效占用；同窗口另有 1 条已确认预约（容量 2）。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">审核留痕</span><span class="chip chip-purple">确定性状态机</span></div>
+            <div class="tl">
+              <div class="tl-item tl-done"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line"></div></div>
+                <div class="tl-body"><div class="tl-title">船东提交预约申请</div><div class="tl-time">09-11 07:39</div><div class="tl-note">申请阶段为「待确认」，不占用档期</div></div></div>
+              <div class="tl-item tl-done"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line"></div></div>
+                <div class="tl-body"><div class="tl-title">港口方确认 · 档期锁定</div><div class="tl-time">—</div><div class="tl-note">确认时校验重叠预约数 &lt; 并发容量</div></div></div>
+              <div class="tl-item"><div class="tl-rail"><div class="tl-dot"></div></div>
+                <div class="tl-body"><div class="tl-title">靠泊完成 · 港口方核销</div><div class="tl-time">待发生</div><div class="tl-note">核销后档期占用释放</div></div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">申请档期窗口</span><span class="card-more">查看泊位档期 ›</span></div>
+            <div class="frow"><span class="flabel">计划靠泊</span><span class="fval">09-13 07:39</span></div>
+            <div class="frow"><span class="flabel">计划离泊</span><span class="fval">09-13 17:39</span></div>
+            <div class="frow"><span class="flabel">靠泊时长</span><span class="fval">10 小时</span></div>
+          </div>
+        </div>
+        <div class="p-bar">
+          <div class="b-note">该预约已锁定档期，船舶完成靠泊后可由港口方核销</div>
+          <div class="b-acts"><div class="btn btn-primary">核销完成</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="cap">已驳回 <span>· 只读留痕 + 原因回显</span></p>
+      <div class="phone">
+        <div class="p-nav">预约审核</div>
+        <div class="p-body">
+          <div class="hero">
+            <div class="hero-row"><span class="hero-name">泊位预约</span><span class="hero-chip">已驳回</span></div>
+            <div class="hero-title">船 #1 申请靠泊</div>
+            <div class="hero-desc">NNG · PT-01 泊位</div>
+            <div class="hero-meta"><span>预约 #9</span><span>·</span><span>提交 09-11 08:02</span></div>
+            <div class="hero-note">预约申请本身不锁定档期——只有港口方确认后，该时间窗才被计入占用。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">档期占用</span><span class="chip">未产生占用</span></div>
+            <div class="check-note">申请被驳回，从未写入档期。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">审核留痕</span><span class="chip chip-purple">确定性状态机</span></div>
+            <div class="tl">
+              <div class="tl-item tl-done"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line"></div></div>
+                <div class="tl-body"><div class="tl-title">船东提交预约申请</div><div class="tl-time">09-11 08:02</div><div class="tl-note">申请阶段为「待确认」，不占用档期</div></div></div>
+              <div class="tl-item tl-done"><div class="tl-rail"><div class="tl-dot"></div></div>
+                <div class="tl-body"><div class="tl-title">港口方驳回</div><div class="tl-time">—</div><div class="tl-note">泊位检修</div></div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><span class="card-title">申请档期窗口</span><span class="card-more">查看泊位档期 ›</span></div>
+            <div class="frow"><span class="flabel">计划靠泊</span><span class="fval">09-18 06:00</span></div>
+            <div class="frow"><span class="flabel">计划离泊</span><span class="fval">09-18 14:00</span></div>
+            <div class="frow"><span class="flabel">靠泊时长</span><span class="fval">8 小时</span></div>
+          </div>
+        </div>
+        <div class="p-bar">
+          <div class="b-note">驳回原因：泊位检修</div>
+          <div class="b-acts"><div class="btn btn-ghost disabled">船舶档案</div><div class="btn btn-primary disabled">下载预约单</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>03 · 本批次把「防超卖」讲清楚的三段论</h2>
+  <p class="sub">答辩口径：稀缺资源型实体的核心纪律——申请不占、确认才锁、超量即拒。</p>
+  <table>
+    <thead><tr><th style="width:130px">环节</th><th style="width:130px">动作</th><th>口径</th><th style="width:150px">页面呈现</th></tr></thead>
+    <tbody>
+      <tr><td>① 申请</td><td><code>POST /port/appts</code></td><td>四条硬约束（verified / 载重吨 / 吃水 / 船型）逐条比对，任一不满足立即 409</td><td>泊位页「预约前置校验链」卡</td></tr>
+      <tr><td>② 待确认</td><td>状态 <code>pending</code></td><td><b>不占档期</b>，防恶意占位；档期甘特只画 confirmed</td><td>泊位页头卡提示 + 空态文案</td></tr>
+      <tr><td>③ 确认</td><td><code>POST /port/appts/{id}/confirm</code></td><td>对泊位行加锁（<code>FOR UPDATE</code>）→ 统计窗口内重叠 confirmed → ≥ 并发容量即 409</td><td>预约页「确认前容量预检」算式 + 冲突预警</td></tr>
+      <tr><td>④ 撤销</td><td><code>POST /port/appts/{id}/cancel</code></td><td>pending / confirmed 均可撤，撤销即刻释放档期</td><td>预约页留痕「未产生占用」</td></tr>
+    </tbody>
+  </table>
+
+  <h2>04 · 交付与验证</h2>
+  <div class="grid2">
+    <div class="box">
+      <div class="card-title" style="margin-bottom:8px">接口与数据来源</div>
+      <ul>
+        <li><code>GET /port/berths/{id}/schedule</code> — 泊位参数 + 全部 confirmed</li>
+        <li><code>GET /port/appts-review?status=</code> — 详情页兜底取数（空串 = 全量）</li>
+        <li><code>POST /port/appts/{id}/confirm|reject|complete</code> — 审核动作</li>
+        <li>跳转缓存：Storage <code>port_appt_detail</code>（免单条查询端点）</li>
+      </ul>
+      <p style="font-size:12.5px;color:#6B7A8C;margin:10px 0 0">全部为既有端点，<b>后端 0 行改动</b>。</p>
+    </div>
+    <div class="box">
+      <div class="card-title" style="margin-bottom:8px">验证结论</div>
+      <table style="box-shadow:none;background:transparent">
+        <tbody>
+          <tr><td>静态校验</td><td class="ok">JSON 18 / 页面 14 / 路由 46 / 事件 164，全绿</td></tr>
+          <tr><td>纯逻辑断言</td><td class="ok">87 项通过（真实载荷驱动）</td></tr>
+          <tr><td>防超卖冒烟</td><td class="ok">第 3 条重叠申请确认 → 409 档期冲突</td></tr>
+          <tr><td>角色隔离</td><td class="ok">货主访问港域端点 → 403</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="sub" style="margin-top:22px">
+    说明：本页为效果预览（HTML 手绘还原），非小程序真机截图。密度、字号、间距以 <code>miniapp/pages/port/berth</code>
+    与 <code>miniapp/pages/port/appt</code> 的实际 wxss 为准。
+  </p>
+
+</div>
+</body>
+</html>

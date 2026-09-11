@@ -7,13 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.cargo import Cargo
+from app.modules.cargo.schemas import CargoCreate, CargoUpdate
 
 
 class CargoStateError(Exception):
     """状态机非法转移。"""
 
 
-def create_cargo(db: Session, shipper_id: int, data) -> Cargo:
+def create_cargo(db: Session, shipper_id: int, data: CargoCreate) -> Cargo:
     """创建发货单；publish_now=True 时直接进入 published。"""
     if data.expect_date < date.today():
         raise ValueError("期望装货日期不能早于今天")
@@ -36,7 +37,7 @@ def create_cargo(db: Session, shipper_id: int, data) -> Cargo:
     return cargo
 
 
-def update_cargo(db: Session, cargo: Cargo, data) -> Cargo:
+def update_cargo(db: Session, cargo: Cargo, data: CargoUpdate) -> Cargo:
     """编辑发货单（仅 draft 状态）。"""
     if cargo.status != "draft":
         raise CargoStateError("仅草稿状态的发货单可编辑")

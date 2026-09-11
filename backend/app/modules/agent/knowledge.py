@@ -93,9 +93,21 @@ KNOWLEDGE_BASE: list[KnowledgeDoc] = [
         id="flow-contract",
         topic="智能合同",
         text=(
-            "订单生成后，双方可在订单页点「生成合同」：系统基于订单数据自动生成运输合同草稿"
-            "并标注风险点（未支付/未锁价/日期临近/证书临期/液货等）；核心条款来自订单数据，"
-            "补充条款由 AI 起草，草稿不具法律效力，签署前请人工审核。"
+            "订单生成后，双方可在订单页点「查看合同」：系统基于订单数据自动生成运输合同草稿"
+            "并标注风险点；风险规则分两类——订单事实类（运费未支付、运费未锁定、装货日期"
+            "临近、船舶证书临期、液货危险品）与商务条款类（滞期费未约定、货物保险未约定、"
+            "违约金标准未量化、在途不可抗力）。核心条款来自订单数据，补充条款由 AI 起草，"
+            "草稿不具法律效力，签署前请人工审核。"
+        ),
+    ),
+    KnowledgeDoc(
+        id="flow-compliance",
+        topic="合规初筛",
+        text=(
+            "发布货源或船舶备案前，平台提供合规初筛：货源侧检查禁运/管制货品（阻断）、"
+            "危险货物申报与资质、集装箱航线适配、装货日期过近；船舶侧检查检验证书有效期、"
+            "主尺度比例、吃水与航道条件、船籍港。初筛只给结论与建议、不阻断提交，"
+            "最终合规结论以主管机关规定为准。"
         ),
     ),
     # ---- 船型与货类 ----
@@ -159,15 +171,15 @@ def _normalize(text: str) -> str:
     return _SPLIT_RE.sub("", text.lower())
 
 
-def _bigrams(text: str) -> Counter:
+def _bigrams(text: str) -> Counter[str]:
     """字符 bigram（单字文档退化为 unigram）。"""
     s = _normalize(text)
     if len(s) <= 1:
-        return Counter({s: 1}) if s else Counter()
+        return Counter({s: 1}) if s else Counter[str]()
     return Counter(s[i : i + 2] for i in range(len(s) - 1))
 
 
-def _cosine(a: Counter, b: Counter) -> float:
+def _cosine(a: Counter[str], b: Counter[str]) -> float:
     if not a or not b:
         return 0.0
     common = set(a) & set(b)
@@ -189,18 +201,26 @@ class KnowledgeIndex:
 
     def __init__(self, docs: list[KnowledgeDoc] | None = None) -> None:
         self._docs = list(docs or KNOWLEDGE_BASE)
-        self._doc_grams = [(d, _bigrams(f"{d.topic} {d.text}")) for d in self._docs]
+        self._doc_grams: list[tuple[KnowledgeDoc, Counter[str]]] = [
+            (d, _bigrams(f"{d.topic} {d.text}")) for d in self._docs
+        ]
         # 文档频率（含 bigram 出现的文档数）
-        df: Counter = Counter()
+        df: Counter[str] = Counter()
         for _, grams in self._doc_grams:
             df.update(grams.keys())
         n = max(len(self._doc_grams), 1)
         # idf 权重（平滑，避免除零）
-        self._idf = {t: math.log((n + 1) / (c + 1)) + 1.0 for t, c in df.items()}
+        self._idf: dict[str, float] = {
+            t: math.log((n + 1) / (c + 1)) + 1.0 for t, c in df.items()
+        }
 
-    def _score(self, query_grams: Counter, doc_grams: Counter) -> float:
-        qa = Counter({t: w * self._idf.get(t, 1.0) for t, w in query_grams.items()})
-        da = Counter({t: w * self._idf.get(t, 1.0) for t, w in doc_grams.items()})
+    def _score(self, query_grams: Counter[str], doc_grams: Counter[str]) -> float:
+        qa: Counter[str] = Counter(
+            {t: w * self._idf.get(t, 1.0) for t, w in query_grams.items()}
+        )
+        da: Counter[str] = Counter(
+            {t: w * self._idf.get(t, 1.0) for t, w in doc_grams.items()}
+        )
         return _cosine(qa, da)
 
     def search(

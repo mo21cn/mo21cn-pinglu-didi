@@ -1,0 +1,7 @@
+{
+  "app_env": "test",
+  "database_url": "sqlite://",
+  "wechat_mock": true,
+  "llm_mock": true,
+  "external_http_attempts": 0
+}

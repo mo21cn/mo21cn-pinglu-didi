@@ -1,77 +1,196 @@
-<!-- 撮合页：候选列表（确定性引擎评分排序） -->
-<view class="page">
-  <view class="head">
-    <text class="head-total">撮合候选 {{total}} 个</text>
-    <text wx:if="{{filterStats.length}}" class="head-stats">未入局：{{filterStats.join(' · ')}}</text>
-  </view>
+<!--
+  撮合结果（L3 三级页）· 撮合引擎（F5）
+  结构：引擎头卡（确定性内核 · 零 LLM）→ 未入局候选（硬约束拦截统计）
+        → 排序条 → 候选卡（四项评分拆解）→ 底部说明
+  mode=cargo：货主找船，可选船下单；mode=ship：船东找货，只读
+-->
+<view class="page-sub">
+  <view class="page-content">
+    <!-- ① 引擎头卡 -->
+    <view class="engine-card bg-brand-gradient">
+      <view class="engine-row">
+        <text class="engine-name">撮合引擎</text>
+        <text class="engine-chip">确定性内核 · 零 LLM</text>
+      </view>
+      <view class="engine-title">{{title}}</view>
+      <view class="engine-meta">
+        <text>候选 {{loading ? '—' : total}} 个</text>
+        <text class="engine-dot">·</text>
+        <text>硬约束过滤 + 四项加权评分</text>
+        <text class="engine-dot">·</text>
+        <text>P99 &lt; 200ms</text>
+      </view>
+      <view class="engine-desc">
+        硬约束（船舶过审 / 证书覆盖装货日 / 载重 ≥ 货量 / 船型货类兼容）先筛掉不合格候选，
+        再按载重利用率 40 + 船型适配 20 + 船籍港就近 20 + 证书余量 20 打分。纯函数内核，不经大模型，结果可复现。
+      </view>
+      <view class="engine-ref">{{mode === 'cargo' ? '货源' : '船舶'}} #{{refId}}</view>
+    </view>
 
-  <view wx:if="{{loading}}" class="empty">引擎计算中...</view>
-  <view wx:elif="{{items.length === 0}}" class="empty">暂无满足硬约束的候选</view>
+    <!-- 加载中 -->
+    <view wx:if="{{loading}}" class="empty">
+      <view class="empty-icon">⚙️</view>
+      <view>引擎计算中...</view>
+    </view>
 
-  <!-- 货主视角：候选船卡片，可下单 -->
-  <view wx:if="{{mode === 'cargo'}}" class="list">
-    <view wx:for="{{items}}" wx:key="ship_id" class="card" data-index="{{index}}" bindtap="onTapCandidate">
-      <view class="card-head">
-        <text class="card-title">{{item.ship_name}}</text>
-        <view class="score">
-          <text class="score-num">{{item.score_text}}</text>
-          <text class="score-label">分</text>
+    <!-- 兜底态 -->
+    <view wx:elif="{{error}}" class="err-card">
+      <view class="err-title">撮合计算失败</view>
+      <view class="err-detail">{{error}}</view>
+      <view class="err-btn" bindtap="onRetry">重新计算</view>
+    </view>
+
+    <block wx:else>
+      <!-- ② 未入局候选（硬约束拦截） -->
+      <view wx:if="{{filterStats.length}}" class="section-card">
+        <view class="section-head">
+          <text class="section-head-title">未入局候选</text>
+          <text class="chip chip-muted">硬约束拦截</text>
+        </view>
+        <view class="fs-list">
+          <view wx:for="{{filterStats}}" wx:key="key" class="fs-item">
+            <text class="fs-label">{{item.label}}</text>
+            <text class="fs-count">{{item.count}}</text>
+          </view>
+        </view>
+        <view class="fs-foot">
+          硬约束不达标直接不入局（软性差异才交给评分），因此这里的候选不会出现在下方排序中。
         </view>
       </view>
-      <view class="card-row">
-        <text>{{item.ship_type_label}} · 载重 {{item.deadweight_t}} 吨</text>
-        <text>船籍港 {{item.home_port}}</text>
-      </view>
-      <view class="card-breakdown">
-        <text>利用率 {{item.breakdown.load_utilization}}</text>
-        <text>船型 {{item.breakdown.type_fit}}</text>
-        <text>就近 {{item.breakdown.home_port}}</text>
-        <text>证书 {{item.breakdown.cert_margin}}</text>
-      </view>
-      <view class="card-actions">
-        <button class="btn-mini btn-primary" size="mini" catchtap="onTapCandidate" data-index="{{index}}">选船下单</button>
-      </view>
-    </view>
-  </view>
 
-  <!-- 船东视角：候选货源卡片（只读，下单由货主发起） -->
-  <view wx:if="{{mode === 'ship'}}" class="list">
-    <view wx:for="{{items}}" wx:key="cargo_id" class="card">
-      <view class="card-head">
-        <text class="card-title">{{item.cargo_name}}</text>
-        <view class="score">
-          <text class="score-num">{{item.score_text}}</text>
-          <text class="score-label">分</text>
+      <!-- ③ 排序条 -->
+      <view wx:if="{{items.length}}" class="sort-bar">
+        <view
+          wx:for="{{sorts}}"
+          wx:key="key"
+          class="sort-item {{sortKey === item.key ? 'sort-item-active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="switchSort"
+        >{{item.label}}</view>
+      </view>
+
+      <!-- 空态 -->
+      <view wx:if="{{items.length === 0}}" class="section-card">
+        <view class="empty">
+          <view class="empty-icon">🔍</view>
+          <view>暂无满足硬约束的候选</view>
         </view>
       </view>
-      <view class="card-row">
-        <text>{{item.weight_t}} 吨 · {{item.origin_label}} → {{item.dest_label}}</text>
-        <text>期望装货 {{item.expect_date}}</text>
+
+      <!-- ④ 候选列表 · 货主视角（可选船下单） -->
+      <view wx:if="{{mode === 'cargo' && items.length}}" class="cand-list">
+        <view wx:for="{{items}}" wx:key="ship_id" class="cand-card">
+          <view class="cand-head">
+            <view class="cand-title-wrap">
+              <text class="cand-title">{{item.ship_name}}</text>
+              <text class="chip chip-muted">{{item.ship_type_label}}</text>
+            </view>
+            <view class="cand-score">
+              <text class="cand-score-num">{{item.score_text}}</text>
+              <text class="cand-score-unit">分</text>
+            </view>
+          </view>
+
+          <view class="cand-facts">
+            <text>载重 {{item.deadweight_t}} 吨</text>
+            <text class="cand-sep">·</text>
+            <text>船籍港 {{item.home_port_label}}</text>
+          </view>
+
+          <view class="dim-list">
+            <view wx:for="{{item.dims}}" wx:for-item="dim" wx:key="key" class="dim">
+              <view class="dim-head">
+                <text class="dim-name">{{dim.name}}</text>
+                <text class="dim-val">{{dim.value}}<text class="dim-max">/{{dim.max}}</text></text>
+              </view>
+              <view class="dim-track">
+                <view class="dim-fill" style="width: {{dim.pct}}%"></view>
+              </view>
+            </view>
+          </view>
+
+          <view class="cand-actions">
+            <button
+              class="btn-primary btn-mini"
+              size="mini"
+              data-index="{{index}}"
+              catchtap="onTapCandidate"
+            >选船下单</button>
+          </view>
+        </view>
       </view>
-      <view class="card-breakdown">
-        <text>利用率 {{item.breakdown.load_utilization}}</text>
-        <text>船型 {{item.breakdown.type_fit}}</text>
-        <text>就近 {{item.breakdown.home_port}}</text>
-        <text>证书 {{item.breakdown.cert_margin}}</text>
+
+      <!-- ④' 候选列表 · 船东视角（只读，出单由货主发起） -->
+      <view wx:if="{{mode === 'ship' && items.length}}" class="cand-list">
+        <view wx:for="{{items}}" wx:key="cargo_id" class="cand-card">
+          <view class="cand-head">
+            <view class="cand-title-wrap">
+              <text class="cand-title">{{item.cargo_name}}</text>
+              <text class="chip chip-muted">{{item.cargo_type_label}}</text>
+            </view>
+            <view class="cand-score">
+              <text class="cand-score-num">{{item.score_text}}</text>
+              <text class="cand-score-unit">分</text>
+            </view>
+          </view>
+
+          <view class="cand-facts">
+            <text>{{item.origin_label}} → {{item.dest_label}}</text>
+            <text class="cand-sep">·</text>
+            <text>{{item.weight_t}} 吨</text>
+          </view>
+          <view class="cand-facts">
+            <text>期望装货 {{item.expect_date}}</text>
+          </view>
+
+          <view class="dim-list">
+            <view wx:for="{{item.dims}}" wx:for-item="dim" wx:key="key" class="dim">
+              <view class="dim-head">
+                <text class="dim-name">{{dim.name}}</text>
+                <text class="dim-val">{{dim.value}}<text class="dim-max">/{{dim.max}}</text></text>
+              </view>
+              <view class="dim-track">
+                <view class="dim-fill" style="width: {{dim.pct}}%"></view>
+              </view>
+            </view>
+          </view>
+
+          <view class="cand-note">撮合为只读推荐 —— 请联系货主确认运价，由货主发起订单</view>
+        </view>
       </view>
-      <view class="card-note">请联系货主确认运价并发起订单</view>
-    </view>
+
+      <!-- ⑤ 评分口径说明 -->
+      <view class="note-card">
+        <view class="note-title">评分口径</view>
+        <view class="note-line">载重利用率 <text class="note-w">40</text> —— 抑制大船小货，货量越贴合载重越优</view>
+        <view class="note-line">船型适配 <text class="note-w">20</text> —— 精确匹配取满分，兼容匹配按系数折算</view>
+        <view class="note-line">船籍港就近 <text class="note-w">20</text> —— Stage1 用船籍港与起运港二值近似</view>
+        <view class="note-line">证书余量 <text class="note-w">20</text> —— 覆盖装货日后剩余天数，90 天封顶</view>
+      </view>
+    </block>
   </view>
 
   <!-- 下单弹窗 -->
   <view wx:if="{{orderModal}}" class="mask" catchtap="closeModal">
     <view class="modal" catchtap="">
       <view class="modal-title">确认下单</view>
-      <view class="modal-row" wx:if="{{target}}">
-        <text>{{target.ship_name}} · 载重 {{target.deadweight_t}} 吨</text>
+      <view wx:if="{{target}}" class="modal-row">
+        <text>{{target.ship_name}} · 载重 {{target.deadweight_t}} 吨 · 综合 {{target.score_text}} 分</text>
       </view>
       <view class="field">
         <text class="label">成交运费（元）*</text>
-        <input class="input" type="digit" placeholder="如：25000" value="{{freightPrice}}" bindinput="onFreightInput" />
+        <input
+          class="input"
+          type="digit"
+          placeholder="如：25000"
+          value="{{freightPrice}}"
+          bindinput="onFreightInput"
+        />
       </view>
+      <view class="modal-note">出单将再次校验撮合硬约束，货源同一时间只允许一个进行中订单。</view>
       <view class="modal-actions">
-        <button class="btn-ghost" size="mini" bindtap="closeModal">取消</button>
-        <button class="btn-primary" size="mini" bindtap="confirmOrder">确认出单</button>
+        <view class="btn-ghost" bindtap="closeModal">取消</view>
+        <view class="btn-primary" bindtap="confirmOrder">确认出单</view>
       </view>
     </view>
   </view>
