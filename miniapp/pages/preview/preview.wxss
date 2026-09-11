@@ -1,0 +1,14 @@
+/* 通用「功能预览」占位页 */
+.preview-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 60rpx;
+}
+
+.preview-text {
+  font-size: 26rpx;
+  color: #98A6B8;
+  letter-spacing: 2rpx;
+}

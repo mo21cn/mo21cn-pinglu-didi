@@ -843,6 +843,118 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
     rec('⑭ 统计行位于导航之下（不再顶出页面框架）', below, geoNote)
   }
 
+  // ============ ⑮ 发货方式选择：自主发货 / 委托发货（纯前端） ============
+  // 需求：点 tabBar 中间「+发货」跳二级页（发布货物）后先弹选择弹窗；
+  //   自主发货 → 留在本页自行填写；委托发货 → 「功能预览，即将开放」占位页。
+  // 本功能不涉及后端（零接口调用），版本号停在 v0.5.0。
+  {
+    const stackOf = async () => {
+      try { return await mp.evaluate(() => getCurrentPages().map((p) => p.route).join(' > ')) } catch (e) { return 'stack 读取失败' }
+    }
+    const cp = await nav(mp, 'push', '/pages/publish/cargo/cargo', 'pages/publish/cargo/cargo')
+    const cd = await waitData(cp, (d) => d.showChannel === true, 30, 400)
+    await sleep(1000)
+    await shot(mp, '15-发货方式弹窗')
+    rec('⑮ 进入发布货物页即弹出发货方式选择', !!(cd && cd.showChannel === true), String(cd && cd.showChannel))
+
+    // 文案逐字对齐设计稿
+    const cardTexts = []
+    for (const el of await cp.$$('.ch-card-text')) cardTexts.push((await el.text()).trim())
+    rec('⑮ 两张卡片文案为「自主发货 / 委托发货」', cardTexts.join('|') === '自主发货|委托发货', cardTexts.join('|'))
+    const descs = []
+    for (const el of await cp.$$('.ch-desc')) descs.push((await el.text()).replace(/\s+/g, ''))
+    rec('⑮ 两段说明文案齐全（自行找船 / 平台承运）',
+      descs.length === 2 &&
+      /自行在船好多平台找寻认证船主接单并完成运输。$/.test(descs[0] || '') &&
+      /委托给船好多平台承运，由平台组织运力完成运输。$/.test(descs[1] || ''),
+      descs.join(' || '))
+    rec('⑮ 两枚单选圈 + 「默认」标记（设计稿元素齐全）',
+      (await cp.$$('.ch-ring')).length === 2 && (await cp.$$('.ch-radio-label')).length === 2)
+
+    // 几何：卡片宽高比 / 图标在卡内左侧 / 单选圈在卡外 / 文案在卡下
+    let geo = null
+    try {
+      geo = await mp.evaluate(() => {
+        const pages = getCurrentPages()
+        const cur = pages[pages.length - 1]
+        const q = wx.createSelectorQuery().in(cur)
+        q.select('.ch-panel').boundingClientRect()
+        q.select('.ch-card-self').boundingClientRect()
+        q.select('.ch-card-entrust').boundingClientRect()
+        q.select('.ch-icon').boundingClientRect()
+        q.select('.ch-ring').boundingClientRect()
+        q.select('.ch-desc').boundingClientRect()
+        const win = typeof wx.getWindowInfo === 'function' ? wx.getWindowInfo() : { windowHeight: 0 }
+        return new Promise((res) => q.exec((r) => res({
+          panel: r[0], self: r[1], entrust: r[2], icon: r[3], ring: r[4], desc: r[5], winH: win.windowHeight
+        })))
+      })
+    } catch (e) { geo = null }
+    const G = geo || {}
+    const hasGeo = !!(G.panel && G.self && G.entrust && G.icon && G.ring && G.desc)
+    rec('⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案）', hasGeo, hasGeo ? 'ok' : JSON.stringify(G).slice(0, 120))
+    if (hasGeo) {
+      rec('⑮ 卡片宽高比 ≈ 设计稿 3:1（非压扁/拉伸）',
+        G.self.width / G.self.height > 2.7 && G.self.width / G.self.height < 3.4,
+        `w/h=${(G.self.width / G.self.height).toFixed(2)} (${G.self.width}x${G.self.height})`)
+      rec('⑮ 两张卡片等高（同规格）', Math.abs(G.self.height - G.entrust.height) <= 1, `${G.self.height} vs ${G.entrust.height}`)
+      rec('⑮ 卡片顺序：自主发货在委托发货之上', G.self.top < G.entrust.top, `self=${G.self.top} entrust=${G.entrust.top}`)
+      rec('⑮ 图标为白圆且在卡片左内侧',
+        G.icon.left > G.self.left && G.icon.left - G.self.left < 20 && Math.abs(G.icon.width - G.icon.height) <= 1,
+        `Δleft=${(G.icon.left - G.self.left).toFixed(1)} ${G.icon.width}x${G.icon.height}`)
+      rec('⑮ 单选圈在卡片右侧之外（设计稿布局）', G.ring.left >= G.self.right, `ring.left=${G.ring.left} card.right=${G.self.right}`)
+      rec('⑮ 说明文案在卡片下方且不重叠', G.desc.top >= G.self.bottom - 1, `desc.top=${G.desc.top} card.bottom=${G.self.bottom}`)
+      rec('⑮ 弹窗完整落在视口内（不被裁切）',
+        G.panel.top >= 0 && G.panel.bottom <= G.winH, `panel=${Math.round(G.panel.top)}..${Math.round(G.panel.bottom)} winH=${G.winH}`)
+    }
+
+    // 行为 1：自主发货 → 只关弹窗、留在本页（真实用户路径）
+    await tapAt(cp, '.ch-card-self', 0)
+    await sleep(1100)
+    const d2 = await waitData(cp, (d) => d.showChannel === false, 20, 300)
+    await shot(mp, '15-自主发货-留在发布页')
+    rec('⑮ 自主发货只关弹窗、留在发布货物页', !!(d2 && d2.showChannel === false), String(d2 && d2.showChannel))
+    rec('⑮ 关弹窗后发布页表单可用（原有内容仍在）',
+      !!(d2 && d2.form && d2.form.expect_date), JSON.stringify(d2 && d2.form && d2.form.expect_date))
+
+    // 行为 2：点遮罩关闭（再次点 +发货 可重新唤起 —— 由 data 初值 + onLoad 复位保证）
+    await cp.setData({ showChannel: true })
+    await sleep(900)
+    await tapAt(cp, '.ch-mask-bg', 0)
+    await sleep(900)
+    rec('⑮ 点遮罩可关闭弹窗（不进占位页）',
+      (await cp.data()).showChannel === false && cp.path === 'pages/publish/cargo/cargo',
+      `showChannel=${(await cp.data()).showChannel}`)
+
+    // 行为 3：委托发货 → 「功能预览，即将开放」占位页
+    await cp.setData({ showChannel: true })
+    await sleep(900)
+    await tapAt(cp, '.ch-card-entrust', 0)
+    await sleep(1600)
+    const pv = await waitPath(mp, 'pages/preview/preview', 25)
+    // 页面已就位但渲染帧可能滞后（2026-09-11 踩到：截图存到的是发布页旧帧）→ 静置再截
+    await sleep(1200)
+    await shot(mp, '15-委托发货-功能预览')
+    rec('⑮ 委托发货跳「功能预览」占位页', !!pv, pv ? 'ok' : '未跳转')
+    if (pv) {
+      const pvd = await pv.data()
+      rec('⑮ 占位页文案为「功能预览，即将开放」', String(pvd.title || '') === '功能预览，即将开放', String(pvd.title))
+      rec('⑮ 占位页仅一行文案（空白页）', (await pv.$$('.preview-text')).length === 1, String((await pv.$$('.preview-text')).length))
+    }
+
+    // 返回：深栈下 navigateBack 偶发回执抖动 → 重试直到回到发布货物页
+    // （2026-09-11 实际踩到：单次 backSafe 后仍停在 preview，导致后续断言级联失败）
+    let back = null
+    for (let i = 0; i < 3 && !back; i++) {
+      await backSafe(mp)
+      back = await waitPath(mp, 'pages/publish/cargo/cargo', 15)
+    }
+    rec('⑮ 从占位页可返回发布货物页（二级页栈正常）', !!back, back ? 'ok' : await stackOf())
+
+    await backSafe(mp)
+    await sleep(1200)
+  }
+
   // ============================ 我的 ============================
   await nav(mp, 'tab', '/pages/mine/mine', 'pages/mine/mine')
   await sleep(1600)

@@ -1,0 +1,4 @@
+<!-- 通用「功能预览」占位页：整页留白 + 一行小灰字，无任何接口调用 -->
+<view class="preview-page">
+  <text class="preview-text">{{title}}</text>
+</view>

@@ -94,3 +94,181 @@ page { background: #F5F7FA; }
 .field-row-miss { background: #FFF6F7; }
 .field-row-miss .field-label { color: #C0455A; }
 .field-row-miss .field-value-placeholder { color: #D98A96; }
+
+/* ==========================================================================
+ * 发货方式选择弹窗（点击 tabBar 中间「+发货」进入本页即弹出）
+ * 设计稿取色（纯前端 · 不涉及后端）：
+ *   自主发货卡  linear-gradient(90deg, #E5A75A → #FECD91)
+ *   委托发货卡  linear-gradient(90deg, #3584FD → #4A81FF)
+ *   白圆内人形  头 #FECD91 / 肩 #E5A75A
+ *   白圆内手托盒 盒盖 #B2D0FE / 盒身 #5D9DFD / 手 #3585FD
+ *   单选圈 #C1C1C1 · 「默认」#3A3544 · 说明文案 #8090A3 · 平台名 #3B5BDB
+ * ========================================================================== */
+.ch-mask {
+  position: fixed;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ch-mask-bg {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  background: rgba(20, 35, 59, .45);
+  animation: ch-fade .18s ease-out;
+}
+
+@keyframes ch-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ch-panel {
+  position: relative;
+  width: 640rpx;
+  padding: 28rpx 0 40rpx;
+  background: #FFFFFF;
+  border-radius: 28rpx;
+  box-shadow: 0 16rpx 56rpx rgba(15, 37, 64, .18);
+  animation: ch-pop .22s ease-out;
+}
+
+@keyframes ch-pop {
+  from { transform: scale(.94); opacity: .4; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* ---- 选项行：卡片 + 单选圈 ---- */
+.ch-opt {
+  display: flex;
+  align-items: center;
+  padding: 0 63rpx 0 79rpx;
+}
+
+.ch-opt-gap { margin-top: 66rpx; }
+.ch-opt-hover .ch-card { opacity: .88; }
+
+.ch-card {
+  flex: 1;
+  height: 146rpx;
+  display: flex;
+  align-items: center;
+  padding-left: 20rpx;
+  border-radius: 16rpx;
+  box-shadow: 0 8rpx 22rpx rgba(61, 90, 219, .16);
+}
+
+.ch-card-self { background: linear-gradient(90deg, #E5A75A 0%, #FECD91 100%); }
+.ch-card-entrust { background: linear-gradient(90deg, #3584FD 0%, #4A81FF 100%); }
+
+.ch-card-text {
+  flex: 1;
+  text-align: center;
+  font-size: 46rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+  letter-spacing: 2rpx;
+}
+
+/* ---- 白圆图标（纯 CSS，无图片资源） ---- */
+.ch-icon {
+  position: relative;
+  width: 94rpx;
+  height: 94rpx;
+  flex: none;
+  border-radius: 50%;
+  background: #FFFFFF;
+  overflow: hidden;
+}
+
+/* 自主发货：人物（头 + 圆肩） */
+.ch-head {
+  position: absolute;
+  left: 30rpx; top: 14rpx;
+  width: 34rpx; height: 34rpx;
+  border-radius: 50%;
+  background: #FECD91;
+}
+
+.ch-shoulder {
+  position: absolute;
+  left: 19rpx; top: 53rpx;
+  width: 60rpx; height: 30rpx;
+  border-radius: 30rpx 30rpx 0 0;
+  background: #E5A75A;
+}
+
+/* 委托发货：手托运单盒 */
+.ch-box-front {
+  position: absolute;
+  left: 35rpx; top: 30rpx;
+  width: 34rpx; height: 21rpx;
+  border-radius: 5rpx;
+  background: #5D9DFD;
+}
+
+.ch-box-lid {
+  position: absolute;
+  left: 36rpx; top: 21rpx;
+  width: 29rpx; height: 10rpx;
+  border-radius: 5rpx 5rpx 2rpx 2rpx;
+  background: #B2D0FE;
+}
+
+.ch-palm {
+  position: absolute;
+  left: 5rpx; top: 52rpx;
+  width: 56rpx; height: 26rpx;
+  border-radius: 26rpx 26rpx 13rpx 13rpx;
+  background: #3585FD;
+  transform: rotate(-14deg);
+}
+
+.ch-thumb {
+  position: absolute;
+  left: 54rpx; top: 54rpx;
+  width: 18rpx; height: 18rpx;
+  border-radius: 9rpx;
+  background: #3585FD;
+}
+
+/* ---- 单选圈 + 「默认」（设计稿标记，非可交互控件） ---- */
+.ch-radio {
+  width: 40rpx;
+  margin-left: 24rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ch-ring {
+  width: 38rpx;
+  height: 38rpx;
+  box-sizing: border-box;
+  border: 3rpx solid #C1C1C1;
+  border-radius: 50%;
+}
+
+.ch-radio-label {
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  line-height: 1.2;
+  color: #3A3544;
+  white-space: nowrap;
+}
+
+/* ---- 说明文案 ---- */
+.ch-desc {
+  padding: 0 26rpx;
+  margin-top: 34rpx;
+  font-size: 24rpx;
+  line-height: 34rpx;
+  color: #8090A3;
+}
+
+.ch-brand {
+  color: #3B5BDB;
+  font-weight: 600;
+}
