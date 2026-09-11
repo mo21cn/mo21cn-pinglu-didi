@@ -1,7 +1,8 @@
 """演示种子数据（可重复执行 · 幂等）—— 第一次汇报演示用。
 
 用法（backend 目录下，需先启动后端 uvicorn）：
-    C:/Users/Administrator/.venvs/pinglu-didi/Scripts/python.exe scripts/seed_demo.py
+    python scripts/seed_demo.py
+    （未激活虚拟环境时用 .venv 内的解释器显式执行）
 
 幂等设计
 --------

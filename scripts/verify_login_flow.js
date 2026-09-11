@@ -164,8 +164,11 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
     check('链路顺序 login → bind-role → switch-role 全部命中',
       ['/auth/login', '/auth/bind-role', '/auth/switch-role'].every((u) => h.log.some((l) => l.indexOf(u) !== -1)))
     const od = await apiGet('/api/v1/order/orders?size=100', h.token())
+    // 阈值恒为「非空」：本断言要证明的是「订单页不是永久空态」，与库内历史数据量无关。
+    // 曾写 >= 10 —— 那是照本机累积数据（12 单）拍的数字，在「空库 + seed」的干净环境
+    // （CI 首跑 / 甲方 clone）必然误报，且断言名本来就写着「非空」。
     check('★ 船东视角订单非空（订单页不再是「暂无订单」空态）',
-      (od.items || []).length >= 10, 'items=' + (od.items || []).length + ' status=' + od.__status)
+      (od.items || []).length >= 1, 'items=' + (od.items || []).length + ' status=' + od.__status)
     const sr = await apiGet('/api/v1/ship/registry?size=100', h.token())
     check('★ 船东「我的船队」非空', (sr.items || []).length >= 3, 'items=' + (sr.items || []).length)
   }
@@ -186,9 +189,11 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
     check('身份已换到货主演示账号（seed-shipper）',
       h.storage.dev_device_code === 'seed-shipper', JSON.stringify(h.storage.dev_device_code))
     const od = await apiGet('/api/v1/order/orders?size=100', h.token())
-    check('★ 货主视角订单非空', (od.items || []).length >= 10, 'items=' + (od.items || []).length)
+    check('★ 货主视角订单非空', (od.items || []).length >= 1, 'items=' + (od.items || []).length)
     const cg = await apiGet('/api/v1/cargo/shipments?size=100', h.token())
-    check('★ 货主「我的货源」非空', (cg.items || []).length >= 5, 'items=' + (cg.items || []).length)
+    // 「我的货源」非空才是身份稳定的证据（见脚本头部 ③：重复登录不得每次新建账号）。
+    // 阈值不设高，避免与库内历史数据量耦合。
+    check('★ 货主「我的货源」非空', (cg.items || []).length >= 1, 'items=' + (cg.items || []).length)
     uid = (h.user() || {}).user_id
   }
 

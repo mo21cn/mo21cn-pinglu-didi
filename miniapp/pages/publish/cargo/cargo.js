@@ -61,14 +61,38 @@ Page({
     ppTip: '',
     ppCurrent: '',
     ppPorts: PORTS,
-    ppAction: ''
+    ppAction: '',
+
+    // 发货方式选择弹窗（纯前端，不涉及后端；进入本页即弹出）
+    showChannel: true
   },
 
   onLoad() {
     const d = new Date(Date.now() + 24 * 3600 * 1000)
-    this.setData({ 'form.expect_date': fmtDate(d) })
+    // 点击 tabBar 中间「+发货」进入本页 → 先弹「自主发货 / 委托发货」选择
+    this.setData({ 'form.expect_date': fmtDate(d), showChannel: true })
     // 来自「✨Ai 解析页」或「统一入口」的草稿 → 回填表单
     this.applySmartDraft()
+  },
+
+  // ---- 发货方式选择（纯前端：自主发货=本页续填；委托发货=占位预览页） ----
+  /** 自主发货：关闭弹窗，留在本页自行填写发布 */
+  pickSelfDelivery() {
+    this.setData({ showChannel: false })
+  },
+
+  /** 委托发货：平台承运模式尚未开放 → 通用「功能预览，即将开放」占位页（无接口调用） */
+  pickEntrustDelivery() {
+    this.setData({ showChannel: false })
+    wx.navigateTo({
+      url: '/pages/preview/preview',
+      fail: (e) => console.warn('[channel] 打开功能预览页失败', (e && e.errMsg) || e)
+    })
+  },
+
+  /** 点击遮罩关闭：等同「自主发货」，留在本页（再次点 +发货 可重新唤起） */
+  closeChannelModal() {
+    this.setData({ showChannel: false })
   },
 
   // ---- 智能填写：一句话 → 货源解析 Agent → 回填表单（Agent 无直写，仍需人工确认后发布） ----

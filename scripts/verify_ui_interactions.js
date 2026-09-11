@@ -1104,6 +1104,62 @@ section('⑤ 静态防线')
       /\.nav-preview\s*\{[^}]*right:\s*200rpx/.test(read('pages/mine/mine.wxss')))
   }
 
+  // ------------------------------------------- ⑨ 发货方式选择（自主发货 / 委托发货）
+  section('⑨ 发货方式选择弹窗')
+  {
+    const cargoWxml = read('pages/publish/cargo/cargo.wxml')
+    const cargoJs = read('pages/publish/cargo/cargo.js')
+    const cargoWxss = read('pages/publish/cargo/cargo.wxss')
+
+    // —— 结构：弹窗 + 两张卡片 + 两枚单选 + 两段说明（对齐设计稿）——
+    check('发布货物页有发货方式弹窗（进入本页即弹出）',
+      /wx:if="\{\{showChannel\}\}"/.test(cargoWxml) && /class="ch-panel"/.test(cargoWxml))
+    check('两张卡片文案为「自主发货 / 委托发货」，且自主在前',
+      /自主发货/.test(cargoWxml) && /委托发货/.test(cargoWxml) &&
+      cargoWxml.indexOf('自主发货') < cargoWxml.indexOf('委托发货'))
+    check('两张卡片各带一枚单选圈 + 「默认」标记（设计稿 1:1）',
+      (cargoWxml.match(/class="ch-ring"/g) || []).length === 2 &&
+      (cargoWxml.match(/class="ch-radio-label">默认</g) || []).length === 2)
+    check('两段说明文案齐全（平台名用品牌色强调）',
+      (cargoWxml.match(/class="ch-brand"/g) || []).length === 2 &&
+      /自行在/.test(cargoWxml) && /委托给/.test(cargoWxml) &&
+      /找寻认证船主接单并完成运输/.test(cargoWxml) && /由平台组织运力完成运输/.test(cargoWxml))
+    check('图标为纯 CSS 矢量（白圆 + 人形 / 手托盒），不新增图片资源',
+      /\.ch-head\s*\{/.test(cargoWxss) && /\.ch-shoulder\s*\{/.test(cargoWxss) &&
+      /\.ch-box-front\s*\{/.test(cargoWxss) && /\.ch-box-lid\s*\{/.test(cargoWxss) &&
+      /\.ch-palm\s*\{/.test(cargoWxss) && !/\.ch-icon[^}]*url\(/.test(cargoWxss))
+    check('卡片配色取自设计稿（橙 #E5A75A→#FECD91 / 蓝 #3584FD→#4A81FF）',
+      /\.ch-card-self\s*\{[^}]*#E5A75A[^}]*#FECD91/.test(cargoWxss) &&
+      /\.ch-card-entrust\s*\{[^}]*#3584FD[^}]*#4A81FF/.test(cargoWxss))
+
+    // —— 行为 ——
+    check('进入本页默认弹出（data 初值 true 且在 onLoad 复位）',
+      /showChannel:\s*true/.test(cargoJs) &&
+      /onLoad\(\)[\s\S]{0,300}showChannel:\s*true/.test(cargoJs))
+    const selfBody = cargoJs.slice(cargoJs.indexOf('pickSelfDelivery'), cargoJs.indexOf('pickEntrustDelivery'))
+    check('自主发货只关弹窗、留在本页（不跳转）',
+      /showChannel:\s*false/.test(selfBody) && !/navigateTo/.test(selfBody) && !/redirectTo/.test(selfBody))
+    const entBody = cargoJs.slice(cargoJs.indexOf('pickEntrustDelivery'), cargoJs.indexOf('closeChannelModal'))
+    check('委托发货跳「功能预览」占位页', /navigateTo/.test(entBody) && /\/pages\/preview\/preview/.test(entBody))
+    check('本功能纯前端：发货方式相关代码零接口调用',
+      !/request\(/.test(selfBody) && !/request\(/.test(entBody))
+    check('遮罩可关闭（再次点 tabBar 中间「+发货」可重新唤起）',
+      /bindtap="closeChannelModal"/.test(cargoWxml) && /closeChannelModal\(\)/.test(cargoJs))
+
+    // —— 占位页 ——
+    const previewJs = read('pages/preview/preview.js')
+    const previewWxml = read('pages/preview/preview.wxml')
+    check('占位页文案为「功能预览，即将开放」',
+      /功能预览，即将开放/.test(previewJs) && /\{\{title\}\}/.test(previewWxml))
+    check('app.json 已注册占位页路由',
+      JSON.parse(read('app.json')).pages.indexOf('pages/preview/preview') >= 0)
+    check('占位页纯静态（无任何接口调用）',
+      !/request\(/.test(previewJs) && !/wx\.request/.test(previewJs))
+
+    // —— 版本号（当前发布版 v0.5.1；升版时同步此处与 pages/mine/mine.wxml）——
+    check('版本号已升到 v0.5.1', /v0\.5\.1/.test(read('pages/mine/mine.wxml')))
+  }
+
   // ---------------------------------------------------------------- 汇总
   console.log('\n' + '='.repeat(72))
   console.log(`UI 交互契约校验：OK ${N_OK} · FAIL ${FAILS.length}`)

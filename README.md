@@ -35,8 +35,8 @@ pinglu-didi/
 ## 快速开始
 
 ```bash
-# 1. 克隆
-git clone git@github.com:mo21cn/mo21cn-pinglu-didi.git
+# 1. 克隆（仓库为 public，HTTPS 即可，无需配 SSH Key）
+git clone https://github.com/mo21cn/mo21cn-pinglu-didi.git
 cd mo21cn-pinglu-didi
 
 # 2. 后端依赖
@@ -45,14 +45,25 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. 环境配置（复制模板并按需修改）
-cp .env.example .env
-
-# 4. 启动
+# 3. 启动（默认 APP_ENV=development，自动加载 backend/.env.development）
 uvicorn app.main:app --reload
+
+# 4. 铺演示数据（幂等，可重复执行；不跑则各列表为空、演示看不到内容）
+python scripts/seed_demo.py
 ```
 
+**环境变量加载规则**（无需手工创建 `.env`）：读取顺序为 `backend/.env.{APP_ENV}` → `backend/.env.local`（后者覆盖前者，且**不入库**）。
+入库的 `.env.development` 已内置 `WECHAT_MOCK=true`（无 appid 也能登录）与 `LLM_MOCK=true`（智能体走内置规则模板，**无需任何 Key**），
+因此 **clone 后直接启动即得完整演示态**——五个业务域 + 四个智能入口全部可用且输出可复现。
+需要接真实大模型时，另建 `backend/.env.local` 写 `LLM_MOCK=false` + `LLM_API_KEY=sk-xxx` 即可覆盖。
+
+**演示身份**（登录页点身份卡即用，数据全挂在这两个账号下）：货主 `seed-shipper` / 船东 `seed-owner` / 港口 `seed-port`。
+用其他身份登录会当场注册出**空账号**，各列表为空——这是预期行为，不是故障。
+
 ### 验证脚本
+
+> 前四条**已纳入 CI**（`.github/workflows/ci.yml` 的 `frontend-static` + `frontend-e2e` 两个 job），
+> push / 开 PR 即自动执行；真机走查依赖微信开发者工具，无法在 CI 运行，仍由本机执行。
 
 ```bash
 # 小程序静态校验（JSON 语法 / 页面四件套 / tabBar / 路由可达 / 事件处理函数存在性）
@@ -136,11 +147,8 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 | 走查 | PR #26 `2bac9b1` | `scripts/verify_frontend_e2e.js` | **169 项断言全绿**：在真实后端拉真载荷驱动 13 个页面的取数/装饰逻辑（不抛异常、不卡 loading、不误报错误、关键列表有数据），并核对「模板读的字段 vs 产出字段」——全站无渲染空白；顺带复现甘特几何边界、支付金额取锁定值、预约容量预检与服务端同口径 |
 | 真机走查 | PR #27 `8be74c2` | `scripts/verify_miniapp_device.js` | **70 项断言全绿、运行期零 console 报错**：驱动真实模拟器逐屏真实点击并截图，覆盖三角色工作台、支付三级页、合同三级页与弹层、撮合双向下单确认、港口运营台（预约 409 拦截、档期甘特峰值 2/2） |
 | 合同降级 | PR #35 | 18 JSON / 14 页面 / 46 路由 / 170 事件 | TODO-10 闭环：LLM 故障时降级（注入 `LLMError`）→ **200 + `degraded=true/network`**，正文保留核心金额与内置标准四条、风险点照常；审计单行 `success=False`。正常路径与 `LLM_MOCK` 结果不变 |
-| **智能入口** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 189 事件 | **Agent 五领域补齐 5/5**。F14 前端入口接线（`assistant` 双模式 + 发布页「智能填写」草稿回填）、F17 合规初筛即时预检（2 端点 / 9 条确定性规则）、F18 商务条款类风险 R6–R9（滞期费/保险/违约金/在途不可抗力）、F20 统一意图路由 `/agent/route`（四意图 + 派发失败不 500）。`pytest` **142 passed**；`verify_ui_interactions` **173 项全绿**；`verify_frontend_e2e` **176/0**；`verify_login_flow` 22/0；真机走查 **125/125 全绿 · 0 运行期 `console.error`** |
-
-| **UI 打磨** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 185 事件 | **①「智能搜索」页面化**：弃用 `wx.showModal({editable})`（长占位文案挤成两行被截断），改为「智能客服」同款页面外壳 + 第三模式 `mode=search`（结果按意图渲染解析卡/合规卡/回答气泡）；**②顶栏身份**：货主/船东顶栏换成纯 CSS 矢量人物头像 + 用户 ID + 常用港（原 emoji 快捷入口功能未丢，页内另有入口）；**③订单页自绘导航**：补上 `navigationStyle:custom` 缺失的导航栏，修「统计行顶到状态栏、被胶囊压住」；顺带发现并修「我的」页「功能预览」被胶囊整块遮住（看不见的假入口）。`verify_ui_interactions` **197/0**；`verify_frontend_e2e` 176/0；`verify_login_flow` 22/0；真机走查 **140/140 · 0 运行期 `console.error`** |
-
-| **第三方审计修正** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 185 事件 | 外部静态审计（B+，P0=0/P1=2/P2=9/P3=13）逐项核实修正 **22 项**（P2-8 已被 #39 顺带修复、P1-2 上线前占位按计划不修）：**P1-1** 客服多轮 `slice(-10)` 对齐后端 `max_length=10`（原第 6 轮起 422）；**P2-1** 选船改 port-picker 弹层（原 >6 艘静默失败）；**P2-2** 5 页补 `enablePullDownRefresh`；**P2-3** 新增 `utils/dates.js` 本地日期（7 处 UTC 偏移）；**P2-4** 发布防重窗口；**P2-5/9** 港口数据源/标签统一 13 港全量口径；**P2-6** 泊位创建守卫；**P3 全清理**（常量收敛 `utils/constants.js` 8 文件、死代码、`wx:key` 自增 id、null 兜底、吞错加日志、驳回原因统一等）；静态防线补 3 条（showActionSheet 动态表达式白名单拦截 / 下拉刷新一致性 / toISOString 日期禁令）。`lazyCodeLoading` 试开因 automator 兼容性回滚（见 PR 已知边界）。`verify_ui_interactions` **199/0**；真机走查 **140/140** |
+| **智能入口** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 189 事件 | **Agent 五领域补齐 5/5**。F14 前端入口接线（`assistant` 双模式 + 发布页「智能填写」草稿回填）、F17 合规初筛即时预检（2 端点 / 9 条确定性规则）、F18 商务条款类风险 R6–R9（滞期费/保险/违约金/在途不可抗力）、F20 统一意图路由 `/agent/route`（四意图 + 派发失败不 500）。`pytest` **142 passed**；`verify_ui_interactions` **173 项全绿**；`verify_frontend_e2e` **176/0**；`verify_login_flow` 22/0；真机走查 **125/125 全绿 · 0 运行期 `console.error`** || **UI 打磨** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 185 事件 | **①「智能搜索」页面化**：弃用 `wx.showModal({editable})`（长占位文案挤成两行被截断），改为「智能客服」同款页面外壳 + 第三模式 `mode=search`（结果按意图渲染解析卡/合规卡/回答气泡）；**②顶栏身份**：货主/船东顶栏换成纯 CSS 矢量人物头像 + 用户 ID + 常用港（原 emoji 快捷入口功能未丢，页内另有入口）；**③订单页自绘导航**：补上 `navigationStyle:custom` 缺失的导航栏，修「统计行顶到状态栏、被胶囊压住」；顺带发现并修「我的」页「功能预览」被胶囊整块遮住（看不见的假入口）。`verify_ui_interactions` **197/0**；`verify_frontend_e2e` 176/0；`verify_login_flow` 22/0；真机走查 **140/140 · 0 运行期 `console.error`** || **第三方审计修正** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 185 事件 | 外部静态审计（B+，P0=0/P1=2/P2=9/P3=13）逐项核实修正 **22 项**（P2-8 已被 #39 顺带修复、P1-2 上线前占位按计划不修）：**P1-1** 客服多轮 `slice(-10)` 对齐后端 `max_length=10`（原第 6 轮起 422）；**P2-1** 选船改 port-picker 弹层（原 >6 艘静默失败）；**P2-2** 5 页补 `enablePullDownRefresh`；**P2-3** 新增 `utils/dates.js` 本地日期（7 处 UTC 偏移）；**P2-4** 发布防重窗口；**P2-5/9** 港口数据源/标签统一 13 港全量口径；**P2-6** 泊位创建守卫；**P3 全清理**（常量收敛 `utils/constants.js` 8 文件、死代码、`wx:key` 自增 id、null 兜底、吞错加日志、驳回原因统一等）；静态防线补 3 条（showActionSheet 动态表达式白名单拦截 / 下拉刷新一致性 / toISOString 日期禁令）。`lazyCodeLoading` 试开因 automator 兼容性回滚（见 PR 已知边界）。`verify_ui_interactions` **199/0**；真机走查 **140/140** |
+| **发货方式选择** | 本次 PR | 20 JSON / 15 页面 / 38 路由 / 188 事件 | **点 tabBar 中间「+发货」进入发布货物页（二级页）后先弹出发货方式选择弹窗**，1:1 复刻设计稿（橙/蓝横向渐变卡 + 白圆纯 CSS 矢量图标 + 单选圈「默认」+ 平台名品牌色强调的说明文案，配色逐点取自设计稿：`#E5A75A→#FECD91` / `#3584FD→#4A81FF`，卡片宽高比 ≈ 3:1）：**①自主发货** → 关弹窗留在本页自行填写；**②委托发货** → 通用占位页 `pages/preview/preview`（一行小灰字「功能预览，即将开放」，可复用于其它未开放功能）；点遮罩可关闭、再次点「+发货」重新唤起。**纯前端零接口调用、零后端改动，该批次未单独升版（随 v0.5.1 发布）**。`verify_ui_interactions` **214/0**；`verify_frontend_e2e` 176/0；真机走查 **162/162 · 0 运行期 `console.error`**（新增 ⑮ 段 22 项） |
 
 **三者状态机口径（可直接用于汇报答辩）**
 

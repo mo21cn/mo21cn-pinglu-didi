@@ -1,7 +1,8 @@
 """端到端交易流冒烟（E2E）—— 联调用可重复执行。
 
 用法（backend 目录下，需先跑 seed_demo.py）：
-    C:/Users/Administrator/.venvs/pinglu-didi/Scripts/python.exe scripts/e2e_smoke.py
+    python scripts/e2e_smoke.py
+    （未激活虚拟环境时用 .venv 内的解释器显式执行）
 
 场景 A（完整履约）：货主发布货源 → 撮合选船 → 下单 → 支付 → 船东启运 → 货主签收
 场景 B（撤单退款）：另发一单 → 支付 → 撤单 → 验证支付单 refunded + 货源回到撮合池

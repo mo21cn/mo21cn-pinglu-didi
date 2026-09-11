@@ -7,6 +7,9 @@ on:
     branches: [develop, main]
 
 jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 后端：lint + 类型检查 + 单测
+  # ─────────────────────────────────────────────────────────────
   backend:
     name: 后端 lint + test
     runs-on: ubuntu-latest
@@ -38,3 +41,84 @@ jobs:
         env:
           APP_ENV: test
         run: pytest --tb=short --cov=app --cov-report=term-missing
+
+  # ─────────────────────────────────────────────────────────────
+  # 前端静态契约：不依赖后端，秒级完成
+  #   verify_miniapp       JSON 语法 / 页面四件套 / tabBar / 路由可达 / 事件函数存在性
+  #   verify_ui_interactions 组件 props 与事件 / 弹层闭环 / 长列表与日期等静态防线
+  # 真机走查（verify_miniapp_device）依赖微信开发者工具，无法在 CI 运行，仍由本机执行。
+  # ─────────────────────────────────────────────────────────────
+  frontend-static:
+    name: 前端静态契约（结构 / 路由 / UI 交互）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 小程序结构 / 路由 / 事件校验
+        run: node scripts/verify_miniapp.js
+
+      - name: UI 交互契约校验
+        run: node scripts/verify_ui_interactions.js
+
+  # ─────────────────────────────────────────────────────────────
+  # 前端端到端：真起后端 → 铺演示数据 → 真载荷驱动页面逻辑
+  #   verify_login_flow     登录链路顺序 / 鉴权头 / token 角色
+  #   verify_frontend_e2e   13 个页面的取数与装饰逻辑（含模板字段产出、派生数值边界）
+  # 说明：后端与校验放在同一个 shell —— 跨 step 的后台进程会被 runner 回收。
+  # ─────────────────────────────────────────────────────────────
+  frontend-e2e:
+    name: 前端端到端（真后端载荷驱动）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 设置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装后端依赖
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 起后端 → 铺演示数据 → 跑端到端校验
+        env:
+          APP_ENV: development
+        run: |
+          set -e
+          cd backend
+          # .env.development 已入库（WECHAT_MOCK=true + LLM_MOCK=true），无需任何 Key 或外部服务
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/uvicorn.log 2>&1 &
+          UVPID=$!
+          trap 'kill $UVPID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 http://127.0.0.1:8000/healthz || true)
+            if [ "$code" = "200" ]; then echo "✓ 后端就绪（第 ${i} 次探活）"; break; fi
+            if [ "$i" = "30" ]; then
+              echo "✗ 后端 30s 内未就绪，日志尾部："
+              tail -40 /tmp/uvicorn.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          python scripts/seed_demo.py
+          cd ..
+          node scripts/verify_login_flow.js
+          node scripts/verify_frontend_e2e.js
