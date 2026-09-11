@@ -61,6 +61,7 @@ uvicorn app.main:app --reload
 | 提交规范（Conventional Commits） | [docs/03-commit-convention.md](docs/03-commit-convention.md) |
 | 代码审查 | [docs/04-code-review.md](docs/04-code-review.md) |
 | 环境隔离 | [docs/05-environment-isolation.md](docs/05-environment-isolation.md) |
+| 汇报演示脚本 | [docs/汇报演示脚本.md](docs/汇报演示脚本.md) |
 | 汇报演示脚本（操作手册 + 答辩口径） | [docs/汇报演示脚本.md](docs/汇报演示脚本.md) |
 | 三级页效果预览（HTML） | [合同页](docs/三级页-合同页-效果预览.html) · [S2 支付与撮合](docs/三级页-S2-支付与撮合-效果预览.html) · [S3 港口域](docs/三级页-S3-港口域-效果预览.html) |
 
@@ -97,6 +98,7 @@ uvicorn app.main:app --reload
 | S2 | 本次 PR | 16 JSON / **12 页面** / **43 路由** / **152 事件** | 支付全链：无单 404 → 发起 201 → 重复发起 409 → 模拟支付 200 → 幂等 paid_at 不变 → 撤单退款 refunded；面议拒发起 400；非参与方 404 |
 | S3 | 本次 PR | 18 JSON / **14 页面** / **46 路由** / **164 事件** | 港域档期：3 条重叠预约确认前两条成功、**第三条 409 档期冲突**；档期接口返回 3 条 confirmed（峰值 2/2 容量）；货主访问 `/port/appts` → 403。纯逻辑断言 **87 项通过**（真实载荷驱动） |
 | S4 | 本次 PR | 18 JSON / 14 页面 / 46 路由 / **170 事件** | 三态兜底补齐 4 页；样式去重净减 242 行；`seed_demo.py` 改造为幂等（连跑两次全"复用"、零重复数据），播下 4 态订单 + 4 条预约并复现 409 |
+| 走查 | 本次 PR | `scripts/verify_frontend_e2e.js` | **169 项断言全绿**：在真实后端拉真载荷驱动 13 个页面的取数/装饰逻辑（不抛异常、不卡 loading、不误报错误、关键列表有数据），并核对「模板读的字段 vs 产出字段」——全站无渲染空白；顺带复现甘特几何边界、支付金额取锁定值、预约容量预检与服务端同口径 |
 
 **三者状态机口径（可直接用于汇报答辩）**
 
@@ -152,3 +154,5 @@ uvicorn app.main:app --reload
 - **演示脚本**：完整操作顺序与答辩口径见 [docs/汇报演示脚本.md](docs/汇报演示脚本.md)（含前置、12 步演示路径、预期提问口径、故障兜底）。
 - **演示数据一键就绪**：`python scripts/seed_demo.py`（幂等，可反复执行）。铺出四态订单（已完成 / 待支付 / 已退款 / 面议）+ 演示独占泊位 `NNG-DEMO-01`（满档，容量 2）/ `GGU-DEMO-02`（空档）+ 4 条预约，并对第三条复现 **409 档期冲突**。登录身份 `seed-shipper` / `seed-owner` / `seed-port`。
 - **汇报前提醒**：后端以 `LLM_MOCK=true` 起，避免合同页依赖外网（见 TODO-10：合同 Agent 在 LLM 故障时返回 503，注释所述「降级返回」与代码不符）。
+- **小程序侧必须关域名校验**：`project.config.json` 里是 `urlCheck: true`（= 开启安全域名与 TLS 校验），请求 `http://127.0.0.1:8000` 会被拦掉、且失败被页面吞成空列表——**这是此前"前端走查不通过"的根因**。仓库已备 `miniapp/project.private.config.json`（`urlCheck: false`，官方推荐的私有配置层，已被 `.gitignore` 忽略，换机器需自带）；也可在工具「详情 → 本地设置」勾选「不校验合法域名」。
+- **船东端演示入口**：`我的船队 → 桂平航 6688（散货 · 1500 载重吨）→ 智能找货`，得 3 条候选可按评分看排序；同队 `横州集运 101`（900 载重吨集装箱船）0 候选是硬约束的正确结果，非缺陷。
