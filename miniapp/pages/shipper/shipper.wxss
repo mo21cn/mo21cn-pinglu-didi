@@ -206,3 +206,10 @@ page { background: #F5F7FA; }
 .my-entry-body { flex: 1; }
 .my-entry-title { font-size: 29rpx; font-weight: 600; color: #14233B; }
 .my-entry-sub { margin-top: 4rpx; font-size: 23rpx; color: #8A99AC; }
+
+/* ---- 校验失败字段高亮：把「缺什么」直接指到字段上（配合 onFindShips 的自动展开） ---- */
+.field-row-miss { background: #FFF6F7; }
+.field-row-miss .field-label { color: #C0455A; }
+.field-row-miss .field-value-placeholder { color: #D98A96; }
+/* 放在 .dual-item-active 之后：同时命中时以「缺失」配色优先 */
+.dual-item-miss { background: #FFF6F7; border-color: #F3C6CD; }

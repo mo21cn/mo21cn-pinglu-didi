@@ -161,6 +161,10 @@ page { background: #F5F7FA; }
   line-height: 26rpx;
 }
 .fn-label { font-size: 23rpx; color: #3D4C63; }
+
+/* 「退出」为已开发能力出口，用弱红做视觉区分（其余为占位） */
+.fn-item-warn .fn-icon { background: #FDF2F3; }
+.fn-label-warn { color: #C0455A; }
 .fn-foot {
   padding: 8rpx 0 28rpx;
   text-align: center;

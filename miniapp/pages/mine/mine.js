@@ -21,7 +21,9 @@ const FUNCTIONS = [
   { key: 'prize',     icon: '🏆', label: '我的奖品' },
   { key: 'feedback',  icon: '💬', label: '意见反馈' },
   { key: 'home',      icon: '🏠', label: '我的主页' },
-  { key: 'follow',    icon: '⭐', label: '我的关注' }
+  { key: 'follow',    icon: '⭐', label: '我的关注' },
+  // 已开发能力出口：退出登录 → 回首页重新选身份
+  { key: 'logout',    icon: '⏏️', label: '退出', warn: true }
 ]
 
 Page({
@@ -101,6 +103,11 @@ Page({
       wx.navigateTo({ url: '/pages/assistant/assistant' })
       return
     }
+    if (key === 'logout') {
+      // 退出登录 → 回首页重新选择身份
+      this.onLogout()
+      return
+    }
     const item = FUNCTIONS.find((f) => f.key === key)
     wx.showToast({ title: `${item ? item.label : '该功能'} · 原型占位，后续开放`, icon: 'none', duration: 1800 })
   },
@@ -124,7 +131,8 @@ Page({
   onLogout() {
     wx.showModal({
       title: '退出登录',
-      content: '退出后需重新登录，是否继续？',
+      content: '将退出当前身份并回到首页重新选择，是否继续？',
+      confirmText: '退出',
       success: (res) => {
         if (!res.confirm) return
         clearUser()

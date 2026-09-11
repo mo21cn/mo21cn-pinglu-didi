@@ -3,6 +3,8 @@
 const { request } = require('../../utils/request')
 const auth = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
+// 全量港口（完整展示名，如「南宁 · 平塘港」）· 顶栏常用港用
+const { PORTS: PORTS_FULL } = require('../../utils/ports')
 
 const SHIP_TYPES = [
   { key: 'bulk',      label: '散货船' },
@@ -49,6 +51,9 @@ Page({
     view: 'hall',            // hall=货源大厅 fleet=我的船队 registry=船舶备案
     defaultPortLabel: '南宁 · 平塘港',
 
+    // 港口选择弹层（13 项超过 wx.showActionSheet 的 itemList 上限 6，改走 port-picker 组件）
+    ppVisible: false, ppTitle: '选择港口', ppTip: '', ppCurrent: '', ppPorts: PORTS_FULL, ppAction: '',
+
     // 货源大厅筛选
     originKey: '', originLabel: '装货港',
     destKey: '',   destLabel: '卸货港',
@@ -89,20 +94,63 @@ Page({
   },
 
   // ---- 顶栏 ----
+  // 港口选择：13 项超过 wx.showActionSheet 的 itemList 上限（6），改走 port-picker 组件
   pickDefaultPort() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
-      success: (res) => this.setData({ defaultPortLabel: PORTS[res.tapIndex].label })
+    const cur = PORTS_FULL.find((p) => p.label === this.data.defaultPortLabel)
+    this.openPortPicker({
+      title: '常用港口',
+      tip: '选中后作为默认出发港',
+      current: cur ? cur.key : '',
+      ports: PORTS_FULL,
+      action: 'defaultPort'
     })
   },
 
+  // ---- 港口选择弹层：统一入口 ----
+  openPortPicker(opts) {
+    this.setData({
+      ppTitle: opts.title || '选择港口',
+      ppTip: opts.tip || '',
+      ppCurrent: opts.current || '',
+      ppPorts: opts.ports || PORTS_FULL,
+      ppAction: opts.action || '',
+      ppVisible: true
+    })
+  },
+
+  onPortPicked(e) {
+    const { key, label } = e.detail
+    const action = this.data.ppAction
+    const patch = { ppVisible: false }
+    if (action === 'defaultPort') {
+      patch.defaultPortLabel = label
+    } else if (action === 'originFilter') {
+      patch.originKey = key
+      patch.originLabel = key ? label : '装货港'
+    } else if (action === 'destFilter') {
+      patch.destKey = key
+      patch.destLabel = key ? label : '卸货港'
+    }
+    this.setData(patch, () => {
+      if (action === 'originFilter' || action === 'destFilter') this.applyFilter()
+    })
+  },
+
+  onPortPickerClose() {
+    this.setData({ ppVisible: false })
+  },
+
+  // 切角色：仅保留「船东 ⇄ 货主」互切（港口方入口已按 UI 评审下线）
   onSwitchRole() {
-    wx.showActionSheet({
-      itemList: ['切换到货主（找船）', '切换到港口方'],
+    wx.showModal({
+      title: '切换身份',
+      content: '切换到「货主（找船）」，进入货主工作台。',
+      confirmText: '切换',
       success: (res) => {
-        const role = res.tapIndex === 0 ? 'shipper' : 'port'
-        const url = role === 'shipper' ? '/pages/shipper/shipper' : '/pages/port/port'
-        auth.switchRole(role).then(() => wx.switchTab({ url })).catch(() => {})
+        if (!res.confirm) return
+        auth.switchRole('shipper')
+          .then(() => wx.switchTab({ url: '/pages/shipper/shipper' }))
+          .catch(() => {})
       }
     })
   },
@@ -113,24 +161,22 @@ Page({
 
   // ---- 货源大厅：筛选 / 排序 ----
   pickOriginFilter() {
-    const opts = [{ key: '', label: '装货港（全部）' }].concat(PORTS.map((p) => ({ key: p.key, label: p.label })))
-    wx.showActionSheet({
-      itemList: opts.map((o) => o.label),
-      success: (res) => {
-        const o = opts[res.tapIndex]
-        this.setData({ originKey: o.key, originLabel: o.key ? o.label : '装货港' }, () => this.applyFilter())
-      }
+    this.openPortPicker({
+      title: '筛选装货港',
+      tip: '选择后立即刷新货源列表',
+      current: this.data.originKey,
+      ports: [{ key: '', label: '装货港（全部）' }].concat(PORTS),
+      action: 'originFilter'
     })
   },
 
   pickDestFilter() {
-    const opts = [{ key: '', label: '卸货港（全部）' }].concat(PORTS.map((p) => ({ key: p.key, label: p.label })))
-    wx.showActionSheet({
-      itemList: opts.map((o) => o.label),
-      success: (res) => {
-        const o = opts[res.tapIndex]
-        this.setData({ destKey: o.key, destLabel: o.key ? o.label : '卸货港' }, () => this.applyFilter())
-      }
+    this.openPortPicker({
+      title: '筛选卸货港',
+      tip: '选择后立即刷新货源列表',
+      current: this.data.destKey,
+      ports: [{ key: '', label: '卸货港（全部）' }].concat(PORTS),
+      action: 'destFilter'
     })
   },
 

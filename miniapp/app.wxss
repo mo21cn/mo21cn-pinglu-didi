@@ -379,7 +379,9 @@ page {
   box-shadow: 0 -4rpx 24rpx rgba(61, 90, 219, .08);
 }
 .bottom-bar .btn-ghost { flex: 1; height: 88rpx; line-height: 88rpx; text-align: center; }
-.bottom-bar .btn-primary { flex: 2; height: 88rpx; line-height: 88rpx; }
+/* text-align 不可省：.btn-primary 基础样式只给了背景/字号，未给对齐，
+   底部固定条下的主按钮（如发布页「确认发布」）会左对齐 */
+.bottom-bar .btn-primary { flex: 2; height: 88rpx; line-height: 88rpx; text-align: center; }
 
 /* ---- 底部固定条：提示行 + 按钮行（合同页 / 支付页等三级页共用） ---- */
 .bar-note {

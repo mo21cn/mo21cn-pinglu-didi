@@ -212,4 +212,15 @@
       </view>
     </block>
   </view>
+
+  <!-- 港口选择弹层（13 项 · 原生 showActionSheet 上限 6 项不可用） -->
+  <port-picker
+    visible="{{ppVisible}}"
+    title="{{ppTitle}}"
+    tip="{{ppTip}}"
+    current="{{ppCurrent}}"
+    ports="{{ppPorts}}"
+    bind:select="onPortPicked"
+    bind:close="onPortPickerClose"
+  />
 </view>

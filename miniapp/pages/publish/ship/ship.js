@@ -2,22 +2,8 @@
 // 后端暂无「空船发布」接口：表单完整可用，提交时占位提示 + 落本机草稿（Storage）
 // 船只列表复用 GET /api/v1/ship/registry（仅取 verified）
 const { request } = require('../../../utils/request')
-
-const PORTS = [
-  { key: 'NNG', label: '南宁 · 平塘港' },
-  { key: 'GGU', label: '贵港' },
-  { key: 'WUZ', label: '梧州' },
-  { key: 'BIN', label: '来宾' },
-  { key: 'LZH', label: '柳州' },
-  { key: 'BSZ', label: '百色' },
-  { key: 'CHZ', label: '崇左' },
-  { key: 'GXL', label: '桂林' },
-  { key: 'HEZ', label: '贺州' },
-  { key: 'YUL', label: '玉林' },
-  { key: 'QNZ', label: '钦州' },
-  { key: 'FCG', label: '防城港' },
-  { key: 'BHZ', label: '北海' }
-]
+// 13 个港口的全站唯一来源（showActionSheet 的 itemList 上限 6，港口选择走 port-picker 组件）
+const { PORTS } = require('../../../utils/ports')
 
 const SHIP_TYPE_LABELS = {
   bulk: '散货船', general: '件杂货船', container: '集装箱船', tanker: '液货船'
@@ -43,7 +29,10 @@ Page({
       remark: ''
     },
     priceMode: 'negotiable',
-    remarkLen: 0
+    remarkLen: 0,
+
+    // 港口选择弹层（port-picker 组件）
+    ppVisible: false, ppTitle: '选择港口', ppTip: '', ppCurrent: '', ppPorts: PORTS, ppAction: ''
   },
 
   onLoad() {
@@ -94,36 +83,49 @@ Page({
     this.setData(patch)
   },
 
+  // ---- 港口选择：13 项超过 wx.showActionSheet 的 itemList 上限（6），走 port-picker 组件 ----
   pickCurrentPort() {
-    const ports = PORTS.filter((p) => p.key !== 'NNG')
-    const opts = [{ key: 'NNG', label: '南宁 · 平塘港' }].concat(ports)
-    wx.showActionSheet({
-      itemList: opts.map((p) => p.label),
-      success: (res) => {
-        const p = opts[res.tapIndex]
-        this.setData({ 'form.current_port': p.key, 'form.current_port_label': p.label })
-      }
-    })
+    this.openPortPicker({ title: '选择当前停靠港', current: this.data.form.current_port, action: 'current' })
   },
 
   pickOrigin() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
-      success: (res) => {
-        const p = PORTS[res.tapIndex]
-        this.setData({ 'form.origin_port': p.key, 'form.origin_label': p.label })
-      }
-    })
+    this.openPortPicker({ title: '选择出发港', current: this.data.form.origin_port, action: 'origin' })
   },
 
   pickDest() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
-      success: (res) => {
-        const p = PORTS[res.tapIndex]
-        this.setData({ 'form.dest_port': p.key, 'form.dest_label': p.label })
-      }
+    this.openPortPicker({ title: '选择目的港', tip: '也可用「不同港」向全网曝光', current: this.data.form.dest_port, action: 'dest' })
+  },
+
+  openPortPicker(opts) {
+    this.setData({
+      ppTitle: opts.title || '选择港口',
+      ppTip: opts.tip || '',
+      ppCurrent: opts.current || '',
+      ppPorts: opts.ports || PORTS,
+      ppAction: opts.action || '',
+      ppVisible: true
     })
+  },
+
+  onPortPicked(e) {
+    const { key, label } = e.detail
+    const action = this.data.ppAction
+    const patch = { ppVisible: false }
+    if (action === 'current') {
+      patch['form.current_port'] = key
+      patch['form.current_port_label'] = label
+    } else if (action === 'origin') {
+      patch['form.origin_port'] = key
+      patch['form.origin_label'] = label
+    } else {
+      patch['form.dest_port'] = key
+      patch['form.dest_label'] = label
+    }
+    this.setData(patch)
+  },
+
+  onPortPickerClose() {
+    this.setData({ ppVisible: false })
   },
 
   setAnyPort() {

@@ -73,7 +73,7 @@
         <view
           wx:for="{{functions}}"
           wx:key="key"
-          class="fn-item"
+          class="fn-item {{item.warn ? 'fn-item-warn' : ''}}"
           data-key="{{item.key}}"
           bindtap="onFunction"
           hover-class="row-hover"
@@ -82,10 +82,10 @@
             {{item.icon}}
             <view wx:if="{{item.badge}}" class="fn-badge">{{item.badge}}</view>
           </view>
-          <view class="fn-label">{{item.label}}</view>
+          <view class="fn-label {{item.warn ? 'fn-label-warn' : ''}}">{{item.label}}</view>
         </view>
       </view>
-      <view class="fn-foot">以上功能为原型占位，后续开放</view>
+      <view class="fn-foot">除「退出」外，以上功能为原型占位，后续开放</view>
     </view>
 
     <!-- 账号（已开发能力出口） -->

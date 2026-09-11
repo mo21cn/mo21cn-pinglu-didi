@@ -1,6 +1,8 @@
 // 04 发布货物（货主端二级页）
 // 对接 POST /api/v1/cargo/shipments（publish_now=true 确认发布 / false 保存草稿）
 const { request } = require('../../../utils/request')
+// 13 个港口的全站唯一来源（showActionSheet 的 itemList 上限 6，港口选择走 port-picker 组件）
+const { PORTS } = require('../../../utils/ports')
 
 const CARGO_TYPES = [
   { key: 'bulk',      label: '散货' },
@@ -18,22 +20,6 @@ const SHIP_TYPES = [
   { key: 'general',   label: '件杂货船' },
   { key: 'container', label: '集装箱船' },
   { key: 'tanker',    label: '液货船' }
-]
-
-const PORTS = [
-  { key: 'NNG', label: '南宁 · 平塘港' },
-  { key: 'GGU', label: '贵港' },
-  { key: 'WUZ', label: '梧州' },
-  { key: 'BIN', label: '来宾' },
-  { key: 'LZH', label: '柳州' },
-  { key: 'BSZ', label: '百色' },
-  { key: 'CHZ', label: '崇左' },
-  { key: 'GXL', label: '桂林' },
-  { key: 'HEZ', label: '贺州' },
-  { key: 'YUL', label: '玉林' },
-  { key: 'QNZ', label: '钦州' },
-  { key: 'FCG', label: '防城港' },
-  { key: 'BHZ', label: '北海' }
 ]
 
 Page({
@@ -56,7 +42,15 @@ Page({
     priceMode: 'negotiable',
     remarkLen: 0,
     confirmed: false,
-    submitting: false
+    submitting: false,
+
+    // 港口选择弹层（port-picker 组件）
+    ppVisible: false,
+    ppTitle: '选择港口',
+    ppTip: '',
+    ppCurrent: '',
+    ppPorts: PORTS,
+    ppAction: ''
   },
 
   onLoad() {
@@ -71,24 +65,41 @@ Page({
     this.setData(patch)
   },
 
+  // ---- 港口选择：13 项超过 wx.showActionSheet 的 itemList 上限（6），走 port-picker 组件 ----
   pickOrigin() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
-      success: (res) => {
-        const p = PORTS[res.tapIndex]
-        this.setData({ 'form.origin_port': p.key, 'form.origin_label': p.label })
-      }
-    })
+    this.openPortPicker({ title: '选择装货港', current: this.data.form.origin_port, action: 'origin' })
   },
 
   pickDest() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
-      success: (res) => {
-        const p = PORTS[res.tapIndex]
-        this.setData({ 'form.dest_port': p.key, 'form.dest_label': p.label })
-      }
+    this.openPortPicker({ title: '选择卸货港', current: this.data.form.dest_port, action: 'dest' })
+  },
+
+  openPortPicker(opts) {
+    this.setData({
+      ppTitle: opts.title || '选择港口',
+      ppTip: opts.tip || '',
+      ppCurrent: opts.current || '',
+      ppPorts: opts.ports || PORTS,
+      ppAction: opts.action || '',
+      ppVisible: true
     })
+  },
+
+  onPortPicked(e) {
+    const { key, label } = e.detail
+    const patch = { ppVisible: false }
+    if (this.data.ppAction === 'origin') {
+      patch['form.origin_port'] = key
+      patch['form.origin_label'] = label
+    } else {
+      patch['form.dest_port'] = key
+      patch['form.dest_label'] = label
+    }
+    this.setData(patch)
+  },
+
+  onPortPickerClose() {
+    this.setData({ ppVisible: false })
   },
 
   pickCargoType() {
