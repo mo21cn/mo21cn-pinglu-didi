@@ -105,16 +105,6 @@ page { background: #E7EFF4; }
   font-weight: 300;
 }
 
-.sheet-foot {
-  margin-top: 36rpx;
-  text-align: center;
-  font-size: 25rpx;
-  color: #6B7A8C;
-}
-.sheet-foot-hover { opacity: .6; }
-.sheet-foot-dot { margin: 0 10rpx; color: #C3CCD8; }
-.sheet-foot-weak { color: #A8B4C4; }
-
 /* ---- 加载遮罩 ---- */
 .loading-mask {
   position: fixed;

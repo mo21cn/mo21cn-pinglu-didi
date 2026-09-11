@@ -2,10 +2,10 @@
 // 不设主页——进入即弹出身份选择，点击卡片直接进入对应工作台
 const auth = require('../../utils/auth')
 
+// 可选身份：仅货主 / 船东（港口方身份已下线，港航服务改由「港口」页承载）
 const ROLE_META = {
   shipper: { label: '货主', page: '/pages/shipper/shipper' },
-  owner:   { label: '船东', page: '/pages/owner/owner' },
-  port:    { label: '港口方', page: '/pages/port/port' }
+  owner:   { label: '船东', page: '/pages/owner/owner' }
 }
 
 Page({
@@ -34,40 +34,44 @@ Page({
     if (!ROLE_META[role] || this.data.logging) return
     this.setData({ pendingRole: role, logging: true })
 
+    // 统一复位：任何失败都要撤掉 loading，否则遮罩会一直盖住页面、后续点击全部失效
+    const reset = (tip) => {
+      this.setData({ logging: false, pendingRole: '' })
+      if (tip) wx.showToast({ title: tip, icon: 'none' })
+    }
+
     const enter = () => {
       wx.switchTab({
         url: ROLE_META[role].page,
-        fail: () => this.setData({ logging: false, pendingRole: '' })
+        fail: () => reset('进入工作台失败，请重试')
       })
     }
 
     if (!auth.isLoggedIn()) {
-      // 首次进入：登录 → 绑定该角色 → 进入工作台
+      // 首次进入：登录 → 绑定该角色 → 切换为当前角色 → 进入工作台
+      //
+      // ⚠️ `bindRole` 只把角色写进 roles 列表，服务端 current_role 仍是登录时的
+      //    默认角色（shipper），token payload 里的 role 也不会变。缺少 `switchRole`
+      //    会带着「货主身份的 token」进船东工作台，后端逐端点角色校验 → 全线 403。
       auth.login()
         .then(() => auth.bindRole(role))
+        .then(() => auth.switchRole(role))
         .then(enter)
-        .catch(() => {
-          this.setData({ logging: false, pendingRole: '' })
-          wx.showToast({ title: '登录失败，请重试', icon: 'none' })
-        })
+        .catch(() => reset('登录失败，请重试'))
       return
     }
 
     const user = auth.getUser() || {}
-    if ((user.roles || []).includes(role)) {
-      // 已有该角色：切过去即可
-      auth.switchRole(role).then(enter).catch(() => {
-        this.setData({ logging: false, pendingRole: '' })
-        wx.showToast({ title: '切换角色失败，请重试', icon: 'none' })
-      })
-    } else {
+    if ((user.roles || []).indexOf(role) === -1) {
+      // 已登录但尚未绑定该身份：先绑定再切换
       auth.bindRole(role)
         .then(() => auth.switchRole(role))
         .then(enter)
-        .catch(() => {
-          this.setData({ logging: false, pendingRole: '' })
-          wx.showToast({ title: '绑定身份失败，请重试', icon: 'none' })
-        })
+        .catch(() => reset('绑定身份失败，请重试'))
+    } else if (user.current_role !== role) {
+      auth.switchRole(role).then(enter).catch(() => reset('切换角色失败，请重试'))
+    } else {
+      enter()
     }
   }
 })

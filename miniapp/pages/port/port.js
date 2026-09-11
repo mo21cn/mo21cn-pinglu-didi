@@ -1,6 +1,7 @@
 // 07 港口服务（底栏二级页）
 // 服务网格为原型占位；「港口服务 → 业务办理」进入平台运营台（泊位预约审核 / 泊位管理 / 新建泊位，F4 已开发）
 const { request } = require('../../utils/request')
+const { getUser } = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
 
 const SERVICE_GROUPS = [
@@ -114,6 +115,13 @@ Page({
   onServiceTap(e) {
     const item = e.currentTarget.dataset.item
     if (item && item.key === 'ops') {
+      // 业务办理（泊位管理 / 预约审核）是港口方运营台，端点仅港口方角色可用。
+      // 港口方身份已从 C 端下线 → 非港口方身份直接给出说明，不再发无效请求（否则整页 403）。
+      const role = (getUser() || {}).current_role
+      if (role !== 'port') {
+        wx.showToast({ title: '运营台为港口方内部功能，暂未对外开放', icon: 'none', duration: 2200 })
+        return
+      }
       this.setData({ view: 'ops', tab: 'appts' })
       this.fetchAppts()
       return

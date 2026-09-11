@@ -45,12 +45,6 @@
         <view class="role-arrow">›</view>
       </view>
     </view>
-
-    <view class="sheet-foot" bindtap="onPickRole" data-role="port" hover-class="sheet-foot-hover">
-      <text>我是港口方</text>
-      <text class="sheet-foot-dot">·</text>
-      <text class="sheet-foot-weak">后续可切换身份</text>
-    </view>
   </view>
 
   <view wx:if="{{logging}}" class="loading-mask">

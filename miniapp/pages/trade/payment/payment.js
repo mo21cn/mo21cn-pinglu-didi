@@ -81,23 +81,31 @@ Page({
     wx.stopPullDownRefresh()
   },
 
-  /** 三路取数：订单（必需）· 支付单（可无）· 货源/船队（用于线路富化，拿不到则降级） */
+  /**
+   * 三路取数：订单（必需）· 支付单（可无）· 货源/船队（用于线路富化，拿不到则降级）。
+   *
+   * ⚠️ 货源 / 船队列表均按当前角色鉴权（货主↔/cargo/shipments，船东↔/ship/registry），
+   *    无条件并发两个必然有一个 403 → 按角色只取对应一侧（与订单页同一口径）。
+   */
   fetch() {
     this.setData({ loading: true, error: '' })
+    const isOwner = this.data.role === 'owner'
+    const enrichUrl = isOwner ? '/api/v1/ship/registry' : '/api/v1/cargo/shipments'
     const safe = (url) => request({ url, data: { size: 100 } }).catch(() => ({ items: [] }))
     Promise.all([
       request({ url: '/api/v1/order/orders/' + this.data.orderId }),
       request({ url: '/api/v1/payment/payments/order/' + this.data.orderId, silent: true }).catch(() => null),
-      safe('/api/v1/cargo/shipments'),
-      safe('/api/v1/ship/registry')
+      safe(enrichUrl)
     ])
       .then((res) => {
         const order = res[0]
         const payment = res[1]
         const cargoMap = {}
-        ;(res[2].items || []).forEach((c) => { cargoMap[c.id] = c })
         const shipMap = {}
-        ;(res[3].items || []).forEach((s) => { shipMap[s.id] = s })
+        ;((res[2] || {}).items || []).forEach((it) => {
+          if (isOwner) shipMap[it.id] = it
+          else cargoMap[it.id] = it
+        })
         this.apply(order, payment, cargoMap, shipMap)
       })
       .catch((err) => {

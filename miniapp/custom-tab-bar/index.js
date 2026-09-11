@@ -24,8 +24,7 @@ const PUBLISH_OF = {
 
 const LABEL_OF = {
   shipper: { find: '找船',  publish: '发布货物' },
-  owner:   { find: '找货',  publish: '发布空船' },
-  port:    { find: '找船',  publish: '发布货物' }
+  owner:   { find: '找货',  publish: '发布空船' }
 }
 
 Component({
