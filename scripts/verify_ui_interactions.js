@@ -71,10 +71,14 @@ function makeRequire(wx, reqLog, authState) {
     const s = String(p)
     if (s.indexOf('utils/ports') !== -1) return realPorts
     if (s.indexOf('auth') !== -1) {
-      return {
+      const A = {
         getUser: () => JSON.parse(JSON.stringify(AUTH.user)),
         isLoggedIn: () => AUTH.loggedIn,
         clearUser: () => reqLog.push('clearUser'),
+        // 开发期「角色 → 演示账号」映射（真实实现见 utils/auth.js 的 DEV_ROLE_CODE）。
+        // 本桩恒返回 false（= 没换账号），故不进 reqLog、不影响下面的链路顺序断言；
+        // 映射本身的断言在 ⑥ 末尾用真实 auth.js 直接验。
+        ensureDevAccount: () => false,
         switchRole: (r) => {
           reqLog.push('switchRole:' + r)
           if (AUTH.failSwitch) return Promise.reject(new Error('switch fail'))
@@ -93,8 +97,29 @@ function makeRequire(wx, reqLog, authState) {
           if ((AUTH.user.roles || []).indexOf(r) === -1) AUTH.user.roles = (AUTH.user.roles || []).concat([r])
           return Promise.resolve({ roles: AUTH.user.roles })
         },
+        // 与 utils/auth.js 的 enterRole 同构：镜像分支、调用顺序、以及
+        // 失败时的 err.stage 标记（index.js 靠它点名「哪一步失败」，缺了就会
+        // 一律显示「进入工作台」）。真实实现的端到端行为由 verify_login_flow.js 验证。
+        enterRole: (r) => {
+          const mark = (name, p) =>
+            p.catch((err) => {
+              if (err && !err.stage) err.stage = name
+              throw err
+            })
+          if (!AUTH.loggedIn) {
+            return mark('login', A.login())
+              .then(() => mark('bind', A.bindRole(r)))
+              .then(() => mark('switch', A.switchRole(r)))
+          }
+          if ((AUTH.user.roles || []).indexOf(r) === -1) {
+            return mark('bind', A.bindRole(r)).then(() => mark('switch', A.switchRole(r)))
+          }
+          if (AUTH.user.current_role !== r) return mark('switch', A.switchRole(r))
+          return Promise.resolve(null)
+        },
         ROLE_LABELS: { shipper: '货主', owner: '船东' },
       }
+      return A
     }
     if (s.indexOf('tabbar') !== -1) return { syncTabBar() {} }
     if (s.indexOf('request') !== -1) {
@@ -405,6 +430,35 @@ section('⑤ 静态防线')
   check('退出登录会清 dev_login_code（否则登回旧身份）', /removeStorageSync\(['"]dev_login_code['"]\)/.test(read('utils/auth.js')))
   check('港口页「业务办理」按身份门控（非港口方不发请求）', /role !== 'port'/.test(read('pages/port/port.js')))
 
+  // —— 进入身份的链路统一收敛到 auth.enterRole ——
+  // 起因：开发期若用一个「全新 code」登录，后端会当场注册出空账号，
+  // 订单页不报错、走「暂无订单」空态（2026-09-11 用户报「订单页面仍然空白」）。
+  // 故 enterRole 里必须①先映射到该角色的演示账号，②再 login→bindRole→switchRole。
+  {
+    const authSrc = read('utils/auth.js')
+    const idxSrc = read('pages/index/index.js')
+    check('首页进入链路统一走 auth.enterRole（不再自行拼 login/bindRole/switchRole）',
+      /auth\.enterRole\(/.test(idxSrc) && !/auth\.bindRole\(/.test(idxSrc) && !/auth\.switchRole\(/.test(idxSrc))
+    check('auth.js 导出 enterRole / ensureDevAccount',
+      /module\.exports[\s\S]*enterRole/.test(authSrc) && /ensureDevAccount/.test(authSrc))
+    const ER = authSrc.match(/function enterRole\([\s\S]*?\n\}/)
+    check('auth.js enterRole 内部顺序 映射账号 → login → bindRole → switchRole',
+      !!ER &&
+        ER[0].indexOf('ensureDevAccount(role)') >= 0 &&
+        ER[0].indexOf('ensureDevAccount(role)') < ER[0].indexOf('login(silent)') &&
+        ER[0].indexOf('login(silent)') < ER[0].indexOf('bindRole(role') &&
+        ER[0].indexOf('bindRole(role') < ER[0].indexOf('switchRole(role'),
+      ER ? ER[0].slice(0, 60).replace(/\n/g, ' ') : 'not found')
+    check('DEV_ROLE_CODE 映射到演示账号（映射错=登录空账号=列表全空）',
+      /DEV_ROLE_CODE\s*=\s*\{[^}]*shipper:\s*'seed-shipper'[^}]*owner:\s*'seed-owner'/.test(authSrc),
+      (authSrc.match(/DEV_ROLE_CODE\s*=\s*\{[^}]*\}/) || ['?'])[0])
+    check('首页 onLoad 换演示账号后不自动进工作台（留在身份选择页重选）',
+      /if \(auth\.ensureDevAccount\(role\)\) return/.test(idxSrc))
+    for (const f of ['pages/mine/mine.js', 'pages/owner/owner.js', 'pages/shipper/shipper.js']) {
+      check(f + ' 里切换身份走 enterRole', /enterRole\(/.test(read(f)) && !/\.switchRole\(/.test(read(f)))
+    }
+  }
+
   // —— 登录链路：首次必须 switchRole，否则带着旧角色 token 进工作台 → 全线 403 ——
   {
     const wx = makeWx()
@@ -557,7 +611,9 @@ section('⑤ 静态防线')
               nickname: '', roles: ['shipper'], current_role: 'shipper'
             })
           },
-          getToken: () => '', setToken() {}, clearToken() {},
+          getToken: () => storage.access_token || '',
+          setToken: (t) => { storage.access_token = t },
+          clearToken: () => { delete storage.access_token },
           describeError: () => ({ cause: '', hint: '' }), BASE_URL: 'http://127.0.0.1:8000',
         }
       }
@@ -579,8 +635,36 @@ section('⑤ 静态防线')
     const A = loadAuth(storage, loginCalls, codes)
     await A.login()
     check('开发期登录不调用 wx.login（不被微信登录服务卡死）', loginCalls.length === 0, 'calls=' + loginCalls.length)
-    check('开发期登录使用固定 code', codes[0] === 'devtools-local', JSON.stringify(codes))
-    check('固定身份 code 已落盘（下次登录仍是同一账号）', storage.dev_device_code === 'devtools-local', JSON.stringify(storage))
+    check('开发期登录使用固定 code', codes[0] === 'seed-shipper', JSON.stringify(codes))
+    check('固定身份 code 已落盘（下次登录仍是同一账号）', storage.dev_device_code === 'seed-shipper', JSON.stringify(storage))
+  }
+  {
+    // 角色 → 演示账号：点货主登 seed-shipper、点船东登 seed-owner
+    for (const [role, code] of [['shipper', 'seed-shipper'], ['owner', 'seed-owner']]) {
+      const storage = {}
+      const codes = []
+      const A = loadAuth(storage, [], codes)
+      const changed = A.ensureDevAccount(role)
+      check('ensureDevAccount(' + role + ') → 演示账号 ' + code,
+        changed === true && storage.dev_device_code === code, JSON.stringify(storage))
+      await A.login()
+      check('  随后登录 code = ' + code, codes[0] === code, JSON.stringify(codes))
+    }
+  }
+  {
+    // 换账号必须清掉旧登录态，否则带着旧账号 token 去打新账号的接口 → 列表全空
+    const storage = { dev_device_code: 'seed-owner', access_token: 'old-token', user_info: '{"user_id":2}' }
+    const A = loadAuth(storage, [], [])
+    const changed = A.ensureDevAccount('shipper')
+    check('换演示账号时清掉旧 token / user_info',
+      changed === true && !storage.access_token && !storage.user_info, JSON.stringify(storage))
+  }
+  {
+    // 手工 dev_login_code 优先：走查脚本靠它注入 seed-port 测港口身份
+    const storage = { dev_login_code: 'seed-port', dev_device_code: 'seed-shipper' }
+    const A = loadAuth(storage, [], [])
+    check('手工 dev_login_code 不被角色映射冲掉',
+      A.ensureDevAccount('owner') === false && storage.dev_device_code === 'seed-shipper', JSON.stringify(storage))
   }
   {
     const storage = { dev_login_code: 'seed-owner' }
@@ -595,10 +679,10 @@ section('⑤ 静态防线')
     const A = loadAuth(storage, [], codes)
     await A.login()
     await A.login()
-    check('重复登录 code 不变（不会每次登录都新建用户）', codes[0] === codes[1] && codes[0] === 'devtools-local', JSON.stringify(codes))
+    check('重复登录 code 不变（不会每次登录都新建用户）', codes[0] === codes[1] && codes[0] === 'seed-shipper', JSON.stringify(codes))
     A.clearUser()
     check('退出清 dev_login_code、保留 dev_device_code（回首页换身份不丢账号）',
-      !('dev_login_code' in storage) && storage.dev_device_code === 'devtools-local', JSON.stringify(Object.keys(storage)))
+      !('dev_login_code' in storage) && storage.dev_device_code === 'seed-shipper', JSON.stringify(Object.keys(storage)))
   }
   check('auth.js 生产路径仍保留 wx.login（DEV_STABLE_IDENTITY=false 时回退）',
     /_wxLoginCode\(\)\.then/.test(read('utils/auth.js')) && /wx\.login\(\{/.test(read('utils/auth.js')))

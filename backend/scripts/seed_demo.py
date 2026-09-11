@@ -390,7 +390,9 @@ def main() -> None:
         print(f"        预约 #{c['appt_id']} 船 #{c['ship_id']} {c['plan_start']} ~ {c['plan_end']}")
 
     print("\n" + "=" * 68)
-    print("演示就绪。小程序开发者工具 Storage 面板设置 dev_login_code：")
+    print("演示就绪。小程序侧无需任何配置：开发期点「货主」自动登 seed-shipper、")
+    print("点「船东」自动登 seed-owner（见 miniapp/utils/auth.js 的 DEV_ROLE_CODE）。")
+    print("  如需港口方等其它联调身份，再在开发者工具 Storage 面板设 dev_login_code：")
     print("  seed-shipper → 货主端 · seed-owner → 船东端 · seed-port → 港口方")
     print("演示锚点：")
     print(f"  订单/支付：已完成 #{anchors.get('complete', {}).get('order', '-')} · "

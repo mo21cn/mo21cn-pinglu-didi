@@ -224,6 +224,43 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
   })
   mp.on('exception', (e) => errs.push('[EXCEPTION] ' + util.inspect(e, { depth: 2 })))
 
+  // ============ ⓪ 清缓存 → 按身份卡进入 → 订单必须有数据 ============
+  // 直复现 2026-09-11 用户报的「订单页面仍然是空白」：
+  // 根因是开发期固定身份用了一个全新空账号（devtools-local），而演示数据都在
+  // seed-shipper / seed-owner 名下 —— 后端按 user_id 过滤订单 → 返回 200 空列表，
+  // 页面不报错、走「暂无订单」空态，看起来就像功能坏了。
+  // 修法见 miniapp/utils/auth.js 的 DEV_ROLE_CODE（按角色映射到演示账号），
+  // 这里用真机把「清缓存 → 点身份卡 → 订单非空」这条路径钉住。
+  for (const [cardIdx, roleLabel, wantPage] of [[0, '货主', 'pages/shipper/shipper'], [1, '船东', 'pages/owner/owner']]) {
+    await mp.evaluate(() => {
+      ;['dev_login_code', 'dev_device_code', 'access_token', 'user_info'].forEach((k) => wx.removeStorageSync(k))
+    })
+    await mp.reLaunch('/pages/index/index')
+    await sleep(1600)
+    const pi = await mp.currentPage()
+    rec(`⓪ 清缓存后停在身份选择页（${roleLabel}）`, pi && pi.path === 'pages/index/index', pi && pi.path)
+    await shot(mp, `00-清缓存-身份选择-${roleLabel}`)
+
+    await tapAt(pi, '.role-card', cardIdx)
+    const wp = await waitPath(mp, wantPage, 30)
+    rec(`⓪ 点「${roleLabel}」进入工作台`, !!wp, wp ? wp.path : '未跳转')
+    if (!wp) continue
+
+    const code = await mp.evaluate(() => wx.getStorageSync('dev_device_code'))
+    rec(`⓪ 身份已映射到演示账号（${roleLabel}）`,
+      code === (cardIdx === 0 ? 'seed-shipper' : 'seed-owner'), String(code))
+
+    const op = await nav(mp, 'tab', '/pages/trade/orders/orders', 'pages/trade/orders/orders')
+    await sleep(2200)
+    const od = await op.data()
+    const n = (od.list || []).length
+    rec(`★ ⓪ ${roleLabel}「订单」页有数据（不再是空白）`,
+      n > 0 && !od.error, `list=${n} raw=${(od.rawList || []).length} error=${od.error || '-'}`)
+    rec(`⓪ ${roleLabel} 订单统计行已渲染`, (od.stats || []).length === 5,
+      JSON.stringify((od.stats || []).map((s) => s.label + ':' + s.count)))
+    await shot(mp, `00-${roleLabel}-订单页`)
+  }
+
   // ============================ 货主链路 ============================
   await loginAs(mp, 'seed-shipper')
   let p = await mp.currentPage()

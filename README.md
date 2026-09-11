@@ -184,14 +184,16 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 
 - **主线三条**：身份切换 → 货主发单/船东找货 → 支付·合同·客服闭环。
 - **技术亮点**：合同 Agent（LLM 零数字：模板渲染核心条款 + 规则引擎产风险）、港口防超卖（行锁 + 重叠计数）、RAG 客服（25 chunk 检索）、自定义 tabBar（随角色变化）。
-- **数据准备**：`WECHAT_MOCK=true` 时 Storage 设 `dev_login_code`（`seed-shipper`/`seed-owner`/`seed-port`）快速切身份。
+- **数据准备**：**无需任何配置**——开发期点「货主」自动登录演示账号 `seed-shipper`、点「船东」自动登录 `seed-owner`（见 `utils/auth.js` 的 `DEV_ROLE_CODE`）。要港口方等其它联调身份，再在 Storage 面板设 `dev_login_code`（`seed-port`）覆盖。
 - **三级页看点**：合同预览（Agent 头卡「核心条款零 LLM」+ 风险卡）、支付详情（金额头卡 + 资金状态留痕时间轴）、撮合结果（引擎头卡「确定性内核 · 零 LLM」+ 四项评分进度条 + 未入局原因）、泊位档期（甘特条 + 峰值占用徽章 + 前置校验链）、预约审核（容量预检算式 + 409 防超卖）。
 - **演示脚本**：完整操作顺序与答辩口径见 [docs/汇报演示脚本.md](docs/汇报演示脚本.md)（含前置、12 步演示路径、预期提问口径、故障兜底）。
 - **演示数据一键就绪**：`python scripts/seed_demo.py`（幂等，可反复执行）。铺出四态订单（已完成 / 待支付 / 已退款 / 面议）+ 演示独占泊位 `NNG-DEMO-01`（满档，容量 2）/ `GGU-DEMO-02`（空档）+ 4 条预约，并对第三条复现 **409 档期冲突**。登录身份 `seed-shipper` / `seed-owner` / `seed-port`。
 - **智能合同仿真案例（订单页 → 查看合同）**：`python scripts/seed_contract_cases.py`（幂等，需先跑 `seed_demo.py`）。为货主与船东各铺 3 张专项订单，点开即可检查合同风险引擎的规则命中：`R3 装货日期临近`（期望装货日 +2 天）、`R4 船舶证书临期`（专用船证书 20 天到期）、`R5 液货/危险品`（液货船 + tanker 货类）；再叠加 `seed_demo` 的已完成单（无风险）/ 待支付单（R1）/ 面议单（R1+R2），**R1–R5 五条规则全覆盖**。订单归属货主、承运船归属船东，两个角色都能在「订单」页看到。已撤单订单后端拒绝生成合同（400），页面上也不显示「查看合同」。
 - **汇报前提醒**：后端仍建议以 `LLM_MOCK=true` 起——合同 Agent 已具备降级（TODO-10 已闭环，LLM 故障时接口仍 200、补充条款回退内置模板并带 `degraded` 标识），但模板模式能保证演示文字逐次一致、可复现。
 - **小程序侧域名校验（已根治）**：`miniapp/project.config.json` 的 `setting.urlCheck` 已改为 `false`——本项目后端固定是 `http://127.0.0.1:8000`（非 HTTPS、未备案域名），开启校验时请求会被直接拦掉。原先靠 `project.private.config.json` 覆盖，但该文件被 `.gitignore` 忽略，**换机器 clone 后必然复现「连不上后端」**，故直接在仓库配置里关掉。若你的工具仍拦截，可在「详情 → 本地设置」勾选「不校验合法域名、web-view、TLS 版本以及 HTTPS 证书」。
-- **开发期登录身份（无需真实 AppID）**：仓库 `appid` 是占位值，开发者工具拿不到真实微信身份；而后端 `WECHAT_MOCK=true` 时 `openid = mock-openid-{code}`，**code 本身就是身份**。为避免 `wx.login` 每次返回不同 code（→ 每次登录都新建用户 →「我的货源 / 我的订单」永远为空）以及微信登录服务不可达时的「登录失败」，`utils/auth.js` 的开发期开关 `DEV_STABLE_IDENTITY` 会固定使用 `dev_device_code`（默认 `devtools-local`）作为身份，**不调用 `wx.login`**。接入真实 AppID 后须将其置为 `false`。
-  - 想用种子数据演示，在 Storage 面板设 `dev_login_code`（`seed-shipper` / `seed-owner` / `seed-port`）——它的优先级高于开发固定身份，退出登录时会被清除。
+- **开发期登录身份（无需真实 AppID）**：仓库 `appid` 是占位值，开发者工具拿不到真实微信身份；而后端 `WECHAT_MOCK=true` 时 `openid = mock-openid-{code}`，**code 本身就是身份**。为避免 `wx.login` 每次返回不同 code（→ 每次登录都新建用户 →「我的货源 / 我的订单」永远为空）以及微信登录服务不可达时的「登录失败」，`utils/auth.js` 的开发期开关 `DEV_STABLE_IDENTITY` 固定使用 `dev_device_code` 作为身份，**不调用 `wx.login`**。接入真实 AppID 后须将其置为 `false`。
+  - **身份必须落在有数据的账号上**：`DEV_ROLE_CODE` 把「点哪个身份」映射到对应演示账号（货主→`seed-shipper`、船东→`seed-owner`）。演示数据全挂在这两个账号名下，若换用一个新 code 登录，后端 `WECHAT_MOCK` 下会当场注册出**空账号**——订单页不报错、走「暂无订单」空态，「我的货源」也全空，与功能故障无法区分（2026-09-11 实际踩到）。
+  - 首页、「我的」页身份切换、货主⇄船东互切**统一走 `auth.enterRole(role)`**：先映射账号，再 `login → bindRole → switchRole`；避免某处漏了 `switchRole` 就带着旧角色 token 进工作台 → 全线 403。
+  - 需要其它联调身份（如用 `seed-port` 测港口运营台），在 Storage 面板设 `dev_login_code`——它优先级最高，退出登录时会被清除。
   - 失败提示已按环节区分：弹窗会写明「失败环节（登录 / 绑定身份 / 切换身份 / 进入工作台）+ 真实原因 + 处置建议」，首页还会先做一次 `/healthz` 预检，连不上后端时提前提示（可点重试），不再只有一句「登录失败」。
 - **船东端演示入口**：`我的船队 → 桂平航 6688（散货 · 1500 载重吨）→ 智能找货`，得 3 条候选可按评分看排序；同队 `横州集运 101`（900 载重吨集装箱船）0 候选是硬约束的正确结果，非缺陷。

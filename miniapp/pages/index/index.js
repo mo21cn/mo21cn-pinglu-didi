@@ -45,6 +45,11 @@ Page({
       const user = auth.getUser()
       const role = user && user.current_role
       if (role && ROLE_META[role]) {
+        // 开发期：若当前登录的不是该角色对应的演示账号（例如旧版本遗留的空账号
+        // devtools-local），ensureDevAccount 会换账号并清空登录态 —— 此时绝不能
+        // 直接切进工作台（那是空账号，订单/货源全空、还不报错），
+        // 留在身份选择页让用户重新点一次即可落到正确的演示账号。
+        if (auth.ensureDevAccount(role)) return
         wx.switchTab({ url: ROLE_META[role].page })
       }
     }
@@ -99,33 +104,14 @@ Page({
       wx.switchTab({ url: ROLE_META[role].page, success: resolve, fail: reject })
     })
 
-    if (!auth.isLoggedIn()) {
-      // 首次进入：登录 → 绑定该角色 → 切换为当前角色 → 进入工作台
-      //
-      // ⚠️ `bindRole` 只把角色写进 roles 列表，服务端 current_role 仍是登录时的
-      //    默认角色（shipper），token payload 里的 role 也不会变。缺少 `switchRole`
-      //    会带着「货主身份的 token」进船东工作台，后端逐端点角色校验 → 全线 403。
-      stage('login', auth.login(silent))
-        .then(() => stage('bind', auth.bindRole(role, silent)))
-        .then(() => stage('switch', auth.switchRole(role, silent)))
-        .then(() => stage('enter', enter()))
-        .catch(fail)
-      return
-    }
-
-    const user = auth.getUser() || {}
-    if ((user.roles || []).indexOf(role) === -1) {
-      // 已登录但尚未绑定该身份：先绑定再切换
-      stage('bind', auth.bindRole(role, silent))
-        .then(() => stage('switch', auth.switchRole(role, silent)))
-        .then(() => stage('enter', enter()))
-        .catch(fail)
-    } else if (user.current_role !== role) {
-      stage('switch', auth.switchRole(role, silent))
-        .then(() => stage('enter', enter()))
-        .catch(fail)
-    } else {
-      stage('enter', enter()).catch(fail)
-    }
+    // 身份准备 + 登录 + 绑定 + 切换，全部交给 auth.enterRole：
+    //   ① 开发期先确保登录的是「该角色对应的演示账号」（见 auth.js 的 DEV_ROLE_CODE）。
+    //      否则会用一个全新空账号登录 —— 页面不报错，但「我的订单 / 我的货源」全空，
+    //      表现得像功能坏了（2026-09-11 实测：订单页走「暂无订单」空态即此因）；
+    //   ② ⚠️ `bindRole` 只把角色写进 roles 列表，服务端 current_role 与 token 里的 role
+    //      都不会变。缺少 `switchRole` 会带着「货主身份的 token」进船东工作台 →
+    //      后端逐端点角色校验 → 全线 403。
+    // 首页、「我的」页身份切换、货主⇄船东互切共用这一条链路，避免再次分叉。
+    stage('enter', auth.enterRole(role, silent).then(() => enter())).catch(fail)
   }
 })

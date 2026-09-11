@@ -13,10 +13,24 @@ const USER_KEY = 'user_info'
  * →「我的货源 / 我的订单」永远是空的；更糟的是微信登录服务一旦不可达
  * （无 APPID / 代理拦截），整条进入链路会直接卡在「登录失败」。
  * 故开发期固定使用一个本地 code：身份稳定，且不依赖 wx.login。
+ *
+ * 但「稳定」还不够 —— 还必须**落在有数据的账号上**，见下方 DEV_ROLE_CODE。
  */
 const DEV_STABLE_IDENTITY = true
 const DEV_CODE_KEY = 'dev_device_code'
-const DEV_DEFAULT_CODE = 'devtools-local'
+const DEV_DEFAULT_CODE = 'seed-shipper'
+
+/**
+ * 开发期「角色 → 演示账号」映射。
+ * 取值与 backend/scripts/seed_demo.py 的 SHIPPER_CODE / OWNER_CODE 严格一致。
+ *
+ * 为什么必须映射：演示数据（货源 / 船舶 / 订单 / 泊位 / 预约）全部挂在两个演示账号
+ * 名下。后端 WECHAT_MOCK=true 时 `openid = mock-openid-{code}`，用别的 code 登录会
+ * **当场注册出一个全新空账号** —— 订单页不报错、走「暂无订单」空态，「我的货源」也全空，
+ * 表现和功能故障一模一样（2026-09-11 用户报「订单页面仍然是空白」即此因）。
+ * 故开发期点哪个身份，就直接登录该身份对应的演示账号。
+ */
+const DEV_ROLE_CODE = { shipper: 'seed-shipper', owner: 'seed-owner' }
 
 const ROLE_LABELS = {
   shipper: '货主',
@@ -158,4 +172,77 @@ function switchRole(role, opts) {
   })
 }
 
-module.exports = { login, bindRole, switchRole, isLoggedIn, getUser, clearUser, ROLE_LABELS }
+/**
+ * 开发期：把身份切到该角色对应的演示账号。
+ *
+ * @returns {boolean} true = 换了账号。此时旧 token / user_info 已被清掉，
+ *   调用方**必须**按「未登录」重新走 login → bindRole → switchRole，
+ *   否则会带着上一个账号的 token 去打新账号的接口（订单列表按 user_id 过滤 → 全空）。
+ *
+ * 手工指定的 `dev_login_code` 优先级更高（走查脚本要靠它注入 seed-port 测港口身份），
+ * 存在时不干预，免得把联调用的固定身份冲掉。
+ */
+function ensureDevAccount(role) {
+  if (!DEV_STABLE_IDENTITY) return false
+  if (wx.getStorageSync('dev_login_code')) return false
+  const code = DEV_ROLE_CODE[role]
+  if (!code) return false
+  if (wx.getStorageSync(DEV_CODE_KEY) === code) return false
+  wx.setStorageSync(DEV_CODE_KEY, code)
+  wx.removeStorageSync(USER_KEY)
+  clearToken()
+  return true
+}
+
+/** 给链路的某一阶段打标记，失败时才能说清是「哪一步」失败 */
+function _stage(name, p) {
+  return p.catch((err) => {
+    if (err && !err.stage) err.stage = name
+    throw err
+  })
+}
+
+/**
+ * 进入某角色 —— 首页身份卡、「我的」页身份切换、货主⇄船东互切**共用同一入口**。
+ *
+ *   ① 开发期先确保登录的是该角色对应的演示账号（换账号则清掉旧登录态）
+ *   ② 未登录            → login → bindRole → switchRole
+ *   ③ 已登录但未绑该角色 → bindRole → switchRole
+ *   ④ 已是当前角色       → 直接返回
+ *
+ * 失败时给 err.stage 打 login / bind / switch 标记，供页面点名失败环节。
+ */
+function enterRole(role, opts) {
+  const silent = { silent: !!(opts && opts.silent) }
+  return Promise.resolve()
+    .then(() => {
+      ensureDevAccount(role)
+    })
+    .then(() => {
+      if (!isLoggedIn()) {
+        return _stage('login', login(silent))
+          .then(() => _stage('bind', bindRole(role, silent)))
+          .then(() => _stage('switch', switchRole(role, silent)))
+      }
+      const user = getUser() || {}
+      if ((user.roles || []).indexOf(role) === -1) {
+        return _stage('bind', bindRole(role, silent)).then(() =>
+          _stage('switch', switchRole(role, silent))
+        )
+      }
+      if (user.current_role !== role) return _stage('switch', switchRole(role, silent))
+      return null
+    })
+}
+
+module.exports = {
+  login,
+  bindRole,
+  switchRole,
+  enterRole,
+  ensureDevAccount,
+  isLoggedIn,
+  getUser,
+  clearUser,
+  ROLE_LABELS
+}
