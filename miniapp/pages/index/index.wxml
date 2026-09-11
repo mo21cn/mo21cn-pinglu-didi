@@ -16,6 +16,11 @@
     <view class="sheet-title">请选择您的身份</view>
     <view class="sheet-sub">选择后直接进入专属工作台</view>
 
+    <!-- 后端连通性预检：连不上时提前说明，而不是等点完身份再报「登录失败」 -->
+    <view wx:if="{{backendDown}}" class="sheet-warn" bindtap="probeBackend" hover-class="hover-dim">
+      ⚠️ 未连接后端 127.0.0.1:8000 · 点此重试
+    </view>
+
     <view class="role-list">
       <view
         class="role-card {{pendingRole === 'shipper' ? 'role-card-pending' : ''}}"

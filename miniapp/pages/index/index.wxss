@@ -52,6 +52,17 @@ page { background: #E7EFF4; }
   color: #93A1B3;
   text-align: center;
 }
+/* 后端未连接提示（预检失败才出现，可点重试） */
+.sheet-warn {
+  margin-top: 24rpx;
+  padding: 16rpx 24rpx;
+  border-radius: 16rpx;
+  background: #FFF4F2;
+  border: 2rpx solid #FFDCD4;
+  color: #C0392B;
+  font-size: 24rpx;
+  text-align: center;
+}
 
 .role-list {
   margin-top: 40rpx;
