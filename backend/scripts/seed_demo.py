@@ -133,12 +133,16 @@ def best_ship(tok_shipper: str, cargo_id: int) -> int | None:
     return items[0]["ship_id"] if items else None
 
 
-def ensure_order(tok_shipper: str, cargo: dict, want_cancelled: bool = False) -> tuple[dict | None, bool]:
+def ensure_order(
+    tok_shipper: str, cargo: dict, want_cancelled: bool = False, require_unpaid_payment: bool = False
+) -> tuple[dict | None, bool]:
     """按货源复用已有订单；必要时重新出单。
 
     自愈规则（保证脚本在非干净库上也能跑到目标演示态）：
     - 最新订单为「已撤单」：撤单流程视为达标；其它流程说明货源已回撮合池 → 重新出单
     - 最新订单在途但运费为空、而货源本身有出价：属无法支付的历史脏单 → 撤销后重新出单
+    - require_unpaid_payment 且最新订单的支付单已非 pending：待支付锚点已被现场点掉
+      （点了「模拟支付」/被退款）→ 撤销该单释放货源后重新出单，使锚点可反复排练
     """
     orders = call("GET", "/order/orders", token=tok_shipper, params={"size": 100})["items"]
     cands = sorted((o for o in orders if o["cargo_id"] == cargo["id"]), key=lambda o: o["id"])
@@ -146,6 +150,18 @@ def ensure_order(tok_shipper: str, cargo: dict, want_cancelled: bool = False) ->
         latest = cands[-1]
         if latest["status"] == "cancelled":
             if want_cancelled:
+                return latest, False
+        elif require_unpaid_payment and latest["status"] in ("matched", "shipped"):
+            pm = call("GET", f"/payment/payments/order/{latest['id']}", token=tok_shipper, soft=True)
+            if ok(pm) and pm.get("status") != "pending":
+                res = call("POST", f"/order/orders/{latest['id']}/cancel", token=tok_shipper,
+                           body={"reason": "演示脚本：待支付锚点已被消耗，撤销后重新出单"})
+                if ok(res):
+                    print(f"    订单 #{latest['id']} 支付单为 {pm.get('status')}（锚点已被消耗）→ 已撤销并重新出单")
+                else:
+                    print(f"    !! 订单 #{latest['id']} 无法撤销（{res.get('__err__')}），待支付锚点可能不可复现")
+                    return latest, False
+            else:
                 return latest, False
         elif (
             latest["status"] in ("matched", "shipped")
@@ -188,6 +204,19 @@ def advance_order(tok_shipper: str, tok_owner: str, order: dict, flow: str) -> s
     oid = order["id"]
     if flow == "negotiable":
         return "面议单：保持待承运（运费未议定，发起支付应被 400 拒绝）"
+
+    if flow == "matched":
+        # 待支付锚点：必须真的落一张待支付支付单，否则现场「模拟支付」按钮根本不存在
+        # （页面在无支付单时只显示「发起支付」，多一步操作，演示脚本口径会对不上）
+        if order.get("freight_price") is None:
+            return "订单待承运但运费未议定（面议单），按规则跳过支付单创建"
+        p = call("GET", f"/payment/payments/order/{oid}", token=tok_shipper, soft=True)
+        if not ok(p) or not p.get("id"):
+            p = call(
+                "POST", "/payment/payments", token=tok_shipper,
+                body={"order_id": oid, "channel": "mock"},
+            )
+        return f"支付 #{p['id']} {p['status']}（现场点「模拟支付」）→ 订单待承运"
 
     if flow in ("complete", "refund"):
         p = ensure_paid(tok_shipper, oid)
@@ -296,7 +325,11 @@ def main() -> None:
     anchors = {}
     for flow, spec in specs:
         cargo, cnew = ensure_cargo(tok_shipper, spec)
-        order, onew = ensure_order(tok_shipper, cargo, want_cancelled=(flow == "refund"))
+        order, onew = ensure_order(
+            tok_shipper, cargo,
+            want_cancelled=(flow == "refund"),
+            require_unpaid_payment=(flow == "matched"),
+        )
         tag = f"货源 #{cargo['id']}[{'新建' if cnew else '复用'}]"
         if order is None:
             print(f"      {tag} {cargo['cargo_name']} → 未成单")
