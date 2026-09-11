@@ -379,3 +379,107 @@ def test_assistant_rag_mock_pipeline(shipper, client):
     )
     assert resp.status_code == 200, resp.text
     assert "发货" in resp.json()["answer"]
+
+
+def test_contract_llm_failure_degrades(shipper, owner, port_user, client, monkeypatch):
+    """LLM 故障时降级返回（TODO-10）：主体条款与风险仍可用，补充条款回退内置模板。"""
+    oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"])
+
+    async def _boom(**_: object) -> None:
+        raise LLMError("network", "LLM 网络错误：模拟故障")
+
+    monkeypatch.setattr(service.llm_gateway, "chat_json", _boom)
+    resp = client.post(
+        "/api/v1/agent/contract/generate",
+        json={"order_id": oid},
+        headers=shipper["_headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["degraded"] is True
+    assert body["degraded_reason"] == "network"
+    assert body["mocked"] is False
+    text = body["contract_text"]
+    # 确定性核心条款不受 LLM 故障影响
+    assert "25,000.00 元" in text
+    assert "南宁" in text and "贵港" in text
+    # 补充条款回退内置标准模板
+    assert "不可抗力" in text and "争议解决" in text
+    # 风险点为规则引擎产物，照常返回
+    assert "运费未支付" in [r["title"] for r in body["risks"]]
+    # 降级对使用者可见
+    assert "已回退平台内置标准条款" in text
+
+
+def test_contract_llm_failure_audit_marks_failure(monkeypatch):
+    """降级路径的审计照实记录：success=False + error_kind（不掩盖 LLM 故障）。"""
+    import datetime as _dt
+
+    from app.models.cargo import Cargo
+    from app.models.order import Order
+    from app.models.ship import Ship
+    from app.models.user import User
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+
+    shipper = User(openid="audit-shipper", roles=["shipper"])
+    owner = User(openid="audit-owner", roles=["owner"])
+    db.add_all([shipper, owner])
+    db.flush()
+    cargo = Cargo(
+        shipper_id=shipper.id,
+        cargo_name="散装水泥",
+        cargo_type="bulk",
+        weight_t=800,
+        origin_port="NNG",
+        dest_port="GGU",
+        expect_date=_dt.date(2026, 10, 1),
+        offer_price=25000,
+        status="published",
+    )
+    ship = Ship(
+        owner_id=owner.id,
+        ship_name="平陆 001",
+        ship_type="bulk",
+        deadweight_t=1500,
+        length_m=45,
+        width_m=8,
+        draft_m=2.5,
+        home_port="GGU",
+        cert_no="C-AUDIT-1",
+        cert_expiry=_dt.date(2027, 1, 1),
+        status="verified",
+    )
+    db.add_all([cargo, ship])
+    db.flush()
+    order = Order(
+        cargo_id=cargo.id,
+        ship_id=ship.id,
+        shipper_id=shipper.id,
+        owner_id=owner.id,
+        freight_price=25000,
+        status="matched",
+    )
+    db.add(order)
+    db.commit()
+
+    async def _boom(**_: object) -> None:
+        raise LLMError("timeout", "LLM 调用超时（模拟）")
+
+    monkeypatch.setattr(service.llm_gateway, "chat_json", _boom)
+    result = asyncio.run(service.generate_contract(db, user_id=shipper.id, order_id=order.id))
+    assert result.degraded is True
+    assert result.degraded_reason == "timeout"
+
+    rows = (
+        db.execute(select(AgentCall).where(AgentCall.agent_name == "contract")).scalars().all()
+    )
+    assert len(rows) == 1
+    assert rows[0].success is False
+    assert rows[0].error_kind == "timeout"

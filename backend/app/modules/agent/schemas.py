@@ -92,3 +92,9 @@ class ContractDraftResult(BaseModel):
     risks: list[ContractRisk] = Field(default_factory=list, description="风险点（确定性规则引擎）")
     mocked: bool = Field(default=False, description="是否为规则模板输出（LLM_MOCK）")
     latency_ms: int = Field(default=0, description="生成耗时（毫秒）")
+    degraded: bool = Field(
+        default=False, description="LLM 故障已降级：补充条款回退平台内置标准条款"
+    )
+    degraded_reason: str | None = Field(
+        default=None, description="降级原因（LLM 错误分类：timeout/network/auth/rate_limit/...）"
+    )
