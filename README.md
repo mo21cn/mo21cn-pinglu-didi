@@ -64,10 +64,18 @@ node scripts/verify_frontend_e2e.js
 # UI 交互契约校验（组件 props/事件、弹层闭环、showActionSheet 长列表等静态与逻辑防线，无需 IDE）
 node scripts/verify_ui_interactions.js
 
+# 登录链路复现校验（真 HTTP 打后端，验链路顺序 / 鉴权头 / token 角色 / 失败可定位；需后端已起）
+node scripts/verify_login_flow.js
+
 # 真机走查（需开发者工具「设置 → 安全设置 → 服务端口」已开启）
 # 前置：后端已起 + 已执行 backend/scripts/seed_demo.py
 MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 ```
+
+> ⚠️ **identity 进入失败这类缺陷要用 `verify_login_flow.js` 才抓得到**：其余脚本都只能
+> 用一个假的 `request` 猜顺序，唯有它加载真实 `utils/auth.js` + `pages/index/index.js`
+> 并让 `wx.request` 走真实 HTTP —— 「补了 bind 忘了 switch ⇒ 带旧角色 token ⇒ 全线 403」
+> 与「wx.login 不可用 ⇒ 整条进入链路卡死」都是这样定位出来的。
 
 > ⚠️ **港口选择不要用 `wx.showActionSheet`**：该 API 的 `itemList` 上限为 6 项，
 > 超过会直接 fail 且页面通常没有 fail 兜底 → 表现为「点了没反应 / 没有下拉选择」。
@@ -181,5 +189,8 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 - **演示脚本**：完整操作顺序与答辩口径见 [docs/汇报演示脚本.md](docs/汇报演示脚本.md)（含前置、12 步演示路径、预期提问口径、故障兜底）。
 - **演示数据一键就绪**：`python scripts/seed_demo.py`（幂等，可反复执行）。铺出四态订单（已完成 / 待支付 / 已退款 / 面议）+ 演示独占泊位 `NNG-DEMO-01`（满档，容量 2）/ `GGU-DEMO-02`（空档）+ 4 条预约，并对第三条复现 **409 档期冲突**。登录身份 `seed-shipper` / `seed-owner` / `seed-port`。
 - **汇报前提醒**：后端仍建议以 `LLM_MOCK=true` 起——合同 Agent 已具备降级（TODO-10 已闭环，LLM 故障时接口仍 200、补充条款回退内置模板并带 `degraded` 标识），但模板模式能保证演示文字逐次一致、可复现。
-- **小程序侧必须关域名校验**：`project.config.json` 里是 `urlCheck: true`（= 开启安全域名与 TLS 校验），请求 `http://127.0.0.1:8000` 会被拦掉、且失败被页面吞成空列表——**这是此前"前端走查不通过"的根因**。仓库已备 `miniapp/project.private.config.json`（`urlCheck: false`，官方推荐的私有配置层，已被 `.gitignore` 忽略，换机器需自带）；也可在工具「详情 → 本地设置」勾选「不校验合法域名」。
+- **小程序侧域名校验（已根治）**：`miniapp/project.config.json` 的 `setting.urlCheck` 已改为 `false`——本项目后端固定是 `http://127.0.0.1:8000`（非 HTTPS、未备案域名），开启校验时请求会被直接拦掉。原先靠 `project.private.config.json` 覆盖，但该文件被 `.gitignore` 忽略，**换机器 clone 后必然复现「连不上后端」**，故直接在仓库配置里关掉。若你的工具仍拦截，可在「详情 → 本地设置」勾选「不校验合法域名、web-view、TLS 版本以及 HTTPS 证书」。
+- **开发期登录身份（无需真实 AppID）**：仓库 `appid` 是占位值，开发者工具拿不到真实微信身份；而后端 `WECHAT_MOCK=true` 时 `openid = mock-openid-{code}`，**code 本身就是身份**。为避免 `wx.login` 每次返回不同 code（→ 每次登录都新建用户 →「我的货源 / 我的订单」永远为空）以及微信登录服务不可达时的「登录失败」，`utils/auth.js` 的开发期开关 `DEV_STABLE_IDENTITY` 会固定使用 `dev_device_code`（默认 `devtools-local`）作为身份，**不调用 `wx.login`**。接入真实 AppID 后须将其置为 `false`。
+  - 想用种子数据演示，在 Storage 面板设 `dev_login_code`（`seed-shipper` / `seed-owner` / `seed-port`）——它的优先级高于开发固定身份，退出登录时会被清除。
+  - 失败提示已按环节区分：弹窗会写明「失败环节（登录 / 绑定身份 / 切换身份 / 进入工作台）+ 真实原因 + 处置建议」，首页还会先做一次 `/healthz` 预检，连不上后端时提前提示（可点重试），不再只有一句「登录失败」。
 - **船东端演示入口**：`我的船队 → 桂平航 6688（散货 · 1500 载重吨）→ 智能找货`，得 3 条候选可按评分看排序；同队 `横州集运 101`（900 载重吨集装箱船）0 候选是硬约束的正确结果，非缺陷。

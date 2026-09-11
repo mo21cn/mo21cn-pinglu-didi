@@ -15,6 +15,8 @@
  *   ⑤ 静态防线：showActionSheet 长列表、组件注册、底栏按钮居中、页面底部留白
  *   ⑥ 身份选择（仅货主/船东）· 登录链路顺序（login→bindRole→switchRole）·
  *      订单页/支付页富化只打当前角色那一侧接口（防跨角色 403）
+ *   ⑦ 失败可定位（describeError 分类 · 失败环节点名）· 开发期身份稳定（不依赖 wx.login）·
+ *      /healthz 连通性预检
  *
  * 用法：node scripts/verify_ui_interactions.js     （退出码 0=全绿，1=有失败）
  * 方法论见 skill：miniapp-page-logic-verification
@@ -99,9 +101,12 @@ function makeRequire(wx, reqLog, authState) {
       return {
         request: (o) => {
           reqLog.push((o.method || 'GET') + ' ' + o.url)
+          if (AUTH.failRequest) return Promise.reject(new Error('request:fail fail to connect'))
           return Promise.resolve({ id: 99, total: 0, items: [] })
         },
         getToken: () => 't', setToken() {}, clearToken() {}, BASE_URL: 'http://127.0.0.1:8000',
+        // 与 utils/request.js 的真实实现同构：把原始信息翻译成 cause/hint
+        describeError: (err) => ({ cause: (err && (err.errMsg || err.message)) || '未知错误', hint: '' }),
       }
     }
     return {}
@@ -436,7 +441,8 @@ section('⑤ 静态防线')
     }
   }
 
-  // —— 失败路径不得把 loading 卡死（遮罩会吞掉所有点击 = 「点了没反应」）——
+  // —— 失败路径不得把 loading 卡死（遮罩会吞掉所有点击 = 「点了没反应」），
+  //    且必须说清「哪一步失败」——原先统一显示「登录失败」无法定位 ——
   {
     const wx = makeWx()
     const reqLog = []
@@ -444,8 +450,22 @@ section('⑤ 静态防线')
     const self = instantiate(cfg)
     cfg.onPickRole.call(self, { currentTarget: { dataset: { role: 'shipper' } } })
     await tick()
-    check('登录失败：复位 loading 并提示', self.data.logging === false && self.data.pendingRole === '' &&
-      wx.__calls.toast.some((o) => /登录失败/.test(o.title)), JSON.stringify(wx.__calls.toast.map((o) => o.title)))
+    const modal = wx.__calls.modal[wx.__calls.modal.length - 1]
+    check('登录失败：复位 loading', self.data.logging === false && self.data.pendingRole === '')
+    check('登录失败：弹窗点名失败环节为「登录」', !!modal && /失败环节：登录/.test(modal.content), JSON.stringify(modal))
+    check('登录失败：弹窗带上真实原因', !!modal && /原因：login fail/.test(modal.content), JSON.stringify(modal && modal.content))
+    check('失败路径不再用会互相覆盖的 toast', wx.__calls.toast.length === 0, JSON.stringify(wx.__calls.toast.map((o) => o.title)))
+  }
+  {
+    const wx = makeWx()
+    const reqLog = []
+    const cfg = loadIdx(wx, reqLog, { loggedIn: true, failBind: true, user: { user_id: 1, current_role: 'shipper', roles: ['shipper'] } })
+    const self = instantiate(cfg)
+    cfg.onPickRole.call(self, { currentTarget: { dataset: { role: 'owner' } } })
+    await tick()
+    const modal = wx.__calls.modal[wx.__calls.modal.length - 1]
+    check('绑定失败：弹窗点名「绑定身份」而非笼统登录失败',
+      !!modal && /失败环节：绑定身份/.test(modal.content), JSON.stringify(modal && modal.content))
   }
   {
     const wx = makeWx()
@@ -455,9 +475,12 @@ section('⑤ 静态防线')
     cfg.onPickRole.call(self, { currentTarget: { dataset: { role: 'shipper' } } })
     await tick()
     check('已就位时直接调 switchTab', wx.__calls.switchTab.length === 1)
-    wx.__calls.switchTab[0].fail({ errMsg: 'switchTab:fail' })
-    check('switchTab 失败：复位并提示（不再静默）', self.data.logging === false && self.data.pendingRole === '' &&
-      wx.__calls.toast.some((o) => /进入工作台失败/.test(o.title)), JSON.stringify(wx.__calls.toast.map((o) => o.title)))
+    wx.__calls.switchTab[0].fail({ errMsg: 'switchTab:fail can not switch to no-tabBar page' })
+    await tick()
+    const modal = wx.__calls.modal[wx.__calls.modal.length - 1]
+    check('switchTab 失败：复位并提示（不再静默）', self.data.logging === false && self.data.pendingRole === '')
+    check('switchTab 失败：弹窗点名「进入工作台」', !!modal && /失败环节：进入工作台/.test(modal.content), JSON.stringify(modal && modal.content))
+    check('switchTab 失败：错误对象被归类到 enter 阶段', !!modal, JSON.stringify(modal))
   }
 
   // —— 港口方身份点击无效（不再发请求 / 不跳转）——
@@ -491,6 +514,116 @@ section('⑤ 静态防线')
       check(`${path.basename(file)}(${role}) 只打 ${want}，不打 ${forbid}`,
         reqLog.some((r) => r.indexOf(want) !== -1) && !reqLog.some((r) => r.indexOf(forbid) !== -1), JSON.stringify(reqLog))
     }
+  }
+
+  // ---------------------------------------------------------------- ⑦ 失败可定位 · 开发期身份稳定
+  section('⑦ 错误诊断分类 · 开发期身份稳定 · /healthz 预检')
+
+  // —— describeError：把 errMsg 翻译成「哪一步坏了 + 怎么修」——
+  // 直接 require 真实实现（utils/request.js 顶层不碰 wx，可在 Node 下加载）
+  {
+    const RQ = require(path.join(MP, 'utils', 'request.js'))
+    check('utils/request 导出 describeError', typeof RQ.describeError === 'function')
+    const cases = [
+      ['域名未校验', { errMsg: 'request:fail url not in domain list' }, '请求域名未通过校验'],
+      ['后端连不上', { errMsg: 'request:fail fail to connect' }, '无法连接后端 127.0.0.1:8000'],
+      ['请求超时', { errMsg: 'request:fail timeout' }, '请求超时'],
+      ['switchTab 失败', { errMsg: 'switchTab:fail can not switch to no-tabBar page' }, '无法跳转到工作台页面'],
+      ['wx.login 不可用', { errMsg: 'wx.login:fail auth deny' }, 'wx.login 不可用'],
+      ['HTTP 5xx 带 detail', { message: 'boom', httpStatus: 500, detail: 'boom' }, '接口返回 500：boom'],
+    ]
+    for (const [label, err, want] of cases) {
+      const d = RQ.describeError(err)
+      check('describeError · ' + label, d.cause === want, `${d.cause} ≠ ${want}`)
+    }
+    const d0 = RQ.describeError({ errMsg: 'request:fail 神秘错误' })
+    check('describeError · 兜底给人话且保留原始 errMsg',
+      d0.cause === '网络异常，请稍后重试' && /神秘错误/.test(d0.hint), JSON.stringify(d0))
+  }
+
+  // —— 开发期身份稳定：AppID 是占位值时 wx.login 拿不到真实身份，
+  //    若走它则每次 code 都不同 → 每次登录都新建用户 →「我的货源/我的订单」永远为空 ——
+  function loadAuth(storage, loginCalls, codes) {
+    const src = read('utils/auth.js')
+    const mod = { exports: {} }
+    const req = (p) => {
+      if (String(p).indexOf('request') !== -1) {
+        return {
+          request: (o) => {
+            const code = (o.data && o.data.code) || ''
+            codes.push(code)
+            return Promise.resolve({
+              access_token: 'tk', user_id: 1, openid: 'mock-openid-' + code,
+              nickname: '', roles: ['shipper'], current_role: 'shipper'
+            })
+          },
+          getToken: () => '', setToken() {}, clearToken() {},
+          describeError: () => ({ cause: '', hint: '' }), BASE_URL: 'http://127.0.0.1:8000',
+        }
+      }
+      return {}
+    }
+    const wx = {
+      getStorageSync: (k) => (k in storage ? storage[k] : ''),
+      setStorageSync: (k, v) => { storage[k] = v },
+      removeStorageSync: (k) => { delete storage[k] },
+      login: (o) => { loginCalls.push(o); if (o && o.fail) o.fail({ errMsg: 'wx.login:fail' }) },
+    }
+    new Function('require', 'module', 'exports', 'wx', src)(req, mod, mod.exports, wx)
+    return mod.exports
+  }
+  {
+    const storage = {}
+    const loginCalls = []
+    const codes = []
+    const A = loadAuth(storage, loginCalls, codes)
+    await A.login()
+    check('开发期登录不调用 wx.login（不被微信登录服务卡死）', loginCalls.length === 0, 'calls=' + loginCalls.length)
+    check('开发期登录使用固定 code', codes[0] === 'devtools-local', JSON.stringify(codes))
+    check('固定身份 code 已落盘（下次登录仍是同一账号）', storage.dev_device_code === 'devtools-local', JSON.stringify(storage))
+  }
+  {
+    const storage = { dev_login_code: 'seed-owner' }
+    const codes = []
+    const A = loadAuth(storage, [], codes)
+    await A.login()
+    check('联调指定身份优先于开发固定身份', codes[0] === 'seed-owner', JSON.stringify(codes))
+  }
+  {
+    const storage = {}
+    const codes = []
+    const A = loadAuth(storage, [], codes)
+    await A.login()
+    await A.login()
+    check('重复登录 code 不变（不会每次登录都新建用户）', codes[0] === codes[1] && codes[0] === 'devtools-local', JSON.stringify(codes))
+    A.clearUser()
+    check('退出清 dev_login_code、保留 dev_device_code（回首页换身份不丢账号）',
+      !('dev_login_code' in storage) && storage.dev_device_code === 'devtools-local', JSON.stringify(Object.keys(storage)))
+  }
+  check('auth.js 生产路径仍保留 wx.login（DEV_STABLE_IDENTITY=false 时回退）',
+    /_wxLoginCode\(\)\.then/.test(read('utils/auth.js')) && /wx\.login\(\{/.test(read('utils/auth.js')))
+
+  // —— /healthz 预检：进首页就把「后端没起」说清楚，而不是等点完身份再报登录失败 ——
+  {
+    const wx = makeWx()
+    const reqLog = []
+    const cfg = loadIdx(wx, reqLog, { loggedIn: false, user: null })
+    const self = instantiate(cfg)
+    cfg.probeBackend.call(self)
+    await tick()
+    check('/healthz 预检命中健康端点', reqLog.some((r) => /\/healthz/.test(r)), JSON.stringify(reqLog))
+    check('后端可用 → 不显示未连接提示', self.data.backendDown === false, String(self.data.backendDown))
+    check('首页模板有未连接提示位（可点重试）',
+      /backendDown/.test(read('pages/index/index.wxml')) && /bindtap="probeBackend"/.test(read('pages/index/index.wxml')))
+  }
+  {
+    const wx = makeWx()
+    const reqLog = []
+    const cfg = loadIdx(wx, reqLog, { loggedIn: false, user: null, failRequest: true })
+    const self = instantiate(cfg)
+    cfg.probeBackend.call(self)
+    await tick()
+    check('后端不可用 → 显示未连接提示', self.data.backendDown === true, String(self.data.backendDown))
   }
 
   // ---------------------------------------------------------------- 汇总

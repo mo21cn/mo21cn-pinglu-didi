@@ -177,6 +177,7 @@ function route(url, body) {
   if (u.indexOf('/ship/registry') === 0) return { ok: D.ships }
   if (u.indexOf('/cargo/shipments') === 0) return { ok: D.cargoList }
   if (u.indexOf('/order/orders') === 0) return { ok: D.orders }
+  if (u === '/healthz') return { ok: { status: 'ok' } }   // 首页连通性预检
   return { err: '未登记的接口 ' + u }
 }
 
@@ -359,7 +360,15 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
   }
 
   // ① 首页身份选择
-  await walk('01 首页身份选择', 'pages/index/index', null, { role: 'shipper' }, ['onLoad'])
+  {
+    const s = await walk('01 首页身份选择', 'pages/index/index', null, { role: 'shipper' }, ['onLoad'])
+    // onLoad 里的 /healthz 预检：后端可用时不得置灰成「未连接后端」
+    if (s) {
+      const d = s._final()
+      if (d.backendDown === true) fail('01 · /healthz 预检误判为后端不可用', String(d.backendDown))
+      else ok()
+    }
+  }
 
   // ② 货主找船
   {
