@@ -35,8 +35,8 @@ pinglu-didi/
 ## 快速开始
 
 ```bash
-# 1. 克隆
-git clone git@github.com:mo21cn/mo21cn-pinglu-didi.git
+# 1. 克隆（仓库为 public，HTTPS 即可，无需配 SSH Key）
+git clone https://github.com/mo21cn/mo21cn-pinglu-didi.git
 cd mo21cn-pinglu-didi
 
 # 2. 后端依赖
@@ -45,12 +45,20 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. 环境配置（复制模板并按需修改）
-cp .env.example .env
-
-# 4. 启动
+# 3. 启动（默认 APP_ENV=development，自动加载 backend/.env.development）
 uvicorn app.main:app --reload
+
+# 4. 铺演示数据（幂等，可重复执行；不跑则各列表为空、演示看不到内容）
+python scripts/seed_demo.py
 ```
+
+**环境变量加载规则**（无需手工创建 `.env`）：读取顺序为 `backend/.env.{APP_ENV}` → `backend/.env.local`（后者覆盖前者，且**不入库**）。
+入库的 `.env.development` 已内置 `WECHAT_MOCK=true`（无 appid 也能登录）与 `LLM_MOCK=true`（智能体走内置规则模板，**无需任何 Key**），
+因此 **clone 后直接启动即得完整演示态**——五个业务域 + 四个智能入口全部可用且输出可复现。
+需要接真实大模型时，另建 `backend/.env.local` 写 `LLM_MOCK=false` + `LLM_API_KEY=sk-xxx` 即可覆盖。
+
+**演示身份**（登录页点身份卡即用，数据全挂在这两个账号下）：货主 `seed-shipper` / 船东 `seed-owner` / 港口 `seed-port`。
+用其他身份登录会当场注册出**空账号**，各列表为空——这是预期行为，不是故障。
 
 ### 验证脚本
 
