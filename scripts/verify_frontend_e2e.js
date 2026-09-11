@@ -132,10 +132,16 @@ async function bootstrap() {
   const payLabel = { pending: '待支付', paid: '已支付', refunded: '已退款', closed: '已关闭' }
   const byPayStatus = {}
   for (const [oid, p] of Object.entries(payments)) if (!byPayStatus[p.status]) byPayStatus[p.status] = Number(oid)
-  D.payCases = Object.entries(byPayStatus).map(([st, oid]) => [oid, payLabel[st] || st])
-  const noPay = (D.orders.items || []).find((o) => !payments[o.id] && o.freight_price && o.status === 'matched')
-    || (D.orders.items || []).find((o) => !payments[o.id])
-  if (noPay) D.payCases.push([noPay.id, '无支付单'])
+  D.payCases = Object.entries(byPayStatus).map(([st, oid]) => [oid, payLabel[st] || st, null])
+  // 「无支付单」要按订单可支付性分成两类断言——不可支付（面议/已撤单/已完成）时
+  // 页面本就不该给发起入口。旧版只有一个宽松兜底候选，种子为待支付锚点预建支付单后
+  // 会退到面议单上，把正确行为判成失败。
+  const payableNoPay = (o) => !payments[o.id] && o.status === 'matched' && o.freight_price != null
+  const noPayYes = (D.orders.items || []).find(payableNoPay)
+  const noPayNo = (D.orders.items || []).find((o) => !payments[o.id] && !payableNoPay(o))
+  if (noPayYes) D.payCases.push([noPayYes.id, '无支付单·可支付', true])
+  else note('S2 支付 · 库内无「已撮合且运费已定、尚未发起支付」的订单，正向发起入口用例由 seed 待支付锚点预建的支付单覆盖')
+  if (noPayNo) D.payCases.push([noPayNo.id, '无支付单·不可支付', false])
 
   console.log('载荷就绪：货 %d · 船 %d · 泊位 %d · 预约 %d · 订单 %d · 支付单 %d · 合同 %d',
     (D.cargoList.items || []).length, (D.ships.items || []).length, (D.berths.items || []).length,
@@ -556,7 +562,7 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
   }
 
   // ⑩ 支付详情三级页（待支付 / 已支付 / 已退款 / 无支付单）
-  for (const [oid, tag] of D.payCases) {
+  for (const [oid, tag, expectCreate] of D.payCases) {
     const s = await walk('S2 支付详情 · ' + tag + ' #' + oid, 'pages/trade/payment/payment', null,
       { role: 'shipper', arg: { order_id: oid } }, ['onLoad'])
     if (s) {
@@ -570,8 +576,10 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
         if (d.amountPrefix !== '¥') fail('S2 支付 · 金额前缀不是 ¥', String(d.amountPrefix))
         else ok()
       } else {
-        if (d.canCreate !== true) fail('S2 支付 · 无支付单且未提供发起入口（canCreate 应为 true）', String(d.canCreate))
-        else ok()
+        const want = expectCreate === undefined || expectCreate === null ? true : expectCreate
+        if (d.canCreate !== want) {
+          fail(`S2 支付 · 无支付单（${tag}）发起入口 canCreate 应为 ${want}`, String(d.canCreate))
+        } else ok()
       }
     }
   }
