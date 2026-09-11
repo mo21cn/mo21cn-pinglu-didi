@@ -120,6 +120,17 @@ function makeHarness(o) {
   }
 }
 
+/** 直接带 token 查后端 —— 用于断言「这个身份到底有没有数据」（订单页空白的本质） */
+async function apiGet(path, token) {
+  try {
+    const r = await fetch(BASE + path, { headers: { Authorization: 'Bearer ' + token } })
+    if (!r.ok) return { __status: r.status }
+    return await r.json()
+  } catch (e) {
+    return { __error: e.message }
+  }
+}
+
 const wait = (ms) => new Promise((r) => setTimeout(r, ms || 1500))
 const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
 
@@ -142,8 +153,8 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
     await wait(2500)
     bullet(h.log)
     check('全程未依赖 wx.login', h.log.indexOf('wx.login') === -1)
-    check('使用开发期固定身份 dev_device_code=devtools-local',
-      h.storage.dev_device_code === 'devtools-local', JSON.stringify(h.storage.dev_device_code))
+    check('身份已映射为船东演示账号（seed-owner）',
+      h.storage.dev_device_code === 'seed-owner', JSON.stringify(h.storage.dev_device_code))
     check('已进入船东工作台', h.log.indexOf('switchTab /pages/owner/owner') !== -1)
     check('没有弹任何失败提示', !h.log.some((l) => /MODAL|TOAST/.test(l)),
       JSON.stringify(h.log.filter((l) => /MODAL|TOAST/.test(l))))
@@ -152,6 +163,11 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
     check('loading 遮罩已复位（不会吞掉点击）', h.self.data.logging === false)
     check('链路顺序 login → bind-role → switch-role 全部命中',
       ['/auth/login', '/auth/bind-role', '/auth/switch-role'].every((u) => h.log.some((l) => l.indexOf(u) !== -1)))
+    const od = await apiGet('/api/v1/order/orders?size=100', h.token())
+    check('★ 船东视角订单非空（订单页不再是「暂无订单」空态）',
+      (od.items || []).length >= 10, 'items=' + (od.items || []).length + ' status=' + od.__status)
+    const sr = await apiGet('/api/v1/ship/registry?size=100', h.token())
+    check('★ 船东「我的船队」非空', (sr.items || []).length >= 3, 'items=' + (sr.items || []).length)
   }
 
   console.log('\n' + '='.repeat(74))
@@ -159,13 +175,20 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
   console.log('='.repeat(74))
   let uid = null
   {
-    const h = makeHarness({ wxLoginFails: true, storage: { dev_device_code: 'devtools-local' } })
+    // 上一轮已登录为船东演示账号，这一轮改点货主 → 必须换到货主演示账号
+    const h = makeHarness({ wxLoginFails: true, storage: { dev_device_code: 'seed-owner' } })
     h.enter('shipper')
     await wait(2500)
     bullet(h.log)
     check('已进入货主工作台', h.log.indexOf('switchTab /pages/shipper/shipper') !== -1)
     check('没有弹任何失败提示', !h.log.some((l) => /MODAL|TOAST/.test(l)))
     check('token 里的角色是 shipper', jwtPayload(h.token()).role === 'shipper', String(jwtPayload(h.token()).role))
+    check('身份已换到货主演示账号（seed-shipper）',
+      h.storage.dev_device_code === 'seed-shipper', JSON.stringify(h.storage.dev_device_code))
+    const od = await apiGet('/api/v1/order/orders?size=100', h.token())
+    check('★ 货主视角订单非空', (od.items || []).length >= 10, 'items=' + (od.items || []).length)
+    const cg = await apiGet('/api/v1/cargo/shipments?size=100', h.token())
+    check('★ 货主「我的货源」非空', (cg.items || []).length >= 5, 'items=' + (cg.items || []).length)
     uid = (h.user() || {}).user_id
   }
 
@@ -206,6 +229,8 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
     check('使用 seed-owner 身份登录', /mock-openid-seed-owner/.test(JSON.stringify(jwtPayload(h.token()))),
       JSON.stringify(jwtPayload(h.token())))
     check('已进入船东工作台', h.log.indexOf('switchTab /pages/owner/owner') !== -1)
+    check('手工身份不会被角色映射覆盖（走查脚本靠它注入 seed-port）',
+      !h.storage.dev_device_code, JSON.stringify(h.storage.dev_device_code))
   }
 
   console.log('\n' + '='.repeat(74))

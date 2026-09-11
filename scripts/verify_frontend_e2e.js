@@ -64,7 +64,12 @@ async function bootstrap() {
   for (const r of ['shipper', 'owner', 'port']) {
     const res = await api('POST', '/auth/login', { body: { code: 'seed-' + r } })
     if (res.status !== 200) throw new Error('登录失败 seed-' + r + ': ' + res.status + ' ' + JSON.stringify(res.data))
-    tok[r] = res.data.access_token
+    // ⚠️ login 签发的 token 带的是**库里持久化的 current_role**，不是请求参数。
+    // 其它脚本/探针一旦改过该账号的 current_role，这里就会拿到「角色不对的 token」→
+    // 后续接口 403。故登录后显式切到目标角色，让本脚本与运行顺序无关。
+    const sw = await api('POST', '/auth/switch-role', { body: { role: r }, token: res.data.access_token })
+    if (sw.status !== 200) throw new Error('切换角色失败 seed-' + r + ' → ' + r + ': ' + sw.status + ' ' + JSON.stringify(sw.data))
+    tok[r] = sw.data.access_token
   }
   console.log('三角色登录成功：seed-shipper / seed-owner / seed-port')
 
@@ -261,6 +266,9 @@ function loadPage(file, ctx) {
         getUser: () => ({ current_role: ctx.role, user_id: ctx.uid || 1 }),
         isLoggedIn: () => true, clearUser() {}, login: () => Promise.resolve({}),
         switchRole: () => Promise.resolve({}), bindRole: () => Promise.resolve({}),
+        // 开发期身份映射 + 统一进入链路（真实实现见 utils/auth.js）。
+        // 本脚本关注「已登录状态下各页面拿真数据渲染」，故桩成直通。
+        ensureDevAccount: () => false, enterRole: () => Promise.resolve({}),
         ROLE_LABELS: { shipper: '货主', owner: '船东', port: '港口方' },
       }
     }

@@ -1,6 +1,6 @@
 // 08 我的（底栏二级页）
 // 用户卡 / 会员卡 / 资产行 / 常用功能网格（多数原型占位）+ 账号（角色切换 / 退出）
-const { getUser, clearUser, switchRole } = require('../../utils/auth')
+const { getUser, clearUser, enterRole } = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
 
 // 账号区可选身份：仅货主 / 船东（港口方身份已下线）
@@ -116,8 +116,12 @@ Page({
     const role = e.currentTarget.dataset.role
     if (role === this.data.currentRole) return
     if (!ROLE_LIST.some((r) => r.key === role)) return
-    switchRole(role)
+    // 统一走 auth.enterRole：开发期会同时把身份切到该角色的演示账号。
+    // 否则切换过去看到的是空账号（页面无报错、列表全空，极易误判成功能故障）。
+    wx.showLoading({ title: '切换中...', mask: true })
+    enterRole(role)
       .then(() => {
+        wx.hideLoading()
         wx.showToast({ title: '已切换为' + this.roleLabelText(role), icon: 'success' })
         const map = {
           shipper: '/pages/shipper/shipper',
@@ -125,7 +129,10 @@ Page({
         }
         wx.switchTab({ url: map[role] || '/pages/index/index' })
       })
-      .catch(() => wx.showToast({ title: '切换失败', icon: 'none' }))
+      .catch(() => {
+        wx.hideLoading()
+        wx.showToast({ title: '切换失败', icon: 'none' })
+      })
   },
 
   onLogout() {

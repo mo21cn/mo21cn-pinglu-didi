@@ -123,7 +123,9 @@ Page({
       confirmText: '切换',
       success: (res) => {
         if (!res.confirm) return
-        auth.switchRole('owner')
+        // 走 auth.enterRole（而非裸 switchRole）：开发期会同时换到该角色的演示账号，
+        // 否则切过去是空账号，订单/货源列表全空
+        auth.enterRole('owner')
           .then(() => wx.switchTab({ url: '/pages/owner/owner' }))
           .catch(() => {})
       }
