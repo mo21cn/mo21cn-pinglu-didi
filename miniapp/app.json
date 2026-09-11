@@ -13,6 +13,7 @@
     "pages/port/berth/berth",
     "pages/port/appt/appt",
     "pages/assistant/assistant",
+    "pages/preview/preview",
     "pages/mine/mine"
   ],
   "window": {

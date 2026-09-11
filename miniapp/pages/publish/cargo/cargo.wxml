@@ -130,4 +130,47 @@
     bind:select="onPortPicked"
     bind:close="onPortPickerClose"
   />
+
+  <!--
+    发货方式选择（点击 tabBar 中间「+发货」进入本页即弹出）
+    · 自主发货 → 关闭弹窗，留在本页自行填写发布
+    · 委托发货 → 跳「功能预览」占位页（纯前端，不涉及后端）
+    文字/布局/颜色/图标均对齐设计稿；两枚单选圈为设计稿中的「默认」标记，非可交互控件。
+  -->
+  <view wx:if="{{showChannel}}" class="ch-mask">
+    <view class="ch-mask-bg" bindtap="closeChannelModal"></view>
+    <view class="ch-panel">
+      <view class="ch-opt" bindtap="pickSelfDelivery" hover-class="ch-opt-hover">
+        <view class="ch-card ch-card-self">
+          <view class="ch-icon">
+            <view class="ch-head"></view>
+            <view class="ch-shoulder"></view>
+          </view>
+          <text class="ch-card-text">自主发货</text>
+        </view>
+        <view class="ch-radio">
+          <view class="ch-ring"></view>
+          <text class="ch-radio-label">默认</text>
+        </view>
+      </view>
+      <view class="ch-desc">您发布货物，自行在<text class="ch-brand">船好多</text>平台找寻认证船主接单并完成运输。</view>
+
+      <view class="ch-opt ch-opt-gap" bindtap="pickEntrustDelivery" hover-class="ch-opt-hover">
+        <view class="ch-card ch-card-entrust">
+          <view class="ch-icon">
+            <view class="ch-box-lid"></view>
+            <view class="ch-box-front"></view>
+            <view class="ch-palm"></view>
+            <view class="ch-thumb"></view>
+          </view>
+          <text class="ch-card-text">委托发货</text>
+        </view>
+        <view class="ch-radio">
+          <view class="ch-ring"></view>
+          <text class="ch-radio-label">默认</text>
+        </view>
+      </view>
+      <view class="ch-desc">您发布货物，委托给<text class="ch-brand">船好多</text>平台承运，由平台组织运力完成运输。</view>
+    </view>
+  </view>
 </view>
