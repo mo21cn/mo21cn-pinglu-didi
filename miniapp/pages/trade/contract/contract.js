@@ -130,6 +130,8 @@ Page({
     loading: true,
     error: '',
     mocked: false,
+    degraded: false,
+    degradedReason: '',
     latencyMs: 0,
     risks: [],
     riskCount: 0,
@@ -184,6 +186,8 @@ Page({
         this.setData({
           loading: false,
           mocked: !!res.mocked,
+          degraded: !!res.degraded,
+          degradedReason: res.degraded_reason || '',
           latencyMs: res.latency_ms || 0,
           risks,
           riskCount: risks.length,

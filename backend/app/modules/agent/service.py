@@ -358,22 +358,30 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
         f"运费 {'已锁定' if order.freight_price is not None else '面议未锁定'}，"
         f"已命中风险：{risk_titles}。请起草四条标准补充条款。"
     )
+    degraded = False
+    degraded_reason: str | None = None
+    mocked = False
+    latency_ms = 0
+    clauses: list[dict[str, str]] = []
     try:
         result = await llm_gateway.chat_json(
             system=CONTRACT_SYSTEM_PROMPT,
             user=fact_summary,
             mock_content=_mock_contract_clauses,
         )
+        clauses = result.content.get("supplementary_clauses") or []
+        mocked = result.mocked
+        latency_ms = result.latency_ms
     except LLMError as exc:
-        # LLM 故障降级：合同主体与风险仍可用确定性结果返回（补充条款置默认）
+        # LLM 故障降级（TODO-10）：主体条款与风险点均为确定性结果，本就不依赖 LLM；
+        # 补充条款回退内置标准模板，接口仍返回 200 并置 degraded=True，
+        # 避免外网抖动导致整页不可用；审计照实记 success=False + error_kind。
+        degraded = True
+        degraded_reason = exc.kind
+        clauses = _mock_contract_clauses("")["supplementary_clauses"]
         record.success = False
         record.error_kind = exc.kind
-        record.response_digest = str(exc)[:_DIGEST_LEN]
-        db.add(record)
-        db.commit()
-        raise AgentServiceError(exc.kind, str(exc)) from exc
 
-    clauses = result.content.get("supplementary_clauses") or []
     _cn_nums = "七八九十"
     supplement = "\n".join(
         f"## {_cn_nums[i] if i < len(_cn_nums) else i + 7}、{c.get('title', '')}"
@@ -382,13 +390,18 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
         if isinstance(c, dict)
     )
     contract_text = main_text + (supplement + "\n" if supplement else "")
+    if degraded:
+        contract_text += (
+            "\n---\n*注：补充条款未能由 AI 起草（LLM 暂不可用），"
+            "已回退平台内置标准条款；核心条款与风险提示不受影响。*\n"
+        )
     contract_text += (
         "\n---\n*本草稿由平台智能合同 Agent 生成，核心条款来自订单数据，"
         "补充条款由 AI 起草；签署前请人工审核。*"
     )
 
-    record.mocked = result.mocked
-    record.latency_ms = result.latency_ms
+    record.mocked = mocked
+    record.latency_ms = latency_ms
     record.response_digest = contract_text[:_DIGEST_LEN]
     db.add(record)
     db.commit()
@@ -397,6 +410,8 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
         order_id=order.id,
         contract_text=contract_text,
         risks=risks,
-        mocked=result.mocked,
-        latency_ms=result.latency_ms,
+        mocked=mocked,
+        latency_ms=latency_ms,
+        degraded=degraded,
+        degraded_reason=degraded_reason,
     )

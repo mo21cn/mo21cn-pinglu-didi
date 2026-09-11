@@ -24,7 +24,7 @@
       <view class="agent-card bg-brand-gradient">
         <view class="agent-row">
           <text class="agent-name">智能合同 Agent</text>
-          <text class="agent-chip">{{mocked ? '规则模板' : 'LLM 已接入'}}</text>
+          <text class="agent-chip">{{degraded ? '降级模板' : (mocked ? '规则模板' : 'LLM 已接入')}}</text>
         </view>
         <view class="agent-title">核心条款零 LLM</view>
         <view class="agent-desc">甲乙方／货物／航线／运费／船舶由订单数据模板渲染，风险点由规则引擎扫描；LLM 只撰写补充条款文字，禁止输出任何数字与日期。</view>
@@ -35,6 +35,12 @@
           <text class="agent-dot">·</text>
           <text>命中风险 {{riskCount}} 项</text>
         </view>
+      </view>
+
+      <!-- 降级提示：LLM 故障已回退内置标准条款（TODO-10） -->
+      <view wx:if="{{degraded}}" class="degrade-note">
+        <text class="degrade-title">已降级 · 补充条款由平台内置标准模板生成</text>
+        <text class="degrade-desc">AI 服务当前不可用（{{degradedReason}}）。主体条款与风险提示不受影响，服务恢复后可重新生成。</text>
       </view>
 
       <!-- ② 风险卡：确定性规则引擎 -->
