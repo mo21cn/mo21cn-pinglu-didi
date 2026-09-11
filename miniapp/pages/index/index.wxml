@@ -3,24 +3,12 @@
   不设主页——进入即选身份，点击直接进入专属工作台
 -->
 <view class="page">
-  <!-- 背景：地图风格底图（纯 CSS 模拟，无外部资源） -->
-  <view class="map-bg">
-    <view class="map-blob blob-a"></view>
-    <view class="map-blob blob-b"></view>
-    <view class="map-blob blob-c"></view>
-    <view class="map-line line-a"></view>
-    <view class="map-line line-b"></view>
-    <view class="map-road">G359</view>
-  </view>
-
-  <!-- 品牌区 -->
-  <view class="hero">
-    <view class="logo-row">
-      <view class="logo-mark">⛵</view>
-      <text class="logo-text">船好多</text>
-    </view>
-    <view class="logo-slogan">船好货多赚好多</view>
-  </view>
+  <!--
+    品牌头图（设计稿导出：平陆运河航拍 +「船好多」标识 + 标语）
+    替代原先「纯 CSS 模拟底图 + 图文 logo」的头部，头图自带品牌标识，
+    故去掉左上角原有的 ⛵ 图标与「船好多」文字、以及下方标语行。
+  -->
+  <image class="brand-hero" src="/assets/home-hero.jpg" mode="aspectFill" />
 
   <!-- 身份选择浮窗 -->
   <view class="role-sheet">
