@@ -61,10 +61,18 @@ node scripts/verify_miniapp.js
 # 前端动态校验（拉真实后端载荷驱动 13 个页面的取数与装饰逻辑，CI 可跑）
 node scripts/verify_frontend_e2e.js
 
+# UI 交互契约校验（组件 props/事件、弹层闭环、showActionSheet 长列表等静态与逻辑防线，无需 IDE）
+node scripts/verify_ui_interactions.js
+
 # 真机走查（需开发者工具「设置 → 安全设置 → 服务端口」已开启）
 # 前置：后端已起 + 已执行 backend/scripts/seed_demo.py
 MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 ```
+
+> ⚠️ **港口选择不要用 `wx.showActionSheet`**：该 API 的 `itemList` 上限为 6 项，
+> 超过会直接 fail 且页面通常没有 fail 兜底 → 表现为「点了没反应 / 没有下拉选择」。
+> 港口共 13 个，请统一用 `components/port-picker`（底部滚动列表，可承载任意长度）。
+> `scripts/verify_ui_interactions.js` 已把这条写成静态防线。
 
 > `verify_miniapp_device.js` 依赖 `miniprogram-automator`（未入库），按需 `npm i -g miniprogram-automator`；
 > 付费点击等会产生副作用的步骤默认关闭，用 `WALK_PAY=1` 显式开启。

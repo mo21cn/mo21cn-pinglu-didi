@@ -101,4 +101,15 @@
     <view class="btn-ghost" bindtap="saveDraft" hover-class="hover-dim">保存草稿</view>
     <view class="btn-primary" bindtap="publish" hover-class="cta-hover">确认发布</view>
   </view>
+
+  <!-- 港口选择弹层（13 项 · 原生 showActionSheet 上限 6 项不可用） -->
+  <port-picker
+    visible="{{ppVisible}}"
+    title="{{ppTitle}}"
+    tip="{{ppTip}}"
+    current="{{ppCurrent}}"
+    ports="{{ppPorts}}"
+    bind:select="onPortPicked"
+    bind:close="onPortPickerClose"
+  />
 </view>

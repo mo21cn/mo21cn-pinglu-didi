@@ -39,7 +39,7 @@
     <view class="section-card">
       <view class="block-title">我要发货</view>
 
-      <view class="field-row" bindtap="pickOrigin" hover-class="row-hover">
+      <view class="field-row {{miss === 'origin' ? 'field-row-miss' : ''}}" bindtap="pickOrigin" hover-class="row-hover">
         <text class="field-label">装货港</text>
         <view class="loc-value">
           <text class="pin pin-blue">●</text>
@@ -48,7 +48,7 @@
         <text class="field-caret">›</text>
       </view>
 
-      <view class="field-row" bindtap="pickDest" hover-class="row-hover">
+      <view class="field-row {{miss === 'dest' ? 'field-row-miss' : ''}}" bindtap="pickDest" hover-class="row-hover">
         <text class="field-label">卸货港</text>
         <view class="loc-value">
           <text class="pin pin-purple">●</text>
@@ -59,14 +59,14 @@
 
       <!-- 双列：货物资料 / 用船需求 -->
       <view class="dual-row">
-        <view class="dual-item {{panel === 'cargo' ? 'dual-item-active' : ''}}" bindtap="togglePanel" data-panel="cargo" hover-class="row-hover">
+        <view class="dual-item {{panel === 'cargo' ? 'dual-item-active' : ''}} {{miss === 'weight' ? 'dual-item-miss' : ''}}" bindtap="togglePanel" data-panel="cargo" hover-class="row-hover">
           <view class="dual-body">
             <view class="dual-label">货物资料</view>
             <view class="dual-value">{{cargoBrief}}</view>
           </view>
           <text class="dual-caret">{{panel === 'cargo' ? '⌃' : '›'}}</text>
         </view>
-        <view class="dual-item {{panel === 'req' ? 'dual-item-active' : ''}}" bindtap="togglePanel" data-panel="req" hover-class="row-hover">
+        <view class="dual-item {{panel === 'req' ? 'dual-item-active' : ''}} {{miss === 'date' ? 'dual-item-miss' : ''}}" bindtap="togglePanel" data-panel="req" hover-class="row-hover">
           <view class="dual-body">
             <view class="dual-label">用船需求</view>
             <view class="dual-value">{{reqBrief}}</view>
@@ -202,4 +202,15 @@
       </view>
     </view>
   </view>
+
+  <!-- 港口选择弹层（13 项 · 原生 showActionSheet 上限 6 项不可用） -->
+  <port-picker
+    visible="{{ppVisible}}"
+    title="{{ppTitle}}"
+    tip="{{ppTip}}"
+    current="{{ppCurrent}}"
+    ports="{{ppPorts}}"
+    bind:select="onPortPicked"
+    bind:close="onPortPickerClose"
+  />
 </view>

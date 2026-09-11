@@ -1,4 +1,6 @@
 {
-  "usingComponents": {},
+  "usingComponents": {
+    "port-picker": "/components/port-picker/index"
+  },
   "navigationBarTitleText": "找货"
 }

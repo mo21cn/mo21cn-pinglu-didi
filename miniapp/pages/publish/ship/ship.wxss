@@ -1,7 +1,11 @@
 /* 05 发布空船（二级页） */
 page { background: #F5F7FA; }
 
-.page-sub { padding: 24rpx 24rpx 0; }
+/* 同 cargo 页：padding 简写会覆盖 app.wxss 给底部固定条预留的 padding-bottom */
+.page-sub {
+  padding: 24rpx 24rpx 0;
+  padding-bottom: calc(200rpx + env(safe-area-inset-bottom));
+}
 .section-card { margin-bottom: 24rpx; }
 
 .row-hover { background: #F7F9FF; }

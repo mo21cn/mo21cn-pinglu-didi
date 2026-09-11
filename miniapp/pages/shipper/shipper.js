@@ -3,6 +3,8 @@
 const { request } = require('../../utils/request')
 const auth = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
+// 13 个港口的全站唯一来源（微信 showActionSheet 的 itemList 上限 6，港口选择改走 port-picker 组件）
+const { PORTS } = require('../../utils/ports')
 
 const CARGO_TYPES = [
   { key: 'bulk',      label: '散货' },
@@ -20,22 +22,6 @@ const SHIP_TYPES = [
   { key: 'general',   label: '件杂货船' },
   { key: 'container', label: '集装箱船' },
   { key: 'tanker',    label: '液货船' }
-]
-
-const PORTS = [
-  { key: 'NNG', label: '南宁 · 平塘港' },
-  { key: 'GGU', label: '贵港' },
-  { key: 'WUZ', label: '梧州' },
-  { key: 'BIN', label: '来宾' },
-  { key: 'LZH', label: '柳州' },
-  { key: 'BSZ', label: '百色' },
-  { key: 'CHZ', label: '崇左' },
-  { key: 'GXL', label: '桂林' },
-  { key: 'HEZ', label: '贺州' },
-  { key: 'YUL', label: '玉林' },
-  { key: 'QNZ', label: '钦州' },
-  { key: 'FCG', label: '防城港' },
-  { key: 'BHZ', label: '北海' }
 ]
 
 // 推荐船源（演示数据：货主视角暂无撮合上下文时展示）
@@ -79,7 +65,17 @@ Page({
     hotShips: HOT_SHIPS,
     hotRoutes: HOT_ROUTES,
     myCargoTotal: 0,
-    publishing: false
+    publishing: false,
+
+    // 港口选择弹层（port-picker 组件）
+    ppVisible: false,
+    ppTitle: '选择港口',
+    ppTip: '',
+    ppCurrent: '',
+    ppPorts: PORTS,
+    ppAction: '',
+    // 校验失败时高亮的字段（origin | dest | weight | date），用于给出可视化的下一步指引
+    miss: ''
   },
 
   onLoad() {
@@ -108,32 +104,68 @@ Page({
   },
 
   // ---- 顶栏 ----
+  // 港口选择统一走 port-picker 组件（13 个港口超过 wx.showActionSheet 的 itemList 上限 6，
+  // 用它选择会直接 fail 且无兜底 —— 表现为「点了没反应/没有下拉选择」）
   pickDefaultPort() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
+    this.openPortPicker({
+      title: '常用港口',
+      tip: '选中后作为默认装货港',
+      current: this.data.defaultPortKey,
+      action: 'defaultPort'
+    })
+  },
+
+  // 切角色：仅保留「货主 ⇄ 船东」互切（港口方入口已按 UI 评审下线）
+  onSwitchRole() {
+    wx.showModal({
+      title: '切换身份',
+      content: '切换到「船东（找货）」，进入船东工作台。',
+      confirmText: '切换',
       success: (res) => {
-        const p = PORTS[res.tapIndex]
-        this.setData({
-          defaultPortLabel: p.label,
-          defaultPortKey: p.key,
-          'form.origin_port': p.key,
-          'form.origin_label': p.label
-        })
+        if (!res.confirm) return
+        auth.switchRole('owner')
+          .then(() => wx.switchTab({ url: '/pages/owner/owner' }))
+          .catch(() => {})
       }
     })
   },
 
-  onSwitchRole() {
-    wx.showActionSheet({
-      itemList: ['切换到船东（找货）', '切换到港口方'],
-      success: (res) => {
-        const role = res.tapIndex === 0 ? 'owner' : 'port'
-        const url = role === 'owner' ? '/pages/owner/owner' : '/pages/port/port'
-        auth.switchRole(role)
-          .then(() => wx.switchTab({ url }))
-          .catch(() => {})
-      }
+  // ---- 港口选择弹层：统一入口 ----
+  openPortPicker(opts) {
+    this.setData({
+      ppTitle: opts.title || '选择港口',
+      ppTip: opts.tip || '',
+      ppCurrent: opts.current || '',
+      ppPorts: opts.ports || PORTS,
+      ppAction: opts.action || '',
+      ppVisible: true
     })
+  },
+
+  onPortPicked(e) {
+    const { key, label } = e.detail
+    const action = this.data.ppAction
+    const patch = { ppVisible: false, miss: '' }
+    if (action === 'defaultPort') {
+      patch.defaultPortKey = key
+      patch.defaultPortLabel = label
+      patch['form.origin_port'] = key
+      patch['form.origin_label'] = label
+    } else if (action === 'origin') {
+      patch['form.origin_port'] = key
+      patch['form.origin_label'] = label
+    } else if (action === 'dest') {
+      patch['form.dest_port'] = key
+      patch['form.dest_label'] = label
+    }
+    this.setData(patch, () => {
+      // 闭环：选完港口自动继续（仅装/卸货港需要就地补选，其余字段在面板内填写）
+      if (action === 'origin' || action === 'dest') this.onFindShips()
+    })
+  },
+
+  onPortPickerClose() {
+    this.setData({ ppVisible: false })
   },
 
   goSearch() { wx.showToast({ title: '搜索功能开发中', icon: 'none' }) },
@@ -143,7 +175,15 @@ Page({
   // ---- 表单 ----
   onInput(e) {
     const field = e.currentTarget.dataset.field
-    this.setData({ [`form.${field}`]: e.detail.value }, () => this.refreshBrief())
+    const patch = { [`form.${field}`]: e.detail.value }
+    // 补全后清掉高亮
+    if (this.data.miss && this.missKeyOf(field) === this.data.miss) patch.miss = ''
+    this.setData(patch, () => this.refreshBrief())
+  },
+
+  /** 表单字段 → miss 高亮键 */
+  missKeyOf(field) {
+    return { weight_t: 'weight', expect_date: 'date', origin_port: 'origin', dest_port: 'dest' }[field] || ''
   },
 
   togglePanel(e) {
@@ -179,22 +219,20 @@ Page({
   },
 
   pickOrigin() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
-      success: (res) => {
-        const p = PORTS[res.tapIndex]
-        this.setData({ 'form.origin_port': p.key, 'form.origin_label': p.label })
-      }
+    this.openPortPicker({
+      title: '选择装货港',
+      tip: '选完自动继续校验',
+      current: this.data.form.origin_port,
+      action: 'origin'
     })
   },
 
   pickDest() {
-    wx.showActionSheet({
-      itemList: PORTS.map((p) => p.label),
-      success: (res) => {
-        const p = PORTS[res.tapIndex]
-        this.setData({ 'form.dest_port': p.key, 'form.dest_label': p.label })
-      }
+    this.openPortPicker({
+      title: '选择卸货港',
+      tip: '选完自动继续校验',
+      current: this.data.form.dest_port,
+      action: 'dest'
     })
   },
 
@@ -205,7 +243,7 @@ Page({
       success: (res) => {
         const offsets = [0, 1, 2, 7]
         const d = new Date(Date.now() + offsets[res.tapIndex] * 86400000)
-        this.setData({ 'form.expect_date': d.toISOString().slice(0, 10) }, () => this.refreshBrief())
+        this.setData({ 'form.expect_date': d.toISOString().slice(0, 10), miss: '' }, () => this.refreshBrief())
       },
       fail: () => {
         // 用户取消：保留已有日期
@@ -219,15 +257,33 @@ Page({
   },
 
   // ---- 查看匹配船源：创建货源（直接发布）→ 跳撮合页 ----
+  // 校验失败不再是「只弹 toast 的死路」，而是把用户带到能补全的位置：
+  //   · 缺装/卸货港 → 直接拉起港口选择面板（选完自动回到本函数继续）
+  //   · 缺吨数/日期 → 自动展开对应面板（货物资料 / 用船需求）并高亮该字段
   onFindShips() {
     if (this.data.publishing) return
     const f = this.data.form
-    if (!f.origin_port) return wx.showToast({ title: '请选择装货港', icon: 'none' })
-    if (!f.dest_port) return wx.showToast({ title: '请选择卸货港', icon: 'none' })
-    if (f.origin_port === f.dest_port) return wx.showToast({ title: '起讫港不能相同', icon: 'none' })
-    if (!f.weight_t || Number(f.weight_t) <= 0) return wx.showToast({ title: '请在「货物资料」填写吨数', icon: 'none' })
-    if (!f.expect_date) return wx.showToast({ title: '请在「用船需求」选择装货日期', icon: 'none' })
 
+    if (!f.origin_port) {
+      return this.openPortPicker({ title: '请选择装货港', tip: '选完自动继续校验', current: '', action: 'origin' })
+    }
+    if (!f.dest_port) {
+      return this.openPortPicker({ title: '请选择卸货港', tip: '选完自动继续校验', current: '', action: 'dest' })
+    }
+    if (f.origin_port === f.dest_port) {
+      this.setData({ miss: 'dest' })
+      return wx.showToast({ title: '装货港与卸货港不能相同', icon: 'none' })
+    }
+    if (!f.weight_t || Number(f.weight_t) <= 0) {
+      this.setData({ panel: 'cargo', miss: 'weight' })
+      return wx.showToast({ title: '请在「货物资料」填写吨数（已为你展开）', icon: 'none', duration: 2200 })
+    }
+    if (!f.expect_date) {
+      this.setData({ panel: 'req', miss: 'date' })
+      return wx.showToast({ title: '请在「用船需求」选择装货日期（已为你展开）', icon: 'none', duration: 2200 })
+    }
+
+    this.setData({ miss: '' })
     const parts = []
     if (this.data.packLabel) parts.push('包装：' + this.data.packLabel)
     if (this.data.shipTypeLabel) parts.push('所需船型：' + this.data.shipTypeLabel)
