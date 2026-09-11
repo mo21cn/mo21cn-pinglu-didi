@@ -30,7 +30,12 @@ const util = require('util')
 const WS = process.env.MINIAPP_AUTO_WS || 'ws://127.0.0.1:9420'
 const API = process.env.API_BASE || 'http://127.0.0.1:8000/api/v1'
 const ROOT = path.resolve(__dirname, '..')
-const SHOTS = process.env.WALK_SHOTS || path.join(ROOT, 'tmp', 'walkthrough-shots')
+// ⚠️ 每轮走查写进独立的时间戳子目录：不清空旧目录会新旧混淆，
+//    但「一次性删掉整个目录的 png」会被沙箱批量删除保护拦下
+//    （SAFE_DELETE_BULK_CONFIRM_REQUIRED，阈值 50/轮），所以改为分目录 + LATEST.txt 指针。
+const SHOTS_ROOT = process.env.WALK_SHOTS || path.join(ROOT, 'tmp', 'walkthrough-shots')
+const RUN_ID = process.env.WALK_RUN_ID || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+const SHOTS = path.join(SHOTS_ROOT, RUN_ID)
 const DO_PAY = process.env.WALK_PAY === '1'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -144,11 +149,31 @@ async function backSafe(mp) {
   }
   return false
 }
+/**
+ * 轮询页面 data 直到满足条件（合同页要等 LLM 生成完）。
+ * 固定 sleep 不可靠：真实 LLM 生成慢于 sleep 时，读到的是 loading 态的空数据
+ * （表现为 raw=0 / risks=[]，看起来像功能坏了，其实是等太短）。
+ * 返回最后一次读到的 data（超时也返回，交给断言判失败）。
+ */
+async function waitData(page, pred, tries = 60, gap = 500) {
+  let last = {}
+  for (let i = 0; i < tries; i++) {
+    try {
+      last = (await page.data()) || {}
+      if (pred(last)) return last
+    } catch (_) { /* 页面切换中，继续等 */ }
+    await sleep(gap)
+  }
+  return last
+}
+/** 合同页就绪：不在 loading，且（有正文 或 已落到错误态） */
+const CONTRACT_READY = (d) => !!d && d.loading === false && (String(d.rawText || '').length > 0 || !!d.error)
 const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.stringify(o))
 
 // ------------------------------------ 主流程 ------------------------------------
 ;(async () => {
   fs.mkdirSync(SHOTS, { recursive: true })
+  fs.writeFileSync(path.join(SHOTS_ROOT, 'LATEST.txt'), SHOTS, 'utf8')
 
   // 0. 预取锚点（不写死 ID，随库自适应）
   const s = await apiLogin('seed-shipper')
@@ -176,6 +201,17 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
   log('锚点/待支付', payAnchor ? { order: payAnchor.order.id, freight: payAnchor.order.freight_price, payment: payAnchor.payment.id } : '未找到')
   log('锚点/撮合货源', matchCargo ? { id: matchCargo.cargo.id, candidates: matchCargo.total } : '无')
   log('锚点/撮合船舶', shipAnchor ? { id: shipAnchor.id, name: shipAnchor.ship_name } : '无')
+  // 智能合同仿真案例（seed_contract_cases.py 铺设）：按货源名里的 R3/R4/R5 标记定位订单
+  const simCases = []
+  for (const key of ['R3', 'R4', 'R5']) {
+    const cargo = cargos.find((c) => c.cargo_name && c.cargo_name.indexOf('仿真案例 · ' + key) >= 0)
+    if (!cargo) continue
+    const order = orders.find((o) => o.cargo_id === cargo.id && o.status !== 'cancelled')
+    if (order) simCases.push({ key, cargoId: cargo.id, orderId: order.id })
+  }
+  log('智能合同仿真案例', simCases.length ? simCases.map((x) => `${x.key}#${x.orderId}`).join(' ') : '未铺设')
+  rec('预取智能合同仿真案例（R3/R4/R5）', simCases.length >= 3, simCases.map((x) => x.key + '#' + x.orderId).join(' '))
+
   log('库内规模', { cargos: cargos.length, orders: orders.length, berths: berths.length, appts: appts.length, ships: ships.length })
   rec('预取演示锚点', !!(payAnchor && matchCargo && shipAnchor),
     `order=${payAnchor && payAnchor.order.id} cargo=${matchCargo && matchCargo.cargo.id} ship=${shipAnchor && shipAnchor.id}`)
@@ -272,10 +308,9 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
       }
       rec('⑦ 「查看合同」真实点击', tapped, `order #${payAnchor.order.id}`)
       await waitPath(mp, 'pages/trade/contract/contract', 25)
-      await sleep(3000)
-      await shot(mp, '07-合同预览三级页')
       const cp = await mp.currentPage()
-      const cd = await cp.data()
+      const cd = await waitData(cp, CONTRACT_READY)
+      await shot(mp, '07-合同预览三级页')
       log('合同页', { orderId: cd.orderId, html: (cd.contractHtml || '').length, risks: (cd.risks || []).length, high: cd.highCount, mocked: cd.mocked })
       rec('⑦ 合同页进入', cp.path === 'pages/trade/contract/contract', cp.path)
       rec('⑦ 合同正文有内容', ((cd.contractHtml || '').length > 200) || ((cd.rawText || '').length > 200),
@@ -285,14 +320,73 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
       await sleep(1500)
       const cur2 = await mp.currentPage()
       const id3 = ((await cur2.data()).list || []).findIndex((x) => x.id === payAnchor.order.id)
-      const card2 = (await cur2.$$('.order-card'))[id3]
-      if (card2) {
+      let c3 = {}
+      for (let i = 0; i < 3; i++) {
+        const card2 = (await cur2.$$('.order-card'))[id3]
+        if (!card2) break
         await card2.longpress()
-        await sleep(2600)
-        const c3 = await cur2.data()
-        await shot(mp, '07b-订单页-长按合同弹层')
-        rec('⑦ 长按订单卡弹出合同弹层', !!(c3.contract && c3.contract.show))
-        if (c3.contract && c3.contract.show) { await tapAt(cur2, '.modal-mask', 0).catch(() => {}); await sleep(700) }
+        // 弹层内容同样来自合同 Agent，慢生成时会出现「弹层在但正文空」→ 等 show 即可
+        c3 = await waitData(cur2, (d) => !!(d.contract && d.contract.show), 16, 400)
+        if (c3.contract && c3.contract.show) break
+        await sleep(900)
+      }
+      await shot(mp, '07b-订单页-长按合同弹层')
+      rec('⑦ 长按订单卡弹出合同弹层', !!(c3.contract && c3.contract.show))
+      if (c3.contract && c3.contract.show) { await tapAt(cur2, '.modal-mask', 0).catch(() => {}); await sleep(700) }
+    }
+  }
+
+  // ⑦b 智能合同仿真案例（R3/R4/R5：订单页「查看合同」→ 风险卡命中预期规则）
+  const EXPECT_RISK = { R3: '装货日期临近', R4: '船舶证书临期', R5: '液货/危险品运输' }
+  for (const sc of simCases) {
+    if ((await mp.currentPage()).path !== 'pages/trade/orders/orders') {
+      await nav(mp, 'tab', '/pages/trade/orders/orders', 'pages/trade/orders/orders')
+      await sleep(1500)
+    }
+    const page = await mp.currentPage()
+    const idx = ((await page.data()).list || []).findIndex((x) => x.id === sc.orderId)
+    rec(`⑦b 仿真案例 ${sc.key} 在订单列表可见`, idx >= 0, `#${sc.orderId} idx=${idx}`)
+    if (idx < 0) continue
+    const card = (await page.$$('.order-card'))[idx]
+    let tapped = false
+    for (const b of (await card.$$('.act-ghost')) || []) {
+      if (String(await b.text().catch(() => '')).indexOf('合同') >= 0) { await b.tap(); tapped = true; break }
+    }
+    rec(`⑦b 「查看合同」可点（${sc.key}）`, tapped)
+    await waitPath(mp, 'pages/trade/contract/contract', 25)
+    const cp = await mp.currentPage()
+    const cd = await waitData(cp, CONTRACT_READY)
+    await shot(mp, '07c-合同-仿真案例-' + sc.key)
+    const titles = (cd.risks || []).map((r) => r.title)
+    log(`合同风险(${sc.key})`, (cd.risks || []).map((r) => `${r.sev_label}/${r.title}`))
+    rec(`⑦b ${sc.key} 合同页进入`, cp.path === 'pages/trade/contract/contract', cp.path)
+    rec(`⑦b ${sc.key} 命中预期风险「${EXPECT_RISK[sc.key]}」`,
+      titles.indexOf(EXPECT_RISK[sc.key]) >= 0, 'risks=' + titles.join('、'))
+    rec(`⑦b ${sc.key} 合同正文非空`, ((cd.rawText || '').length > 400), 'raw=' + (cd.rawText || '').length)
+    await backSafe(mp)
+    await sleep(1400)
+  }
+
+  // ⑦c 已完成订单也应能查看合同（干净合同 / 无风险）
+  if (payAnchor) {
+    const page = await mp.currentPage()
+    const done = ((await page.data()).list || []).find((x) => x.status === 'completed')
+    if (done) {
+      const idx = ((await page.data()).list || []).findIndex((x) => x.id === done.id)
+      const card = (await page.$$('.order-card'))[idx]
+      let tapped = false
+      for (const b of (await card.$$('.act-ghost')) || []) {
+        if (String(await b.text().catch(() => '')).indexOf('合同') >= 0) { await b.tap(); tapped = true; break }
+      }
+      rec('⑦c 已完成订单可查看合同', tapped, `#${done.id}`)
+      if (tapped) {
+        await waitPath(mp, 'pages/trade/contract/contract', 25)
+        const cd2 = await waitData(await mp.currentPage(), CONTRACT_READY)
+        await shot(mp, '07d-合同-已完成订单-无风险')
+        rec('⑦c 已完成合同无风险项', (cd2.risks || []).length === 0, 'risks=' + (cd2.risks || []).length)
+        rec('⑦c 已完成合同正文非空', ((cd2.rawText || '').length > 400), 'raw=' + (cd2.rawText || '').length)
+        await backSafe(mp)
+        await sleep(1300)
       }
     }
   }
@@ -375,12 +469,58 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
     }
   }
 
+  // ⑨b 船东 · 「订单」→ 智能合同（同一批仿真案例，验证两个角色都能检查）
+  const oOrders = await nav(mp, 'tab', '/pages/trade/orders/orders', 'pages/trade/orders/orders')
+  await sleep(2000)
+  await shot(mp, '10c-船东-我的订单')
+  const ood = await oOrders.data()
+  rec('⑨b 船东订单页无错误且非空', !ood.error && (ood.list || []).length > 0,
+    `role=${ood.role} list=${(ood.list || []).length}`)
+  const ownerCase = simCases[simCases.length - 1]
+  if (ownerCase) {
+    const idx = ood.list.findIndex((x) => x.id === ownerCase.orderId)
+    rec(`⑨b 船东可见仿真案例 ${ownerCase.key}`, idx >= 0, `#${ownerCase.orderId} idx=${idx}`)
+    if (idx >= 0) {
+      const card = (await oOrders.$$('.order-card'))[idx]
+      let tapped = false
+      for (const b of (await card.$$('.act-ghost')) || []) {
+        if (String(await b.text().catch(() => '')).indexOf('合同') >= 0) { await b.tap(); tapped = true; break }
+      }
+      rec('⑨b 船东「查看合同」可点', tapped)
+      if (tapped) {
+        await waitPath(mp, 'pages/trade/contract/contract', 25)
+        const cd3 = await waitData(await mp.currentPage(), CONTRACT_READY)
+        await shot(mp, '10d-船东-合同-' + ownerCase.key)
+        const titles3 = (cd3.risks || []).map((r) => r.title)
+        log('船东侧合同风险', (cd3.risks || []).map((r) => `${r.sev_label}/${r.title}`))
+        rec(`⑨b 船东侧命中预期风险「${EXPECT_RISK[ownerCase.key]}」`,
+          titles3.indexOf(EXPECT_RISK[ownerCase.key]) >= 0, 'risks=' + titles3.join('、'))
+        rec('⑨b 船东侧合同正文非空', ((cd3.rawText || '').length > 400), 'raw=' + (cd3.rawText || '').length)
+        await backSafe(mp)
+        await sleep(1300)
+      }
+    }
+  }
+
   // ============================ 港口链路 ============================
-  await loginAs(mp, 'seed-port')
-  await tapAt(await mp.currentPage(), '.sheet-foot', 0) // 我是港口方
-  let port = await waitPath(mp, 'pages/port/port', 30)
-  rec('⑩ 港口工作台进入（真实点击「我是港口方」）', !!port, port ? port.path : '未跳转')
-  if (!port) port = await nav(mp, 'tab', '/pages/port/port', 'pages/port/port')
+  // ⚠️ C 端「我是港口方」身份入口已在 #33 全下线（首页只保留货主/船东两项），
+  //    港口运营台只能以 port 身份**会话**进入。这里直接登录后端并把会话写进 Storage
+  //    （键与 utils/auth.js / utils/request.js 完全一致：access_token + user_info），
+  //    再走底栏「港口服务」tab —— 页面渲染与后续点击仍是真机的，只是绕过了已删除的入口。
+  const ps = await apiLogin('seed-port')
+  let ptoken = ps.access_token
+  if (ps.current_role !== 'port') {
+    const sw = await apiPost('/auth/switch-role', ptoken, { role: 'port' })
+    if (sw.data && sw.data.access_token) ptoken = sw.data.access_token
+  }
+  const pme = await apiGet('/auth/me', ptoken)
+  await mp.evaluate((s) => {
+    wx.setStorageSync('access_token', s.token)
+    wx.setStorageSync('user_info', JSON.stringify(s.user))
+    wx.removeStorageSync('dev_login_code')
+  }, { token: ptoken, user: pme })
+  let port = await nav(mp, 'tab', '/pages/port/port', 'pages/port/port')
+  rec('⑩ 港口工作台进入（port 身份会话 · C 端入口已下线）', !!port, port ? port.path : '未跳转')
   await sleep(1600)
   await shot(mp, '11-港口服务（占位网格）')
   let pd = await port.data()
