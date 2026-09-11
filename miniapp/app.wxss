@@ -514,3 +514,53 @@ page {
   line-height: 1.6;
 }
 
+/* ==================== 用户头像（矢量占位） ====================
+   货主/船东工作台顶栏共用：纯 CSS 画的人像剪影，无图片资源、任意分辨率不糊。
+   接入真实头像后把 .avatar-vec 换成 <image> 即可（容器尺寸/圆角不变）。 */
+.top-user {
+  display: flex;
+  align-items: center;
+  margin-right: 12rpx;
+  flex: none;
+}
+.avatar-vec {
+  position: relative;
+  width: 66rpx;
+  height: 66rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
+  overflow: hidden;
+  flex: none;
+  box-shadow: 0 2rpx 10rpx rgba(61, 90, 219, .18);
+}
+.av-head {
+  position: absolute;
+  left: 50%;
+  top: 13rpx;
+  width: 21rpx;
+  height: 21rpx;
+  margin-left: -10.5rpx;
+  border-radius: 50%;
+  background: #FFFFFF;
+}
+.av-body {
+  position: absolute;
+  left: 50%;
+  top: 40rpx;
+  width: 40rpx;
+  height: 32rpx;
+  margin-left: -20rpx;
+  border-radius: 20rpx 20rpx 0 0;
+  background: #FFFFFF;
+}
+.top-user-id {
+  margin-left: 12rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #14233B;
+  max-width: 190rpx;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+

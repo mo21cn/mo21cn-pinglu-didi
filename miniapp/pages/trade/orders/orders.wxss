@@ -14,22 +14,8 @@ page { background: #F5F7FA; }
   position: relative;
 }
 .nav-title { font-size: 34rpx; font-weight: 600; color: #14233B; }
-.nav-bell {
-  position: absolute;
-  right: 28rpx;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 34rpx;
-}
-.nav-bell-red {
-  position: absolute;
-  right: 24rpx;
-  top: 14rpx;
-  width: 14rpx;
-  height: 14rpx;
-  border-radius: 50%;
-  background: #FA5252;
-}
+/* 说明：导航右侧刻意不放控件 —— 微信胶囊按钮占据右上角（约 right 28rpx 起），
+   放上去会被完全遮住，成为「看不见的假入口」。 */
 
 /* ---- 统计行 ---- */
 .stat-row {

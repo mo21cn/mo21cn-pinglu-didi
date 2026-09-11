@@ -287,9 +287,5 @@ Page({
 
   closeContract() {
     this.setData({ 'contract.show': false })
-  },
-
-  onBell() {
-    wx.showToast({ title: '消息中心开发中', icon: 'none' })
   }
 })

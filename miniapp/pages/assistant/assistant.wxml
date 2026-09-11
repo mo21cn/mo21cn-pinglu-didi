@@ -1,10 +1,8 @@
 <view class="page">
-  <!-- 顶部说明（按模式切换文案：客服导购 / 货源解析） -->
+  <!-- 顶部说明（文案由 MODE_META 按模式注入：客服 / 解析 / 搜索） -->
   <view class="banner">
-    <view class="banner-title">{{mode === 'parse' ? '智能填写货源' : '平台智能客服'}}</view>
-    <view class="banner-sub">{{mode === 'parse'
-      ? '用一句话描述货物与航线，AI 解析成货源草稿；核对后带去发布页，不会直接替您发布'
-      : '咨询发货/找船/支付/航线/船型等问题，纯只读，AI 不代替您执行任何写操作'}}</view>
+    <view class="banner-title">{{bannerTitle}}</view>
+    <view class="banner-sub">{{bannerSub}}</view>
   </view>
 
   <!-- 解析态下的角色门控（货源解析仅货主可用） -->
@@ -24,31 +22,22 @@
   >
     <!-- 空状态 -->
     <view wx:if="{{emptyHint}}" class="empty">
-      <view class="empty-icon">{{mode === 'parse' ? '✨' : '💬'}}</view>
-      <view class="empty-title">{{mode === 'parse' ? '描述一下这票货' : '有什么可以帮您？'}}</view>
-      <view class="empty-sub">试试这样说：</view>
-      <block wx:if="{{mode === 'parse'}}">
-        <view
-          wx:for="{{parseChips}}"
-          wx:key="*this"
-          class="empty-chip empty-chip-parse"
-          bindtap="onQuickAsk"
-          data-q="{{item}}"
-        >{{item}}</view>
-      </block>
-      <block wx:else>
-        <view class="empty-chip" bindtap="onQuickAsk" data-q="怎么发布货源？">怎么发布货源？</view>
-        <view class="empty-chip" bindtap="onQuickAsk" data-q="钦州港能走什么货？">钦州港能走什么货？</view>
-        <view class="empty-chip" bindtap="onQuickAsk" data-q="液货用什么船拉？">液货用什么船拉？</view>
-        <view class="empty-chip" bindtap="onQuickAsk" data-q="撤单了运费退吗？">撤单了运费退吗？</view>
-        <view class="empty-chip" bindtap="onQuickAsk" data-q="智能撮合怎么评分？">智能撮合怎么评分？</view>
-      </block>
+      <view class="empty-icon">{{emptyIcon}}</view>
+      <view class="empty-title">{{emptyTitle}}</view>
+      <view class="empty-sub">{{emptySub}}</view>
+      <view
+        wx:for="{{chips}}"
+        wx:key="*this"
+        class="empty-chip {{chipWide ? 'empty-chip-parse' : ''}}"
+        bindtap="onQuickAsk"
+        data-q="{{item}}"
+      >{{item}}</view>
     </view>
 
     <block wx:for="{{messages}}" wx:key="ts" wx:for-index="i">
       <view class="msg-row {{item.role === 'user' ? 'right' : 'left'}}">
         <view class="avatar {{item.role === 'user' ? 'avatar-user' : 'avatar-bot'}}">
-          {{item.role === 'user' ? '我' : (mode === 'parse' ? '解' : '客')}}
+          {{item.role === 'user' ? '我' : botBadge}}
         </view>
 
         <!-- 解析结果卡片（结构化草稿，可一键带去发布页） -->
@@ -67,8 +56,34 @@
           </view>
         </view>
 
+        <!-- 合规预检卡片（F17 结论：三档 + 逐条依据 + 建议） -->
+        <view wx:elif="{{item.kind === 'compliance' && !item.pending}}" class="comp-card comp-card-{{item.level}}">
+          <view class="comp-head">
+            <text class="comp-title">{{item.compTitle}}</text>
+            <text class="comp-badge comp-badge-{{item.level}}">{{item.levelLabel}}</text>
+          </view>
+          <view wx:if="{{item.summary}}" class="comp-summary">{{item.summary}}</view>
+          <view wx:for="{{item.findings}}" wx:for-item="f" wx:key="code" class="comp-row">
+            <view class="comp-row-head">
+              <text class="comp-sev comp-sev-{{f.severity}}">{{f.severityLabel}}</text>
+              <text class="comp-row-title">{{f.title}}</text>
+            </view>
+            <view class="comp-row-detail">{{f.detail}}</view>
+            <view class="comp-row-tip">建议：{{f.suggestion}}</view>
+          </view>
+          <view wx:if="{{!item.findings.length}}" class="comp-clean">未发现合规风险</view>
+        </view>
+
         <view wx:else class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-bot'}} {{item.pending ? 'bubble-pending' : ''}} {{item.error ? 'bubble-error' : ''}}">
+          <!-- 路由结果标注：识别到的意图 + 置信度（F20 的路由能力要让人看得见） -->
+          <view wx:if="{{item.intentLabel}}" class="route-meta">
+            已识别：{{item.intentLabel}}<text wx:if="{{item.confidence}}"> · {{item.confidence}}%</text>
+          </view>
           <text user-select="{{true}}" space="emsp" decode="{{true}}" class="bubble-text">{{item.text}}</text>
+          <!-- 未派发（如非货主描述货源）：给「下一步能做什么」，而不是一句报错 -->
+          <view wx:if="{{item.needRole}}" class="parse-btn" data-idx="{{i}}" bindtap="onSwitchForRetry" hover-class="parse-btn-hover">
+            切换为货主并重试 ›
+          </view>
           <view wx:if="{{item.mocked === false && item.latency}}" class="bubble-meta">DeepSeek · {{item.latency}}ms</view>
         </view>
       </view>
@@ -82,7 +97,7 @@
       value="{{input}}"
       bindinput="onInput"
       bindconfirm="onSend"
-      placeholder="{{mode === 'parse' ? '例：800吨散装水泥，下周三从南宁运到贵港' : '描述您的问题，按回车发送'}}"
+      placeholder="{{inputPlaceholder}}"
       placeholder-class="ph"
       auto-height
       maxlength="500"
@@ -99,7 +114,7 @@
         size="mini"
         bindtap="onSend"
         hover-class="btn-send-hover"
-      >{{sending ? (mode === 'parse' ? '解析中' : '发送中') : (mode === 'parse' ? '解析' : '发送')}}</button>
+      >{{sending ? busyLabel : sendLabel}}</button>
     </view>
   </view>
 </view>

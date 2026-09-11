@@ -44,6 +44,7 @@ const HOT_ROUTES = [
 Page({
   data: {
     roleLabel: '货主',
+    userCode: '',            // 顶栏用户 ID（用户1024）——与「我的」页同一口径
     defaultPortLabel: '南宁 · 平塘港',
     defaultPortKey: 'NNG',
     form: {
@@ -89,6 +90,7 @@ Page({
 
   onShow() {
     syncTabBar(this)
+    this.fetchIdentity()
     this.fetchMyCargoCount()
   },
 
@@ -346,6 +348,18 @@ Page({
 
   onMoreRoutes() {
     wx.showToast({ title: '更多航线开发中', icon: 'none' })
+  },
+
+  // ---- 顶栏身份（用户头像 + 用户 ID + 常用港）----
+  /** 用户 ID 与「我的」页同一口径（用户+user_id），缺失时给中性占位，不显示 "用户undefined" */
+  fetchIdentity() {
+    const user = auth.getUser() || {}
+    this.setData({ userCode: user.user_id ? '用户' + user.user_id : '未登录' })
+  },
+
+  /** 头像 → 「我的」（tabBar 页，必须 switchTab） */
+  goMine() {
+    wx.switchTab({ url: '/pages/mine/mine' })
   },
 
   // ---- 我的货源 ----

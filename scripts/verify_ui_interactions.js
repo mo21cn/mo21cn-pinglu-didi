@@ -123,17 +123,13 @@ function makeRequire(wx, reqLog, authState) {
       return A
     }
     if (s.indexOf('tabbar') !== -1) return { syncTabBar() {} }
-    // 统一智能入口（F19/F20）：最小同构桩 —— 记录调用，并把结论交给 wx.showModal。
-    // 真实分支（四类意图、三档合规文案、dispatched=false 的引导）由 ⑧ 的静态防线断言覆盖。
+    // 统一智能入口（F19/F20）：最小同构桩 —— 记录调用。
+    // 「openSmartEntry 打开智能搜索页」与四类意图的渲染分支由 ⑧ 章在真实页面上断言。
     if (s.indexOf('agent-entry') !== -1) {
       return {
         openSmartEntry: (o) => {
           reqLog.push('openSmartEntry')
-          wx.showModal({
-            title: (o && o.title) || '',
-            editable: true,
-            placeholderText: (o && o.placeholder) || ''
-          })
+          wx.navigateTo({ url: '/pages/assistant/assistant?mode=search', fail: () => {} })
         },
         runComplianceCheck: (url, body) => {
           reqLog.push('compliance ' + url + ' ' + JSON.stringify(body || {}))
@@ -142,7 +138,6 @@ function makeRequire(wx, reqLog, authState) {
           }
         },
         showComplianceModal: (r) => wx.showModal({ title: '合规预检', content: (r && r.summary) || '' }),
-        DRAFT_KEY: 'cargo_draft_v1',
       }
     }
     if (s.indexOf('request') !== -1) {
@@ -158,6 +153,10 @@ function makeRequire(wx, reqLog, authState) {
           // 货源解析端点可注入载荷（F14 解析态断言用）
           if (AUTH.parsePayload && /\/agent\/cargo-parse$/.test(o.url)) {
             return Promise.resolve(JSON.parse(JSON.stringify(AUTH.parsePayload)))
+          }
+          // 统一入口端点可注入载荷（F20 搜索态四类意图断言用）
+          if (AUTH.routePayload && /\/agent\/route$/.test(o.url)) {
+            return Promise.resolve(JSON.parse(JSON.stringify(AUTH.routePayload)))
           }
           return Promise.resolve({ id: 99, total: 0, items: [] })
         },
@@ -808,7 +807,7 @@ section('⑤ 静态防线')
     cfg1.onLoad.call(s1, { mode: 'parse' })
     check('mode=parse → 进入解析态', s1.data.mode === 'parse', String(s1.data.mode))
     check('货主进解析态 → 不触发角色门控', s1.data.roleBlocked === false)
-    check('解析态示例是货源描述（含吨位）', (s1.data.parseChips || []).some((c) => /吨/.test(c)))
+    check('解析态示例是货源描述（含吨位）', (s1.data.chips || []).some((c) => /吨/.test(c)))
     const s1b = instantiate(cfg1)
     cfg1.onLoad.call(s1b, {})
     check('无 mode → 仍是客服模式（原行为不变）', s1b.data.mode === 'chat')
@@ -918,7 +917,95 @@ section('⑤ 静态防线')
     check('船舶合规预检 → POST /agent/compliance/ship 且带证书字段',
       /compliance \/api\/v1\/agent\/compliance\/ship/.test(scomp) && /"cert_no":"CERT-F17-001"/.test(scomp), scomp)
 
-    // —— 统一入口：搜索框 / ✨Ai 的分工 ——
+    // —— 搜索态（F20 统一入口）：与「智能客服」同款页面，不再是可编辑弹窗 ——
+    const ROUTE_CASES = [
+      ['货源解析', {
+        intent: 'cargo_parse', confidence: 0.92, dispatched: true, message: '',
+        result: { draft: PARSE_PAYLOAD.draft, needs_review: PARSE_PAYLOAD.needs_review }
+      }],
+      ['合规预检', {
+        intent: 'compliance', confidence: 0.8, dispatched: true, message: '',
+        result: {
+          target: 'text', level: 'block', summary: '命中 1 条阻断项',
+          findings: [{
+            code: 'C1', severity: 'block', title: '疑似禁运/管制货物',
+            detail: '货物名称含「甲醇」', suggestion: '需危化品运输资质并单独申报'
+          }],
+          checked_rules: ['C1']
+        }
+      }],
+      ['智能合同', { intent: 'contract', confidence: 0.75, dispatched: false, message: '合同风控需要具体订单。', result: null }],
+      ['智能客服', {
+        intent: 'assistant', confidence: 0.5, dispatched: true, message: '',
+        result: { answer: '发布货源有两种方式…', mocked: true, latency_ms: 12 }
+      }]
+    ]
+
+    const wxS = makeWx()
+    const reqLogS = []
+    const cfgS = loadConfig(ASSIST, 'page', wxS, reqLogS, OWNER)
+    const sS = instantiate(cfgS)
+    cfgS.onLoad.call(sS, { mode: 'search' })
+    check('mode=search → 进入搜索态（与 chat/parse 三态并存）', sS.data.mode === 'search', String(sS.data.mode))
+    check('搜索态不做角色门控（路由自行判角色并给引导）', sS.data.roleBlocked === false)
+    check('搜索态文案按模式注入（WXML 不再三目嵌套）',
+      sS.data.bannerTitle === '平台智能搜索' && /搜货|搜船/.test(sS.data.inputPlaceholder), sS.data.bannerTitle)
+    check('三模式历史分库（chat / parse / search 各一份）',
+      cfgS.storageKey.call(sS) === 'search_history_v1'
+      && cfgS.storageKey.call(Object.assign({}, sS, { data: { mode: 'parse' } })) === 'parse_history_v1'
+      && cfgS.storageKey.call(Object.assign({}, sS, { data: { mode: 'chat' } })) === 'chat_history_v1')
+
+    sS.setData({ input: '我要发800吨散装水泥，南宁到贵港' })
+    await cfgS.onSend.call(sS)
+    check('搜索态发送 → POST /agent/route', reqLogS.some((r) => r === 'POST /api/v1/agent/route'), JSON.stringify(reqLogS))
+
+    for (const [name, payload] of ROUTE_CASES) {
+      const cfgR = loadConfig(ASSIST, 'page', makeWx(), [], Object.assign({}, OWNER, { routePayload: payload }))
+      const sR = instantiate(cfgR)
+      cfgR.onLoad.call(sR, { mode: 'search' })
+      sR.setData({ input: '一句话描述' })
+      await cfgR.onSend.call(sR)
+      const m = sR.data.messages[sR.data.messages.length - 1] || {}
+      if (payload.intent === 'cargo_parse') {
+        check('搜索态·货源意图 → 渲染结构化解析卡（非纯文本）',
+          m.kind === 'parse' && (m.rows || []).length === 7 && !!m.draft, String(m.kind))
+        check('搜索态·货源意图标注识别结果与置信度', m.intentLabel === '货源解析' && m.confidence === 92, String(m.intentLabel))
+      } else if (payload.intent === 'compliance') {
+        check('搜索态·合规意图 → 渲染合规卡（三档结论 + 逐条依据与建议）',
+          m.kind === 'compliance' && m.level === 'block' && m.levelLabel === '未通过'
+          && (m.findings || []).length === 1 && m.findings[0].severityLabel === '阻断', String(m.kind))
+      } else {
+        check(`搜索态·${name}意图 → 文本气泡（不误落其它卡片）`,
+          !m.kind && !!m.text && m.intentLabel === name, `${m.kind} / ${m.intentLabel}`)
+      }
+    }
+
+    // 未派发（非货主描述货源）→ 引导语 + 一键切角色重试；不报错、不 500
+    const wxN = makeWx()
+    const reqLogN = []
+    await (async () => {
+      const cfgN = loadConfig(ASSIST, 'page', wxN, reqLogN, Object.assign({}, OWNER, {
+        routePayload: {
+          intent: 'cargo_parse', confidence: 0.7, dispatched: false,
+          message: '货源解析仅货主角色可用，请先切换为货主。', result: null
+        }
+      }))
+      const sN = instantiate(cfgN)
+      cfgN.onLoad.call(sN, { mode: 'search' })
+      sN.setData({ input: '我要发一批货' })
+      await cfgN.onSend.call(sN)
+      const mN = sN.data.messages[sN.data.messages.length - 1] || {}
+      check('搜索态·未派发不算错误：给引导语 + 可点动作 + 原句重试',
+        !mN.error && mN.needRole === true && /货主/.test(mN.text) && mN.retryText === '我要发一批货',
+        JSON.stringify({ error: mN.error, needRole: mN.needRole, retryText: mN.retryText }))
+      cfgN.onSwitchForRetry.call(sN, { currentTarget: { dataset: { idx: sN.data.messages.length - 1 } } })
+      await wait()
+      check('未派发 → 一键切货主走 auth.enterRole（bind + switch 全链）',
+        reqLogN.some((r) => r === 'bindRole:shipper') && reqLogN.some((r) => r === 'switchRole:shipper'),
+        JSON.stringify(reqLogN))
+    })()
+
+    // —— 统一入口：搜索框 / ✨Ai 的分工（静态防线）——
     for (const [who, file] of [['货主', 'pages/shipper/shipper.js'], ['船东', 'pages/owner/owner.js']]) {
       const src = read(file)
       check(`${who}页搜索框接统一入口（不再是「开发中」占位）`,
@@ -927,17 +1014,48 @@ section('⑤ 静态防线')
         /goAI\(\)\s*\{\s*wx\.navigateTo\(\{ url: '\/pages\/assistant\/assistant\?mode=parse' \}\)/.test(src))
     }
     const ae = read('utils/agent-entry.js')
-    check('统一入口调 /agent/route', /\/api\/v1\/agent\/route/.test(ae))
-    check('四类意图分支齐备', ['cargo_parse', 'compliance', 'assistant', 'contract'].every((k) => ae.indexOf("'" + k + "'") >= 0))
+    check('智能搜索不再用可编辑弹窗（改为智能客服同款页面）',
+      !/editable\s*:\s*true/.test(ae) && /pages\/assistant\/assistant\?mode=search/.test(ae))
+    check('搜索态调 /agent/route 且四类意图分支齐备',
+      /\/api\/v1\/agent\/route/.test(assistSrc)
+      && ['cargo_parse', 'compliance', 'contract', 'assistant'].every((k) => assistSrc.indexOf("'" + k + "'") >= 0))
     check('合规三档文案（通过 / 有提示 / 未通过）',
-      /合规预检通过/.test(ae) && /合规预检有提示/.test(ae) && /合规预检未通过/.test(ae))
-    check('切断言而非报错：识别到未派发时给引导语', /dispatched/.test(ae) && /res\.message/.test(ae))
-    check('非货主描述货源 → 引导切换身份（走 auth.enterRole）', /enterRole\('shipper'\)/.test(ae))
+      /合规预检通过/.test(ae) && /合规预检有提示/.test(ae) && /合规预检未通过/.test(ae)
+      && /合规预检通过/.test(assistSrc) && /合规预检未通过/.test(assistSrc))
+    check('切断言而非报错：未派发时给引导语与重试动作', /dispatched/.test(assistSrc) && /needRole/.test(assistSrc))
+    check('非货主描述货源 → 引导切换身份（走 auth.enterRole）', /enterRole\('shipper'\)/.test(assistSrc))
     check('草稿键与解析页/发布页一致（cargo_draft_v1）',
-      /cargo_draft_v1/.test(ae) && /cargo_draft_v1/.test(assistSrc) && /cargo_draft_v1/.test(read('pages/publish/cargo/cargo.js')))
+      /cargo_draft_v1/.test(assistSrc) && /cargo_draft_v1/.test(read('pages/publish/cargo/cargo.js')))
     check('发布货源页模板含智能填写卡与合规预检入口',
       /onSmartFill/.test(read('pages/publish/cargo/cargo.wxml')) && /onComplianceCheck/.test(read('pages/publish/cargo/cargo.wxml')))
     check('发布空船页模板含合规预检入口', /onComplianceCheck/.test(read('pages/publish/ship/ship.wxml')))
+
+    // —— 顶栏身份：用户头像（矢量占位）+ 用户 ID + 常用港 ——
+    for (const [who, dir] of [['货主', 'shipper'], ['船东', 'owner']]) {
+      const wxml = read(`pages/${dir}/${dir}.wxml`)
+      const js = read(`pages/${dir}/${dir}.js`)
+      check(`${who}页顶栏是矢量人物头像（不再是 emoji 占位）`,
+        /avatar-vec/.test(wxml) && /av-head/.test(wxml) && /av-body/.test(wxml) && !/top-avatar/.test(wxml))
+      check(`${who}页顶栏显示用户 ID 与地理位置（常用港）`,
+        /top-user-id/.test(wxml) && /\{\{userCode\}\}/.test(wxml) && /defaultPortLabel/.test(wxml))
+      check(`${who}页用户 ID 与「我的」页同口径（用户+user_id）`, /'用户'\s*\+\s*user\.user_id/.test(js))
+    }
+    const avatarCss = read('app.wxss')
+    check('矢量头像样式在 app.wxss（货主/船东共用，不逐页重复定义）',
+      /\.avatar-vec/.test(avatarCss) && /\.av-head/.test(avatarCss) && /\.av-body/.test(avatarCss))
+
+    // —— 订单页自绘导航（custom 导航缺顶部内边距会让统计行顶出页面框架）——
+    const ordersWxml = read('pages/trade/orders/orders.wxml')
+    check('订单页自绘导航存在（否则统计行顶到状态栏、被胶囊遮挡）',
+      /class="nav"/.test(ordersWxml) && /statusBarHeight/.test(ordersWxml))
+    check('订单页导航只有居中标题（右侧留空给胶囊，不做看不见的假入口）',
+      /nav-title/.test(ordersWxml) && /我的订单/.test(ordersWxml) && !/nav-bell/.test(ordersWxml))
+    check('订单页导航排在统计行之前（内容整体下移）',
+      ordersWxml.indexOf('class="nav"') >= 0 && ordersWxml.indexOf('class="nav"') < ordersWxml.indexOf('class="stat-row"'))
+    check('订单页导航样式齐备（nav / nav-inner）',
+      /\.nav\s*\{/.test(read('pages/trade/orders/orders.wxss')) && /\.nav-inner/.test(read('pages/trade/orders/orders.wxss')))
+    check('自绘导航的右侧控件避开微信胶囊（「我的」页「功能预览」曾整块被遮住）',
+      /\.nav-preview\s*\{[^}]*right:\s*200rpx/.test(read('pages/mine/mine.wxss')))
   }
 
   // ---------------------------------------------------------------- 汇总
