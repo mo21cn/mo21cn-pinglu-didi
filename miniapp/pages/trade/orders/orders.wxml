@@ -93,7 +93,7 @@
 
           <view class="order-actions">
             <view
-              wx:if="{{item.status === 'matched' || item.status === 'shipped'}}"
+              wx:if="{{item.status !== 'cancelled'}}"
               class="act-ghost"
               data-id="{{item.id}}"
               catchtap="onContractPage"
