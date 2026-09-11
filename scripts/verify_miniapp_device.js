@@ -846,7 +846,7 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
   // ============ ⑮ 发货方式选择：自主发货 / 委托发货（纯前端） ============
   // 需求：点 tabBar 中间「+发货」跳二级页（发布货物）后先弹选择弹窗；
   //   自主发货 → 留在本页自行填写；委托发货 → 「功能预览，即将开放」占位页。
-  // 本功能不涉及后端（零接口调用），版本号停在 v0.5.0。
+  // 本功能不涉及后端（零接口调用），随 v0.5.1 补丁版发布。
   {
     const stackOf = async () => {
       try { return await mp.evaluate(() => getCurrentPages().map((p) => p.route).join(' > ')) } catch (e) { return 'stack 读取失败' }
