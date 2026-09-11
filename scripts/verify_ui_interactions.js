@@ -13,6 +13,8 @@
  *   ③ 发布货物 / 发布空船 / 船东页的港口选择是否全部改走组件
  *   ④ 我的页「退出」出口、货主页与船东页切角色弹窗不含「港口方」
  *   ⑤ 静态防线：showActionSheet 长列表、组件注册、底栏按钮居中、页面底部留白
+ *   ⑥ 身份选择（仅货主/船东）· 登录链路顺序（login→bindRole→switchRole）·
+ *      订单页/支付页富化只打当前角色那一侧接口（防跨角色 403）
  *
  * 用法：node scripts/verify_ui_interactions.js     （退出码 0=全绿，1=有失败）
  * 方法论见 skill：miniapp-page-logic-verification
@@ -60,26 +62,43 @@ function makeWx() {
   return wx
 }
 
-function makeRequire(wx, reqLog) {
+function makeRequire(wx, reqLog, authState) {
   const realPorts = require(path.join(MP, 'utils', 'ports.js'))
+  const AUTH = authState || { loggedIn: true, user: { user_id: 1, current_role: 'shipper', roles: ['shipper'] } }
   return (p) => {
     const s = String(p)
     if (s.indexOf('utils/ports') !== -1) return realPorts
     if (s.indexOf('auth') !== -1) {
       return {
-        getUser: () => ({ user_id: 1, current_role: 'shipper' }),
-        isLoggedIn: () => true,
+        getUser: () => JSON.parse(JSON.stringify(AUTH.user)),
+        isLoggedIn: () => AUTH.loggedIn,
         clearUser: () => reqLog.push('clearUser'),
-        switchRole: (r) => { reqLog.push('switchRole:' + r); return Promise.resolve({}) },
-        login: () => Promise.resolve({}), bindRole: () => Promise.resolve({}),
-        ROLE_LABELS: { shipper: '货主', owner: '船东', port: '港口方' },
+        switchRole: (r) => {
+          reqLog.push('switchRole:' + r)
+          if (AUTH.failSwitch) return Promise.reject(new Error('switch fail'))
+          AUTH.user.current_role = r
+          return Promise.resolve({ current_role: r })
+        },
+        login: () => {
+          reqLog.push('login')
+          if (AUTH.failLogin) return Promise.reject(new Error('login fail'))
+          AUTH.loggedIn = true
+          return Promise.resolve({})
+        },
+        bindRole: (r) => {
+          reqLog.push('bindRole:' + r)
+          if (AUTH.failBind) return Promise.reject(new Error('bind fail'))
+          if ((AUTH.user.roles || []).indexOf(r) === -1) AUTH.user.roles = (AUTH.user.roles || []).concat([r])
+          return Promise.resolve({ roles: AUTH.user.roles })
+        },
+        ROLE_LABELS: { shipper: '货主', owner: '船东' },
       }
     }
     if (s.indexOf('tabbar') !== -1) return { syncTabBar() {} }
     if (s.indexOf('request') !== -1) {
       return {
         request: (o) => {
-          reqLog.push(o.method + ' ' + o.url)
+          reqLog.push((o.method || 'GET') + ' ' + o.url)
           return Promise.resolve({ id: 99, total: 0, items: [] })
         },
         getToken: () => 't', setToken() {}, clearToken() {}, BASE_URL: 'http://127.0.0.1:8000',
@@ -90,10 +109,10 @@ function makeRequire(wx, reqLog) {
 }
 
 /** 加载页面/组件 JS，返回其配置对象 */
-function loadConfig(file, kind, wx, reqLog) {
+function loadConfig(file, kind, wx, reqLog, authState) {
   const src = fs.readFileSync(file, 'utf8')
   let cfg = null
-  const req = makeRequire(wx, reqLog)
+  const req = makeRequire(wx, reqLog, authState)
   const getApp = () => ({ globalData: {}, routeByRole: () => '/pages/index/index' })
   if (kind === 'component') {
     new Function('require', 'Component', 'wx', 'getApp', src)(req, (c) => { cfg = c }, wx, getApp)
@@ -359,9 +378,125 @@ section('⑤ 静态防线')
   check('shipper.wxss 定义缺失字段高亮样式', /\.field-row-miss/.test(read('pages/shipper/shipper.wxss')))
 }
 
-// ---------------------------------------------------------------- 汇总
-console.log('\n' + '='.repeat(72))
-console.log(`UI 交互契约校验：OK ${N_OK} · FAIL ${FAILS.length}`)
-FAILS.forEach((f) => console.log('  FAIL · ' + f))
-console.log('='.repeat(72))
-process.exit(FAILS.length === 0 ? 0 : 1)
+// ---------------------------------------------------------------- ⑥ 身份 / 登录链路
+;(async () => {
+  const tick = () => new Promise((r) => setTimeout(r, 25))
+  const IDX = path.join(MP, 'pages/index/index.js')
+  const loadIdx = (wx, reqLog, authState) => loadConfig(IDX, 'page', wx, reqLog, authState)
+
+  section('⑥ 身份选择·登录链路·角色门控取数')
+
+  // —— 港口方身份已下线（首页 / 我的 / 品牌底栏 / auth 文案均不得再出现）——
+  const meta = read('pages/index/index.js').match(/const ROLE_META = \{([\s\S]*?)\n\}/)
+  check('首页身份仅「货主 / 船东」', !!meta && /shipper/.test(meta[1]) && /owner/.test(meta[1]) && !/port/.test(meta[1]))
+  check('首页 wxml 不再有「港口方」入口', read('pages/index/index.wxml').indexOf('港口方') === -1)
+  check('首页 wxss 已清理 sheet-foot 样式', read('pages/index/index.wxss').indexOf('.sheet-foot') === -1)
+  const mineList = read('pages/mine/mine.js').match(/const ROLE_LIST = \[([\s\S]*?)\n\]/)
+  check('我的页账号区仅两个身份', !!mineList && !/port/.test(mineList[1]) && (mineList[1].match(/key:/g) || []).length === 2)
+  const roleLabels = read('utils/auth.js').match(/const ROLE_LABELS = \{([\s\S]*?)\n\}/)
+  check('auth.js ROLE_LABELS 不含港口方', !!roleLabels && !/port:/.test(roleLabels[1]))
+  const labelOf = read('custom-tab-bar/index.js').match(/const LABEL_OF = \{([\s\S]*?)\n\}/)
+  check('自定义 tabBar LABEL_OF 不含港口方', !!labelOf && !/port:/.test(labelOf[1]))
+  check('退出登录会清 dev_login_code（否则登回旧身份）', /removeStorageSync\(['"]dev_login_code['"]\)/.test(read('utils/auth.js')))
+  check('港口页「业务办理」按身份门控（非港口方不发请求）', /role !== 'port'/.test(read('pages/port/port.js')))
+
+  // —— 登录链路：首次必须 switchRole，否则带着旧角色 token 进工作台 → 全线 403 ——
+  {
+    const wx = makeWx()
+    const reqLog = []
+    const authState = { loggedIn: false, user: { user_id: 1, current_role: '', roles: [] } }
+    const cfg = loadIdx(wx, reqLog, authState)
+    const self = instantiate(cfg)
+    cfg.onPickRole.call(self, { currentTarget: { dataset: { role: 'owner' } } })
+    await tick()
+    check('首次登录链路顺序 login→bindRole→switchRole',
+      reqLog.join(' > ') === 'login > bindRole:owner > switchRole:owner', reqLog.join(' > '))
+    check('首次登录后 current_role 已切到目标身份', authState.user.current_role === 'owner')
+    check('首次登录后进入船东工作台', wx.__calls.switchTab.length === 1 && wx.__calls.switchTab[0].url === '/pages/owner/owner',
+      JSON.stringify(wx.__calls.switchTab.map((o) => o.url)))
+    check('成功路径不弹提示', wx.__calls.toast.length === 0, JSON.stringify(wx.__calls.toast.map((o) => o.title)))
+    check('成功路径不残留 loading 遮罩', self.data.logging === false || self.data.pendingRole === 'owner')
+  }
+
+  // —— 已登录三种分支 ——
+  {
+    const cases = [
+      ['已是当前身份 → 直接进入，不发请求', 'owner', { current_role: 'owner', roles: ['shipper', 'owner'] }, ''],
+      ['已绑但在别的身份 → 仅 switchRole', 'shipper', { current_role: 'owner', roles: ['shipper', 'owner'] }, 'switchRole:shipper'],
+      ['未绑该身份 → bindRole + switchRole', 'owner', { current_role: 'shipper', roles: ['shipper'] }, 'bindRole:owner > switchRole:owner'],
+    ]
+    for (const [label, role, user, expect] of cases) {
+      const wx = makeWx()
+      const reqLog = []
+      const cfg = loadIdx(wx, reqLog, { loggedIn: true, user: Object.assign({ user_id: 1 }, user) })
+      const self = instantiate(cfg)
+      cfg.onPickRole.call(self, { currentTarget: { dataset: { role } } })
+      await tick()
+      check(label, reqLog.join(' > ') === expect && wx.__calls.switchTab.length === 1, `${reqLog.join(' > ')} | tab=${wx.__calls.switchTab.length}`)
+    }
+  }
+
+  // —— 失败路径不得把 loading 卡死（遮罩会吞掉所有点击 = 「点了没反应」）——
+  {
+    const wx = makeWx()
+    const reqLog = []
+    const cfg = loadIdx(wx, reqLog, { loggedIn: false, failLogin: true, user: { user_id: 1, current_role: '', roles: [] } })
+    const self = instantiate(cfg)
+    cfg.onPickRole.call(self, { currentTarget: { dataset: { role: 'shipper' } } })
+    await tick()
+    check('登录失败：复位 loading 并提示', self.data.logging === false && self.data.pendingRole === '' &&
+      wx.__calls.toast.some((o) => /登录失败/.test(o.title)), JSON.stringify(wx.__calls.toast.map((o) => o.title)))
+  }
+  {
+    const wx = makeWx()
+    const reqLog = []
+    const cfg = loadIdx(wx, reqLog, { loggedIn: true, user: { user_id: 1, current_role: 'shipper', roles: ['shipper'] } })
+    const self = instantiate(cfg)
+    cfg.onPickRole.call(self, { currentTarget: { dataset: { role: 'shipper' } } })
+    await tick()
+    check('已就位时直接调 switchTab', wx.__calls.switchTab.length === 1)
+    wx.__calls.switchTab[0].fail({ errMsg: 'switchTab:fail' })
+    check('switchTab 失败：复位并提示（不再静默）', self.data.logging === false && self.data.pendingRole === '' &&
+      wx.__calls.toast.some((o) => /进入工作台失败/.test(o.title)), JSON.stringify(wx.__calls.toast.map((o) => o.title)))
+  }
+
+  // —— 港口方身份点击无效（不再发请求 / 不跳转）——
+  {
+    const wx = makeWx()
+    const reqLog = []
+    const cfg = loadIdx(wx, reqLog, { loggedIn: false, user: { user_id: 1, current_role: '', roles: [] } })
+    const self = instantiate(cfg)
+    cfg.onPickRole.call(self, { currentTarget: { dataset: { role: 'port' } } })
+    await tick()
+    check('点击「港口方」不再有任何动作', reqLog.length === 0 && wx.__calls.switchTab.length === 0 && self.data.logging === false,
+      JSON.stringify({ reqLog, tab: wx.__calls.switchTab.length }))
+  }
+
+  // —— 订单页 / 支付页：富化只打当前角色那一侧（此前两侧都打 → 必有一个 403）——
+  {
+    const cases = [
+      ['pages/trade/orders/orders.js', 'fetchAll', 'shipper', '/api/v1/cargo/shipments', '/api/v1/ship/registry'],
+      ['pages/trade/orders/orders.js', 'fetchAll', 'owner', '/api/v1/ship/registry', '/api/v1/cargo/shipments'],
+      ['pages/trade/payment/payment.js', 'fetch', 'shipper', '/api/v1/cargo/shipments', '/api/v1/ship/registry'],
+      ['pages/trade/payment/payment.js', 'fetch', 'owner', '/api/v1/ship/registry', '/api/v1/cargo/shipments'],
+    ]
+    for (const [file, method, role, want, forbid] of cases) {
+      const wx = makeWx()
+      const reqLog = []
+      const cfg = loadConfig(path.join(MP, file), 'page', wx, reqLog, { loggedIn: true, user: { current_role: role, roles: [role] } })
+      const self = instantiate(cfg, { role, orderId: 1 })
+      if (typeof cfg[method] !== 'function') { fail(`${path.basename(file)}.${method} 不存在`); continue }
+      cfg[method].call(self)
+      await tick()
+      check(`${path.basename(file)}(${role}) 只打 ${want}，不打 ${forbid}`,
+        reqLog.some((r) => r.indexOf(want) !== -1) && !reqLog.some((r) => r.indexOf(forbid) !== -1), JSON.stringify(reqLog))
+    }
+  }
+
+  // ---------------------------------------------------------------- 汇总
+  console.log('\n' + '='.repeat(72))
+  console.log(`UI 交互契约校验：OK ${N_OK} · FAIL ${FAILS.length}`)
+  FAILS.forEach((f) => console.log('  FAIL · ' + f))
+  console.log('='.repeat(72))
+  process.exit(FAILS.length === 0 ? 0 : 1)
+})()

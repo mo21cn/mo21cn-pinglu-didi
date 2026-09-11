@@ -3,10 +3,10 @@
 const { getUser, clearUser, switchRole } = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
 
+// 账号区可选身份：仅货主 / 船东（港口方身份已下线）
 const ROLE_LIST = [
   { key: 'shipper', icon: '🚢', label: '货主' },
-  { key: 'owner',   icon: '⚓', label: '船东' },
-  { key: 'port',    icon: '🏗', label: '港口方' }
+  { key: 'owner',   icon: '⚓', label: '船东' }
 ]
 
 // 常用功能（hasRoute 的为真实可进入）
@@ -69,7 +69,7 @@ Page({
   },
 
   roleLabelText(role) {
-    return { shipper: '货主', owner: '船东', port: '港口方' }[role] || '用户'
+    return { shipper: '货主', owner: '船东' }[role] || '用户'
   },
 
   onPreviewTip() {
@@ -115,13 +115,13 @@ Page({
   onSwitchRole(e) {
     const role = e.currentTarget.dataset.role
     if (role === this.data.currentRole) return
+    if (!ROLE_LIST.some((r) => r.key === role)) return
     switchRole(role)
       .then(() => {
         wx.showToast({ title: '已切换为' + this.roleLabelText(role), icon: 'success' })
         const map = {
           shipper: '/pages/shipper/shipper',
-          owner: '/pages/owner/owner',
-          port: '/pages/port/port'
+          owner: '/pages/owner/owner'
         }
         wx.switchTab({ url: map[role] || '/pages/index/index' })
       })

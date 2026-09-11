@@ -5,8 +5,7 @@ const USER_KEY = 'user_info'
 
 const ROLE_LABELS = {
   shipper: '货主',
-  owner: '船东',
-  port: '港口方'
+  owner: '船东'
 }
 
 function getUser() {
@@ -18,8 +17,14 @@ function setUser(user) {
   wx.setStorageSync(USER_KEY, JSON.stringify(user))
 }
 
+/**
+ * 退出登录：清空登录态。
+ * `dev_login_code`（联调用的固定身份 code）一并清除 —— 否则退出后重新点身份时，
+ * 仍会用上一次的 code 登回旧账号（可能是另一个角色），导致「刚退出就进错身份」。
+ */
 function clearUser() {
   wx.removeStorageSync(USER_KEY)
+  wx.removeStorageSync('dev_login_code')
   clearToken()
 }
 

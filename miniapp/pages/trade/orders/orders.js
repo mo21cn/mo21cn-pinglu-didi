@@ -74,20 +74,30 @@ Page({
   },
 
   // ---- 数据 ----
-  /** 订单为主资源（失败即报错）；货源/船队仅用于卡片富化，取不到时降级 */
+  /**
+   * 订单为主资源（失败即报错）；货源/船队仅用于卡片线路富化，取不到时降级。
+   *
+   * ⚠️ `/cargo/shipments` 只允许货主、`/ship/registry` 只允许船东（后端逐端点校验
+   *    current_role）。此前无条件并发两个接口，必然有一个 403 —— 控制台红错、
+   *    且是纯粹的无效请求。订单卡富化只需要「自己这一侧」的数据，故按角色二选一。
+   */
   fetchAll() {
     this.setData({ loading: true, error: '' })
+    const role = this.data.role
+    const isOwner = role === 'owner'
+    const enrichUrl = isOwner ? '/api/v1/ship/registry' : '/api/v1/cargo/shipments'
     const safe = (url) => request({ url, data: { size: 100 } }).catch(() => ({ items: [] }))
     Promise.all([
       request({ url: '/api/v1/order/orders', data: { size: 100 } }),
-      safe('/api/v1/cargo/shipments'),
-      safe('/api/v1/ship/registry')
+      safe(enrichUrl)
     ])
-      .then(([orders, cargos, ships]) => {
+      .then(([orders, own]) => {
         const cargoMap = {}
-        ;(cargos.items || []).forEach((c) => { cargoMap[c.id] = c })
         const shipMap = {}
-        ;(ships.items || []).forEach((s) => { shipMap[s.id] = s })
+        ;(own.items || []).forEach((it) => {
+          if (isOwner) shipMap[it.id] = it
+          else cargoMap[it.id] = it
+        })
 
         const rawList = (orders.items || []).map((o) => this.decorate(o, cargoMap, shipMap))
         this.setData({ rawList })
