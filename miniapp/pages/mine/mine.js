@@ -29,11 +29,11 @@ const FUNCTIONS = [
 Page({
   data: {
     statusBarHeight: 20,
-    userName: '用户',
+    userName: '未登录',
     userInitials: '客',
     phoneText: '未绑定手机号',
-    roleLabel: '货主',
-    currentRole: 'shipper',
+    roleLabel: '登录后使用',
+    currentRole: '',
     roleList: ROLE_LIST,
     functions: FUNCTIONS
   },
@@ -59,6 +59,15 @@ Page({
         phoneText: user.phone || '未绑定手机号',
         currentRole: user.current_role || 'shipper',
         roleLabel: this.roleLabelText(user.current_role)
+      })
+    } else {
+      // 未登录给中性占位（第三方审计 P3-10：原默认「货主」会误导身份判断）
+      this.setData({
+        userName: '未登录',
+        userInitials: '客',
+        phoneText: '未绑定手机号',
+        currentRole: '',
+        roleLabel: '登录后使用'
       })
     }
   },

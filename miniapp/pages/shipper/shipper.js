@@ -7,24 +7,10 @@ const { syncTabBar } = require('../../utils/tabbar')
 const { PORTS } = require('../../utils/ports')
 // 统一智能入口（F20 路由 / F19 全局入口）
 const { openSmartEntry } = require('../../utils/agent-entry')
+const { fmtDate, fmtDateOffset } = require('../../utils/dates')
 
-const CARGO_TYPES = [
-  { key: 'bulk',      label: '散货' },
-  { key: 'general',   label: '件杂货' },
-  { key: 'container', label: '集装箱' },
-  { key: 'tanker',    label: '液货' },
-  { key: 'other',     label: '其他' }
-]
-
-const PACKS = ['散装', '袋装', '托盘', '裸装', '罐装']
-
-const SHIP_TYPES = [
-  { key: '',          label: '按货物条件匹配' },
-  { key: 'bulk',      label: '散货船' },
-  { key: 'general',   label: '件杂货船' },
-  { key: 'container', label: '集装箱船' },
-  { key: 'tanker',    label: '液货船' }
-]
+// 业务常量唯一来源（第三方审计 P3-4：原为页面本地复制）
+const { CARGO_TYPES, PACKS, SHIP_TYPES_ANY: SHIP_TYPES } = require('../../utils/constants')
 
 // 推荐船源（演示数据：货主视角暂无撮合上下文时展示）
 const HOT_SHIPS = [
@@ -83,7 +69,7 @@ Page({
 
   onLoad() {
     const d = new Date(Date.now() + 24 * 3600 * 1000)
-    this.setData({ 'form.expect_date': d.toISOString().slice(0, 10) })
+    this.setData({ 'form.expect_date': fmtDate(d) })
     this.refreshBrief()
     this.fetchMyCargoCount()
   },
@@ -131,7 +117,7 @@ Page({
         // 否则切过去是空账号，订单/货源列表全空
         auth.enterRole('owner')
           .then(() => wx.switchTab({ url: '/pages/owner/owner' }))
-          .catch(() => {})
+          .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
       }
     })
   },
@@ -244,13 +230,13 @@ Page({
   },
 
   pickDate() {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = fmtDate()
     wx.showActionSheet({
       itemList: ['今天', '明天', '后天', '一周内'],
       success: (res) => {
         const offsets = [0, 1, 2, 7]
-        const d = new Date(Date.now() + offsets[res.tapIndex] * 86400000)
-        this.setData({ 'form.expect_date': d.toISOString().slice(0, 10), miss: '' }, () => this.refreshBrief())
+        // 本地日期（toISOString 是 UTC，凌晨会取到「昨天」，第三方审计 P2-3）
+        this.setData({ 'form.expect_date': fmtDateOffset(offsets[res.tapIndex]), miss: '' }, () => this.refreshBrief())
       },
       fail: () => {
         // 用户取消：保留已有日期
@@ -317,7 +303,7 @@ Page({
         this.fetchMyCargoCount()
         wx.navigateTo({ url: `/pages/trade/match/match?mode=cargo&refId=${cargo.id}` })
       })
-      .catch(() => {})
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
       .finally(() => this.setData({ publishing: false }))
   },
 
@@ -366,7 +352,7 @@ Page({
   fetchMyCargoCount() {
     request({ url: '/api/v1/cargo/shipments', data: { size: 1 } })
       .then((res) => this.setData({ myCargoTotal: res.total || 0 }))
-      .catch(() => {})
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
   },
 
   goMyCargo() {

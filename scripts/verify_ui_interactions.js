@@ -67,10 +67,15 @@ function makeWx() {
 
 function makeRequire(wx, reqLog, authState) {
   const realPorts = require(path.join(MP, 'utils', 'ports.js'))
+  // 纯常量/纯函数模块直接加载真实实现（P3-4 收敛后页面从这两个文件取数）
+  const realConstants = require(path.join(MP, 'utils', 'constants.js'))
+  const realDates = require(path.join(MP, 'utils', 'dates.js'))
   const AUTH = authState || { loggedIn: true, user: { user_id: 1, current_role: 'shipper', roles: ['shipper'] } }
   return (p) => {
     const s = String(p)
     if (s.indexOf('utils/ports') !== -1) return realPorts
+    if (s.indexOf('utils/constants') !== -1) return realConstants
+    if (s.indexOf('utils/dates') !== -1) return realDates
     if (s.indexOf('auth') !== -1) {
       const A = {
         getUser: () => JSON.parse(JSON.stringify(AUTH.user)),
@@ -118,7 +123,7 @@ function makeRequire(wx, reqLog, authState) {
           if (AUTH.user.current_role !== r) return mark('switch', A.switchRole(r))
           return Promise.resolve(null)
         },
-        ROLE_LABELS: { shipper: '货主', owner: '船东' },
+        ROLE_LABELS: { shipper: '货主', owner: '船东', port: '港口方' },
       }
       return A
     }
@@ -390,23 +395,62 @@ section('⑤ 静态防线')
   }
   walk(MP)
 
-  // showActionSheet 长列表（微信上限 6 项，超过静默失败）
+  // showActionSheet 长列表（微信上限 6 项，超过静默失败且无 fail 兜底）
+  // 规则（第三方审计 §六.1 增强：原实现只认字面量与 PORTS，动态表达式漏检 ——
+  //       「发布空船页选船」用 ships.map() 承载无上限数据源，船队 >6 艘即静默失败）：
+  //   允许：① 字面量数组（≤6 项） ② PACKS（5 项常量）
+  //         ③ 白名单常量的 .map()：CARGO_TYPES(5) / SHIP_TYPES(4) / SHIP_TYPES_ANY(5)
+  //   其余表达式（动态数据源 / 未知变量）一律 FAIL —— 要承载长列表必须走 port-picker 组件
   const overLimit = []
+  const SHEET_WHITELIST = new Set(['CARGO_TYPES', 'SHIP_TYPES', 'SHIP_TYPES_ANY'])
   for (const f of files.filter((x) => x.endsWith('.js'))) {
     const src = fs.readFileSync(f, 'utf8')
     const re = /showActionSheet\(\s*\{[\s\S]{0,600}?itemList:\s*([^\n]+)/g
     let m
     while ((m = re.exec(src))) {
-      const expr = m[1]
-      if (/PORTS/.test(expr)) overLimit.push(`${path.relative(MP, f)}: ${expr.trim()}`)
+      const expr = m[1].trim()
+      const where = `${path.relative(MP, f)}: ${expr}`
+      if (/PORTS/.test(expr)) { overLimit.push(`${where}（港口必须走 port-picker 组件）`) ; continue }
       const lit = expr.match(/\[([^\]]*)\]/)
       if (lit) {
         const n = lit[1].split(',').filter((s) => s.trim()).length
-        if (n > 6) overLimit.push(`${path.relative(MP, f)}: 字面量 ${n} 项`)
+        if (n > 6) overLimit.push(`${where}（字面量 ${n} 项 > 6）`)
+        continue
       }
+      if (/^PACKS\b/.test(expr)) continue // 5 项常量
+      const mapped = expr.match(/^([A-Za-z_$][\w$]*)\.map\(/)
+      if (mapped) {
+        if (SHEET_WHITELIST.has(mapped[1])) continue // 白名单常量（编译期固定项数 ≤6）
+        overLimit.push(`${where}（动态表达式 .map() 非白名单——长列表必须走 port-picker）`)
+        continue
+      }
+      overLimit.push(`${where}（未知表达式，请白名单化或改走 port-picker）`)
     }
   }
-  check('全站无 showActionSheet 承载超过 6 项（港口 13 项必须走组件）', overLimit.length === 0, overLimit.join(' | '))
+  check('全站无 showActionSheet 承载超过 6 项 / 动态列表（白名单外一律拦截）', overLimit.length === 0, overLimit.join(' | '))
+
+  // 下拉刷新一致性（第三方审计 §六.2 / P2-2：JS 有 onPullDownRefresh 但 json 未开开关 → 手势静默无效）
+  const pullMismatches = []
+  for (const f of files.filter((x) => x.endsWith('.js') && x.indexOf(path.join('pages' + path.sep)) !== -1)) {
+    const src = fs.readFileSync(f, 'utf8')
+    if (!/onPullDownRefresh\s*\(\s*\)\s*\{/.test(src)) continue
+    const json = f.replace(/\.js$/, '.json')
+    let conf = null
+    try { conf = JSON.parse(fs.readFileSync(json, 'utf8')) } catch (e) { pullMismatches.push(`${path.relative(MP, f)}: json 不可解析`) ; continue }
+    if (conf.enablePullDownRefresh !== true) pullMismatches.push(`${path.relative(MP, f)}: 有 onPullDownRefresh 但 enablePullDownRefresh != true`)
+  }
+  check('有 onPullDownRefresh 的页面均已开启 enablePullDownRefresh', pullMismatches.length === 0, pullMismatches.join(' | '))
+
+  // 业务日期禁用 toISOString().slice（第三方审计 §六.4 / P2-3：UTC 日期在东八区 0-8 点取到「昨天」）
+  // 允许：utils/dates.js（本工具自身）；`new Date().toISOString()` 整串保存（时间戳语义，非业务日期）
+  const isoDateHits = []
+  for (const f of files.filter((x) => x.endsWith('.js'))) {
+    if (f.endsWith(path.join('utils', 'dates.js'))) continue
+    const src = fs.readFileSync(f, 'utf8')
+    const re = /toISOString\s*\(\s*\)\s*\.slice/g
+    if (re.test(src)) isoDateHits.push(path.relative(MP, f))
+  }
+  check('业务日期不走 toISOString().slice（UTC 偏移，改用 utils/dates.fmtDate）', isoDateHits.length === 0, isoDateHits.join(' | '))
 
   // 使用 port-picker 的页面必须注册组件
   const users = files.filter((f) => f.endsWith('.wxml') && fs.readFileSync(f, 'utf8').indexOf('<port-picker') !== -1)
@@ -455,7 +499,9 @@ section('⑤ 静态防线')
   const mineList = read('pages/mine/mine.js').match(/const ROLE_LIST = \[([\s\S]*?)\n\]/)
   check('我的页账号区仅两个身份', !!mineList && !/port/.test(mineList[1]) && (mineList[1].match(/key:/g) || []).length === 2)
   const roleLabels = read('utils/auth.js').match(/const ROLE_LABELS = \{([\s\S]*?)\n\}/)
-  check('auth.js ROLE_LABELS 不含港口方', !!roleLabels && !/port:/.test(roleLabels[1]))
+  // 港口方身份已下线：入口（切角色/账号区/tabBar）不得出现；但 ROLE_LABELS 保留
+  // port 兜底（第三方审计 P3-3：万一后端返回 port 角色，role_label 不应回退为英文）
+  check('auth.js ROLE_LABELS 含港口方兜底（入口下线 ≠ 标签缺失）', !!roleLabels && /port:\s*'港口方'/.test(roleLabels[1]))
   const labelOf = read('custom-tab-bar/index.js').match(/const LABEL_OF = \{([\s\S]*?)\n\}/)
   check('自定义 tabBar LABEL_OF 不含港口方', !!labelOf && !/port:/.test(labelOf[1]))
   check('退出登录会清 dev_login_code（否则登回旧身份）', /removeStorageSync\(['"]dev_login_code['"]\)/.test(read('utils/auth.js')))

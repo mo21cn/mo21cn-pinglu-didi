@@ -42,7 +42,7 @@ function showComplianceModal(result) {
 function runComplianceCheck(url, body) {
   request({ url, method: 'POST', data: body })
     .then((res) => showComplianceModal(res))
-    .catch(() => {})
+    .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
 }
 
 /**

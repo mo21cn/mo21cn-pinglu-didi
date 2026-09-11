@@ -1,4 +1,5 @@
 {
   "usingComponents": {},
-  "navigationBarTitleText": "港口服务"
+  "navigationBarTitleText": "港口服务",
+  "enablePullDownRefresh": true
 }

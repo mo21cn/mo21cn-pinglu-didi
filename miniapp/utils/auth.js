@@ -34,12 +34,21 @@ const DEV_ROLE_CODE = { shipper: 'seed-shipper', owner: 'seed-owner' }
 
 const ROLE_LABELS = {
   shipper: '货主',
-  owner: '船东'
+  owner: '船东',
+  port: '港口方'
 }
 
 function getUser() {
   const raw = wx.getStorageSync(USER_KEY)
-  return raw ? JSON.parse(raw) : null
+  if (!raw) return null
+  // 容错（第三方审计 P3-2）：损坏的 JSON 不应把整页登录态判断炸掉
+  try {
+    return JSON.parse(raw)
+  } catch (e) {
+    console.warn('[auth] user_info 损坏，已清除', (e && e.message) || e)
+    try { wx.removeStorageSync(USER_KEY) } catch (e2) { /* 清理失败不阻塞 */ }
+    return null
+  }
 }
 
 function setUser(user) {

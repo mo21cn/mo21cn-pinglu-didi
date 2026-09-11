@@ -5,17 +5,13 @@ const { request } = require('../../../utils/request')
 const { PORTS, portLabel } = require('../../../utils/ports')
 // 合规预检结论展示（F17 → 与统一入口共用同一套渲染）
 const { runComplianceCheck } = require('../../../utils/agent-entry')
+const { fmtDate, fmtDateOffset } = require('../../../utils/dates')
 
 // 货源解析草稿的会话键（解析页 / 统一入口写入，本页读取后即清除）
 const DRAFT_KEY = 'cargo_draft_v1'
 
-const CARGO_TYPES = [
-  { key: 'bulk',      label: '散货' },
-  { key: 'general',   label: '件杂货' },
-  { key: 'container', label: '集装箱' },
-  { key: 'tanker',    label: '液货' },
-  { key: 'other',     label: '其他' }
-]
+// 业务常量唯一来源（第三方审计 P3-4：原为页面本地复制）
+const { CARGO_TYPES, PACKS, SHIP_TYPES_ANY: SHIP_TYPES } = require('../../../utils/constants')
 
 const CARGO_TYPE_LABEL = {}
 CARGO_TYPES.forEach((t) => { CARGO_TYPE_LABEL[t.key] = t.label })
@@ -30,16 +26,6 @@ const REVIEW_LABELS = {
   expect_date: '装货日期',
   offer_price: '运费'
 }
-
-const PACKS = ['散装', '袋装', '托盘', '裸装', '罐装']
-
-const SHIP_TYPES = [
-  { key: '',          label: '按货物条件匹配' },
-  { key: 'bulk',      label: '散货船' },
-  { key: 'general',   label: '件杂货船' },
-  { key: 'container', label: '集装箱船' },
-  { key: 'tanker',    label: '液货船' }
-]
 
 Page({
   data: {
@@ -80,7 +66,7 @@ Page({
 
   onLoad() {
     const d = new Date(Date.now() + 24 * 3600 * 1000)
-    this.setData({ 'form.expect_date': d.toISOString().slice(0, 10) })
+    this.setData({ 'form.expect_date': fmtDate(d) })
     // 来自「✨Ai 解析页」或「统一入口」的草稿 → 回填表单
     this.applySmartDraft()
   },
@@ -262,8 +248,8 @@ Page({
       itemList: ['今天', '明天', '后天', '一周内'],
       success: (res) => {
         const offsets = [0, 1, 2, 7]
-        const d = new Date(Date.now() + offsets[res.tapIndex] * 86400000)
-        const dateStr = d.toISOString().slice(0, 10)
+        // 本地日期（toISOString 是 UTC，凌晨会取到「昨天」，第三方审计 P2-3）
+        const dateStr = fmtDateOffset(offsets[res.tapIndex])
         const patch = { 'form.expect_date': dateStr }
         if (this.data.missTip && this.data.missTip.expect_date) patch['missTip.expect_date'] = false
         this.setData(patch)
@@ -341,7 +327,9 @@ Page({
         } else {
           wx.showToast({ title: '草稿已保存', icon: 'success' })
         }
-        this.setData({ submitting: false })
+        // 成功后到跳转的窗口内保持 submitting（不重置）：
+        // 早期版本先撤 submitting 再延迟 700ms 跳转，窗口内可再次点「确认发布」→ 重复建单
+        // （第三方审计 P2-4；redirectTo/navigateBack 会卸载页面，无需恢复按钮态）
         if (publishNow) {
           setTimeout(() => wx.redirectTo({ url: `/pages/trade/match/match?mode=cargo&refId=${cargo.id}` }), 700)
         } else {

@@ -152,6 +152,19 @@ Page({
   },
 
   onPullDownRefresh() {
+    // 下拉不重复触发 LLM 生成（第三方审计 P3-11：原实现每次下拉都调
+    // /agent/contract/generate —— 费时费钱，还会覆盖用户正在阅读的内容）。
+    // 语义收敛为「失败重试」：仅在尚无内容（首次加载失败）时重试；
+    // 已生成 → 提示；要重新生成可退出重进（方案 A：进页即生成）。
+    if (this.data.loading) {
+      wx.stopPullDownRefresh()
+      return
+    }
+    if (this.data.contractHtml || this.data.rawText) {
+      wx.stopPullDownRefresh()
+      wx.showToast({ title: '合同已生成；退出重进可重新生成', icon: 'none', duration: 2200 })
+      return
+    }
     this.generate()
     wx.stopPullDownRefresh()
   },

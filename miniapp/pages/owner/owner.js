@@ -5,37 +5,20 @@ const auth = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
 // 全量港口（完整展示名，如「南宁 · 平塘港」）· 顶栏常用港用
 const { PORTS: PORTS_FULL } = require('../../utils/ports')
+// 港口标签统一为全量名（如「南宁 · 平塘港」）：原筛选器用本地短标签（「南宁」），
+// 与顶栏/列表/其他页面口径不一致（第三方审计 P2-9）→ 删本地表，全走 PORTS_FULL。
+const PORTS = PORTS_FULL
 // 统一智能入口（F20 路由 / F19 全局入口）
 const { openSmartEntry } = require('../../utils/agent-entry')
 
-const SHIP_TYPES = [
-  { key: 'bulk',      label: '散货船' },
-  { key: 'general',   label: '件杂货船' },
-  { key: 'container', label: '集装箱船' },
-  { key: 'tanker',    label: '液货船' }
-]
+// 业务常量唯一来源（第三方审计 P3-4：原为页面本地复制）
+const { SHIP_TYPES, SHIP_TYPES_ANY } = require('../../utils/constants')
 
 const SHIP_STATUS_LABELS = {
   pending_verify: '待审核',
   verified: '已通过',
   rejected: '已驳回'
 }
-
-const PORTS = [
-  { key: 'NNG', label: '南宁' },
-  { key: 'GGU', label: '贵港' },
-  { key: 'WUZ', label: '梧州' },
-  { key: 'BIN', label: '来宾' },
-  { key: 'LZH', label: '柳州' },
-  { key: 'BSZ', label: '百色' },
-  { key: 'CHZ', label: '崇左' },
-  { key: 'GXL', label: '桂林' },
-  { key: 'HEZ', label: '贺州' },
-  { key: 'YUL', label: '玉林' },
-  { key: 'QNZ', label: '钦州' },
-  { key: 'FCG', label: '防城港' },
-  { key: 'BHZ', label: '北海' }
-]
 
 // 货源大厅演示数据
 // 注：后端暂未开放「公开货源大厅」接口（/cargo/shipments 为货主本人的发货单），
@@ -156,7 +139,7 @@ Page({
         // 否则切过去是空账号，订单/货源列表全空
         auth.enterRole('shipper')
           .then(() => wx.switchTab({ url: '/pages/shipper/shipper' }))
-          .catch(() => {})
+          .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
       }
     })
   },
@@ -188,11 +171,11 @@ Page({
   },
 
   pickShipTypeFilter() {
-    const opts = [{ key: '', label: '船型（全部）' }].concat(SHIP_TYPES.map((t) => ({ key: t.key, label: t.label })))
+    // SHIP_TYPES_ANY = 首项空（全部）+ 4 船型，共 5 项（静态防线白名单常量）
     wx.showActionSheet({
-      itemList: opts.map((o) => o.label),
+      itemList: SHIP_TYPES_ANY.map((t) => t.label),
       success: (res) => {
-        const o = opts[res.tapIndex]
+        const o = SHIP_TYPES_ANY[res.tapIndex]
         this.setData({ shipTypeKey: o.key, shipTypeLabel: o.key ? o.label : '船型' }, () => this.applyFilter())
       }
     })
@@ -333,7 +316,7 @@ Page({
         this.fetchShipList()
         this.setData({ view: 'fleet' })
       })
-      .catch(() => {})
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
       .finally(() => this.setData({ regSubmitting: false }))
   },
 

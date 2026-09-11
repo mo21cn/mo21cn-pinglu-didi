@@ -16,10 +16,16 @@ const STORAGE_KEY = 'chat_history_v1'
 const PARSE_STORAGE_KEY = 'parse_history_v1'
 const SEARCH_STORAGE_KEY = 'search_history_v1'
 const MAX_HISTORY = 50
-// 上送后端用于多轮上下文的历史条数（assistant 仅取最近 6 条拼到 user 消息）
-const CTX_TURNS = 6
+// 上送后端的多轮上下文条数上限：必须 ≤ 后端 AssistantRequest.history 的 max_length=10。
+// 早期写成 CTX_TURNS*2=12 条超限 → 第 6 轮发送起携带 11+ 条历史被 FastAPI 422 拒收，
+// 前端只显示「未获得回答」无法定位（第三方审计 P1-1）。
+const MAX_CTX_HISTORY = 10
 // 解析结果转交发布页的会话键（发布页 onLoad 读取后即清除，避免重复回填）
 const DRAFT_KEY = 'cargo_draft_v1'
+
+// 消息自增 id（wx:key 用）：ts 在同毫秒会插入 user+pending 两条导致键重复（第三方审计 P3-6）
+let msgSeq = 0
+function nextMsgId() { return ++msgSeq }
 
 const FIELD_LABELS = {
   cargo_name: '货物名称',
@@ -279,7 +285,8 @@ Page({
   loadHistory() {
     try {
       const raw = wx.getStorageSync(this.storageKey())
-      const list = Array.isArray(raw) ? raw : []
+      // 旧版本存储的消息没有 id（用 ts 当 key），恢复时统一补上自增 id
+      const list = (Array.isArray(raw) ? raw : []).map((m) => (m && !m.id ? { ...m, id: nextMsgId() } : m))
       this.setData({ messages: list, emptyHint: list.length === 0 }, () => this.scrollToBottom())
     } catch (e) {
       // Storage 异常不阻塞
@@ -360,8 +367,8 @@ Page({
       return
     }
 
-    const userMsg = { role: 'user', text, ts: Date.now() }
-    const pendingMsg = { role: 'assistant', text: '正在思考…', ts: Date.now(), pending: true }
+    const userMsg = { id: nextMsgId(), role: 'user', text, ts: Date.now() }
+    const pendingMsg = { id: nextMsgId(), role: 'assistant', text: '正在思考…', ts: Date.now(), pending: true }
     this.setData({
       messages: [...this.data.messages, userMsg, pendingMsg],
       input: '',
@@ -372,10 +379,10 @@ Page({
       this.saveHistory()
     })
 
-    // 组装多轮上下文（只取最近 CTX_TURNS 对，按时间升序）
+    // 组装多轮上下文（按时间升序；条数对齐后端 max_length=10，多轮不再 422）
     const historyForApi = this.data.messages
       .filter((m) => !m.pending && (m.role === 'user' || m.role === 'assistant'))
-      .slice(-(CTX_TURNS * 2))
+      .slice(-MAX_CTX_HISTORY)
       .map((m) => ({ role: m.role, content: m.text }))
 
     const mode = this.data.mode
@@ -436,8 +443,9 @@ Page({
     }
   },
 
-  /** 用最终消息替换末尾「正在思考」占位 */
+  /** 用最终消息替换末尾「正在思考」占位（统一在此补 id，兼容各分支产物与历史遗留数据） */
   replacePending(msg, after) {
+    if (!msg.id) msg.id = nextMsgId()
     const list = this.data.messages.slice()
     const idx = list.findIndex((m) => m.pending)
     if (idx >= 0) list[idx] = msg

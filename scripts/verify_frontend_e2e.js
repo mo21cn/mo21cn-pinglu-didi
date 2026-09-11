@@ -261,6 +261,11 @@ function loadPage(file, ctx) {
   let cfg = null
   const requireStub = (p) => {
     const s = String(p)
+    // 纯常量/纯函数模块直接加载真实实现（P3-4 常量收敛 + P2-3 日期工具后页面依赖它们）
+    const U = (name) => require(path.join(ROOT, 'miniapp', 'utils', name))
+    if (s.indexOf('utils/ports') !== -1) return U('ports.js')
+    if (s.indexOf('utils/constants') !== -1) return U('constants.js')
+    if (s.indexOf('utils/dates') !== -1) return U('dates.js')
     if (s.indexOf('auth') !== -1) {
       return {
         getUser: () => ({ current_role: ctx.role, user_id: ctx.uid || 1 }),
