@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="ArYiDeHO6KVa2FWzSBsOtd">
+<head data-page-node-id="GVHHvzQ1WxZV9bB1qEQRkR">
+  <meta charset="UTF-8" data-page-node-id="oVciZMoM6tDwMYZUqRkMBa">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="XxZaU2IZxfEugprsYC1N4p">
+  <title>UI 改版 v1 · 滴滴打船 · 设计概览</title>
+  <style>
+    :root {
+      --brand-blue: #3B5BDB;
+      --brand-purple: #7048E8;
+      --brand-light: #4C6EF5;
+      --brand-deep: #5C3AEC;
+      --brand-soft: #F2EBFF;
+      --brand-mist: #EDF1FF;
+      --text-deep: #0F2540;
+      --text-mid: #6B7A8C;
+      --text-faint: #98A6B8;
+      --bg-soft: #F5F7FA;
+      --line: #EEF1F6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg-soft);
+      color: var(--text-deep);
+      line-height: 1.6;
+      padding: 40px 20px 80px;
+    }
+    .container { max-width: 1080px; margin: 0 auto; }
+
+    /* ---- Header ---- */
+    .page-header {
+      text-align: center;
+      padding: 60px 32px;
+      background: linear-gradient(135deg, var(--brand-blue) 0%, var(--brand-deep) 50%, var(--brand-purple) 100%);
+      color: white;
+      border-radius: 32px;
+      margin-bottom: 48px;
+      position: relative;
+      overflow: hidden;
+    }
+    .page-header::before {
+      content: '';
+      position: absolute;
+      width: 320px; height: 320px;
+      background: rgba(255,255,255,.12);
+      border-radius: 50%;
+      top: -120px; right: -80px;
+    }
+    .page-header::after {
+      content: '';
+      position: absolute;
+      width: 200px; height: 200px;
+      background: rgba(255,255,255,.08);
+      border-radius: 50%;
+      bottom: -60px; left: 30px;
+    }
+    .page-header h1 { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 12px; position: relative; }
+    .page-header .sub { font-size: 18px; opacity: .9; letter-spacing: 6px; position: relative; }
+    .page-header .tag {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 6px 20px;
+      background: rgba(255,255,255,.2);
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 999px;
+      font-size: 14px;
+      position: relative;
+    }
+
+    /* ---- Section ---- */
+    .section {
+      background: white;
+      border-radius: 24px;
+      padding: 40px 36px;
+      margin-bottom: 32px;
+      box-shadow: 0 4px 24px rgba(61, 91, 219, 0.08);
+    }
+    .section h2 {
+      font-size: 28px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      margin-bottom: 8px;
+    }
+    .section .lead { color: var(--text-mid); font-size: 16px; margin-bottom: 24px; }
+
+    /* ---- Color tokens ---- */
+    .color-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin: 24px 0;
+    }
+    .color-cell {
+      border-radius: 16px;
+      padding: 20px 16px;
+      color: white;
+      text-align: left;
+      box-shadow: 0 4px 16px rgba(0,0,0,.08);
+    }
+    .color-cell .hex { font-size: 18px; font-weight: 700; font-family: monospace; }
+    .color-cell .name { font-size: 14px; opacity: .9; margin-top: 4px; }
+    .color-cell.gradient { background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple)); }
+    .color-cell.blue { background: var(--brand-blue); }
+    .color-cell.purple { background: var(--brand-purple); }
+    .color-cell.deep { background: var(--brand-deep); }
+    .color-cell.light { background: var(--brand-light); }
+    .color-cell.soft { background: var(--brand-mist); color: var(--text-deep); }
+    .color-cell.mist { background: var(--brand-soft); color: var(--text-deep); }
+    .color-cell.text { background: var(--text-deep); }
+
+    /* ---- Phone mockup ---- */
+    .phone-frame {
+      width: 320px;
+      height: 640px;
+      background: white;
+      border: 8px solid #1F2937;
+      border-radius: 36px;
+      padding: 0;
+      margin: 16px;
+      display: inline-block;
+      vertical-align: top;
+      box-shadow: 0 16px 48px rgba(0,0,0,.18);
+      overflow: hidden;
+      position: relative;
+    }
+    .phone-statusbar {
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple));
+      color: white;
+      font-size: 12px;
+      padding: 6px 16px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .phone-content {
+      height: calc(100% - 28px);
+      overflow: hidden;
+      position: relative;
+    }
+    .phone-label {
+      display: block;
+      text-align: center;
+      font-size: 14px;
+      color: var(--text-mid);
+      margin: 12px 0 24px;
+      font-weight: 500;
+    }
+
+    /* ---- Mock UI elements ---- */
+    .mock { font-size: 11px; }
+    .mock .top-bar {
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple));
+      padding: 12px 14px;
+      color: white;
+      border-radius: 0 0 12px 12px;
+    }
+    .mock .top-bar .row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .mock .top-bar .logo {
+      width: 28px; height: 28px;
+      background: rgba(255,255,255,.2);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .mock .top-bar .search {
+      flex: 1;
+      background: white;
+      border-radius: 16px;
+      padding: 6px 10px;
+      font-size: 10px;
+      color: var(--text-faint);
+    }
+    .mock .top-bar .icon {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px;
+      color: white;
+    }
+    .mock .top-bar .icon.ai { background: linear-gradient(135deg, #FFA94D, #FF6B6B); }
+    .mock .top-bar .icon.cs { background: linear-gradient(135deg, #51CF66, #12B886); }
+    .mock .body { padding: 12px; }
+    .mock .banner {
+      background: linear-gradient(135deg, var(--brand-light), var(--brand-purple));
+      color: white;
+      border-radius: 12px;
+      padding: 14px 14px;
+      margin-bottom: 10px;
+    }
+    .mock .banner h3 { font-size: 14px; font-weight: 700; }
+    .mock .banner p { font-size: 10px; opacity: .9; margin-top: 4px; }
+    .mock .card {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(61, 91, 219, .08);
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .mock .row-line {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 0;
+      font-size: 10px;
+      color: var(--text-mid);
+    }
+    .mock .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 4px; }
+    .mock .dot.blue { background: var(--brand-blue); }
+    .mock .dot.purple { background: var(--brand-purple); }
+    .mock .val { color: var(--text-deep); font-weight: 500; }
+    .mock .action-btn {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 14px;
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .mock .action-btn.blue { background: linear-gradient(135deg, var(--brand-blue), var(--brand-light)); }
+    .mock .action-btn.purple { background: linear-gradient(135deg, var(--brand-purple), #845EF7); }
+    .mock .row-btns {
+      display: flex; gap: 8px; margin-bottom: 8px;
+    }
+    .mock .row-btns .action-btn { flex: 1; padding: 10px 0; text-align: center; }
+    .mock .grid-2 {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .mock .grid-2 .cell {
+      background: white; border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(61, 91, 219, .06);
+      padding: 8px;
+    }
+    .mock .cell .title { font-size: 10px; font-weight: 600; color: var(--text-deep); }
+    .mock .cell .price { font-size: 12px; font-weight: 700; color: #FA5252; margin-top: 4px; }
+    .mock .grab {
+      background: linear-gradient(135deg, #FA5252, #FF6B6B);
+      color: white;
+      border-radius: 12px;
+      padding: 4px 10px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .mock .promo {
+      background: linear-gradient(135deg, #FF6B6B, #FA5252);
+      color: white;
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .mock .promo .title { font-size: 12px; font-weight: 700; }
+    .mock .promo .sub { font-size: 9px; opacity: .9; }
+    .mock .promo .cta { background: rgba(255,255,255,.25); padding: 4px 10px; border-radius: 10px; font-size: 10px; }
+    .mock .tabbar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: white;
+      border-top: 1px solid var(--line);
+      display: flex; padding: 6px 0;
+    }
+    .mock .tabbar .tb {
+      flex: 1; text-align: center; font-size: 10px; color: var(--text-faint);
+    }
+    .mock .tabbar .tb.active { color: var(--brand-blue); font-weight: 600; }
+    .mock .tabbar .tb .ico { font-size: 16px; display: block; }
+
+    /* ---- Role picker specific ---- */
+    .mock-index .brand-hero {
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-deep), var(--brand-purple));
+      padding: 24px 16px 50px;
+      color: white;
+      border-radius: 0 0 16px 16px;
+    }
+    .mock-index .brand-hero h2 { font-size: 22px; font-weight: 700; }
+    .mock-index .brand-hero .sub { font-size: 11px; opacity: .9; letter-spacing: 2px; margin-top: 4px; }
+    .mock-index .role-sheet {
+      margin: -30px 12px 0;
+      background: white;
+      border-radius: 12px;
+      padding: 16px 14px;
+      box-shadow: 0 4px 16px rgba(61, 91, 219, .12);
+    }
+    .mock-index .role-sheet .title { font-size: 14px; font-weight: 700; text-align: center; margin-bottom: 4px; }
+    .mock-index .role-sheet .sub { font-size: 10px; color: var(--text-mid); text-align: center; margin-bottom: 12px; }
+    .mock-index .role-cards { display: flex; gap: 8px; }
+    .mock-index .role-card {
+      flex: 1; padding: 14px 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(59, 91, 219, .15);
+      text-align: center;
+    }
+    .mock-index .role-card .ico { font-size: 24px; }
+    .mock-index .role-card .label { font-size: 12px; font-weight: 700; margin: 4px 0 2px; }
+    .mock-index .role-card .desc { font-size: 9px; color: var(--text-mid); line-height: 1.3; margin-bottom: 8px; }
+    .mock-index .role-card .tag {
+      display: inline-block; padding: 3px 8px; font-size: 9px;
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple));
+      color: white; border-radius: 8px;
+    }
+    .mock-index .port-entry {
+      margin-top: 8px; padding: 8px 12px;
+      background: var(--bg-soft);
+      border-radius: 8px;
+      font-size: 10px;
+      display: flex; align-items: center;
+    }
+
+    /* ---- User banner / orders ---- */
+    .mock-orders .user-banner {
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple));
+      color: white;
+      padding: 14px 16px;
+    }
+    .mock-orders .user-banner .row { display: flex; justify-content: space-between; align-items: center; }
+    .mock-orders .user-banner .avatar {
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,.25);
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 14px;
+    }
+    .mock-orders .user-banner .greet { font-size: 12px; font-weight: 600; }
+    .mock-orders .user-banner .role { font-size: 9px; opacity: .85; }
+    .mock-orders .user-banner .stat { background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.25); padding: 6px 12px; border-radius: 8px; }
+    .mock-orders .user-banner .stat .num { font-size: 16px; font-weight: 700; }
+    .mock-orders .user-banner .stat .label { font-size: 8px; opacity: .85; }
+    .mock-orders .status-tabs {
+      display: flex; gap: 6px; padding: 10px 12px;
+      background: white; overflow-x: auto;
+    }
+    .mock-orders .status-tab {
+      padding: 5px 12px; background: var(--bg-soft);
+      border-radius: 999px; font-size: 10px; color: var(--text-mid);
+      white-space: nowrap;
+    }
+    .mock-orders .status-tab.active {
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple));
+      color: white; font-weight: 600;
+    }
+    .mock-orders .todo-card {
+      background: white; border-radius: 8px;
+      padding: 10px; margin: 6px 12px;
+      box-shadow: 0 1px 6px rgba(61, 91, 219, .06);
+      display: flex; align-items: center; gap: 8px;
+      font-size: 10px;
+    }
+    .mock-orders .todo-card .ico {
+      width: 28px; height: 28px; border-radius: 6px;
+      background: linear-gradient(135deg, #E7ECFF, #F0E7FF);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+    .mock-orders .todo-card .t { font-weight: 600; color: var(--text-deep); }
+    .mock-orders .todo-card .s { color: var(--text-mid); font-size: 9px; }
+    .mock-orders .order-card {
+      background: white; border-radius: 10px;
+      padding: 10px 12px; margin: 6px 12px;
+      box-shadow: 0 1px 6px rgba(61, 91, 219, .06);
+    }
+    .mock-orders .order-card .head { display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-bottom: 6px; }
+    .mock-orders .order-card .badge {
+      background: rgba(240, 140, 0, .1); color: #F08C00;
+      padding: 2px 8px; border-radius: 999px; font-size: 9px;
+    }
+    .mock-orders .order-card .route {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--brand-mist); padding: 6px 8px; border-radius: 6px;
+      font-size: 10px; margin-bottom: 6px;
+    }
+    .mock-orders .order-card .route .arrow { color: var(--text-faint); }
+    .mock-orders .order-card .meta { display: flex; gap: 8px; font-size: 10px; color: var(--text-mid); }
+    .mock-orders .order-card .meta .price { color: #FA5252; font-weight: 700; }
+
+    /* ---- My page ---- */
+    .mock-mine .user-banner {
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-deep), var(--brand-purple));
+      color: white;
+      padding: 20px 16px 16px;
+      border-radius: 0 0 16px 16px;
+    }
+    .mock-mine .user-banner .row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .mock-mine .user-banner .avatar {
+      width: 48px; height: 48px;
+      background: rgba(255,255,255,.25); border: 2px solid rgba(255,255,255,.35);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 18px;
+    }
+    .mock-mine .user-banner .name { font-size: 16px; font-weight: 700; }
+    .mock-mine .user-banner .role {
+      display: inline-block; padding: 2px 8px; margin-top: 4px;
+      background: rgba(255,255,255,.25); border-radius: 999px;
+      font-size: 9px;
+    }
+    .mock-mine .user-banner .edit {
+      margin-left: auto; padding: 4px 10px;
+      background: rgba(255,255,255,.18);
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 999px; font-size: 9px;
+    }
+    .mock-mine .stats {
+      display: flex; align-items: center;
+      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25);
+      border-radius: 12px; padding: 10px;
+    }
+    .mock-mine .stats .cell { flex: 1; text-align: center; }
+    .mock-mine .stats .cell .num { font-size: 16px; font-weight: 700; }
+    .mock-mine .stats .cell .label { font-size: 9px; opacity: .85; }
+    .mock-mine .stats .div { width: 1px; height: 20px; background: rgba(255,255,255,.25); }
+    .mock-mine .dev-banner {
+      margin: 10px 12px 0; padding: 8px 10px;
+      background: linear-gradient(135deg, #FFF8E6, #FFEDC2);
+      border-left: 3px solid #F08C00;
+      border-radius: 6px; font-size: 9px; color: #8B5A00;
+    }
+    .mock-mine .dev-banner .t { font-weight: 600; color: #B57600; }
+    .mock-mine .section {
+      margin: 10px 12px 0; background: white; border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(61, 91, 219, .06);
+      padding: 10px 12px;
+    }
+    .mock-mine .section .st { font-size: 11px; font-weight: 600; margin-bottom: 8px; }
+    .mock-mine .role-chips { display: flex; gap: 6px; }
+    .mock-mine .role-chips .rc {
+      flex: 1; padding: 8px 0; text-align: center;
+      background: var(--bg-soft); border-radius: 8px;
+      font-size: 10px; border: 1px solid transparent;
+    }
+    .mock-mine .role-chips .rc.active {
+      background: linear-gradient(135deg, var(--brand-mist), var(--brand-soft));
+      border-color: var(--brand-blue);
+    }
+    .mock-mine .entry-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+    }
+    .mock-mine .entry-grid .it {
+      background: var(--brand-mist); border-radius: 6px;
+      padding: 8px 0; text-align: center; font-size: 9px;
+      position: relative;
+    }
+    .mock-mine .entry-grid .it .ico { font-size: 16px; }
+    .mock-mine .entry-grid .it .dev {
+      position: absolute; top: 0; right: 0;
+      background: #FA5252; color: white;
+      padding: 1px 4px; border-radius: 6px; font-size: 7px;
+    }
+
+    /* ---- Comparison table ---- */
+    .compare-table {
+      width: 100%; border-collapse: collapse;
+      margin: 16px 0;
+    }
+    .compare-table th, .compare-table td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      font-size: 14px;
+      text-align: left;
+    }
+    .compare-table th {
+      background: var(--bg-soft);
+      font-weight: 600;
+      color: var(--text-deep);
+    }
+    .compare-table td.center { text-align: center; }
+    .check { color: #12B886; font-weight: 700; }
+    .cross { color: var(--text-faint); }
+
+    .footer-note {
+      text-align: center;
+      color: var(--text-mid);
+      font-size: 14px;
+      margin-top: 48px;
+    }
+    .footer-note .accent {
+      background: linear-gradient(135deg, var(--brand-blue), var(--brand-purple));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body data-page-node-id="HqlPElGA47VkAEmuAdVNlb">
+  <div class="container" data-page-node-id="VJ0OWht18s2M9Djhix3CEX">
+    <div class="page-header" data-page-node-id="BobFQvSNW8El4hcsjlC7rb">
+      <h1 data-page-node-id="oeGDnXgCZraqrXWjDK6HdJ">UI 改版 v1 · 滴滴打船</h1>
+      <div class="sub" data-page-node-id="IlS9bbTcWLASmUF3EfloBx">蓝紫渐变 · 卡片化 · 顶栏图标行</div>
+      <div class="tag" data-page-node-id="aeyRz0od6lNqifK7xuPlEQ">C 阶段交付 · PR #19 · develop=87e64fd</div>
+    </div>
+
+    <!-- 设计令牌 -->
+    <div class="section" data-page-node-id="JyD9qEgZXrH6GhW8KIr819">
+      <h2 data-page-node-id="9dl5Hp4gjkTFi5RpkN50pE">🎨 设计令牌</h2>
+      <p class="lead" data-page-node-id="UmvCeEzE21ieRThts69OKI">删除原单蓝色 #1565C0 / #0F7CFF，主色改为蓝紫渐变贯穿全应用</p>
+      <div class="color-grid" data-page-node-id="AmlAVr3qUHHCHVHhmG0S0A">
+        <div class="color-cell gradient" data-page-node-id="PBct5Ng6MflV09uuaA6aK6"><div class="hex" data-page-node-id="5VdL3m3k8GCDXXMCXUJzjQ">#3B5BDB → #7048E8</div><div class="name" data-page-node-id="JFuuPpDGySUwwojJOGGdHP">品牌主渐变</div></div>
+        <div class="color-cell blue" data-page-node-id="kakHZxZkafoyitZQOwheWO"><div class="hex" data-page-node-id="6P5UC0glWGQiWEGTr4mn9w">#3B5BDB</div><div class="name" data-page-node-id="PG2ABfTNQKJYXIWyG67gvd">brand-blue</div></div>
+        <div class="color-cell purple" data-page-node-id="ijhjmSDGegbdfUHKMCebIJ"><div class="hex" data-page-node-id="aJRgDTiXyiG23fzDWjCcsu">#7048E8</div><div class="name" data-page-node-id="En7orOXZ8grpvIPYGBzm4F">brand-purple</div></div>
+        <div class="color-cell deep" data-page-node-id="SEDRP9VER7TBLW7MEtLXMj"><div class="hex" data-page-node-id="nNq6rtyJ2gVEGt9nBNf6DY">#5C3AEC</div><div class="name" data-page-node-id="8lJ2G5zBHHon9qajgfBSSJ">brand-deep</div></div>
+        <div class="color-cell light" data-page-node-id="3Du4yxMHUGvLkiaNknf9Ol"><div class="hex" data-page-node-id="mipdJ3Ls2yBLbFrUPrdkcc">#4C6EF5</div><div class="name" data-page-node-id="kdh4RIlRrD5e29O4VQOlAu">brand-light</div></div>
+        <div class="color-cell soft" data-page-node-id="hvfVVSIVQIrrLNX5LZa9hT"><div class="hex" data-page-node-id="AiBcG6v7OfUJUVljpRBQCB">#EDF1FF</div><div class="name" data-page-node-id="f57soAVCAn4GRTPGKTvhSA">brand-mist</div></div>
+        <div class="color-cell mist" data-page-node-id="qApvYhVDNHe1OWww2q9RjH"><div class="hex" data-page-node-id="8KTJ1SyQPBFF2WJv6Tn0OK">#F2EBFF</div><div class="name" data-page-node-id="6O0bvAFWc6b07zaw6yIieh">brand-soft</div></div>
+        <div class="color-cell text" data-page-node-id="8dJUawo6AxbU38cMH7eMLj"><div class="hex" data-page-node-id="uS5iOeg32XG6BhiVFqzIFc">#0F2540</div><div class="name" data-page-node-id="CVIQ5h0HhP9ZJ06Rj6udoJ">text-deep</div></div>
+      </div>
+    </div>
+
+    <!-- 交付范围 -->
+    <div class="section" data-page-node-id="sGPbGh19NeRZDBjPByDinh">
+      <h2 data-page-node-id="owubb4NyPsg6QiiGyB9KOI">📦 交付范围</h2>
+      <p class="lead" data-page-node-id="RW6MWvpp4VKrcQj7pT94WW">7 项任务全部完成，后端零改动，仅前端 27 个文件 +3234/-860 行</p>
+      <table class="compare-table" data-page-node-id="OTmOGxxMQ9eXduyEDPdGBR">
+        <thead data-page-node-id="TVeGzU1FqSmzUJbQarXOXD">
+          <tr data-page-node-id="L62Dlxu44f5SXEbkw1EHDA">
+            <th style="width: 60px;" data-page-node-id="c1GTC7msqbPptxC3bM7cqi">#</th>
+            <th data-page-node-id="3uk0AstUhhGz65SwR9yX6J">用户方案</th>
+            <th data-page-node-id="ad051jAKD4EDpTh9oczC9J">v1 实现</th>
+            <th style="width: 80px;" data-page-node-id="H8g8nSoveHHUp8WMHoOlOT">状态</th>
+          </tr>
+        </thead>
+        <tbody data-page-node-id="HMbHMEhK8zDUm81JQMIB9L">
+          <tr data-page-node-id="WyhelyUp8nIduttJEz1Krr">
+            <td class="center" data-page-node-id="05DYlHUZjOGqwXc8uWEMGZ">1</td>
+            <td data-page-node-id="HWrsuBb2TjxYJ9Shd0P0Gj">不设主页，首屏浮窗点选身份进入</td>
+            <td data-page-node-id="QR3rkwqZ3aasDLe8OJRr1k">蓝紫渐变品牌头 + 白色浮窗（货主/船东 主卡 + 港口 次级入口）</td>
+            <td class="center" data-page-node-id="smMciLC3shZFkdvKDCou23"><span class="check" data-page-node-id="UDA24Ism4niuRnBa4iTeR2">✓</span></td>
+          </tr>
+          <tr data-page-node-id="O6EqkHFGzXLD43QYAAacuv">
+            <td class="center" data-page-node-id="BKDIcpjIOoC58vBZU2A0y4">2</td>
+            <td data-page-node-id="yYED9UOCxsk8CX1VBctCxY">主要开发两个身份端（货主/船东）</td>
+            <td data-page-node-id="L1MGrkTPzgmR0SqzcXjqUK">tabBar 5 项：[找船] [找货] [订单] [港口] [我的]；港口放底栏</td>
+            <td class="center" data-page-node-id="miU53IckFO5rHUIiTMtWDM"><span class="check" data-page-node-id="yup9V5FkbmTBd7YJI2GIja">✓</span></td>
+          </tr>
+          <tr data-page-node-id="bgwv30SUIcKfttm6GCzduH">
+            <td class="center" data-page-node-id="Z4niFB0vixuWPTpaRkUrV8">3</td>
+            <td data-page-node-id="ydxHYYNqBMZWYAD79x1jlO">货主端首页 = 找船（参考图左上）</td>
+            <td data-page-node-id="2HWdyqNVfRMLHkZPxbY67S">顶栏（搜索/AI/客服）+ 地址卡 + 货物卡 + 发零担/发整车 + 热门航线 + 我的货源入口</td>
+            <td class="center" data-page-node-id="mDaqf0EfDNJks7QOCbWPU3"><span class="check" data-page-node-id="zquds22htSWFBb7uREmoAI">✓</span></td>
+          </tr>
+          <tr data-page-node-id="w5KDAwaqbIpGfSTDjsIGU7">
+            <td class="center" data-page-node-id="1bYeoiLmXxbmUbXvwc9euC">4</td>
+            <td data-page-node-id="ysykFKCbN7f5SrCpVyUA5R">船东端首页 = 找货（参考图右上）</td>
+            <td data-page-node-id="Tw4XQNkSniAnCks2wO9h1n">顶栏 + Tab（找货/船队/备案）+ 筛选条 + 货源卡（蓝紫路线+抢单）+ 活动 banner</td>
+            <td class="center" data-page-node-id="WYguRmTCCN6GyNGUEgqazi"><span class="check" data-page-node-id="dfk9Uv6NgzxwE6Ftys3SQB">✓</span></td>
+          </tr>
+          <tr data-page-node-id="ofBglAuKVUQlbUg1y3O3tW">
+            <td class="center" data-page-node-id="vwHsGdT7oDy0g5rCWB8sBb">5</td>
+            <td data-page-node-id="DCNuODbo9iyRwNPDisXPDd">搜索/AI/客服 放到首页上端</td>
+            <td data-page-node-id="rVJtb44pMEXhzOd79oO69y">顶栏固定三图标行（搜索/AI/客服），与 F13 assistant 兼容</td>
+            <td class="center" data-page-node-id="pN9upXGLRaNMTGoMpOjOJ7"><span class="check" data-page-node-id="WgPzXtlWAqAGHLjEPZZyrw">✓</span></td>
+          </tr>
+          <tr data-page-node-id="ElFvpk02lFEAfe0Qa7byQ9">
+            <td class="center" data-page-node-id="BTZOGCzvClCq5v1gj8M5mx">6</td>
+            <td data-page-node-id="AFZ1HBeSMyZwGGsHoCelxl">色彩框架改为蓝色和紫色渐变</td>
+            <td data-page-node-id="cnrDDyJ2lY6yA6ZsqnY6Fe">全应用统一 #3B5BDB → #7048E8 渐变；顶栏/banner/按钮/Tab 高亮</td>
+            <td class="center" data-page-node-id="YNQQYEQFIwMdS0w69kib2G"><span class="check" data-page-node-id="B6c13miuxh22iYBEGZWYKi">✓</span></td>
+          </tr>
+          <tr data-page-node-id="CPCVOTmEF9wWDYvr2x4tBK">
+            <td class="center" data-page-node-id="SLAxmVRFV6QAVLR2fM6139">7</td>
+            <td data-page-node-id="1Ytzy96UHowDXS997HiPTj">底栏的订单二级页面（参考图右下）</td>
+            <td data-page-node-id="r3vfkdGczkUPjtHqYFw0eV">用户 banner + 状态 Tab + 待办卡（按角色 4 条）+ 订单卡 + 合同弹层</td>
+            <td class="center" data-page-node-id="DSvsSFFaB2EwHlrf2htMQc"><span class="check" data-page-node-id="lOoytunZhVr8k4Xat590US">✓</span></td>
+          </tr>
+          <tr data-page-node-id="Oy9bp0ZKuRRruvmeTkaRC3">
+            <td class="center" data-page-node-id="nMMhl1EEapBO5NTOER90Wl">—</td>
+            <td data-page-node-id="kKv9HKJziTMcMJsBqaE35M">港口按钮 + 我的按钮 二级页（构思中）</td>
+            <td data-page-node-id="eClTQFq8BOBMJ2ID742aAE">港口：保留核心 + 顶部"UI 改造中"提示；我的：全新骨架（待你构思）</td>
+            <td class="center" data-page-node-id="JLphzljdorPVTqV8npkX9c"><span class="check" data-page-node-id="OyLvk642QVpDVVApcJeoAU">✓</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 视觉稿：4 屏手机 -->
+    <div class="section" data-page-node-id="H2k9cZb4fTgknV7wZ9rJL1">
+      <h2 data-page-node-id="fivGmmaqyXFaKk8fG9FeoQ">📱 视觉稿预览</h2>
+      <p class="lead" data-page-node-id="606fA4n6KeYcv2trVumx7Q">4 屏手机 mockup（CSS 实现，与小程序 wxml 视觉 1:1）</p>
+      <div style="text-align: center; overflow-x: auto; padding: 16px 0;" data-page-node-id="7xodVvvZHAT6TgglSOHzQH">
+        <!-- Phone 1: Index -->
+        <div class="phone-frame mock mock-index" data-page-node-id="pC4usOpTVTmo7OUSDghEbN">
+          <div class="phone-statusbar" data-page-node-id="5D01oGyp1jqA1ZSiHeu9Qx">上午10:00 ●●● <span data-page-node-id="92JkMub0Fk0BNpIvMTPDTr">100%</span></div>
+          <div class="phone-content" data-page-node-id="udGL3FdSwx2tGspwqzZnDR">
+            <div class="brand-hero" data-page-node-id="RR0irUQ4gN1ziQaXEOBvWh">
+              <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;" data-page-node-id="JXwNFfZAlEqMq7AWQOcChB">
+                <span style="font-size:18px;" data-page-node-id="T820aFN6VQKIue2ZpiZV1s">⛵</span>
+                <span style="font-size:10px;opacity:.9;letter-spacing:1px;" data-page-node-id="Co4xu3p8fEIFnBrb2J8ixj">新船帮 · XCB</span>
+              </div>
+              <h2 data-page-node-id="UVIZmkZn3gBElIl732L34S">平陆运河 · 滴滴打船</h2>
+              <div class="sub" data-page-node-id="iGA20TIvuSIntbdA7mSh6b">货 · 船 · 港 一站式撮合</div>
+            </div>
+            <div class="role-sheet" data-page-node-id="eDoDH57xE24NVSWjH5QYdW">
+              <div class="title" data-page-node-id="w5iGDVjDuYnwEjcQLIfVXz">请选择您的身份</div>
+              <div class="sub" data-page-node-id="kykXVHtKwpAxK0IGq0COzR">不同身份看到的工作台不同</div>
+              <div class="role-cards" data-page-node-id="fw1w0iY1p0FXynlbvB9UIm">
+                <div class="role-card" data-page-node-id="lKlT7nFw6WnWEp8pOoXBrT">
+                  <div class="ico" data-page-node-id="EjIeWHxTAND8HuxMPBEg50">🚢</div>
+                  <div class="label" data-page-node-id="wYIroAPSXiYpfiXC3osl7z">我是货主</div>
+                  <div class="desc" data-page-node-id="8mmB8tRTPa34nKnDBf4MdC">发货找船 · 一句话生成货源</div>
+                  <span class="tag" data-page-node-id="nGtwLAEBz2H9FxjhdgFM6r">点此进入 ›</span>
+                </div>
+                <div class="role-card" data-page-node-id="ExKOZAwKzkCOaoqM215mE3">
+                  <div class="ico" data-page-node-id="KN4LTOFrlkDizod3cFHh52">⚓</div>
+                  <div class="label" data-page-node-id="PcWo7D8BVyTAFS9DQF8TO5">我是船东</div>
+                  <div class="desc" data-page-node-id="Nx3evIEGWHT9vaPk3PsLRP">接单找货 · 海量货源抢单</div>
+                  <span class="tag" data-page-node-id="6hiwOywWoGK6B8JtplxqBE">点此进入 ›</span>
+                </div>
+              </div>
+              <div class="port-entry" data-page-node-id="GD3O3U6BOrflzrcE1y8Ge6">
+                <span style="font-size:14px;margin-right:6px;" data-page-node-id="vsXWnGrDLBmsfemh1MqHJn">🏗</span>
+                <span style="flex:1;" data-page-node-id="HDIfgG4L4rp4MB0Fjfib9H">我是港口方</span>
+                <span style="color:#98A6B8;" data-page-node-id="gKJMhvqJ0WfVyz8DDXzilJ">›</span>
+              </div>
+            </div>
+            <div style="text-align:center;font-size:9px;color:#98A6B8;margin-top:14px;" data-page-node-id="Ufe1XKnRf3AeYB9veolEsj">其他登录方式</div>
+            <div style="display:flex;justify-content:center;gap:10px;margin-top:8px;" data-page-node-id="QcbBpQ2pQEOLw4HCgKUjYB">
+              <div style="width:60px;padding:6px 0;background:white;border-radius:6px;text-align:center;font-size:9px;box-shadow:0 1px 4px rgba(0,0,0,.06);" data-page-node-id="TwRFNPHOX51fhwERK76b8z">📱<br data-page-node-id="H2oj2YKlZd0CqluRX74Esi">一键登录</div>
+              <div style="width:60px;padding:6px 0;background:white;border-radius:6px;text-align:center;font-size:9px;box-shadow:0 1px 4px rgba(0,0,0,.06);" data-page-node-id="deTEm4nTIBB6HSsmpiTFJw">💬<br data-page-node-id="UBViDTpbHKCTM90vUTsgj1">微信登录</div>
+            </div>
+            <div class="tabbar" data-page-node-id="2W53vCiFKk3SsYChiVx2NE">
+              <div class="tb" data-page-node-id="S93FbWYOxJ4p9S0P4fPi2a"><div class="ico" data-page-node-id="IE7Gt49MK3dPSDiSDeILFi">📦</div>找船</div>
+              <div class="tb" data-page-node-id="masAcDWNGWRSEKucM70aJB"><div class="ico" data-page-node-id="KeYiFKvar5lhktWCsSt2QA">📋</div>找货</div>
+              <div class="tb" data-page-node-id="SBB6xHMaDyjv5hlXmMw5nI"><div class="ico" data-page-node-id="AiffxlePWj0cc2Kl10GHX4">📑</div>订单</div>
+              <div class="tb" data-page-node-id="r9pIpvBOHaDDeFBDLLk25O"><div class="ico" data-page-node-id="cVCHbpfwFMQBklXL1y6GCn">🏗</div>港口</div>
+              <div class="tb" data-page-node-id="ugfyGbLYKO1JSB2bVetdDx"><div class="ico" data-page-node-id="f6chqhkpjFA7YTVA0B5iNc">👤</div>我的</div>
+            </div>
+          </div>
+        </div>
+        <span class="phone-label" data-page-node-id="CBSwl0k3t7hd60eOAlfMhR">首屏：角色选择浮窗</span>
+
+        <!-- Phone 2: Shipper find-ship -->
+        <div class="phone-frame mock" data-page-node-id="dL13aQAl5ao0Jn7DnxZ4o3">
+          <div class="phone-statusbar" data-page-node-id="vZ1GDIgeAU0khTvwW47wi9">上午10:00 ●●● <span data-page-node-id="funt9scMYct5FyEnJlyHeM">100%</span></div>
+          <div class="phone-content" data-page-node-id="jcvPjERZOmpMvTzGZNujag">
+            <div class="top-bar" data-page-node-id="gR1NnhnxHRWlNkgiB1rqaz">
+              <div class="row" data-page-node-id="FZRAIgOqY817wncGwsTJqh">
+                <div class="logo" data-page-node-id="DRqzxOFNcx5vOHWtizcWc0">⛵</div>
+                <div class="search" data-page-node-id="gGCmgNyOJIsYEqxhk4jsHz">🔍 搜索港口/船型/航线</div>
+                <div class="icon ai" data-page-node-id="1sIi0XqAWZEPr0Y1ClzcAX">✨</div>
+                <div class="icon cs" data-page-node-id="r18aYQCw9ejuS5YN9ycgzr">💬</div>
+              </div>
+            </div>
+            <div class="body" data-page-node-id="st3HimCbIkLzkPpUaPKdo7">
+              <div class="banner" data-page-node-id="qSx5arsFAPut5RGzHG06pS">
+                <h3 data-page-node-id="cENcP7jZuIYkYUiIh1iz4x">只做运费 · 不拼货管</h3>
+                <p data-page-node-id="AuSADFoWXS5lh5f5k3aWIf">一句中文话发货，AI 自动解析进撮合池</p>
+                <span style="display:inline-block;margin-top:6px;background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.35);padding:3px 8px;border-radius:999px;font-size:9px;" data-page-node-id="p7CDrAKRyC8X18Dw7ULC0e">试试智能客服 ›</span>
+              </div>
+              <div class="card" data-page-node-id="Pkbfn1vKZRt7lnFFcAQVfW">
+                <div class="row-line" data-page-node-id="3ecr2akqMGXHaMbOm96CBN">
+                  <span data-page-node-id="lTrVTwYak8EOq73X6vBc7b"><span class="dot blue" data-page-node-id="uJteDy43ox7vohbLNUCD9h"></span>装货地</span>
+                  <span class="val" data-page-node-id="IYrLH9OD2JmKQsF5PQeDfA">南宁 ›</span>
+                </div>
+                <div class="row-line" style="border-top:1px solid #EEF1F6;" data-page-node-id="mfEZ3oAfAaGSEsmGrMUeBZ">
+                  <span data-page-node-id="XTpM5qyODvj7G6w5Ajj6zG"><span class="dot purple" data-page-node-id="daKe4Wne3mErH6ad8pMpgp"></span>卸货地</span>
+                  <span class="val" data-page-node-id="S8pbFXpynIjqzglbRX7jqs">贵港 ›</span>
+                </div>
+              </div>
+              <div class="card" data-page-node-id="R5Zkmw54Av3MQuQRjjbakL">
+                <div style="font-size:11px;font-weight:600;margin-bottom:6px;" data-page-node-id="iE1keXdCefYEVm4nKRGYrE">货物信息</div>
+                <div class="row-line" data-page-node-id="Xrc9uUTzuWg4xlXaOEy3QQ">
+                  <span data-page-node-id="eWPoE0vGk7eUpE5EP0E47E">货类</span><span class="val" data-page-node-id="xwFJnSU4TcDQMey6N4SWaZ">散货 ›</span>
+                </div>
+                <div class="row-line" style="border-top:1px solid #EEF1F6;" data-page-node-id="OcUiPP8dYPgE0gstaJLide">
+                  <span data-page-node-id="u55ifm7mPQkU9NAmgKYoh0">重量（吨）</span><span class="val" data-page-node-id="e7CsdBVUUpuQtsyF36hX9e">800</span>
+                </div>
+                <div class="row-line" style="border-top:1px solid #EEF1F6;" data-page-node-id="72IbpDw1510wdqmlfAetBm">
+                  <span data-page-node-id="6ylXslCjZ6ZWiNCs7LtAYE">装货日期</span><span class="val" data-page-node-id="ZZnWnlhOAYJ3phEA6W36Yh">2026-09-12 ›</span>
+                </div>
+              </div>
+              <div class="row-btns" data-page-node-id="xke0w8zS6VCb2K9ZlMxfUG">
+                <div class="action-btn blue" data-page-node-id="sPrFrlyJ0xfmhWLJL6QkKy">发零担<br data-page-node-id="osR4bF5CsyXYX8kLw2Z7kZ"><span style="font-size:8px;opacity:.9;font-weight:400;" data-page-node-id="qz9xNajZJaqCG0hp4qNhUq">不足整车</span></div>
+                <div class="action-btn purple" data-page-node-id="XJ03YzPIbGxJH1GKfCVBRR">发整车<br data-page-node-id="sEeJHJBaGHSEOptYd3FGlr"><span style="font-size:8px;opacity:.9;font-weight:400;" data-page-node-id="Lkao8vgaVuV3G2Bbi9jyxm">包船直运</span></div>
+              </div>
+              <div class="grid-2" data-page-node-id="lDKqSytxo57VqJhgDuI0j7">
+                <div class="cell" data-page-node-id="9gwtlFF5HPg20AgEChtJgE">
+                  <div class="title" data-page-node-id="y3appIg5T3ZdIllhCKLEsU">南宁 → 贵港</div>
+                  <div class="price" data-page-node-id="tJ12ZWBSwafPO097Luy5H3">¥ 942起</div>
+                </div>
+                <div class="cell" data-page-node-id="hnERZrANoZWc93xnbKxtt6">
+                  <div class="title" data-page-node-id="QmTwmOOR1wzQHiuWLCpUnx">贵港 → 梧州</div>
+                  <div class="price" data-page-node-id="RvZN6lzDpZoxIMfr7UDILS">¥ 1240起</div>
+                </div>
+              </div>
+            </div>
+            <div class="tabbar" data-page-node-id="PNrIO7Mecc0Fy9Ipc59yGb">
+              <div class="tb active" data-page-node-id="LnzOsKKEt5LSubBKw778ka"><div class="ico" data-page-node-id="9EtH9U2tFc2YbfdE1O51K0">📦</div>找船</div>
+              <div class="tb" data-page-node-id="VUN6u9HizrglMSJTI9ffvp"><div class="ico" data-page-node-id="VumAWUfMqADO3JcyITGHBV">📋</div>找货</div>
+              <div class="tb" data-page-node-id="PTgmVFuu8Eo9Vi9nQLlvap"><div class="ico" data-page-node-id="sc6ImliL1XqBy3ym7ikzph">📑</div>订单</div>
+              <div class="tb" data-page-node-id="ZyvxDmaxzLyR3LSgKosUrh"><div class="ico" data-page-node-id="3KD3UGnD5EPGXUMfDBqrC4">🏗</div>港口</div>
+              <div class="tb" data-page-node-id="vggaLZkldhdxCjrBVusnHY"><div class="ico" data-page-node-id="fUJDvlBYtp75zZQ78saZVF">👤</div>我的</div>
+            </div>
+          </div>
+        </div>
+        <span class="phone-label" data-page-node-id="iFsE88FnytgvEz1m5rqpTZ">货主端：找船首页</span>
+
+        <!-- Phone 3: Owner find-cargo -->
+        <div class="phone-frame mock" data-page-node-id="VhUIK2RaTdkPY3NK2T9idO">
+          <div class="phone-statusbar" data-page-node-id="A6QqpdIEu3cnPexCyQp3sf">上午10:00 ●●● <span data-page-node-id="RGek1pqMPwf06maOa2QGQ2">100%</span></div>
+          <div class="phone-content" data-page-node-id="1NHzXUhOcOFGcSH5rpm92f">
+            <div class="top-bar" data-page-node-id="hMA9WsiMlTV8OLO2mk9NaU">
+              <div class="row" data-page-node-id="9uQzTnzUbMSsZzDHDRiGoY">
+                <div class="logo" data-page-node-id="P6XexlxipjC3y7iYsT0GX9">⚓</div>
+                <div class="search" data-page-node-id="ycVFjPM4dxJDSJa3jIwV5f">🔍 搜索货类/港口</div>
+                <div class="icon ai" data-page-node-id="hHGNEzs8kWN8eO69pktB6o">✨</div>
+                <div class="icon cs" data-page-node-id="jlqj71QBLFWsAIXLqkYbAK">💬</div>
+              </div>
+            </div>
+            <div class="body" style="padding:10px 10px;" data-page-node-id="C9JqHcpstveehFKuBQVb46">
+              <div style="display:flex;background:white;border-radius:10px;padding:3px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.04);" data-page-node-id="cwpLkXoChvnXWIf8y8nCeL">
+                <div style="flex:1;text-align:center;padding:4px 0;background:linear-gradient(135deg,#3B5BDB,#7048E8);color:white;border-radius:8px;font-size:10px;font-weight:600;" data-page-node-id="DCVq3mwXvnsF0FDFJvhb8v">找货</div>
+                <div style="flex:1;text-align:center;padding:4px 0;font-size:10px;color:#6B7A8C;" data-page-node-id="VOHFbUjBzFn8c3rxHsTE6T">我的船队</div>
+                <div style="flex:1;text-align:center;padding:4px 0;font-size:10px;color:#6B7A8C;" data-page-node-id="vBGtEaKiumtNPGsURejh1F">船舶备案</div>
+              </div>
+              <div style="display:flex;gap:5px;margin-bottom:8px;" data-page-node-id="OEMgaeiBXkxbvzvOgvl8oz">
+                <div style="flex:1;background:white;border-radius:6px;padding:5px;text-align:center;font-size:10px;box-shadow:0 1px 3px rgba(0,0,0,.04);" data-page-node-id="Bd2HeZOlu5AkyTbTMCIemn">全国 ▾</div>
+                <div style="flex:1;background:white;border-radius:6px;padding:5px;text-align:center;font-size:10px;box-shadow:0 1px 3px rgba(0,0,0,.04);" data-page-node-id="rABifeVLKr83RtW02nBaON">时间 ▾</div>
+                <div style="flex:1;background:white;border-radius:6px;padding:5px;text-align:center;font-size:10px;box-shadow:0 1px 3px rgba(0,0,0,.04);" data-page-node-id="q9qRQouyFL3Pbt5BRC3vlQ">筛选 ▾</div>
+              </div>
+              <div class="card" data-page-node-id="jDwuoF5MgR3LG8svkfEwOl">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" data-page-node-id="rVNC2NvJRxvAxWNuBmiM8G">
+                  <div data-page-node-id="3k7YaayfCn8esCf9guGNqE">
+                    <span style="background:rgba(112,72,232,.1);color:#7048E8;padding:1px 6px;border-radius:999px;font-size:9px;margin-right:4px;" data-page-node-id="8bDXXegRBEQTBD344SvcSL">散货</span>
+                    <span style="background:rgba(59,91,219,.1);color:#3B5BDB;padding:1px 6px;border-radius:999px;font-size:9px;" data-page-node-id="sAxOKGc2h3v18rUFc4pdRJ">¥ 25000</span>
+                  </div>
+                  <span style="font-size:9px;color:#98A6B8;" data-page-node-id="syePaRZEocX8vqPv6Qp2sj">1分钟前</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" data-page-node-id="XHOlMaJllqwWNAm3PKA3z9">
+                  <div data-page-node-id="RGxgXJ7Wgg9zqqAPrMFwrR">
+                    <div style="font-size:11px;font-weight:600;" data-page-node-id="yAFk94b0UOhrVDVXT0tCsw">张老板</div>
+                    <div style="font-size:9px;color:#98A6B8;" data-page-node-id="jS1t74xueY6w6bP80UVenU">1.5 km</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:4px;" data-page-node-id="VCzgjlOMY2aOhDeoPNW93M">
+                    <span class="dot blue" data-page-node-id="8MHwVaYaC1RukU67xr5mbz"></span><span style="font-size:10px;" data-page-node-id="PynUqAHYw3RBUHrBr2qlKb">南宁</span>
+                    <span style="font-size:10px;color:#98A6B8;" data-page-node-id="5UoHG7PGZEfYV8GhzavQeW">───</span>
+                    <span class="dot purple" data-page-node-id="64o1QQG6YRAZ5ZQlWBgSZu"></span><span style="font-size:10px;" data-page-node-id="R3S03IsrXCPM9WGshxmZCI">贵港</span>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid #F1F4F8;" data-page-node-id="ru9KcmveEVPU7HohVEOXDZ">
+                  <span style="font-size:10px;color:#6B7A8C;" data-page-node-id="u6jRmMGDgvTp8FfQunRVrZ">散装水泥 · 800吨 · 2026-09-12 装</span>
+                  <span class="grab" data-page-node-id="9aYA98CKq3KdUBvp1NDasI">立即抢单</span>
+                </div>
+              </div>
+              <div class="card" data-page-node-id="sVJApV3HjyB1ZJF5Bfr2LN">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" data-page-node-id="LKRVMQiVGuNh0OxHCv46bk">
+                  <div data-page-node-id="pBj8UdPbGVfhuEuKQdfAhQ">
+                    <span style="background:rgba(112,72,232,.1);color:#7048E8;padding:1px 6px;border-radius:999px;font-size:9px;margin-right:4px;" data-page-node-id="93UUFRoHhP9PKU4TQWEDTT">集装箱</span>
+                    <span style="background:#F1F4F8;color:#6B7A8C;padding:1px 6px;border-radius:999px;font-size:9px;" data-page-node-id="DN8JyDdtY096UtqnR8VdAk">面议</span>
+                  </div>
+                  <span style="font-size:9px;color:#98A6B8;" data-page-node-id="Dig7BxvF6Q0zapdQ6MIQoL">5分钟前</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;" data-page-node-id="w7kHBtEzIjn0m56MeoofAB">
+                  <div data-page-node-id="ixAuSQ7iZ5ZM8NJnHfOkyi">
+                    <div style="font-size:11px;font-weight:600;" data-page-node-id="0MPSqe7RpW5XgrDMA35uPa">王经理</div>
+                    <div style="font-size:9px;color:#98A6B8;" data-page-node-id="ErVADNwnoUK395wy88x1wP">3.2 km</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:4px;" data-page-node-id="TELCYIm2nBOPLSCZBEbGob">
+                    <span class="dot blue" data-page-node-id="8TSSFTt7ncNx4ekmzojvUZ"></span><span style="font-size:10px;" data-page-node-id="FPYyRyqkHcUGSX5AgtpydQ">钦州</span>
+                    <span style="font-size:10px;color:#98A6B8;" data-page-node-id="mBT352M5dvp5jL9si3oSTQ">───</span>
+                    <span class="dot purple" data-page-node-id="U8GiNvukAEFfCYBOG3cMpf"></span><span style="font-size:10px;" data-page-node-id="aNP4IH6EFALVSYPWDcPFsO">防城港</span>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid #F1F4F8;" data-page-node-id="hwNuD9v2YLlaeNxDtK74Ta">
+                  <span style="font-size:10px;color:#6B7A8C;" data-page-node-id="1lGYDtWjozCiVD9n4zntoD">集装箱货 · 1200吨</span>
+                  <span class="grab" data-page-node-id="yfyqQfNod7jGP6HbyjFbzx">立即抢单</span>
+                </div>
+              </div>
+              <div class="promo" data-page-node-id="Su3Gb3wwgsXUdJFme0sEfE">
+                <div data-page-node-id="yKenFcTpGpMMSn2mGIjEwk">
+                  <div class="title" data-page-node-id="3CvPQTvslOv2AXAOJHFBqP">录入蜂羽宣言</div>
+                  <div class="sub" data-page-node-id="FPSk5QVoKZoIXehWhmzzEj">抽万元大奖 · 活动进行中</div>
+                </div>
+                <div class="cta" data-page-node-id="WqBUZdOdC8vBectxGV6LBl">点击参与</div>
+              </div>
+            </div>
+            <div class="tabbar" data-page-node-id="MrGA2TwoiXA8UpLXBrR2Lk">
+              <div class="tb" data-page-node-id="AQasLjMHnZZsht0ti4ZnGL"><div class="ico" data-page-node-id="tvK6q1KBZ9wU1G5H1vT35J">📦</div>找船</div>
+              <div class="tb active" data-page-node-id="Ph59HFg9PJH752SIeKEArn"><div class="ico" data-page-node-id="2GZ4QNtZtxRdfpk6e6F2nF">📋</div>找货</div>
+              <div class="tb" data-page-node-id="6pRvtGK9H100lcBEI70Ccc"><div class="ico" data-page-node-id="Iy5V31HvFB6RNPGCWN6MX7">📑</div>订单</div>
+              <div class="tb" data-page-node-id="0r8DpvBAl9NEJ6btcAjims"><div class="ico" data-page-node-id="WzQyLDScdO932v7BYut4lA">🏗</div>港口</div>
+              <div class="tb" data-page-node-id="MuMDY5qIJT6z3HFcLLmVMj"><div class="ico" data-page-node-id="bmlz4eMqYAeDsMn0rjVJMn">👤</div>我的</div>
+            </div>
+          </div>
+        </div>
+        <span class="phone-label" data-page-node-id="KwFaZ2Balo8z3Ab5xBzYAm">船东端：找货首页</span>
+
+        <!-- Phone 4: Orders -->
+        <div class="phone-frame mock mock-orders" data-page-node-id="bZtl9prlbhqRtpEsUtWo6c">
+          <div class="phone-statusbar" data-page-node-id="cGoZyYWhuIerPezhYnCp9F">上午10:00 ●●● <span data-page-node-id="q6XK0mJtaWl3aRByaeSw9i">100%</span></div>
+          <div class="phone-content" data-page-node-id="vNcsk48iYPlAkBkKLHO4oQ">
+            <div class="user-banner" data-page-node-id="1OB38HUqUvAVAsIUTgyADF">
+              <div class="row" data-page-node-id="zYwi8UFdx65vwERZrKb6kH">
+                <div style="display:flex;align-items:center;gap:8px;" data-page-node-id="jKdsSd4BqypmptkXNaIA4S">
+                  <div class="avatar" data-page-node-id="aR4RJrh4kSE2VEkaU7fDqh">王</div>
+                  <div data-page-node-id="J2LpJiHFCRXTGoU19H2YQu">
+                    <div class="greet" data-page-node-id="Px0sAyZIS8csWuswTRb0Lh">下午好，王经理</div>
+                    <div class="role" data-page-node-id="Junc9ZpWdLfCEwOgV8Maff">当前角色：货主</div>
+                  </div>
+                </div>
+                <div class="stat" data-page-node-id="saFfL7Po5Os43fq8RddGwS">
+                  <div class="num" data-page-node-id="NbHCZrUFGE00m19qoWtxG4">3</div>
+                  <div class="label" data-page-node-id="Oc2tDECHs8bZ9dC5PB3Fru">待办</div>
+                </div>
+              </div>
+            </div>
+            <div class="status-tabs" data-page-node-id="TKYH1FpO3zlvVrgLOdGrS9">
+              <div class="status-tab active" data-page-node-id="iDX7XZ5gWG19JkGrMEW5Zx">全部</div>
+              <div class="status-tab" data-page-node-id="GNc0qpr0HeVKVeyDvHlqAi">待承运 2</div>
+              <div class="status-tab" data-page-node-id="DSoOs6UBVDMGCCk3EwFpEH">运输中 1</div>
+              <div class="status-tab" data-page-node-id="tUuYr8luYHDYJbmjY9dSRE">已完成</div>
+              <div class="status-tab" data-page-node-id="iVBkOIqbfY0hbKKcnZrP1x">已撤单</div>
+            </div>
+            <div style="padding:10px 12px 4px;font-size:11px;font-weight:600;" data-page-node-id="vMX5j13LEgHye5RGcTdoaW">待处理事项</div>
+            <div class="todo-card" data-page-node-id="X8IRCbb5sr77vGAZfPsO3d">
+              <div class="ico" data-page-node-id="uWCknCxuA8gjrcH51lPj5e">✅</div>
+              <div style="flex:1;" data-page-node-id="Tql7WYqDOyFDAeH1PfPziy">
+                <div class="t" data-page-node-id="4OhfCNF4QIfsAFR8AWinNY">完成货主认证</div>
+                <div class="s" data-page-node-id="WDU8OQlSWEHuQFtl1XKWe6">认证后可发布货源、查看船东联系方式</div>
+              </div>
+              <div style="color:#98A6B8;" data-page-node-id="AnDhdxP4v11rHQ21IJExNF">›</div>
+            </div>
+            <div class="todo-card" data-page-node-id="Sn9mMrMDrkLvltOQXVB0Fp">
+              <div class="ico" data-page-node-id="jx0Q42QtdfUkHxdFmAIcTy">📋</div>
+              <div style="flex:1;" data-page-node-id="xfvLON6deHdSeyRMbYGCTc">
+                <div class="t" data-page-node-id="Uxsg8F0atlwB6weDi7UsH9">上传营业执照</div>
+                <div class="s" data-page-node-id="EudsAU2TbnOqMFt94EBVuJ">企业货主必传 · 个人货主可跳过</div>
+              </div>
+              <div style="color:#98A6B8;" data-page-node-id="SYygZGI9CSSyPEOqK1kCuv">›</div>
+            </div>
+            <div class="todo-card" data-page-node-id="GFzo1HVEnhtzYaKI2F7620">
+              <div class="ico" data-page-node-id="WiwYQSAmVXlVDCZ75jENXu">💰</div>
+              <div style="flex:1;" data-page-node-id="E577SW29VHOksHcBeFCvh2">
+                <div class="t" data-page-node-id="5OlCractQLhvSzrVUg0iZ0">关注平台支付优惠</div>
+                <div class="s" data-page-node-id="q1nfIxuhHnXnj52dFz4IDq">运费支付返现 · 限时活动进行中</div>
+              </div>
+              <div style="color:#98A6B8;" data-page-node-id="YkwalNCHV5G5I3C8LoeENH">›</div>
+            </div>
+            <div class="tabbar" data-page-node-id="vhJcbeFY4tynpcv0aRCreB">
+              <div class="tb" data-page-node-id="eCCYw7isidDYJCJGbDo6va"><div class="ico" data-page-node-id="vLCHPWfVUgDtY210GotsP5">📦</div>找船</div>
+              <div class="tb" data-page-node-id="xz9BPSuT4JifEZKmMn3jCL"><div class="ico" data-page-node-id="puCvK34JX6Y4gSxzc4Sc2l">📋</div>找货</div>
+              <div class="tb active" data-page-node-id="B9rvvk08ZJ3SSeBARvP6Dq"><div class="ico" data-page-node-id="x9RBJE0kiYS1xNhagFIitY">📑</div>订单</div>
+              <div class="tb" data-page-node-id="04aknakyE6MMsEWXhGCiFq"><div class="ico" data-page-node-id="77xGXixwbYDOsXnILCjOfz">🏗</div>港口</div>
+              <div class="tb" data-page-node-id="vGbpVkPLepbi23YsNDkj1A"><div class="ico" data-page-node-id="hofqSOG0ZATzrs1kOnBHgN">👤</div>我的</div>
+            </div>
+          </div>
+        </div>
+        <span class="phone-label" data-page-node-id="CnQUPXqJqPViiMIq1DUocU">订单：用户 banner + 状态 Tab + 待办卡</span>
+
+        <!-- Phone 5: Mine -->
+        <div class="phone-frame mock mock-mine" data-page-node-id="alBrxq2gZzQXMeGmkB2NWs">
+          <div class="phone-statusbar" data-page-node-id="UOVdYxU4h0WvI7iETSow3R">上午10:00 ●●● <span data-page-node-id="yGB0xaDN3czRXFTkOHeMyC">100%</span></div>
+          <div class="phone-content" data-page-node-id="lFnpl7IFvGxFIEPK50EgBG">
+            <div class="user-banner" data-page-node-id="0VEaoEUky60nIHpHzqVfGN">
+              <div class="row" data-page-node-id="CU14w52qI0hsNtOCOvjKyq">
+                <div class="avatar" data-page-node-id="SF4WFBdMh7PPAUH9ZKsE04">王</div>
+                <div data-page-node-id="X4ac2t0ZLPrU9qLz4dLJJu">
+                  <div class="name" data-page-node-id="vlTUkB6r2g2GfrhfALKeDW">王经理</div>
+                  <div class="role" data-page-node-id="aUMM7HGrK0Z8K0DLeWZXAm">货主</div>
+                </div>
+                <div class="edit" data-page-node-id="Y450vyB1Tq8ZqtSAjAPJ4U">编辑</div>
+              </div>
+              <div class="stats" data-page-node-id="Xl3tVau5QkyLmoQzJ9dMEC">
+                <div class="cell" data-page-node-id="I2GOtA1lg7pjYCUDvO2vKN"><div class="num" data-page-node-id="MDzS9I78u7JLMP8ELeTBnK">8</div><div class="label" data-page-node-id="u5txzOZOFqmhS0IUSVoyw1">货源</div></div>
+                <div class="div" data-page-node-id="uKiGqj5mhQqiYPRMsA0CR2"></div>
+                <div class="cell" data-page-node-id="ki9iFV11eCX1fXvHc12ncU"><div class="num" data-page-node-id="FDAzo6yzppkMVoXhlsw42h">3</div><div class="label" data-page-node-id="72GlX1lerflSEvH3qjQZkR">船舶</div></div>
+                <div class="div" data-page-node-id="sztdWuyxezoatVn9P6zMJV"></div>
+                <div class="cell" data-page-node-id="fPbMuWDCQHWXy1F6IBff3o"><div class="num" data-page-node-id="zWlp8qS99eMjAF1lbWzVPk">12</div><div class="label" data-page-node-id="tvMjxCpaIctHEoFEM7aJwg">订单</div></div>
+                <div class="div" data-page-node-id="P8EPj4ioPt86aYiFa7mVBp"></div>
+                <div class="cell" data-page-node-id="0kYLajwzClc4DXjt2aXLEJ"><div class="num" data-page-node-id="ATYJtg7CEcM2xeYZs8pBLa">5</div><div class="label" data-page-node-id="NmtJjEMTbkjhq0kO7xpgON">完成</div></div>
+              </div>
+            </div>
+            <div class="dev-banner" data-page-node-id="zMBNuTraQ7hnJCVombiggS">
+              <div class="t" data-page-node-id="ZM5pzVYAYx2uCRTIMFEbdm">我的二级页 UI 构思中</div>
+              <div data-page-node-id="RxQmR9Zst6PfDJAad8We3L">当前展示基础骨架，下版本升级：实名认证 / 钱包 / 设置 / 客服等模块</div>
+            </div>
+            <div class="section" data-page-node-id="hKLHbi4yMuevFjsIfC4Ftx">
+              <div class="st" data-page-node-id="CDOrtqte3wNJhZY6dicNa8">切换身份</div>
+              <div class="role-chips" data-page-node-id="RhDBBQ8bxv1xzIdzZwcZNt">
+                <div class="rc active" data-page-node-id="gYYzTvEXz57vjOGbSbfSVX">🚢<br data-page-node-id="AgC9wbyyVUTua2HvI9k64c">货主</div>
+                <div class="rc" data-page-node-id="kAgVu5tBgkoUUuRWS4wf3i">⚓<br data-page-node-id="uBreATOCKv6G9opQ8H0Zw3">船东</div>
+                <div class="rc" data-page-node-id="TqAcRusPPxXI7l1yyuVhZk">🏗<br data-page-node-id="j5vZsw3BRTq3rNSlNCRfWu">港口方</div>
+              </div>
+            </div>
+            <div class="section" data-page-node-id="MGRrnw7vNTCmuzNZ3FsHYK">
+              <div class="st" data-page-node-id="LTxcr6AYMcj1Z4gHo0XQKu">常用功能</div>
+              <div class="entry-grid" data-page-node-id="O3r56rhipNK02GHZZTbxyj">
+                <div class="it" data-page-node-id="dD5268xkGLbXoct0JbD8bx">✅<br data-page-node-id="GMIEHd1MxJzqMiQCwkPORD">实名<div class="dev" data-page-node-id="dm2TnDWYM9txKEaRt81pE6">开发中</div></div>
+                <div class="it" data-page-node-id="8ZNDQFmkS8xNbcJlK6P1bF">💰<br data-page-node-id="3glcGxNSx6vjZq7qH5PKyP">钱包<div class="dev" data-page-node-id="v0P17PlC9maSBvYNiCyhOA">开发中</div></div>
+                <div class="it" data-page-node-id="tG3KO3lYEPxH6V6vJCYU07">📋<br data-page-node-id="fKjVJWTqskgkyqWgkXYscd">订单</div>
+                <div class="it" data-page-node-id="Vl3sxiThnKfXSEyiY8PIJG">⚓<br data-page-node-id="JoAKMqegaP4hCEZIpCuBbE">船队</div>
+                <div class="it" data-page-node-id="gr2CBAZ83UB5yrgwE9jlNm">📦<br data-page-node-id="v7ATwcSHbw5IGPhBwM7pld">货源</div>
+                <div class="it" data-page-node-id="H8XbYMQ7XizoEtZOBMFQRp">🧾<br data-page-node-id="Utk1A1MgkruOcYwMcZxAnT">发票<div class="dev" data-page-node-id="XUiAgQUHWpNnXCnUVhUpc8">开发中</div></div>
+                <div class="it" data-page-node-id="hqlKLKDToxYHDs7FESpynL">🔔<br data-page-node-id="gg1iYyS0POP2Ii6exwN84n">消息<div class="dev" data-page-node-id="xTejtkNXNjFqp4PWWJJkss">开发中</div></div>
+                <div class="it" data-page-node-id="LMXmwafkKP33dAoAEtGj9A">💬<br data-page-node-id="LaHQPZlt2mkvIVcZsYoJbL">客服</div>
+              </div>
+            </div>
+            <div class="tabbar" data-page-node-id="Fka4WluQ5F3vRjaewumN6B">
+              <div class="tb" data-page-node-id="tOO8uyrLIvQHJEjGcMHVVD"><div class="ico" data-page-node-id="Xa4kfWtY9D2LdTHI1fGVpM">📦</div>找船</div>
+              <div class="tb" data-page-node-id="66Cklkfyw16EHETLOvyAks"><div class="ico" data-page-node-id="GjWbBG8ioEKInLDCDRFPJe">📋</div>找货</div>
+              <div class="tb" data-page-node-id="JKiIX9zmHGch7d2ggj5Hy0"><div class="ico" data-page-node-id="tuzS5Z8lDq2RvwQhuFMAcB">📑</div>订单</div>
+              <div class="tb" data-page-node-id="CFLLDdmj6i67XCjBNFuiZz"><div class="ico" data-page-node-id="dBauehZwHGaygYlbWx23ma">🏗</div>港口</div>
+              <div class="tb active" data-page-node-id="nnjCvLWpIlLHmpDbec3AE1"><div class="ico" data-page-node-id="9JdnG2oCZcdg26GbzveCbG">👤</div>我的</div>
+            </div>
+          </div>
+        </div>
+        <span class="phone-label" data-page-node-id="G8AtCp3Hdfz14yFM05h1Tc">我的：用户 banner + 4 统计 + 角色切换 + 功能网格</span>
+      </div>
+    </div>
+
+    <!-- 关键代码示例 -->
+    <div class="section" data-page-node-id="bjKnFA86uqDTBKWnk697FG">
+      <h2 data-page-node-id="AF5r4BuXVbkw5DYJF7H1ig">💻 关键代码示例</h2>
+      <p class="lead" data-page-node-id="NEfm7LAvYjZSKVNj6M8n3X">设计令牌、tabBar、角色选择的核心实现</p>
+
+      <h3 style="font-size:18px;margin-top:24px;margin-bottom:8px;color:var(--brand-blue);" data-page-node-id="0ObFv8InzTa5KKi5QRa7by">app.wxss · 品牌主色</h3>
+      <pre style="background:#0F2540;color:#E7ECFF;padding:16px;border-radius:8px;overflow-x:auto;font-size:12px;line-height:1.6;" data-page-node-id="wlvcZra4p5Abj7kVVHdSd3">
+.bg-brand-gradient { background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%); }
+.chip-purple { background: rgba(112, 72, 232, .08); color: #7048E8; }
+.badge-shipped { color: #7048E8; background: rgba(112, 72, 232, .10); }
+.btn-primary { background: linear-gradient(135deg, #3B5BDB, #7048E8); color: white; }</pre>
+
+      <h3 style="font-size:18px;margin-top:24px;margin-bottom:8px;color:var(--brand-blue);" data-page-node-id="NbGPpHNvB6ttFB52PZ32mF">app.json · 5-tab tabBar</h3>
+      <pre style="background:#0F2540;color:#E7ECFF;padding:16px;border-radius:8px;overflow-x:auto;font-size:12px;line-height:1.6;" data-page-node-id="rMpHIKhIDCAGO598depfaB">
+{
+  "tabBar": {
+    "color": "#98A6B8",
+    "selectedColor": "#3B5BDB",
+    "backgroundColor": "#FFFFFF",
+    "list": [
+      { "pagePath": "pages/shipper/shipper",     "text": "找船" },
+      { "pagePath": "pages/owner/owner",         "text": "找货" },
+      { "pagePath": "pages/trade/orders/orders", "text": "订单" },
+      { "pagePath": "pages/port/port",           "text": "港口" },
+      { "pagePath": "pages/mine/mine",           "text": "我的" }
+    ]
+  }
+}</pre>
+
+      <h3 style="font-size:18px;margin-top:24px;margin-bottom:8px;color:var(--brand-blue);" data-page-node-id="xcNfOno9xYvpAobq9xng51">index.js · 角色选择 + 自动登录态</h3>
+      <pre style="background:#0F2540;color:#E7ECFF;padding:16px;border-radius:8px;overflow-x:auto;font-size:12px;line-height:1.6;" data-page-node-id="6436yiFORFsaBGGSi881Y0">
+onLoad() {
+  if (auth.isLoggedIn()) {
+    const role = auth.getUser().current_role
+    if (ROLE_META[role]) wx.switchTab({ url: ROLE_META[role].page })
+  }
+},
+
+onPickRole(e) {
+  const role = e.currentTarget.dataset.role
+  const doEnter = () => auth.switchRole(role).then(() => wx.switchTab({ url: ROLE_META[role].page }))
+  if (!auth.isLoggedIn()) {
+    auth.login().then(() => auth.bindRole(role)).then(doEnter)
+  } else {
+    const user = auth.getUser()
+    (user.roles || []).includes(role) ? doEnter() : auth.bindRole(role).then(doEnter)
+  }
+}</pre>
+    </div>
+
+    <!-- 验证 -->
+    <div class="section" data-page-node-id="r7XNs1JYbyIJmeXhE9HaZa">
+      <h2 data-page-node-id="DwcsPJuEC6Jx2RbNjeL94s">✅ 验证状态</h2>
+      <p class="lead" data-page-node-id="oRWLB0pcv6HUXtyjHjbf0K">后端零改动，CI 双绿，PR #19 已合并</p>
+      <table class="compare-table" data-page-node-id="Q7gFC1fPWuNZAoQr8ilLbI">
+        <thead data-page-node-id="WfQfOijipXN2FV4uUrvrf6">
+          <tr data-page-node-id="Tb9WSnAnIKD0MNdkxwxNlx"><th data-page-node-id="3gZs2I9JTNHqqtwOTrWccj">维度</th><th data-page-node-id="lVTmmO694RtVQ4H0PotmOy">状态</th><th data-page-node-id="yCNGzsjniXEGgJaFkX9Cqm">备注</th></tr>
+        </thead>
+        <tbody data-page-node-id="8FqPPk8UgyEKyrEg7AOyCH">
+          <tr data-page-node-id="7uCtfjmiPXGyChWCxDHTdD"><td data-page-node-id="PFxhZxziT7U2CzqhixyZYy">前端 wxml/wxss/js/json</td><td class="center" data-page-node-id="gHdcoy3dL4FIAeWj5Mh8mI"><span class="check" data-page-node-id="FIRrVaworxG4ryrP02C14K">✓</span></td><td data-page-node-id="llLVba5tSWmTiYyUYh12Nv">27 文件 / +3234 / -860</td></tr>
+          <tr data-page-node-id="LV9WWPN6poxvmkp5bP9lIJ"><td data-page-node-id="BxycP5U69pgAXCP0i6p0SD">后端 python</td><td class="center" data-page-node-id="qxCLpoGOCNQgpKSwBcTW2I"><span class="check" data-page-node-id="ao7eX1bjZWIFSgcKdtz0eL">✓ 零改动</span></td><td data-page-node-id="QRET4fFvdvjCuE2VFIB2UW">52 source files / 117 passed / mypy 0 / ruff 全绿</td></tr>
+          <tr data-page-node-id="KIwdZmx3sUwkSUCwswmag6"><td data-page-node-id="GTB4HbuAEDsypCP9FvMSsm">GitHub Actions CI</td><td class="center" data-page-node-id="HocADtNmNs2QJkXYnpF7h9"><span class="check" data-page-node-id="gBEkPMvDX0HnvuJT2yOpwH">✓ 双绿</span></td><td data-page-node-id="LC3oiW6toOpRNGep7wjLmI">lint + test 都 success</td></tr>
+          <tr data-page-node-id="RZrrHtCoFBbXjCEXDzjHXB"><td data-page-node-id="MX35Bn9mXh0hbZ3DNgAG7e">PR #19 合并</td><td class="center" data-page-node-id="TlICJ672MzZg0CLQb9CpLT"><span class="check" data-page-node-id="iB8u43gVsBdeDOBqgBti5Z">✓ squash</span></td><td data-page-node-id="f8mMJJXVXaE3ekaHD2aB41">develop = 87e64fd</td></tr>
+          <tr data-page-node-id="JWtngDoI9vM7vJIZWpqu9D"><td data-page-node-id="7RwA9fDVHd9ru4fPZo1ooS">小程序真机联调</td><td class="center" data-page-node-id="0sp6TyKmMKDk2IZRT9HA0M"><span class="cross" data-page-node-id="FYlx9vQTBOyg5dUDKfDjpg">— 待用户</span></td><td data-page-node-id="knzmGMmLCbcyBe635MNECr">需微信开发者工具实操（appid 联调需 release 配合）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 下一步 -->
+    <div class="section" data-page-node-id="xKRkjkkviCdbZaF8XgBiZA">
+      <h2 data-page-node-id="e2uRRogOJ8HnDaxtUBsES2">🚀 下一步候选</h2>
+      <p class="lead" data-page-node-id="3JesFciQ1xanXlXGepiyBa">v1 已交付，按你之前列的 6 个候选继续打磨：</p>
+      <ol style="padding-left:20px;line-height:1.8;" data-page-node-id="EsmigtrUPh2ln76NiBohH1">
+        <li data-page-node-id="7NX9gJlKzrXIxC40KJs9ds"><b data-page-node-id="15wDxl2eg1NLVvrrejMNAy">设计语言统一</b> · 深色模式 / 字号规范 / iOS Human Interface 适配</li>
+        <li data-page-node-id="WMDHZ22D1k2A1KexSDJCvV"><b data-page-node-id="JOpfSFi3KV2nc65rEFvhXg">首屏引导</b> · 无角色用户 onboarding（首次进入的角色选择交互）</li>
+        <li data-page-node-id="AkjKO7lfKyS0arIoxZ1i9t"><b data-page-node-id="QJW2EzVJuEyc20dyPyn0Eo">三角色工作台交互一致性</b> · 货主 / 船东 / 港口 的顶栏 + 卡片 + 操作流对齐</li>
+        <li data-page-node-id="fpHNWtBBPuRVzVaGuo0jsK"><b data-page-node-id="B7t39xeEvbiz0hJMPkc3NE">三态组件库</b> · loading / empty / error / success 统一抽象（避免每页写一遍）</li>
+        <li data-page-node-id="jIRUTWG2A3P4LioOa30p94"><b data-page-node-id="DxgN8lL74DwUYY0qseDJJB">真实联调 checklist</b> · 后端 + 微信小程序 + 真机 三方联调清单</li>
+        <li data-page-node-id="YzyQQBSkgbnArFJKPgmkl4"><b data-page-node-id="8LbOfI9BDHBXkxCfzvRGdG">无障碍 a11y</b> · 字号/对比度/屏幕阅读器适配</li>
+      </ol>
+    </div>
+
+    <div class="footer-note" data-page-node-id="z3Yhq1ft2Q9L29nbaJzXG3">
+      UI 改版 v1 · C 阶段交付 · 2026-09-10 · 由 <span class="accent" data-page-node-id="G6viMjS8GwHes5Lu6gTAEr">WorkBuddy</span> 自动生成
+    </div>
+  </div>
+</body>
+</html>

@@ -69,9 +69,28 @@
     </view>
 
     <view wx:if="{{tab === 'appts'}}">
-      <view wx:if="{{!loading && apptList.length === 0}}" class="empty">
+      <view class="filter-bar ops-filter">
+        <view
+          wx:for="{{apptFilters}}"
+          wx:key="key"
+          class="filter-pill {{apptFilter === item.key ? 'filter-pill-active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="pickApptFilter"
+        >{{item.label}}</view>
+      </view>
+
+      <view wx:if="{{loading && apptList.length === 0}}" class="empty">
+        <view class="empty-icon">⏳</view>
+        <view>预约列表加载中...</view>
+      </view>
+      <view wx:elif="{{error}}" class="err-card">
+        <view class="err-title">加载失败</view>
+        <view class="err-detail">{{error}}</view>
+        <view class="err-btn" bindtap="fetchAppts">重新加载</view>
+      </view>
+      <view wx:elif="{{apptList.length === 0}}" class="empty">
         <view class="empty-icon">📅</view>
-        <view>暂无待确认的泊位预约</view>
+        <view>暂无{{apptFilter === 'pending' ? '待确认的' : ''}}泊位预约</view>
       </view>
       <view wx:for="{{apptList}}" wx:key="id" class="section-card ops-card" data-id="{{item.id}}" bindtap="goApptDetail" hover-class="hover-dim">
         <view class="ops-card-head">
@@ -90,7 +109,16 @@
     </view>
 
     <view wx:if="{{tab === 'list'}}">
-      <view wx:if="{{!loading && berthList.length === 0}}" class="empty">
+      <view wx:if="{{loading && berthList.length === 0}}" class="empty">
+        <view class="empty-icon">⏳</view>
+        <view>泊位列表加载中...</view>
+      </view>
+      <view wx:elif="{{error}}" class="err-card">
+        <view class="err-title">加载失败</view>
+        <view class="err-detail">{{error}}</view>
+        <view class="err-btn" bindtap="fetchBerths">重新加载</view>
+      </view>
+      <view wx:elif="{{berthList.length === 0}}" class="empty">
         <view class="empty-icon">⚓</view>
         <view>暂无泊位，请先新建</view>
       </view>

@@ -72,6 +72,12 @@ Page({
     groups: SERVICE_GROUPS,
     ports: PORTS,
     tab: 'appts',
+    apptFilter: 'pending',
+    apptFilters: [
+      { key: 'pending', label: '待确认' },
+      { key: 'confirmed', label: '已锁定' },
+      { key: '', label: '全部' }
+    ],
     form: {
       port_code: 'NNG',
       berth_no: '',
@@ -85,7 +91,8 @@ Page({
     apptList: [],
     apptTotal: 0,
     statusLabels: STATUS_LABELS,
-    loading: false
+    loading: false,
+    error: ''
   },
 
   onShow() {
@@ -152,19 +159,30 @@ Page({
   },
 
   fetchBerths() {
-    this.setData({ loading: true })
+    this.setData({ loading: true, error: '' })
     request({ url: '/api/v1/port/berths', data: { size: 50 } })
       .then((res) => this.setData({ berthList: res.items || [] }))
-      .catch(() => {})
+      .catch((err) => this.setData({ error: (err && err.message) || '泊位列表加载失败' }))
       .finally(() => this.setData({ loading: false }))
   },
 
   fetchAppts() {
-    this.setData({ loading: true })
-    request({ url: '/api/v1/port/appts-review', data: { status: 'pending', size: 50 } })
+    this.setData({ loading: true, error: '' })
+    request({
+      url: '/api/v1/port/appts-review',
+      data: { status: this.data.apptFilter, size: 50 }
+    })
       .then((res) => this.setData({ apptList: res.items || [], apptTotal: res.total || 0 }))
-      .catch(() => {})
+      .catch((err) => this.setData({ error: (err && err.message) || '预约列表加载失败' }))
       .finally(() => this.setData({ loading: false }))
+  },
+
+  /** 审核列表状态筛选（status 空串 = 全量，服务端未传即不过滤） */
+  pickApptFilter(e) {
+    const key = e.currentTarget.dataset.key
+    if (key === this.data.apptFilter) return
+    this.setData({ apptFilter: key })
+    this.fetchAppts()
   },
 
   onInput(e) {

@@ -48,7 +48,15 @@
 
       <view wx:if="{{list.length}}" class="list-hint">「查看合同 / 支付详情」进入三级页 · 长按订单卡快速预览合同</view>
 
-      <view wx:if="{{loading && list.length === 0}}" class="empty">加载中...</view>
+      <view wx:if="{{loading && list.length === 0}}" class="empty">
+        <view class="empty-icon">⏳</view>
+        <view>订单加载中...</view>
+      </view>
+      <view wx:elif="{{error}}" class="err-card">
+        <view class="err-title">订单加载失败</view>
+        <view class="err-detail">{{error}}</view>
+        <view class="err-btn" bindtap="fetchAll">重新加载</view>
+      </view>
       <view wx:elif="{{list.length === 0}}" class="empty">
         <view class="empty-icon">📋</view>
         <view>暂无{{activeLabel}}订单</view>

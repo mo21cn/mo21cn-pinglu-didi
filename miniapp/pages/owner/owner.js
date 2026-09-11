@@ -59,6 +59,7 @@ Page({
     // 船队
     shipList: [],
     shipLoading: false,
+    shipError: '',
     shipCount: 0,
     verifiedCount: 0,
 
@@ -198,7 +199,7 @@ Page({
   },
 
   fetchShipList() {
-    this.setData({ shipLoading: true })
+    this.setData({ shipLoading: true, shipError: '' })
     request({ url: '/api/v1/ship/registry', data: { size: 50 } })
       .then((res) => {
         const items = res.items || []
@@ -208,7 +209,7 @@ Page({
           verifiedCount: items.filter((s) => s.status === 'verified').length
         })
       })
-      .catch(() => {})
+      .catch((err) => this.setData({ shipError: (err && err.message) || '船队加载失败' }))
       .finally(() => this.setData({ shipLoading: false }))
   },
 

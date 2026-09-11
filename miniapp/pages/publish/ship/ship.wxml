@@ -12,7 +12,16 @@
   <view class="section-card">
     <view class="block-title"><text class="block-title-no">01</text><text>选择船舶</text></view>
 
-    <view wx:if="{{shipLoading}}" class="empty">船舶加载中...</view>
+    <view wx:if="{{shipLoading}}" class="empty">
+      <view class="empty-icon">⏳</view>
+      <view>船舶加载中...</view>
+    </view>
+
+    <view wx:elif="{{shipError}}" class="err-card">
+      <view class="err-title">船舶列表加载失败</view>
+      <view class="err-detail">{{shipError}}</view>
+      <view class="err-btn" bindtap="fetchShips">重新加载</view>
+    </view>
 
     <view wx:elif="{{ships.length === 0}}" class="no-ship">
       <view class="no-ship-text">暂无已认证船舶，请先完成船舶备案并通过审核</view>

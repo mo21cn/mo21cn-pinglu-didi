@@ -12,7 +12,8 @@ class OrderCreate(BaseModel):
 
     cargo_id: int = Field(gt=0, description="货源 ID")
     ship_id: int = Field(gt=0, description="承运船舶 ID")
-    # 运费（元）；空则沿用货源出价（offer_price，仍空为面议）
+    # 运费（元）。注意：不会自动继承货源的 offer_price，须由调用方显式传入；
+    # 不传即落库为 null（面议单），此时不可发起支付。
     freight_price: float | None = Field(default=None, gt=0, description="成交运费（元）")
 
 
