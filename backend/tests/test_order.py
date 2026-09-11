@@ -241,6 +241,18 @@ def test_order_list_role_view(owner, port_user, shipper, client):
     as_owner = client.get(API_ORDER, headers=owner["_headers"]).json()
     assert as_owner["total"] == 1 and as_owner["items"][0]["id"] == order["id"]
 
+    # 内嵌摘要（TODO-02）：船东视角同样拿到货源摘要，前端不再降级成「货源 #id」
+    for view in (as_shipper, as_owner):
+        item = view["items"][0]
+        assert item["cargo"] is not None and item["ship"] is not None
+        assert item["cargo"]["id"] == cargo["id"]
+        assert item["cargo"]["cargo_name"] == CARGO_PAYLOAD["cargo_name"]
+        assert item["cargo"]["origin_port"] == CARGO_PAYLOAD["origin_port"]
+        assert item["cargo"]["dest_port"] == CARGO_PAYLOAD["dest_port"]
+        assert item["ship"]["id"] == sid
+        assert item["ship"]["ship_name"] == _ship_payload()["ship_name"]
+        assert item["ship"]["deadweight_t"] == _ship_payload()["deadweight_t"]
+
     filtered = client.get(f"{API_ORDER}?status=shipped", headers=shipper["_headers"]).json()
     assert filtered["total"] == 0
 
@@ -255,6 +267,11 @@ def test_order_detail_participant_only(owner, port_user, shipper, client):
     order = _make_order(client, shipper, cargo["id"], sid)
     resp = client.get(f"{API_ORDER}/{order['id']}", headers=port_user["_headers"])
     assert resp.status_code == 404
+
+    # 详情端点同样内嵌摘要（支付三级页据此免去富化请求）
+    detail = client.get(f"{API_ORDER}/{order['id']}", headers=owner["_headers"]).json()
+    assert detail["cargo"]["id"] == cargo["id"]
+    assert detail["ship"]["id"] == sid
 
 
 def test_order_role_guard_port(port_user, shipper, client):

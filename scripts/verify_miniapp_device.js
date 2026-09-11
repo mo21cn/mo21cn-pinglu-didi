@@ -289,8 +289,10 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
   const olist = od.list || []
   rec('⑥ 订单页无错误且列表有数据', !od.error && olist.length > 0, `list=${olist.length} stats=${(od.stats || []).length}`)
   const c0 = olist[0] || {}
-  rec('⑥ 订单卡路线/货名/船名（前端富化）', !!(c0.origin_label && c0.dest_label && c0.cargo_name && c0.ship_name),
-    `#${c0.id} ${c0.origin_label}→${c0.dest_label} ${c0.cargo_name}`)
+  rec('⑥ 订单卡路线/货名/船名取自订单内嵌摘要（无 #id 降级）',
+    !!(c0.origin_label && c0.dest_label && c0.cargo_name && c0.ship_name) &&
+      !/#\d/.test(String(c0.cargo_name) + String(c0.ship_name)),
+    `#${c0.id} ${c0.origin_label}→${c0.dest_label} ${c0.cargo_name} / ${c0.ship_name}`)
   rec('⑥ 待办卡生成', (od.todoList || []).length >= 0, JSON.stringify(od.todoList || []))
 
   // ⑧ 支付详情三级页（真实点击「去支付」）

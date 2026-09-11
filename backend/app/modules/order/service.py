@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.cargo import Cargo
 from app.models.order import Order
@@ -171,7 +171,8 @@ def list_orders(
     size: int = 20,
 ) -> tuple[int, list[Order]]:
     """订单列表（角色视角）：货主看自己货源的单，船东看自己船舶的单。"""
-    stmt = select(Order)
+    # selectinload：cargo/ship 是 OrderOut 的内嵌摘要，预取避免逐行懒加载 N+1
+    stmt = select(Order).options(selectinload(Order.cargo), selectinload(Order.ship))
     if role == "shipper":
         stmt = stmt.where(Order.shipper_id == user_id)
     elif role == "owner":
@@ -191,7 +192,11 @@ def list_orders(
 
 
 def get_order(db: Session, order_id: int) -> Order | None:
-    return db.get(Order, order_id)
+    return db.execute(
+        select(Order)
+        .options(selectinload(Order.cargo), selectinload(Order.ship))
+        .where(Order.id == order_id)
+    ).scalar_one_or_none()
 
 
 def is_participant(order: Order, user_id: int) -> bool:

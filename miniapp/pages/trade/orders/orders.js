@@ -3,8 +3,8 @@
 // 三级页入口：
 //   合同：卡片「查看合同」→ pages/trade/contract（完整版）；长按订单卡 → 弹层快速预览
 //   支付：卡片「去支付 / 支付详情」→ pages/trade/payment（单据状态机 + 资金留痕）
-// 注：订单接口仅返回 cargo_id/ship_id → 用「我的货源 / 我的船队」列表做 enrich 展示路线。
-//     若拿不到货源详情（如船东视角），降级显示「货源 #id」。
+// 注：订单接口已内嵌 cargo/ship 摘要（后端 OrderOut.cargo/ship）→ 路线/货名/船名直接可用，
+//     船东视角也不再有「货源 #id」降级；仅当摘要缺失时才回退到列表接口补齐。
 const { request } = require('../../../utils/request')
 const { getUser } = require('../../../utils/auth')
 const { syncTabBar } = require('../../../utils/tabbar')
@@ -75,33 +75,38 @@ Page({
 
   // ---- 数据 ----
   /**
-   * 订单为主资源（失败即报错）；货源/船队仅用于卡片线路富化，取不到时降级。
+   * 订单为主资源（失败即报错）。订单接口已内嵌 cargo/ship 摘要 → 常规路径**零富化请求**。
    *
+   * 仅在摘要缺失时（旧后端 / 异常数据）才回退到「自己这一侧」的列表接口补齐：
    * ⚠️ `/cargo/shipments` 只允许货主、`/ship/registry` 只允许船东（后端逐端点校验
    *    current_role）。此前无条件并发两个接口，必然有一个 403 —— 控制台红错、
-   *    且是纯粹的无效请求。订单卡富化只需要「自己这一侧」的数据，故按角色二选一。
+   *    且是纯粹的无效请求。故按角色二选一。
    */
   fetchAll() {
     this.setData({ loading: true, error: '' })
-    const role = this.data.role
-    const isOwner = role === 'owner'
-    const enrichUrl = isOwner ? '/api/v1/ship/registry' : '/api/v1/cargo/shipments'
-    const safe = (url) => request({ url, data: { size: 100 } }).catch(() => ({ items: [] }))
-    Promise.all([
-      request({ url: '/api/v1/order/orders', data: { size: 100 } }),
-      safe(enrichUrl)
-    ])
-      .then(([orders, own]) => {
-        const cargoMap = {}
-        const shipMap = {}
-        ;(own.items || []).forEach((it) => {
-          if (isOwner) shipMap[it.id] = it
-          else cargoMap[it.id] = it
-        })
-
-        const rawList = (orders.items || []).map((o) => this.decorate(o, cargoMap, shipMap))
-        this.setData({ rawList })
-        this.applyView()
+    request({ url: '/api/v1/order/orders', data: { size: 100 } })
+      .then((orders) => {
+        const items = orders.items || []
+        // 常规路径：订单自带摘要 → 不发富化请求
+        if (!items.some((o) => !o.cargo || !o.ship)) {
+          this.setData({ rawList: items.map((o) => this.decorate(o)) })
+          this.applyView()
+          return null
+        }
+        const isOwner = this.data.role === 'owner'
+        const enrichUrl = isOwner ? '/api/v1/ship/registry' : '/api/v1/cargo/shipments'
+        return request({ url: enrichUrl, data: { size: 100 } })
+          .catch(() => ({ items: [] }))
+          .then((own) => {
+            const cargoMap = {}
+            const shipMap = {}
+            ;((own || {}).items || []).forEach((it) => {
+              if (isOwner) shipMap[it.id] = it
+              else cargoMap[it.id] = it
+            })
+            this.setData({ rawList: items.map((o) => this.decorate(o, cargoMap, shipMap)) })
+            this.applyView()
+          })
       })
       .catch((err) => {
         this.setData({ error: (err && err.message) || '订单加载失败，请稍后重试' })
@@ -109,10 +114,10 @@ Page({
       .finally(() => this.setData({ loading: false }))
   },
 
-  /** 订单卡片展示字段装饰（拿不到货源详情时降级） */
+  /** 订单卡片展示字段装饰：订单内嵌摘要 > 联动列表 > 降级 #id */
   decorate(o, cargoMap, shipMap) {
-    const c = cargoMap[o.cargo_id]
-    const s = shipMap[o.ship_id]
+    const c = o.cargo || ((cargoMap && cargoMap[o.cargo_id]) || null)
+    const s = o.ship || ((shipMap && shipMap[o.ship_id]) || null)
     const originLabel = c ? (PORT_LABELS[c.origin_port] || c.origin_port) : '货源'
     const destLabel = c ? (PORT_LABELS[c.dest_port] || c.dest_port) : ('#' + o.cargo_id)
     let weightText = '—'
@@ -121,8 +126,12 @@ Page({
     let dateText = ''
     if (c) dateText = c.expect_date + ' 装货'
     else if (o.matched_at) dateText = String(o.matched_at).slice(0, 10) + ' 成交'
+    // 摘要对象不再往下传（避免 setData 体积无谓翻倍）
+    const rest = Object.assign({}, o)
+    delete rest.cargo
+    delete rest.ship
     return {
-      ...o,
+      ...rest,
       origin_label: originLabel,
       dest_label: destLabel,
       cargo_name: c ? c.cargo_name : ('货源 #' + o.cargo_id),

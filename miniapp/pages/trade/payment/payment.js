@@ -82,7 +82,9 @@ Page({
   },
 
   /**
-   * 三路取数：订单（必需）· 支付单（可无）· 货源/船队（用于线路富化，拿不到则降级）。
+   * 两路取数：订单（必需）· 支付单（可无）。
+   * 订单接口已内嵌 cargo/ship 摘要 → 常规路径**零富化请求**；
+   * 摘要缺失时才回退到「自己这一侧」的列表接口。
    *
    * ⚠️ 货源 / 船队列表均按当前角色鉴权（货主↔/cargo/shipments，船东↔/ship/registry），
    *    无条件并发两个必然有一个 403 → 按角色只取对应一侧（与订单页同一口径）。
@@ -94,19 +96,24 @@ Page({
     const safe = (url) => request({ url, data: { size: 100 } }).catch(() => ({ items: [] }))
     Promise.all([
       request({ url: '/api/v1/order/orders/' + this.data.orderId }),
-      request({ url: '/api/v1/payment/payments/order/' + this.data.orderId, silent: true }).catch(() => null),
-      safe(enrichUrl)
+      request({ url: '/api/v1/payment/payments/order/' + this.data.orderId, silent: true }).catch(() => null)
     ])
       .then((res) => {
         const order = res[0]
         const payment = res[1]
-        const cargoMap = {}
-        const shipMap = {}
-        ;((res[2] || {}).items || []).forEach((it) => {
-          if (isOwner) shipMap[it.id] = it
-          else cargoMap[it.id] = it
+        if (order.cargo && order.ship) {
+          this.apply(order, payment, {}, {})
+          return null
+        }
+        return safe(enrichUrl).then((own) => {
+          const cargoMap = {}
+          const shipMap = {}
+          ;((own || {}).items || []).forEach((it) => {
+            if (isOwner) shipMap[it.id] = it
+            else cargoMap[it.id] = it
+          })
+          this.apply(order, payment, cargoMap, shipMap)
         })
-        this.apply(order, payment, cargoMap, shipMap)
       })
       .catch((err) => {
         this.setData({ error: (err && err.message) || '加载失败，请稍后重试' })
@@ -116,8 +123,8 @@ Page({
 
   apply(order, payment, cargoMap, shipMap) {
     const role = this.data.role
-    const c = cargoMap[order.cargo_id]
-    const s = shipMap[order.ship_id]
+    const c = order.cargo || cargoMap[order.cargo_id]
+    const s = order.ship || shipMap[order.ship_id]
 
     const cargoText = c
       ? c.cargo_name + ' · ' + c.weight_t + ' 吨 · ' +

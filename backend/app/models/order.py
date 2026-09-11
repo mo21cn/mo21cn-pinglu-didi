@@ -16,8 +16,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+# 运行时导入：SQLAlchemy 需要按注解解析关联目标类（cargo/ship 不反向依赖 order，无环）
+from app.models.cargo import Cargo
+from app.models.ship import Ship
 from app.models.user import Base
 
 
@@ -66,3 +69,8 @@ class Order(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间"
     )
+
+    # ---- 关联对象（订单视图内嵌摘要；查询侧统一 selectinload 防 N+1）----
+    # 订单参与方（货主/船东）均有权看到交易所涉的货与船，故摘要对双方都返回。
+    cargo: Mapped[Cargo] = relationship("Cargo")
+    ship: Mapped[Ship] = relationship("Ship")
