@@ -3,96 +3,25 @@ page { background: #E7EFF4; }
 
 .page {
   position: relative;
-  min-height: 100vh;
-  padding-bottom: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
-/* ---- 背景地图（纯 CSS 模拟地形 + 水系） ---- */
-.map-bg {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, #DCE9F0 0%, #E9F1F5 55%, #F2F6F8 100%);
-}
-.map-blob {
-  position: absolute;
-  border-radius: 44% 56% 62% 38% / 48% 42% 58% 52%;
-}
-.blob-a {
-  width: 560rpx; height: 420rpx;
-  left: -120rpx; top: 80rpx;
-  background: rgba(174, 205, 172, .55);
-}
-.blob-b {
-  width: 480rpx; height: 520rpx;
-  right: -140rpx; top: 200rpx;
-  background: rgba(186, 214, 226, .60);
-}
-.blob-c {
-  width: 700rpx; height: 360rpx;
-  left: 60rpx; top: 520rpx;
-  background: rgba(196, 218, 190, .45);
-}
-.map-line {
-  position: absolute;
-  height: 3rpx;
-  background: rgba(255, 255, 255, .85);
-  border-radius: 3rpx;
-}
-.line-a { width: 620rpx; left: -60rpx; top: 340rpx; transform: rotate(-9deg); }
-.line-b { width: 520rpx; right: -80rpx; top: 470rpx; transform: rotate(6deg); }
-.map-road {
-  position: absolute;
-  left: 60rpx; top: 600rpx;
-  font-size: 20rpx;
-  color: #FFFFFF;
-  background: #E8B93B;
-  padding: 0 10rpx;
-  border-radius: 4rpx;
-  letter-spacing: 1rpx;
-}
-
-/* ---- 品牌区 ---- */
-.hero {
-  position: relative;
-  padding: calc(200rpx + env(safe-area-inset-top)) 60rpx 0;
-}
-.logo-row {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-}
-.logo-mark {
-  width: 104rpx;
-  height: 104rpx;
-  border-radius: 26rpx;
-  background: linear-gradient(135deg, #3B5BDB 0%, #7048E8 100%);
-  color: #FFFFFF;
-  font-size: 54rpx;
-  line-height: 104rpx;
-  text-align: center;
-  box-shadow: 0 10rpx 24rpx rgba(61, 90, 219, .28);
-}
-.logo-text {
-  font-size: 68rpx;
-  font-weight: 800;
-  color: #14233B;
-  letter-spacing: 6rpx;
-}
-.logo-slogan {
-  margin-top: 18rpx;
-  margin-left: 4rpx;
-  font-size: 28rpx;
-  color: #55677E;
-  letter-spacing: 8rpx;
+/* ---- 品牌头图（设计稿导出：平陆运河航拍 + 品牌标识） ---- */
+.brand-hero {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: block;
+  background: #B9D3E6;
 }
 
 /* ---- 身份浮窗 ---- */
 .role-sheet {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  flex: 0 0 auto;
   background: #FFFFFF;
   border-top-left-radius: 40rpx;
   border-top-right-radius: 40rpx;

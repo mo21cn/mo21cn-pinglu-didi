@@ -6,17 +6,13 @@
 <view class="page">
   <!-- ==================== 服务视图（原型） ==================== -->
   <block wx:if="{{view === 'service'}}">
-    <!-- 地图头（示意） -->
+    <!--
+      地图头（设计稿导出：企石枢纽示意底图）
+      底图自带「企石枢纽」锚点标注，故去掉原 CSS 模拟地形与 ⚓ 图标 + 文字标注；
+      右下角保留「定位」功能控件。
+    -->
     <view class="map-head">
-      <view class="m-green mg1"></view>
-      <view class="m-green mg2"></view>
-      <view class="m-water"></view>
-      <view class="m-road">G359</view>
-      <view class="m-anchor">
-        <view class="anchor-pin">⚓</view>
-        <view class="anchor-label">企石枢纽</view>
-      </view>
-      <view class="map-tip">地图示意</view>
+      <image class="map-head-img" src="/assets/port-map.jpg" mode="aspectFill" />
       <view class="map-locate" bindtap="onLocate" hover-class="hover-dim">◎</view>
     </view>
 
