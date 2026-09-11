@@ -34,7 +34,7 @@
       >{{item}}</view>
     </view>
 
-    <block wx:for="{{messages}}" wx:key="ts" wx:for-index="i">
+    <block wx:for="{{messages}}" wx:key="id" wx:for-index="i">
       <view class="msg-row {{item.role === 'user' ? 'right' : 'left'}}">
         <view class="avatar {{item.role === 'user' ? 'avatar-user' : 'avatar-bot'}}">
           {{item.role === 'user' ? '我' : botBadge}}

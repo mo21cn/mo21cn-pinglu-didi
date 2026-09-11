@@ -313,13 +313,19 @@ Page({
 
   // ---- 操作 ----
   onConfirm() {
+    // 双保险守卫（第三方审计 P3-5：wxml 只加了 btn-disabled 样式仍绑定 tap，
+    // 冲突时点击仍会发请求 → 后端行锁兜底会 409，但前端应先拦下）
+    if (!this.data.canConfirm) {
+      wx.showToast({ title: this.data.barNote || '档期冲突，无法确认', icon: 'none' })
+      return
+    }
     request({ url: '/api/v1/port/appts/' + this.data.apptId + '/confirm', method: 'POST' })
       .then(() => {
         wx.showToast({ title: '已确认，档期锁定', icon: 'success' })
         this.clearCache()
         this.fetch()
       })
-      .catch(() => {})
+      .catch((err) => console.warn('[appt] confirm 失败', (err && err.message) || err))
   },
 
   onReject() {
@@ -339,7 +345,7 @@ Page({
             this.clearCache()
             this.fetch()
           })
-          .catch(() => {})
+          .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
       }
     })
   },
@@ -351,7 +357,7 @@ Page({
         this.clearCache()
         this.fetch()
       })
-      .catch(() => {})
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
   },
 
   clearCache() {

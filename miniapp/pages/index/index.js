@@ -39,7 +39,8 @@ Page({
   },
 
   onLoad() {
-    this.probeBackend()
+    // 后端探活只在 onShow 做（第三方审计 P3-7：onLoad 后必然触发 onShow，
+    // 原来两处各探活一次 → 首屏两次 /healthz）
     // 已登录且已有角色 → 直接进上次的工作台（无需再次选择）
     if (auth.isLoggedIn()) {
       const user = auth.getUser()

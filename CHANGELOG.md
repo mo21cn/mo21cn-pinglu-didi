@@ -3,6 +3,71 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] - 2026-09-12
+
+UI V2 全量改版 + 交易三级页闭环 + **Agent 五领域补齐 5/5** + 第三方审计修正。
+自 0.4.0（演示版框架）以来的主旋律：**前端体验从"能演示"打磨到"可交付"**。
+
+### 新增
+
+- **UI V2 全量改版**（PR #19/#20）：
+  - 自定义 tabBar（`tabBar.custom=true` + `custom-tab-bar` 组件）：找船/找货
+    第 1 位随角色变化、中间凸起位发布入口（货主发货物 / 船东发空船）
+  - 品牌更名「船好多」，蓝紫渐变令牌（#3B5BDB → #7048E8）贯穿全站
+- **交易三级页 L3**（PR #21–#25）：
+  - 智能合同三级页（长按快览弹层 + Markdown 渲染 + 风险分级）
+  - 支付详情页（时间轴 + 金额取支付单锁定值 + 面议拒付引导）
+  - 撮合结果页（四项得分拆解 + 未入局原因计数）与港口域档期甘特
+- **E2E 工具链**（PR #26/#27）：`verify_frontend_e2e`（真后端载荷驱动
+  页面逻辑）+ `verify_miniapp_device`（miniprogram-automator 真机走查）
+- **Agent 五领域补齐 5/5**（PR #38）：
+  - F14 货源解析前端接线（`assistant` 三模式：客服/解析/搜索 + 草稿回填）
+  - F17 合规初筛（2 端点 / 9 条确定性规则 / 零 LLM / 不阻断写入）
+  - F18 商务条款类风险 R6–R9（滞期费/保险/违约金/在途不可抗力）
+  - F20 统一意图路由 `/agent/route`（合同>合规>货源解析>客服兜底）
+- **智能搜索页面化**（PR #39）：与智能客服同款对话外壳的第三模式
+  `mode=search`，结果按意图渲染解析卡/合规卡/回答气泡
+
+### 修复（第三方审计修正，22 项）
+
+外部静态审计（结论 B+，P0=0 / P1=2 / P2=9 / P3=13）逐项核实后修正：
+
+- **P1-1** 客服多轮上下文 `slice(-10)` 对齐后端 `max_length=10`
+  （原第 6 轮发送起携带 11+ 条历史被 422 拒收，提示语无法定位）
+- **P2-1** 发布空船页「选船」改 port-picker 弹层
+  （原 `wx.showActionSheet` 承载无上限数据源，船队 >6 艘静默失败）
+- **P2-2** 5 个页面补 `enablePullDownRefresh`（原下拉刷新手势静默无效）
+- **P2-3** 新增 `utils/dates.js` 本地日期工具，替换 7 处
+  `toISOString().slice`（UTC 在东八区 0–8 点会取到「昨天」）
+- **P2-4** 发布货源成功后保持提交态至跳转（防 700ms 窗口内重复建单）
+- **P2-5/P2-9** 港口数据源与标签全站统一 13 港全量口径
+  （原 port 页仅 10 港、owner 筛选器短标签两套文案）
+- **P2-6** 泊位创建补提交守卫；**P2-7** request.js 401 注释对齐实现
+- **P3 批量清理**：常量收敛 `utils/constants.js`（8 文件、修正 tanker
+  文案漂移「油船→液货船」）；死代码（app.js 路由映射/死样式）；消息
+  `wx:key` 改自增 id（同毫秒键重复）；`getUser` 容错；泊位参数 null
+  兜底；15 处静默吞错加可定位日志；列表页驳回改填原因（与详情页统一）；
+  合同页下拉不再重复触发 LLM 生成；我的页未登录中性占位；首屏双探活
+- **静态防线补 3 条**：showActionSheet 动态表达式白名单拦截 /
+  onPullDownRefresh⇔json 开关一致性 / 业务日期禁 `toISOString().slice`
+
+### 已知边界
+
+- P2-8（订单页状态栏留白）在审计落地前已被 PR #39 顺带修复
+- P1-2 上线前收口项按计划保留占位：真实 AppID / HTTPS 域名 /
+  `DEV_STABLE_IDENTITY=false` / 微信支付真实渠道 / JWT 密钥 secrets 化
+- `lazyCodeLoading` 试开后回滚：与 miniprogram-automator 不兼容
+  （页面节点树找不到、走查 FATAL），待框架适配后再评估
+- 货源大厅仍为演示数据（后端无「公开货源」接口）；合同不落库（TODO-03）
+
+### 验证
+
+- `ruff` 全过｜`pytest` **142 passed**｜`mypy app` 0 error（后端本批零改动，作回归）
+- `verify_miniapp` 19 JSON / 14 页面 / 46 路由 / 185 事件
+- `verify_ui_interactions` **199 / 0**（审计前 197 → +2）
+- `verify_frontend_e2e` **176 / 0**｜`verify_login_flow` **22 / 0**
+- 真机走查 **140 / 140 · 0 运行期 console.error**
+
 ## [0.4.0] - 2026-09-10
 
 RAG 知识检索 + 底部客服对话入口（F12-F13）：Agent 从 prompt 硬编码转检索式注入，小程序底部 tabBar 接通客服。

@@ -7,19 +7,9 @@
 // 展示性页面：只读档期 + 参数解读，不改泊位参数（编辑能力为占位）。
 const { request } = require('../../../utils/request')
 const { getUser } = require('../../../utils/auth')
-
-const PORT_LABELS = {
-  NNG: '南宁', GGU: '贵港', WUZ: '梧州', BIN: '来宾', LZH: '柳州',
-  BSZ: '百色', CHZ: '崇左', GXL: '桂林', HEZ: '贺州', YUL: '玉林',
-  QNZ: '钦州', FCG: '防城港', BHZ: '北海'
-}
-
-const SHIP_TYPE_LABELS = {
-  bulk: '散货船',
-  general: '件杂货船',
-  container: '集装箱船',
-  tanker: '油船'
-}
+// 业务常量唯一来源（第三方审计 P3-4：原本地复制 PORT_LABELS（未使用，死代码）与
+// SHIP_TYPE_LABELS（tanker 写成「油船」，与其余 7 处不一致）→ 统一收敛）
+const { SHIP_TYPE_LABELS } = require('../../../utils/constants')
 
 // 硬约束校验链（与 service.create_appt 一一对应，纯展示）
 const RULES = [
@@ -147,10 +137,11 @@ Page({
       berthSub: b.berth_name || '未命名泊位',
       statusLabel: b.status === 'active' ? '可用' : '停用',
       statusChip: b.status === 'active' ? 'chip-success' : 'chip-muted',
-      dwtText: b.max_dwt + ' 吨',
-      draftText: b.max_draft + ' 米',
+      // 空值兜底（第三方审计 P3-9：null 拼接会显示「null 吨」）
+      dwtText: (b.max_dwt != null && b.max_dwt !== '') ? b.max_dwt + ' 吨' : '—',
+      draftText: (b.max_draft != null && b.max_draft !== '') ? b.max_draft + ' 米' : '—',
       typeText: types.length ? types.join(' / ') : '—',
-      capacityText: b.concurrent_capacity + ' 船位',
+      capacityText: (b.concurrent_capacity != null) ? b.concurrent_capacity + ' 船位' : '—',
       capacity: Number(b.concurrent_capacity) || 0
     }
 

@@ -46,13 +46,7 @@ page {
   background: linear-gradient(135deg, #EDF1FF 0%, #F2EBFF 100%);
 }
 
-.text-brand-gradient {
-  /* 仅 WebKit 支持，小程序里主要做按钮文字（用 color 兜底） */
-  background: linear-gradient(135deg, #3B5BDB, #7048E8);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
+/* （第三方审计 P3-13：原 .text-brand-gradient 无引用，死样式已删除） */
 
 /* ---- 通用卡片 ---- */
 .card {

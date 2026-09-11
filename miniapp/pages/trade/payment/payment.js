@@ -28,11 +28,8 @@ const ORDER_STATUS = {
   cancelled: '已撤单'
 }
 
-const PORT_LABELS = {
-  NNG: '南宁', GGU: '贵港', WUZ: '梧州', BIN: '来宾', LZH: '柳州',
-  BSZ: '百色', CHZ: '崇左', GXL: '桂林', HEZ: '贺州', YUL: '玉林',
-  QNZ: '钦州', FCG: '防城港', BHZ: '北海'
-}
+// 业务常量唯一来源（第三方审计 P3-4：原为页面本地复制）
+const { PORT_LABELS } = require('../../../utils/constants')
 
 function fmtTime(t) {
   if (!t) return ''
@@ -286,7 +283,7 @@ Page({
             wx.showToast({ title: '支付成功', icon: 'success' })
             this.fetch()
           })
-          .catch(() => {})
+          .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
       }
     })
   },

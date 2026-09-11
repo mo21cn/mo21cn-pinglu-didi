@@ -5,24 +5,14 @@
 // 入口：①货主端「我的货源」「查看匹配船源」②发布货源成功后自动跳转 ③船东端「我的船队」找货
 const { request } = require('../../../utils/request')
 
-const SHIP_TYPE_LABELS = {
-  bulk: '散货船',
-  general: '件杂货船',
-  container: '集装箱船',
-  tanker: '液货船'
-}
+// 业务常量唯一来源（第三方审计 P3-4：原为页面本地复制）
+const { SHIP_TYPE_LABELS, PORT_LABELS } = require('../../../utils/constants')
 
 const CARGO_TYPE_LABELS = {
   bulk: '散货',
   general: '件杂货',
   container: '集装箱',
   tanker: '液货'
-}
-
-const PORT_LABELS = {
-  NNG: '南宁', GGU: '贵港', WUZ: '梧州', BIN: '来宾', LZH: '柳州',
-  BSZ: '百色', CHZ: '崇左', GXL: '桂林', HEZ: '贺州', YUL: '玉林',
-  QNZ: '钦州', FCG: '防城港', BHZ: '北海'
 }
 
 // 评分维度（与 engine.py 的 W_* 权重一一对应，满分合计 100）
@@ -206,6 +196,6 @@ Page({
           wx.switchTab({ url: '/pages/trade/orders/orders' })
         }, 800)
       })
-      .catch(() => {})
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
   }
 })

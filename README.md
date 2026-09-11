@@ -140,6 +140,8 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 
 | **UI 打磨** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 185 事件 | **①「智能搜索」页面化**：弃用 `wx.showModal({editable})`（长占位文案挤成两行被截断），改为「智能客服」同款页面外壳 + 第三模式 `mode=search`（结果按意图渲染解析卡/合规卡/回答气泡）；**②顶栏身份**：货主/船东顶栏换成纯 CSS 矢量人物头像 + 用户 ID + 常用港（原 emoji 快捷入口功能未丢，页内另有入口）；**③订单页自绘导航**：补上 `navigationStyle:custom` 缺失的导航栏，修「统计行顶到状态栏、被胶囊压住」；顺带发现并修「我的」页「功能预览」被胶囊整块遮住（看不见的假入口）。`verify_ui_interactions` **197/0**；`verify_frontend_e2e` 176/0；`verify_login_flow` 22/0；真机走查 **140/140 · 0 运行期 `console.error`** |
 
+| **第三方审计修正** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 185 事件 | 外部静态审计（B+，P0=0/P1=2/P2=9/P3=13）逐项核实修正 **22 项**（P2-8 已被 #39 顺带修复、P1-2 上线前占位按计划不修）：**P1-1** 客服多轮 `slice(-10)` 对齐后端 `max_length=10`（原第 6 轮起 422）；**P2-1** 选船改 port-picker 弹层（原 >6 艘静默失败）；**P2-2** 5 页补 `enablePullDownRefresh`；**P2-3** 新增 `utils/dates.js` 本地日期（7 处 UTC 偏移）；**P2-4** 发布防重窗口；**P2-5/9** 港口数据源/标签统一 13 港全量口径；**P2-6** 泊位创建守卫；**P3 全清理**（常量收敛 `utils/constants.js` 8 文件、死代码、`wx:key` 自增 id、null 兜底、吞错加日志、驳回原因统一等）；静态防线补 3 条（showActionSheet 动态表达式白名单拦截 / 下拉刷新一致性 / toISOString 日期禁令）。`lazyCodeLoading` 试开因 automator 兼容性回滚（见 PR 已知边界）。`verify_ui_interactions` **199/0**；真机走查 **140/140** |
+
 **三者状态机口径（可直接用于汇报答辩）**
 
 | 域 | 状态机 | 幂等 / 并发防线 | 留痕 |

@@ -6,10 +6,10 @@ const { request } = require('../../../utils/request')
 const { PORTS } = require('../../../utils/ports')
 // 合规预检结论展示（F17：船舶备案前即时预检）
 const { runComplianceCheck } = require('../../../utils/agent-entry')
+const { fmtDate, fmtDateOffset } = require('../../../utils/dates')
 
-const SHIP_TYPE_LABELS = {
-  bulk: '散货船', general: '件杂货船', container: '集装箱船', tanker: '液货船'
-}
+// 业务常量唯一来源（第三方审计 P3-4：原为页面本地复制）
+const { SHIP_TYPE_LABELS } = require('../../../utils/constants')
 
 const DRAFT_KEY = 'empty_ship_drafts'
 
@@ -39,7 +39,7 @@ Page({
 
   onLoad() {
     const d = new Date(Date.now() + 3600 * 1000)
-    this.setData({ 'form.available_date': d.toISOString().slice(0, 10) })
+    this.setData({ 'form.available_date': fmtDate(d) })
     this.fetchShips()
   },
 
@@ -54,21 +54,20 @@ Page({
       .finally(() => this.setData({ shipLoading: false }))
   },
 
+  // 选船：船队可能超过 wx.showActionSheet 的 itemList 上限（6），超过会静默失败（第三方审计 P2-1）
+  // → 复用 port-picker 弹层（组件支持任意长度列表，ports 参数可自定义）
   pickShip() {
     const ships = this.data.ships
     if (!ships.length) return
-    wx.showActionSheet({
-      itemList: ships.map((s) => `${s.ship_name}（${s.deadweight_t}吨）`),
-      success: (res) => {
-        const s = ships[res.tapIndex]
-        this.setData({
-          selectedShipId: s.id,
-          selectedShip: s,
-          shipLabel: s.ship_name,
-          shipBrief: `${SHIP_TYPE_LABELS[s.ship_type] || s.ship_type} · 载重 ${s.deadweight_t} 吨 · 吃水 ${s.draft_m} 米`,
-          'form.available_t': String(Math.round(s.deadweight_t))
-        })
-      }
+    this.openPortPicker({
+      title: '选择船舶',
+      tip: '仅展示已通过审核（verified）的船舶',
+      current: this.data.selectedShipId ? String(this.data.selectedShipId) : '',
+      ports: ships.map((s) => ({
+        key: String(s.id),
+        label: `${s.ship_name}（${s.deadweight_t}吨 · 吃水 ${s.draft_m}米）`
+      })),
+      action: 'ship'
     })
   },
 
@@ -134,7 +133,17 @@ Page({
     const { key, label } = e.detail
     const action = this.data.ppAction
     const patch = { ppVisible: false }
-    if (action === 'current') {
+    if (action === 'ship') {
+      // 选船（复用弹层）：key 是船舶 id 的字符串形式
+      const s = this.data.ships.filter((x) => String(x.id) === key)[0]
+      if (s) {
+        patch.selectedShipId = s.id
+        patch.selectedShip = s
+        patch.shipLabel = s.ship_name
+        patch.shipBrief = `${SHIP_TYPE_LABELS[s.ship_type] || s.ship_type} · 载重 ${s.deadweight_t} 吨 · 吃水 ${s.draft_m} 米`
+        patch['form.available_t'] = String(Math.round(s.deadweight_t))
+      }
+    } else if (action === 'current') {
       patch['form.current_port'] = key
       patch['form.current_port_label'] = label
     } else if (action === 'origin') {
@@ -160,8 +169,8 @@ Page({
       itemList: ['今天', '明天', '后天', '一周内'],
       success: (res) => {
         const offsets = [0, 1, 2, 7]
-        const d = new Date(Date.now() + offsets[res.tapIndex] * 86400000)
-        this.setData({ 'form.available_date': d.toISOString().slice(0, 10) })
+        // 本地日期（toISOString 是 UTC，凌晨会取到「昨天」，第三方审计 P2-3）
+        this.setData({ 'form.available_date': fmtDateOffset(offsets[res.tapIndex]) })
       }
     })
   },
