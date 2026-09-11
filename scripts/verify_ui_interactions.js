@@ -14,7 +14,8 @@
  *   ④ 我的页「退出」出口、货主页与船东页切角色弹窗不含「港口方」
  *   ⑤ 静态防线：showActionSheet 长列表、组件注册、底栏按钮居中、页面底部留白
  *   ⑥ 身份选择（仅货主/船东）· 登录链路顺序（login→bindRole→switchRole）·
- *      订单页/支付页富化只打当前角色那一侧接口（防跨角色 403）
+ *      订单页/支付页：订单自带 cargo/ship 摘要时零富化请求，缺失时才按角色
+ *      回退单侧（防跨角色 403）
  *   ⑦ 失败可定位（describeError 分类 · 失败环节点名）· 开发期身份稳定（不依赖 wx.login）·
  *      /healthz 连通性预检
  *
@@ -127,6 +128,11 @@ function makeRequire(wx, reqLog, authState) {
         request: (o) => {
           reqLog.push((o.method || 'GET') + ' ' + o.url)
           if (AUTH.failRequest) return Promise.reject(new Error('request:fail fail to connect'))
+          // 订单端点可注入载荷：用于区分「订单自带 cargo/ship 摘要 → 零富化」
+          // 与「摘要缺失 → 回退单侧」两条路径。
+          if (AUTH.orderPayload && /\/order\/orders(\/|$|\?)/.test(o.url)) {
+            return Promise.resolve(JSON.parse(JSON.stringify(AUTH.orderPayload)))
+          }
           return Promise.resolve({ id: 99, total: 0, items: [] })
         },
         getToken: () => 't', setToken() {}, clearToken() {}, BASE_URL: 'http://127.0.0.1:8000',
@@ -549,24 +555,62 @@ section('⑤ 静态防线')
       JSON.stringify({ reqLog, tab: wx.__calls.switchTab.length }))
   }
 
-  // —— 订单页 / 支付页：富化只打当前角色那一侧（此前两侧都打 → 必有一个 403）——
+  // —— 订单页 / 支付页（TODO-02）：订单自带 cargo/ship 摘要 → 零富化请求；
+  //    摘要缺失（旧后端/异常）才回退，且只打当前角色那一侧（两侧都打 → 必有一个 403）——
   {
+    const SUMMARY = {
+      id: 7, cargo_id: 3, ship_id: 5, shipper_id: 1, owner_id: 2,
+      freight_price: 12000, status: 'matched', cancel_reason: '',
+      matched_at: '2026-09-10T10:00:00', shipped_at: null, completed_at: null,
+      cancelled_at: null, created_at: '2026-09-10T10:00:00',
+      cargo: { id: 3, cargo_name: '水泥熟料', cargo_type: 'bulk', weight_t: 1000, origin_port: 'NNG', dest_port: 'QNZ', expect_date: '2026-10-01' },
+      ship: { id: 5, ship_name: '桂平顺发 88', ship_type: 'bulk', deadweight_t: 1500, home_port: 'GGU' },
+    }
     const cases = [
-      ['pages/trade/orders/orders.js', 'fetchAll', 'shipper', '/api/v1/cargo/shipments', '/api/v1/ship/registry'],
-      ['pages/trade/orders/orders.js', 'fetchAll', 'owner', '/api/v1/ship/registry', '/api/v1/cargo/shipments'],
-      ['pages/trade/payment/payment.js', 'fetch', 'shipper', '/api/v1/cargo/shipments', '/api/v1/ship/registry'],
-      ['pages/trade/payment/payment.js', 'fetch', 'owner', '/api/v1/ship/registry', '/api/v1/cargo/shipments'],
+      ['pages/trade/orders/orders.js', 'fetchAll', 'shipper', '/api/v1/cargo/shipments', '/api/v1/ship/registry', (o) => ({ total: 1, page: 1, size: 20, items: [o] })],
+      ['pages/trade/orders/orders.js', 'fetchAll', 'owner', '/api/v1/ship/registry', '/api/v1/cargo/shipments', (o) => ({ total: 1, page: 1, size: 20, items: [o] })],
+      ['pages/trade/payment/payment.js', 'fetch', 'shipper', '/api/v1/cargo/shipments', '/api/v1/ship/registry', (o) => o],
+      ['pages/trade/payment/payment.js', 'fetch', 'owner', '/api/v1/ship/registry', '/api/v1/cargo/shipments', (o) => o],
     ]
-    for (const [file, method, role, want, forbid] of cases) {
-      const wx = makeWx()
-      const reqLog = []
-      const cfg = loadConfig(path.join(MP, file), 'page', wx, reqLog, { loggedIn: true, user: { current_role: role, roles: [role] } })
-      const self = instantiate(cfg, { role, orderId: 1 })
-      if (typeof cfg[method] !== 'function') { fail(`${path.basename(file)}.${method} 不存在`); continue }
-      cfg[method].call(self)
-      await tick()
-      check(`${path.basename(file)}(${role}) 只打 ${want}，不打 ${forbid}`,
-        reqLog.some((r) => r.indexOf(want) !== -1) && !reqLog.some((r) => r.indexOf(forbid) !== -1), JSON.stringify(reqLog))
+    const settle = async () => { for (let i = 0; i < 6; i++) await tick() }
+    for (const [file, method, role, want, forbid, wrap] of cases) {
+      const base = path.basename(file)
+      const build = (payload) => {
+        const wx = makeWx()
+        const reqLog = []
+        const cfg = loadConfig(path.join(MP, file), 'page', wx, reqLog,
+          { loggedIn: true, user: { current_role: role, roles: [role] }, orderPayload: payload })
+        return { self: instantiate(cfg, { role, orderId: 7 }), reqLog, cfg }
+      }
+
+      // (1) 带内嵌摘要 → 不发任何富化请求，且卡片字段不降级
+      {
+        const { self, reqLog, cfg } = build(wrap(SUMMARY))
+        if (typeof cfg[method] !== 'function') { fail(`${base}.${method} 不存在`); continue }
+        cfg[method].call(self)
+        await settle()
+        check(`${base}(${role}) 订单自带摘要 → 零富化请求`,
+          !reqLog.some((r) => r.indexOf(want) !== -1 || r.indexOf(forbid) !== -1), JSON.stringify(reqLog))
+        const texts = file.indexOf('orders') !== -1
+          ? (self.data.rawList || []).map((o) => [o.origin_label, o.dest_label, o.cargo_name, o.ship_name].join(' '))
+          : [self.data.cargoText, self.data.shipText]
+        const joined = texts.join(' | ')
+        check(`${base}(${role}) 卡片字段取自内嵌摘要（无 #id 降级）`,
+          texts.length > 0 && texts.every((t) => t && t.indexOf('#') === -1) && joined.indexOf('水泥熟料') !== -1 && joined.indexOf('桂平顺发 88') !== -1,
+          joined)
+      }
+
+      // (2) 摘要缺失（旧后端/异常）→ 回退，且只打本角色那一侧
+      {
+        const stripped = Object.assign({}, SUMMARY)
+        delete stripped.cargo
+        delete stripped.ship
+        const { self, reqLog, cfg } = build(wrap(stripped))
+        cfg[method].call(self)
+        await settle()
+        check(`${base}(${role}) 摘要缺失 → 仅回退 ${want}，不打 ${forbid}`,
+          reqLog.some((r) => r.indexOf(want) !== -1) && !reqLog.some((r) => r.indexOf(forbid) !== -1), JSON.stringify(reqLog))
+      }
     }
   }
 

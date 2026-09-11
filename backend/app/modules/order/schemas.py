@@ -1,7 +1,7 @@
 """订单模块 Pydantic 模型（F6）。"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +19,32 @@ class OrderCreate(BaseModel):
 
 class OrderCancel(BaseModel):
     reason: str = Field(default="", max_length=255, description="撤单原因")
+
+
+class CargoSummary(BaseModel):
+    """订单内嵌货源摘要（订单卡直接展示，免去前端二次拉取）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    cargo_name: str
+    cargo_type: str
+    weight_t: float
+    origin_port: str
+    dest_port: str
+    expect_date: date
+
+
+class ShipSummary(BaseModel):
+    """订单内嵌承运船舶摘要（同上）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ship_name: str
+    ship_type: str
+    deadweight_t: float
+    home_port: str
 
 
 class OrderOut(BaseModel):
@@ -39,6 +65,10 @@ class OrderOut(BaseModel):
     completed_at: datetime | None
     cancelled_at: datetime | None
     created_at: datetime
+    # 内嵌摘要：参与方（含船东）都有权看到所承运的货与船，
+    # 前端无需再按角色拉「我的货源 / 我的船队」做富化。
+    cargo: CargoSummary | None = None
+    ship: ShipSummary | None = None
 
 
 class OrderListResponse(BaseModel):

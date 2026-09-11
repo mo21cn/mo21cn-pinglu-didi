@@ -162,7 +162,7 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 | 预约审核详情 `[x]` | 港口 | `GET /port/appts-review`、`POST /port/appts/{id}/confirm\|reject\|cancel\|complete` |
 | 客服对话 | 顶栏 | `POST /agent/assistant` |
 
-**B 档 · 需小改后端（3 项）**：订单详情·运输时间轴（`OrderOut` 缺 cargo/ship 摘要）、合同留痕/版本（需 `contracts` 表）、实名认证中心（需资质表）。
+**B 档 · 需小改后端（3 项）**：~~订单详情·运输时间轴（`OrderOut` 缺 cargo/ship 摘要）~~ **已完成（#37）**、合同留痕/版本（需 `contracts` 表）、实名认证中心（需资质表）。
 **C 档 · 无接口占位**：消息中心、搜索、会员卡与资产行、港口 4 组服务、空船发布。
 
 ### 已知限制与待办
@@ -170,7 +170,7 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 | ID | 限制 | 影响 | 处置 |
 |---|---|---|---|
 | TODO-01 | 货源大厅为演示数据，后端无公开货源池接口 | 船东端看不到其他货主的真实货源 | 新增 `GET /cargo/pool` |
-| TODO-02 | `OrderOut` 仅含 `cargo_id`/`ship_id` | 订单卡路线靠前端富化，船东视角降级为「货源 #id」 | `OrderOut` 增加 cargo 摘要字段 |
+| ~~TODO-02~~ | ~~`OrderOut` 仅含 `cargo_id`/`ship_id`~~ | ~~订单卡路线靠前端富化，船东视角降级为「货源 #id」~~ | **已解决（#37）**：`OrderOut` 内嵌 `cargo`/`ship` 摘要，前端零富化请求 |
 | TODO-03 | 合同草稿不落库、无 GET 端点 | 无签署快照与版本，与底线 3「留痕」有落差 | 新增 `contracts` 表 + `GET` 读快照 |
 | TODO-04 | 发布空船无接口 | 落本机 Storage 草稿 | 新增空船发布单接口 |
 | TODO-05 | 实名/资质认证无接口 | 「我的」页相关入口占位 | 资质表 + 审核流 |
