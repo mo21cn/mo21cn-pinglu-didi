@@ -7,7 +7,7 @@
 为什么单独一个脚本
 ------------------
 seed_demo 铺的是「交易主链路」锚点（已完成 / 待支付 / 已退款 / 面议），
-本脚本铺的是「合同风险引擎」样本（R1–R5），关注点不同、可独立重跑，
+本脚本铺的是「合同风险引擎」样本（R1–R9），关注点不同、可独立重跑，
 避免为了演示合同去动已在多个校验脚本里被引用的基础锚点。
 
 铺出内容
@@ -19,9 +19,18 @@ seed_demo 铺的是「交易主链路」锚点（已完成 / 待支付 / 已退�
 | 基础 · 已完成     | 无风险（干净合同）     | 复用 seed_demo 的已完成单 #7        |
 | 基础 · 待支付     | R1 运费未支付（高）    | 复用 seed_demo 的待支付单 #11       |
 | 基础 · 面议       | R1 + R2 运费未锁定（高）| 复用 seed_demo 的面议单 #10        |
-| R3 装货日期临近   | R3 装货日期临近（中）  | 期望装货日期 = 今日 +2（<3 日）     |
-| R4 船舶证书临期   | R4 船舶证书临期（中）  | 专用船证书有效期 = 今日 +20（<30 日）|
-| R5 液货危险品     | R5 液货/危险品（中）   | 液货船 + tanker 货类（硬约束配平）  |
+| R3 装货日期临近   | R3（中）               | 期望装货日期 = 今日 +2（<3 日）     |
+| R4 船舶证书临期   | R4（中）               | 专用船证书有效期 = 今日 +20（<30 日）|
+| R5 液货危险品     | R5（中）               | 液货船 + tanker 货类（硬约束配平）  |
+| R9 在途不可抗力   | R9（低）               | 出单后由船东启运 → status=shipped   |
+
+商务条款类（R6 滞期费 / R7 保险 / R8 违约金量化）会**叠加**在履约中的订单上，
+这是风险引擎的常态（一单可同时命中多条），预期叠加关系：
+
+- **R6 滞期费未约定**：货类为散货 bulk 或液货 tanker，且订单未完结（matched/shipped）；
+- **R7 货物保险未约定**：货类为集装箱/液货（货值高），或运费 ≥ 30000 元，且订单未完结；
+- **R8 违约金标准未量化**：matched 且装货日在 7 日内（R3 样本即命中）。
+- 已签收/已撤销订单**不再提示 R6/R7** —— 保证「已完成 = 干净合同」的演示口径。
 
 R3 / R4 为什么能正常成单
 ------------------------
@@ -116,35 +125,45 @@ def main() -> None:
     print(f"      船 #{ship_tank['id']} {ship_tank['ship_name']} → {ship_tank['status']} "
           f"{'（新建）' if c2 else '（复用）'}")
 
-    print("\n[3/3] 仿真订单（覆盖 R3 / R4 / R5）")
+    print("\n[3/3] 仿真订单（覆盖 R3 / R4 / R5 / R9，商务条款类 R6–R8 叠加命中）")
     expect = (date.today() + timedelta(days=5)).isoformat()
     soon = (date.today() + timedelta(days=2)).isoformat()
+    # (标签, 货源规格, 指定船 id, 出单后是否启运)
     cases = [
         ("R3 装货日期临近", {
             "cargo_name": "仿真案例 · R3 装货日期临近（2 天后）", "cargo_type": "general",
             "weight_t": 600, "volume_m3": 400, "origin_port": "NNG", "dest_port": "GGU",
             "expect_date": soon, "offer_price": 26000,
             "remark": "仿真：期望装货日期在 3 日内 → 合同风险 R3",
-        }, None),
+        }, None, False),
         ("R4 船舶证书临期", {
             "cargo_name": "仿真案例 · R4 承运船证书临期（20 天）", "cargo_type": "bulk",
             "weight_t": 700, "volume_m3": 450, "origin_port": "GGU", "dest_port": "WUZ",
             "expect_date": expect, "offer_price": 31000,
             "remark": "仿真：指定证书临期船承运 → 合同风险 R4",
-        }, ship_cert["id"]),
+        }, ship_cert["id"], False),
         ("R5 液货危险品", {
             "cargo_name": "仿真案例 · R5 液货危险品（甲醇 500 吨）", "cargo_type": "tanker",
             "weight_t": 500, "volume_m3": 600, "origin_port": "QNZ", "dest_port": "GGU",
             "expect_date": expect, "offer_price": 45000,
             "remark": "仿真：液货运输 → 合同风险 R5",
-        }, ship_tank["id"]),
+        }, ship_tank["id"], False),
+        ("R9 在途不可抗力", {
+            "cargo_name": "仿真案例 · R9 在途不可抗力（在途货物）", "cargo_type": "general",
+            "weight_t": 550, "volume_m3": 380, "origin_port": "LZH", "dest_port": "WUZ",
+            "expect_date": expect, "offer_price": 24000,
+            "remark": "仿真：出单后启运 → 合同风险 R9（在途）",
+        }, None, True),
     ]
     anchors: list[tuple[str, int]] = []
-    for tag, spec, sid in cases:
+    for tag, spec, sid, ship_after in cases:
         order = ensure_case_order(tok_shipper, spec, sid)
         if order is None:
             print(f"      {tag} → 未成单（撮合无候选，请检查船是否 verified）")
             continue
+        # 幂等启运：仅当仍是 matched 时启运（重复执行不会二次启运/报错）
+        if ship_after and order["status"] == "matched":
+            order = call("POST", f"/order/orders/{order['id']}/ship", token=tok_owner, body={})
         anchors.append((tag, order["id"]))
         print(f"      {tag} → 订单 #{order['id']} {order['status']} 承运船 #{order['ship_id']}")
 

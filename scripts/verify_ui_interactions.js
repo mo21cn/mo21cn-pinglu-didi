@@ -123,6 +123,28 @@ function makeRequire(wx, reqLog, authState) {
       return A
     }
     if (s.indexOf('tabbar') !== -1) return { syncTabBar() {} }
+    // 统一智能入口（F19/F20）：最小同构桩 —— 记录调用，并把结论交给 wx.showModal。
+    // 真实分支（四类意图、三档合规文案、dispatched=false 的引导）由 ⑧ 的静态防线断言覆盖。
+    if (s.indexOf('agent-entry') !== -1) {
+      return {
+        openSmartEntry: (o) => {
+          reqLog.push('openSmartEntry')
+          wx.showModal({
+            title: (o && o.title) || '',
+            editable: true,
+            placeholderText: (o && o.placeholder) || ''
+          })
+        },
+        runComplianceCheck: (url, body) => {
+          reqLog.push('compliance ' + url + ' ' + JSON.stringify(body || {}))
+          if (AUTH.compliancePayload) {
+            wx.showModal({ title: '合规预检', content: AUTH.compliancePayload.summary || '' })
+          }
+        },
+        showComplianceModal: (r) => wx.showModal({ title: '合规预检', content: (r && r.summary) || '' }),
+        DRAFT_KEY: 'cargo_draft_v1',
+      }
+    }
     if (s.indexOf('request') !== -1) {
       return {
         request: (o) => {
@@ -132,6 +154,10 @@ function makeRequire(wx, reqLog, authState) {
           // 与「摘要缺失 → 回退单侧」两条路径。
           if (AUTH.orderPayload && /\/order\/orders(\/|$|\?)/.test(o.url)) {
             return Promise.resolve(JSON.parse(JSON.stringify(AUTH.orderPayload)))
+          }
+          // 货源解析端点可注入载荷（F14 解析态断言用）
+          if (AUTH.parsePayload && /\/agent\/cargo-parse$/.test(o.url)) {
+            return Promise.resolve(JSON.parse(JSON.stringify(AUTH.parsePayload)))
           }
           return Promise.resolve({ id: 99, total: 0, items: [] })
         },
@@ -752,6 +778,166 @@ section('⑤ 静态防线')
     cfg.probeBackend.call(self)
     await tick()
     check('后端不可用 → 显示未连接提示', self.data.backendDown === true, String(self.data.backendDown))
+  }
+
+  // ------------------------------------------- ⑧ 解析入口 / 合规预检 / 统一入口
+  section('⑧ 货源解析入口（F14）· 合规预检（F17）· 统一入口（F20）')
+  {
+    const wait = () => new Promise((r) => setTimeout(r, 25))
+    const ASSIST = path.join(MP, 'pages', 'assistant', 'assistant.js')
+    const CARGO = path.join(MP, 'pages', 'publish', 'cargo', 'cargo.js')
+    const SHIP = path.join(MP, 'pages', 'publish', 'ship', 'ship.js')
+    const SHIPPER = { loggedIn: true, user: { user_id: 1, current_role: 'shipper', roles: ['shipper'] } }
+    const OWNER = { loggedIn: true, user: { user_id: 2, current_role: 'owner', roles: ['owner'] } }
+    const PARSE_PAYLOAD = {
+      draft: {
+        cargo_name: '散装水泥', cargo_type: 'bulk', weight_t: 800,
+        origin_port: 'NNG', dest_port: 'GGU', expect_date: '2026-09-20', offer_price: 25000
+      },
+      confidence: 0.86, needs_review: ['expect_date'], mocked: true, latency_ms: 12
+    }
+
+    // —— 历史缺陷防线：无参 onLoad 会把路由 query 整体丢掉 ——
+    const assistSrc = read('pages/assistant/assistant.js')
+    check('客服页 onLoad 接收 options（不再吞掉 mode=parse）', /onLoad\(\s*options\s*\)/.test(assistSrc) && !/onLoad\(\)\s*\{/.test(assistSrc))
+
+    // —— 解析态：mode=parse 与角色门控 ——
+    const wx1 = makeWx()
+    const cfg1 = loadConfig(ASSIST, 'page', wx1, [], SHIPPER)
+    const s1 = instantiate(cfg1)
+    cfg1.onLoad.call(s1, { mode: 'parse' })
+    check('mode=parse → 进入解析态', s1.data.mode === 'parse', String(s1.data.mode))
+    check('货主进解析态 → 不触发角色门控', s1.data.roleBlocked === false)
+    check('解析态示例是货源描述（含吨位）', (s1.data.parseChips || []).some((c) => /吨/.test(c)))
+    const s1b = instantiate(cfg1)
+    cfg1.onLoad.call(s1b, {})
+    check('无 mode → 仍是客服模式（原行为不变）', s1b.data.mode === 'chat')
+
+    const cfg1o = loadConfig(ASSIST, 'page', makeWx(), [], OWNER)
+    const s1o = instantiate(cfg1o)
+    cfg1o.onLoad.call(s1o, { mode: 'parse' })
+    check('船东进解析态 → 门控开启（货源解析仅货主）', s1o.data.roleBlocked === true)
+    check('解析态门控有「切换为货主」入口（走 auth.enterRole）',
+      /onSwitchToShipper/.test(read('pages/assistant/assistant.wxml')) && /auth\.enterRole\('shipper'\)/.test(assistSrc))
+
+    // —— 解析态发送：走 /agent/cargo-parse 并渲染结构化卡片 ——
+    const wx2 = makeWx()
+    const reqLog2 = []
+    const cfg2 = loadConfig(ASSIST, 'page', wx2, reqLog2, Object.assign({}, SHIPPER, { parsePayload: PARSE_PAYLOAD }))
+    const s2 = instantiate(cfg2)
+    cfg2.onLoad.call(s2, { mode: 'parse' })
+    s2.setData({ input: '800吨散装水泥，下周三从南宁运到贵港' })
+    await cfg2.onSend.call(s2)
+    check('解析态发送 → POST /agent/cargo-parse',
+      reqLog2.some((r) => r === 'POST /api/v1/agent/cargo-parse'), JSON.stringify(reqLog2))
+    const card = s2.data.messages[s2.data.messages.length - 1] || {}
+    check('解析结果渲染为结构化卡片（7 个字段）', card.kind === 'parse' && (card.rows || []).length === 7, JSON.stringify(card.kind))
+    check('待确认字段被标红并可读', card.hasMissing === true && (card.rows || []).some((r) => r.missing === true),
+      String(card.missingText))
+    check('港口回填为中文名（非裸代码）', (card.rows || []).some((r) => r.key === 'origin_port' && /南宁/.test(r.value)),
+      JSON.stringify((card.rows || []).filter((r) => r.key === 'origin_port')))
+    check('置信度以百分比展示', card.confidence === 86, String(card.confidence))
+    cfg2.onUseDraft.call(s2, { currentTarget: { dataset: { idx: s2.data.messages.length - 1 } } })
+    check('「带去发布页填写」跳发布货源页（Agent 无直写，仅带草稿）',
+      wx2.__calls.navigateTo.some((n) => /pages\/publish\/cargo\/cargo/.test(n.url)),
+      JSON.stringify(wx2.__calls.navigateTo))
+
+    // —— 客服模式仍走 assistant（模式互不串台） ——
+    const wx3 = makeWx()
+    const reqLog3 = []
+    const cfg3 = loadConfig(ASSIST, 'page', wx3, reqLog3, SHIPPER)
+    const s3 = instantiate(cfg3)
+    cfg3.onLoad.call(s3, {})
+    s3.setData({ input: '怎么发布货源？' })
+    await cfg3.onSend.call(s3)
+    const lastMsg = s3.data.messages[s3.data.messages.length - 1] || {}
+    check('客服模式发送 → POST /agent/assistant', reqLog3.some((r) => r === 'POST /api/v1/agent/assistant'), JSON.stringify(reqLog3))
+    check('客服模式不落解析卡片', lastMsg.kind !== 'parse', String(lastMsg.kind))
+
+    // —— 发布货源页：草稿回填与高亮 ——
+    const cfg4 = loadConfig(CARGO, 'page', makeWx(), [], SHIPPER)
+    const s4 = instantiate(cfg4)
+    cfg4.fillFromDraft.call(s4, { draft: PARSE_PAYLOAD.draft, needs_review: ['weight_t', 'expect_date'] })
+    check('解析草稿回填表单（含港口中文名与货类标签）',
+      s4.data.form.origin_port === 'NNG' && s4.data.form.dest_port === 'GGU'
+      && s4.data.form.weight_t === '800' && s4.data.cargoTypeLabel === '散货'
+      && /南宁/.test(s4.data.form.origin_label),
+      JSON.stringify(s4.data.form))
+    check('needs_review 字段高亮（预计算 missTip，WXML 不能 indexOf）',
+      s4.data.missTip.weight_t === true && s4.data.missTip.expect_date === true
+      && s4.data.missTip.cargo_name === false, JSON.stringify(s4.data.missTip))
+    check('回填后提示待确认字段', /AI 已回填/.test(s4.data.smartTip) && /重量/.test(s4.data.smartTip), s4.data.smartTip)
+    cfg4.onInput.call(s4, { currentTarget: { dataset: { field: 'weight_t' } }, detail: { value: '900' } })
+    check('人工补全后撤掉高亮', s4.data.missTip.weight_t === false && s4.data.form.weight_t === '900')
+
+    // —— 发布货源页：一句话发货 + 合规预检 ——
+    const wx5 = makeWx()
+    const reqLog5 = []
+    const cfg5 = loadConfig(CARGO, 'page', wx5, reqLog5, Object.assign({}, SHIPPER, { parsePayload: PARSE_PAYLOAD }))
+    const s5 = instantiate(cfg5)
+    cfg5.onSmartFill.call(s5)
+    const modal = wx5.__calls.modal[0] || {}
+    check('「一句话发货」弹可编辑输入框', modal.editable === true && !!modal.placeholderText)
+    // 表单尚空 → 合规预检应先提示补全，不应发请求（顺序敏感：解析回填会填满表单）
+    cfg5.onComplianceCheck.call(s5)
+    check('表单不完整时合规预检只提示、不发请求', !reqLog5.some((r) => /compliance/.test(r)) && wx5.__calls.toast.length > 0,
+      JSON.stringify(reqLog5))
+    cfg5.parseText.call(s5, '800吨散装水泥南宁到贵港')
+    await wait()
+    check('一句话发货 → POST /agent/cargo-parse', reqLog5.some((r) => r === 'POST /api/v1/agent/cargo-parse'), JSON.stringify(reqLog5))
+    check('一句话发货解析结果直接回填表单', s5.data.form.origin_port === 'NNG' && s5.data.form.weight_t === '800',
+      JSON.stringify(s5.data.form))
+    s5.setData({
+      form: {
+        cargo_name: '散装水泥', cargo_type: 'bulk', weight_t: '800', origin_port: 'NNG',
+        dest_port: 'GGU', expect_date: '2026-09-20', origin_label: '南宁', dest_label: '贵港',
+        offer_price: '', remark: '包装：散装'
+      }
+    })
+    cfg5.onComplianceCheck.call(s5)
+    const comp = reqLog5.find((r) => /compliance/.test(r)) || ''
+    check('合规预检 → POST /agent/compliance/cargo', /compliance \/api\/v1\/agent\/compliance\/cargo/.test(comp), comp)
+    check('合规预检带上起讫港与货类（结论可复核）',
+      /"origin_port":"NNG"/.test(comp) && /"dest_port":"GGU"/.test(comp) && /"cargo_type":"bulk"/.test(comp), comp)
+
+    // —— 发布空船页：船舶合规预检 ——
+    const wx6 = makeWx()
+    const reqLog6 = []
+    const cfg6 = loadConfig(SHIP, 'page', wx6, reqLog6, OWNER)
+    const s6 = instantiate(cfg6)
+    cfg6.onComplianceCheck.call(s6)
+    check('未选船舶时合规预检只提示', !reqLog6.some((r) => /compliance/.test(r)) && wx6.__calls.toast.length > 0)
+    s6.setData({
+      selectedShip: {
+        ship_name: '平陆 001', ship_type: 'bulk', deadweight_t: 1500, length_m: 60, width_m: 12,
+        draft_m: 3.5, home_port: 'GGU', cert_no: 'CERT-F17-001', cert_expiry: '2027-01-01'
+      }
+    })
+    cfg6.onComplianceCheck.call(s6)
+    const scomp = reqLog6.find((r) => /compliance/.test(r)) || ''
+    check('船舶合规预检 → POST /agent/compliance/ship 且带证书字段',
+      /compliance \/api\/v1\/agent\/compliance\/ship/.test(scomp) && /"cert_no":"CERT-F17-001"/.test(scomp), scomp)
+
+    // —— 统一入口：搜索框 / ✨Ai 的分工 ——
+    for (const [who, file] of [['货主', 'pages/shipper/shipper.js'], ['船东', 'pages/owner/owner.js']]) {
+      const src = read(file)
+      check(`${who}页搜索框接统一入口（不再是「开发中」占位）`,
+        /goSearch\(\)\s*\{\s*openSmartEntry\(/.test(src) && !/搜索功能开发中/.test(src))
+      check(`${who}页「✨Ai」进解析态（mode=parse）`,
+        /goAI\(\)\s*\{\s*wx\.navigateTo\(\{ url: '\/pages\/assistant\/assistant\?mode=parse' \}\)/.test(src))
+    }
+    const ae = read('utils/agent-entry.js')
+    check('统一入口调 /agent/route', /\/api\/v1\/agent\/route/.test(ae))
+    check('四类意图分支齐备', ['cargo_parse', 'compliance', 'assistant', 'contract'].every((k) => ae.indexOf("'" + k + "'") >= 0))
+    check('合规三档文案（通过 / 有提示 / 未通过）',
+      /合规预检通过/.test(ae) && /合规预检有提示/.test(ae) && /合规预检未通过/.test(ae))
+    check('切断言而非报错：识别到未派发时给引导语', /dispatched/.test(ae) && /res\.message/.test(ae))
+    check('非货主描述货源 → 引导切换身份（走 auth.enterRole）', /enterRole\('shipper'\)/.test(ae))
+    check('草稿键与解析页/发布页一致（cargo_draft_v1）',
+      /cargo_draft_v1/.test(ae) && /cargo_draft_v1/.test(assistSrc) && /cargo_draft_v1/.test(read('pages/publish/cargo/cargo.js')))
+    check('发布货源页模板含智能填写卡与合规预检入口',
+      /onSmartFill/.test(read('pages/publish/cargo/cargo.wxml')) && /onComplianceCheck/.test(read('pages/publish/cargo/cargo.wxml')))
+    check('发布空船页模板含合规预检入口', /onComplianceCheck/.test(read('pages/publish/ship/ship.wxml')))
   }
 
   // ---------------------------------------------------------------- 汇总

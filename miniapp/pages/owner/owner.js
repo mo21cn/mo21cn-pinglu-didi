@@ -5,6 +5,8 @@ const auth = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
 // 全量港口（完整展示名，如「南宁 · 平塘港」）· 顶栏常用港用
 const { PORTS: PORTS_FULL } = require('../../utils/ports')
+// 统一智能入口（F20 路由 / F19 全局入口）
+const { openSmartEntry } = require('../../utils/agent-entry')
 
 const SHIP_TYPES = [
   { key: 'bulk',      label: '散货船' },
@@ -157,8 +159,9 @@ Page({
     })
   },
 
-  goSearch() { wx.showToast({ title: '搜索功能开发中', icon: 'none' }) },
-  goAI() { wx.navigateTo({ url: '/pages/assistant/assistant?topic=cargo' }) },
+  // 统一智能入口（F20）：搜索框走意图路由，「✨Ai」直达货源解析态（非货主会引导切换）
+  goSearch() { openSmartEntry({ title: '智能搜索', placeholder: '搜货/搜船/问用法——用一句话描述' }) },
+  goAI() { wx.navigateTo({ url: '/pages/assistant/assistant?mode=parse' }) },
   goAssistant() { wx.navigateTo({ url: '/pages/assistant/assistant' }) },
 
   // ---- 货源大厅：筛选 / 排序 ----

@@ -59,3 +59,38 @@ page { background: #F5F7FA; }
   background: linear-gradient(135deg, #3B5BDB, #7048E8);
 }
 .confirm-text { font-size: 25rpx; color: #6B7A8C; }
+
+/* ---- 智能填写卡（F14 货源解析） ---- */
+.smart-card {
+  margin: 20rpx 24rpx 8rpx;
+  padding: 24rpx;
+  background: linear-gradient(135deg, #EEF2FF 0%, #F6F2FF 100%);
+  border: 1rpx solid #DFE4FA;
+  border-radius: 20rpx;
+}
+.smart-head { display: flex; align-items: flex-start; }
+.smart-icon { font-size: 34rpx; margin-right: 12rpx; line-height: 1.2; }
+.smart-head-text { flex: 1; }
+.smart-title { font-size: 28rpx; font-weight: 600; color: #2A3566; }
+.smart-sub { font-size: 22rpx; color: #6B7A8C; margin-top: 6rpx; line-height: 1.5; }
+.smart-actions { display: flex; gap: 16rpx; margin-top: 18rpx; }
+.smart-btn {
+  flex: 1; height: 68rpx; line-height: 68rpx; text-align: center;
+  font-size: 25rpx; border-radius: 999rpx;
+  background: #FFFFFF; color: #3B5BDB; border: 1rpx solid #C7D2F5;
+}
+.smart-btn-main {
+  flex: 1.2; color: #FFFFFF; border: 0;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+}
+.smart-btn-hover { opacity: 0.85; }
+.smart-tip {
+  margin-top: 16rpx; padding: 12rpx 16rpx; border-radius: 12rpx;
+  background: #FFFFFF; color: #5B6A7C; font-size: 22rpx; line-height: 1.5;
+}
+.smart-tip-warn { background: #FFF6F7; color: #C0455A; }
+
+/* ---- 待确认字段高亮（解析回填后 needs_review） ---- */
+.field-row-miss { background: #FFF6F7; }
+.field-row-miss .field-label { color: #C0455A; }
+.field-row-miss .field-value-placeholder { color: #D98A96; }

@@ -4,6 +4,8 @@
 const { request } = require('../../../utils/request')
 // 13 个港口的全站唯一来源（showActionSheet 的 itemList 上限 6，港口选择走 port-picker 组件）
 const { PORTS } = require('../../../utils/ports')
+// 合规预检结论展示（F17：船舶备案前即时预检）
+const { runComplianceCheck } = require('../../../utils/agent-entry')
 
 const SHIP_TYPE_LABELS = {
   bulk: '散货船', general: '件杂货船', container: '集装箱船', tanker: '液货船'
@@ -61,11 +63,32 @@ Page({
         const s = ships[res.tapIndex]
         this.setData({
           selectedShipId: s.id,
+          selectedShip: s,
           shipLabel: s.ship_name,
           shipBrief: `${SHIP_TYPE_LABELS[s.ship_type] || s.ship_type} · 载重 ${s.deadweight_t} 吨 · 吃水 ${s.draft_m} 米`,
           'form.available_t': String(Math.round(s.deadweight_t))
         })
       }
+    })
+  },
+
+  /** 船舶合规预检（F17）：备案/发布前的即时预检，只出结论不阻断 */
+  onComplianceCheck() {
+    const s = this.data.selectedShip
+    if (!s) {
+      wx.showToast({ title: '请先选择船舶', icon: 'none' })
+      return
+    }
+    runComplianceCheck('/api/v1/agent/compliance/ship', {
+      ship_name: s.ship_name,
+      ship_type: s.ship_type,
+      deadweight_t: Number(s.deadweight_t),
+      length_m: Number(s.length_m),
+      width_m: Number(s.width_m),
+      draft_m: Number(s.draft_m),
+      home_port: s.home_port || '',
+      cert_no: s.cert_no,
+      cert_expiry: s.cert_expiry
     })
   },
 

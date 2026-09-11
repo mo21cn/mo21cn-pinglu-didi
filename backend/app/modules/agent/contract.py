@@ -31,6 +31,11 @@ STATUS_NAMES = {
     "matched": "已撮合待承运", "shipped": "运输中", "completed": "已签收", "cancelled": "已撤销",
 }
 
+# 「大额运输」阈值（元）：运费达到即提示约定货物保险与责任限额（R7）。
+# 与「高货值货类」取或：集装箱/液货即使运费不高，货值通常也较高。
+LARGE_FREIGHT_THRESHOLD = 30000
+HIGH_VALUE_CARGO_TYPES = ("container", "tanker")
+
 
 def _party(user: User) -> str:
     return user.nickname or f"用户（ID：{user.id}）"
@@ -162,6 +167,59 @@ def check_risks(
             "title": "液货/危险品运输",
             "detail": "液货类货物可能涉及危险品，承运资质与保险要求高于普货。",
             "suggestion": "建议在合同中补充危险品申报、专用船舶资质与货物保险条款。",
+        })
+
+    # ---- 商务条款完备性（R6–R9）：对齐验收口径「滞期费/违约金/保险/不可抗力」 ----
+    # 说明：平台内置标准条款只覆盖「不可抗力 / 违约与责任划分 / 争议解决 /
+    # 安全与环保」四项，且**均为定性表述**；下列规则把「条款缺失或未量化」这一
+    # 确定性事实与订单事实结合，只在风险现实存在时提示，避免对每单都刷屏。
+    # 已签收/已撤销的订单不再有条款完备性意义，故 R6/R7 只在履约进行中提示。
+
+    active = order.status in ("matched", "shipped")
+
+    # R6 滞期费/装卸时间未约定（散货、液货装卸作业耗时长，超时即产生滞期）
+    if active and cargo.cargo_type in ("bulk", "tanker"):
+        risks.append({
+            "severity": "medium",
+            "title": "滞期费未约定",
+            "detail": "散货/液货装卸作业耗时长，遇天气、泊位或设备原因易超出约定装卸时间；"
+                      "平台标准条款未包含滞期费标准。",
+            "suggestion": "建议在合同中补充装卸时限与滞期费标准（如超时按日计费）及停泊待时归属。",
+        })
+
+    # R7 货物保险未约定（高货值货类，或大额运费合同）
+    freight = float(order.freight_price) if order.freight_price is not None else None
+    insurance_signal = ""
+    if cargo.cargo_type in HIGH_VALUE_CARGO_TYPES:
+        insurance_signal = f"{CARGO_TYPE_NAMES.get(cargo.cargo_type, cargo.cargo_type)}类货物货值通常较高"
+    elif freight is not None and freight >= LARGE_FREIGHT_THRESHOLD:
+        insurance_signal = f"本单运费 {freight:,.0f} 元属大额运输"
+    if active and insurance_signal:
+        risks.append({
+            "severity": "medium",
+            "title": "货物保险未约定",
+            "detail": f"{insurance_signal}；平台标准条款仅约定承运人赔偿责任，未涉及投保义务。",
+            "suggestion": "建议补充货主投保义务或承运人责任险条款，并明确免赔与理赔流程。",
+        })
+
+    # R8 违约金标准未量化（临近装货、双方均可能逾期时才有现实意义）
+    if order.status == "matched" and 0 <= days_to_load <= 7:
+        risks.append({
+            "severity": "low",
+            "title": "违约金标准未量化",
+            "detail": "标准条款仅约定「按日支付违约金」，未约定计算基数与比例，"
+                      "临近装货期时双方逾期风险上升但索赔口径不明确。",
+            "suggestion": "建议明确违约金计算基数、比例上限与免责情形，避免结算时争议。",
+        })
+
+    # R9 在途不可抗力风险（货物已启运，汛期水位/大风封航等直接影响履约）
+    if order.status == "shipped":
+        risks.append({
+            "severity": "low",
+            "title": "在途不可抗力风险",
+            "detail": "货物已处运输途中，汛期水位变化、大风封航或航道管制可能造成延误或改道；"
+                      "标准条款未约定通知时限与举证责任。",
+            "suggestion": "建议明确不可抗力发生后的通知时限、证明材料与期限顺延/解约的处理方式。",
         })
 
     return risks

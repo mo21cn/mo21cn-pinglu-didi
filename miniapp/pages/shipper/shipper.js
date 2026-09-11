@@ -5,6 +5,8 @@ const auth = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
 // 13 个港口的全站唯一来源（微信 showActionSheet 的 itemList 上限 6，港口选择改走 port-picker 组件）
 const { PORTS } = require('../../utils/ports')
+// 统一智能入口（F20 路由 / F19 全局入口）
+const { openSmartEntry } = require('../../utils/agent-entry')
 
 const CARGO_TYPES = [
   { key: 'bulk',      label: '散货' },
@@ -170,8 +172,9 @@ Page({
     this.setData({ ppVisible: false })
   },
 
-  goSearch() { wx.showToast({ title: '搜索功能开发中', icon: 'none' }) },
-  goAI() { wx.navigateTo({ url: '/pages/assistant/assistant?topic=cargo&mode=parse' }) },
+  // 统一智能入口（F20）：搜索框走意图路由，「✨Ai」直达货源解析态
+  goSearch() { openSmartEntry({ title: '智能搜索', placeholder: '搜货/搜船/问用法——用一句话描述' }) },
+  goAI() { wx.navigateTo({ url: '/pages/assistant/assistant?mode=parse' }) },
   goAssistant() { wx.navigateTo({ url: '/pages/assistant/assistant' }) },
 
   // ---- 表单 ----

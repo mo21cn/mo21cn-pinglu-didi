@@ -9,6 +9,13 @@
     <text class="preview-text">空船大厅接口开发中 · 当前提交将保存为本机草稿</text>
   </view>
 
+  <!-- 合规预检（F17）：备案/发布前的即时预检，只出结论不阻断 -->
+  <view class="checks">
+    <view class="checks-btn" bindtap="onComplianceCheck" hover-class="checks-btn-hover">
+      🛡 船舶合规预检（证书 / 主尺度 / 吃水）
+    </view>
+  </view>
+
   <view class="section-card">
     <view class="block-title"><text class="block-title-no">01</text><text>选择船舶</text></view>
 
