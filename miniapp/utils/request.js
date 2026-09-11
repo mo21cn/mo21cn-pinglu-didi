@@ -45,7 +45,26 @@ function request(opts) {
         }
       },
       fail(err) {
-        if (!silent) wx.showToast({ title: '网络异常，请稍后重试', icon: 'none' })
+        if (silent) {
+          reject(err)
+          return
+        }
+        // 网络层错误分级提示：区分「域名未配置 / 后端未启动 / 真断网」，
+        // 避免所有失败都笼统提示"网络异常"而无法定位问题（联调期高频场景）。
+        const msg = (err && err.errMsg) || ''
+        if (/url not in domain list/i.test(msg)) {
+          wx.showModal({
+            title: '域名未配置',
+            content: '请在开发者工具「详情 → 本地设置」勾选「不校验合法域名、web-view、TLS 版本以及 HTTPS 证书」后重新编译。',
+            showCancel: false,
+          })
+        } else if (/timeout/i.test(msg)) {
+          wx.showToast({ title: '请求超时，请检查后端是否启动', icon: 'none' })
+        } else if (/fail( to)? connect|unable to connect/i.test(msg)) {
+          wx.showToast({ title: '无法连接后端（127.0.0.1:8000）', icon: 'none' })
+        } else {
+          wx.showToast({ title: '网络异常，请稍后重试', icon: 'none' })
+        }
         reject(err)
       }
     })
