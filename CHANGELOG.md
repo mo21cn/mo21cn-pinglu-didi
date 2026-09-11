@@ -15,6 +15,19 @@
   - 点遮罩可关闭，再次点「+发货」重新唤起。
 - **纯前端实现**：不涉及任何后端改动、零接口调用；版本号仍为 **v0.5.0**（不升版）。
 
+### 文档 / 配置
+
+- **「clone 即得完整演示态」链路修复**（面向甲方评审）：
+  - `backend/.env.development` 显式声明 `LLM_MOCK=true`——开发环境智能体走内置规则模板，
+    **无需任何 Key**、零网络，四个智能入口（客服 / 一句话发货 / 合规预检 / 统一路由）全部可用且输出可复现；
+  - `README` 快速开始纠错：克隆地址由 SSH 改 **HTTPS**（仓库为 public，甲方无需配 SSH Key）、
+    移除无效的 `cp .env.example .env`（应用只读 `.env.{APP_ENV}` 与 `.env.local`）、
+    补上 `python scripts/seed_demo.py` 种子数据步骤（不跑则各列表为空），并补「环境变量加载规则」与「演示身份」说明；
+  - `backend/.env.example` 补齐智能体段（`LLM_MOCK` / `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`），
+    与 `config.py` 默认值对齐。
+  - 注：空 `LLM_API_KEY` 本就会触发 `llm.py` 的自动降级，故本项**不改变既有运行时行为**，
+    属把隐式兜底改为显式声明 + 文档纠错，避免`README` 误导评审方。
+
 ## [0.5.0] - 2026-09-12
 
 UI V2 全量改版 + 交易三级页闭环 + **Agent 五领域补齐 5/5** + 第三方审计修正。
