@@ -1156,8 +1156,8 @@ section('⑤ 静态防线')
     check('占位页纯静态（无任何接口调用）',
       !/request\(/.test(previewJs) && !/wx\.request/.test(previewJs))
 
-    // —— 版本号（需求：停留在 v0.5.0，本次不升版）——
-    check('版本号仍停在 v0.5.0', /v0\.5\.0/.test(read('pages/mine/mine.wxml')))
+    // —— 版本号（当前发布版 v0.5.1；升版时同步此处与 pages/mine/mine.wxml）——
+    check('版本号已升到 v0.5.1', /v0\.5\.1/.test(read('pages/mine/mine.wxml')))
   }
 
   // ---------------------------------------------------------------- 汇总
