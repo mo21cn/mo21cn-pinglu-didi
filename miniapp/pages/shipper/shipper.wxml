@@ -6,7 +6,14 @@
   <!-- 顶栏 -->
   <view class="top">
     <view class="top-row1">
-      <view class="top-avatar" bindtap="goMyCargo" hover-class="hover-dim">📋</view>
+      <!-- 用户头像（矢量占位）+ 用户 ID：点击进「我的」 -->
+      <view class="top-user" bindtap="goMine" hover-class="hover-dim">
+        <view class="avatar-vec">
+          <view class="av-head"></view>
+          <view class="av-body"></view>
+        </view>
+        <text class="top-user-id">{{userCode}}</text>
+      </view>
       <view class="top-loc" bindtap="pickDefaultPort" hover-class="hover-dim">
         <text class="loc-dot">📍</text>
         <text class="loc-text">{{defaultPortLabel}}</text>

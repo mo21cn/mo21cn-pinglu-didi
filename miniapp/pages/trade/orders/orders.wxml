@@ -3,6 +3,17 @@
   统计行（全部/待承运/运输中/已完成/已撤单）→ 待处理事项 → 最近订单
 -->
 <view class="page">
+  <!-- 自定义导航栏（本页 navigationStyle:custom，必须自绘）
+       缺失时统计行会直接顶到状态栏下方 / 被胶囊遮挡，表现为「功能超出页面框架」。
+       statusBarHeight 由 onLoad 取 wx.getWindowInfo，与「我的」页同一做法。
+       注意：导航右侧**不放**消息铃铛——胶囊按钮就压在右上角（约 right 28rpx 处），
+       放了也是被遮住看不见，属于假入口。 -->
+  <view class="nav" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <text class="nav-title">我的订单</text>
+    </view>
+  </view>
+
   <!-- 统计行 -->
   <view class="stat-row">
     <view

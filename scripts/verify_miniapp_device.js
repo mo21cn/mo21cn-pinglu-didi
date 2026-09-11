@@ -76,18 +76,59 @@ async function apiPost(p, t, body) {
 // --------------------------------- 模拟器辅助 ---------------------------------
 async function shot(mp, name) {
   const p = path.join(SHOTS, name + '.png')
-  try {
-    await mp.screenshot({ path: p })
-    const size = fs.existsSync(p) ? fs.statSync(p).size : 0
-    rec('截图 ' + name, size > 8000, size + 'B')
-  } catch (e) {
-    rec('截图 ' + name, false, String(e && e.message))
+  // 截图偶发 timeout（页面过渡/渲染中，IDE 侧未及时回执）——重试一次再判失败。
+  // 2026-09-11 实际踩到：紧邻的下一张截图正常，说明页面没问题，是回执抖动。
+  let lastErr = ''
+  for (let i = 0; i < 2; i++) {
+    try {
+      await mp.screenshot({ path: p })
+      const size = fs.existsSync(p) ? fs.statSync(p).size : 0
+      if (size > 8000) {
+        rec('截图 ' + name, true, size + 'B' + (i ? '（重试成功）' : ''))
+        return
+      }
+      lastErr = size + 'B（过小，疑似空图）'
+    } catch (e) {
+      lastErr = String((e && e.message) || e)
+    }
+    await sleep(900)
   }
+  rec('截图 ' + name, false, lastErr)
 }
 async function tapAt(page, sel, i) {
   const els = await page.$$(sel)
   if (!els || !els.length) throw new Error('未找到元素 ' + sel)
   await els[Math.min(Math.max(i, 0), els.length - 1)].tap()
+}
+/**
+ * 把第 i 个匹配元素滚进视口后再操作。
+ * 为什么需要：`Element.tap()` 是按元素坐标派发触摸的，元素在折叠线外时点击会落空
+ * （2026-09-11 实际踩到：订单页加自绘导航后内容整体下移，长列表里「去支付」按钮
+ * 偶尔落在第二屏 → 点击回执成功但页面没跳转，随后的截图/data 读取连环超时）。
+ * 尽力而为，失败不阻塞走查。
+ */
+async function scrollIntoView(mp, sel, i, offset = 140) {
+  try {
+    await mp.evaluate((s, idx, off) => {
+      // 注意：evaluate 跑在 App 上下文，选择器必须显式 .in(当前页)，否则
+      // createSelectorQuery 会报 no page（见踩坑记录）。
+      const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
+      const cur = pages[pages.length - 1]
+      if (!cur) return
+      const q = wx.createSelectorQuery().in(cur)
+      q.selectAll(s).boundingClientRect()
+      q.selectViewport().scrollOffset()
+      q.exec((r) => {
+        const rect = (r[0] || [])[idx]
+        const sc = r[1] || {}
+        if (!rect) return
+        if (rect.top > 200 || rect.bottom < 120) {
+          wx.pageScrollTo({ scrollTop: Math.max(0, (sc.scrollTop || 0) + rect.top - off), duration: 0 })
+        }
+      })
+    }, sel, i, offset)
+    await sleep(500)
+  } catch (_) { /* 滚动失败不阻断断言 */ }
 }
 /** 用指定 code 登录（联调期靠 Storage 的 dev_login_code 指定种子身份） */
 async function loginAs(mp, code) {
@@ -301,15 +342,25 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
     rec('⑧ 待支付订单在列表可见', idx >= 0, `order #${payAnchor.order.id} idx=${idx}`)
     if (idx >= 0) {
       const card = (await ordersPage.$$('.order-card'))[idx]
+      // 先滚进视口再点：长列表 + 自绘导航后内容整体下移，按钮可能在折叠线外
+      await scrollIntoView(mp, '.order-card', idx)
       let tapped = false
       for (const b of (await card.$$('.act-primary')) || []) {
         if (String(await b.text().catch(() => '')).indexOf('支付') >= 0) { await b.tap(); tapped = true; break }
       }
       rec('⑧ 「去支付」真实点击', tapped)
-      await waitPath(mp, 'pages/trade/payment/payment', 25)
+      let payPage = await waitPath(mp, 'pages/trade/payment/payment', 25)
+      if (!payPage) {
+        // 偶发落空：滚动重试一次（仍失败则如实记录，不再让整轮走查致命退出）
+        await scrollIntoView(mp, '.order-card', idx, 200)
+        for (const b of (await card.$$('.act-primary')) || []) {
+          if (String(await b.text().catch(() => '')).indexOf('支付') >= 0) { await b.tap().catch(() => {}); break }
+        }
+        payPage = await waitPath(mp, 'pages/trade/payment/payment', 25)
+      }
       await sleep(2200)
       await shot(mp, '08-支付详情三级页')
-      const pp = await mp.currentPage()
+      const pp = payPage || (await mp.currentPage())
       const pm = await pp.data()
       log('支付页', { orderId: pm.orderId, amountText: pm.amountText, statusLabel: pm.statusLabel, canPay: pm.canPay, timeline: (pm.timeline || []).length })
       rec('⑧ 支付页进入', pp.path === 'pages/trade/payment/payment', pp.path)
@@ -704,6 +755,92 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
     }
     await backSafe(mp)
     await sleep(1000)
+  }
+
+  // ============ ⑭ UI 打磨：智能搜索页 / 顶栏身份 / 订单页自绘导航 ============
+  // 三处用户可感知的问题：
+  //   ① 智能搜索原为 wx.showModal({editable}) —— 长占位文案挤成两行被截断；
+  //      改为一页「智能客服同款外壳」的搜索态（结果按意图渲染卡片）。
+  //   ② 货主/船东顶栏缺用户头像与 ID（只有 emoji 快捷入口）→ 换成矢量人物头像 + 用户 ID。
+  //   ③ 订单页 navigationStyle:custom 却未自绘导航 → 统计行顶到状态栏、被胶囊压住。
+  await loginAs(mp, 'seed-shipper')
+  {
+    const idx = await mp.currentPage()
+    await tapAt(idx, '.role-card', 0) // 我是货主（loginAs 不完成登录，必须点身份卡）
+    const home = await waitPath(mp, 'pages/shipper/shipper', 40)
+    if (!home) throw new Error('⑭ 前置：货主工作台未进入')
+    await sleep(1600)
+
+    // （1）顶栏身份：矢量头像 + 用户 ID + 常用港
+    const hd = await home.data()
+    rec('⑭ 货主页顶栏有矢量人物头像', (await home.$$('.avatar-vec')).length > 0)
+    rec('⑭ 货主页顶栏显示用户 ID', /^用户\d+$/.test(String(hd.userCode || '')), String(hd.userCode))
+    rec('⑭ 货主页顶栏显示地理位置（常用港）', !!hd.defaultPortLabel, String(hd.defaultPortLabel))
+    await shot(mp, '16-货主页-顶栏身份')
+
+    // （2）搜索框 → 智能搜索页（客服同款外壳，不再是系统弹窗）
+    await tapAt(home, '.search-box', 0)
+    const sp = await waitPath(mp, 'pages/assistant/assistant', 30)
+    if (!sp) throw new Error('⑭ 智能搜索页未打开')
+    const sd = await waitData(sp, (d) => d.mode === 'search', 40, 500)
+    await sleep(700)
+    await shot(mp, '16-智能搜索页')
+    rec('⑭ 搜索框进入「智能搜索」页（不再弹系统弹窗）', sd.mode === 'search', `mode=${sd.mode}`)
+    rec('⑭ 智能搜索复用客服外壳（含输入区与底部按钮）',
+      (await sp.$$('.composer')).length > 0 && (await sp.$$('.btn-send')).length > 0)
+    rec('⑭ 搜索态文案与示例齐备',
+      /智能搜索/.test(String(sd.bannerTitle || '')) && (sd.chips || []).length >= 3,
+      `banner=${sd.bannerTitle} chips=${(sd.chips || []).length}`)
+
+    // （3）真实发一句 → 走统一路由，且结果有落点（卡片或气泡）并标注识别意图
+    await sp.setData({ input: '我要发800吨散装水泥，南宁到贵港' })
+    await sleep(400)
+    try {
+      await tapAt(sp, '.btn-send', 0)
+      const sd2 = await waitData(sp, (d) => (d.messages || []).some((m) => m.role === 'assistant' && !m.pending), 60, 600)
+      const last = (sd2.messages || []).filter((m) => m.role === 'assistant' && !m.pending).slice(-1)[0] || {}
+      await shot(mp, '16-智能搜索结果')
+      rec('⑭ 智能搜索返回结果（卡片/气泡，且标注识别意图）',
+        !!(last.kind || last.text) && !last.error,
+        `kind=${last.kind || '-'} intent=${last.intentLabel || '-'} text=${String(last.text || '').slice(0, 20)}`)
+      if (last.kind === 'parse') {
+        rec('⑭ 货源类搜索出结构化解析卡（7 字段）', (last.rows || []).length === 7, String((last.rows || []).length))
+      }
+    } catch (e) {
+      rec('⑭ 智能搜索返回结果', false, '未触发：' + ((e && e.message) || e))
+    }
+    await backSafe(mp)
+    await sleep(1200)
+
+    // （4）订单页自绘导航：导航必须存在，且统计行落在导航下方
+    const op = await nav(mp, 'tab', '/pages/trade/orders/orders', 'pages/trade/orders/orders')
+    await sleep(1800)
+    await shot(mp, '16-订单页-自绘导航')
+    rec('⑭ 订单页自绘导航存在', (await op.$$('.nav')).length > 0)
+    rec('⑭ 订单页导航标题渲染', (await op.$$('.nav-title')).length > 0)
+    let geoNote = ''
+    let below = false
+    try {
+      const navEl = (await op.$$('.nav'))[0]
+      const statEl = (await op.$$('.stat-row'))[0]
+      const nOff = await navEl.offset()
+      const nSize = await navEl.size()
+      const sOff = await statEl.offset()
+      const pick = (o, keys) => {
+        for (const k of keys) if (o && typeof o[k] === 'number') return o[k]
+        return null
+      }
+      const nTop = pick(nOff, ['top', 'y'])
+      const nH = pick(nSize, ['height'])
+      const sTop = pick(sOff, ['top', 'y'])
+      geoNote = JSON.stringify({ nTop, nH, sTop })
+      if (nTop !== null && sTop !== null) {
+        below = sTop >= nTop + (nH === null ? 0 : nH) - 2
+      }
+    } catch (e) {
+      geoNote = '几何读取失败：' + ((e && e.message) || e)
+    }
+    rec('⑭ 统计行位于导航之下（不再顶出页面框架）', below, geoNote)
   }
 
   // ============================ 我的 ============================

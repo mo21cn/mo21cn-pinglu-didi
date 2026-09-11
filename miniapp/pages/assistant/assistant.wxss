@@ -52,6 +52,31 @@
 .parse-btn { margin-top: 16rpx; height: 68rpx; line-height: 68rpx; text-align: center; background: #1565C0; color: #fff; font-size: 26rpx; border-radius: 999rpx; }
 .parse-btn-hover { background: #0d4ea0; }
 
+/* 路由结果标注（搜索态：识别到的意图 + 置信度） */
+.route-meta { margin-bottom: 8rpx; padding-bottom: 8rpx; border-bottom: 1rpx solid rgba(15,37,64,.08); font-size: 21rpx; color: #7b8a9c; }
+
+/* 合规预检卡片（F17：三档结论 + 逐条依据 + 建议） */
+.comp-card { max-width: 80%; margin-left: 14rpx; padding: 20rpx 22rpx; background: #fff; border-radius: 20rpx; border-top-left-radius: 6rpx; box-shadow: 0 1rpx 2rpx rgba(0,0,0,.04); border-left: 6rpx solid #cfd8e3; }
+.comp-card-pass { border-left-color: #2F9E5F; }
+.comp-card-warn { border-left-color: #E8A33D; }
+.comp-card-block { border-left-color: #C0455A; }
+.comp-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12rpx; border-bottom: 1rpx solid #eef2f7; }
+.comp-title { font-size: 27rpx; font-weight: 600; color: #0f2540; }
+.comp-badge { font-size: 21rpx; padding: 4rpx 14rpx; border-radius: 999rpx; background: #eef2f7; color: #6b7a8c; }
+.comp-badge-pass { background: #E9F7EF; color: #2F9E5F; }
+.comp-badge-warn { background: #FFF7E6; color: #B7791F; }
+.comp-badge-block { background: #FDEDEF; color: #C0455A; }
+.comp-summary { margin-top: 12rpx; font-size: 24rpx; color: #4a5b70; line-height: 1.5; }
+.comp-row { margin-top: 14rpx; padding-top: 14rpx; border-top: 1rpx dashed #eef2f7; }
+.comp-row-head { display: flex; align-items: center; gap: 10rpx; }
+.comp-sev { font-size: 20rpx; padding: 2rpx 12rpx; border-radius: 6rpx; flex-shrink: 0; }
+.comp-sev-block { background: #FDEDEF; color: #C0455A; }
+.comp-sev-warn { background: #FFF7E6; color: #B7791F; }
+.comp-row-title { font-size: 25rpx; font-weight: 600; color: #0f2540; }
+.comp-row-detail { margin-top: 6rpx; font-size: 23rpx; color: #6b7a8c; line-height: 1.5; }
+.comp-row-tip { margin-top: 6rpx; font-size: 23rpx; color: #1565C0; line-height: 1.5; }
+.comp-clean { margin-top: 12rpx; font-size: 24rpx; color: #2F9E5F; }
+
 /* 底部输入区 */
 .composer { background: #fff; border-top: 1rpx solid #e7ecf2; padding: 14rpx 20rpx calc(14rpx + env(safe-area-inset-bottom)); display: flex; align-items: flex-end; gap: 14rpx; }
 .composer-input { flex: 1; min-height: 60rpx; max-height: 200rpx; background: #f4f6fa; border-radius: 18rpx; padding: 16rpx 20rpx; font-size: 28rpx; color: #0f2540; line-height: 1.5; box-sizing: border-box; }

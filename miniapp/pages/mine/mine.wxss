@@ -17,9 +17,11 @@ page { background: #F5F7FA; }
   position: relative;
 }
 .nav-title { font-size: 34rpx; font-weight: 600; color: #14233B; }
+/* 注意：微信胶囊按钮占据导航右上角（约 562~736rpx），原先 right:28rpx 会被完全遮住 →
+   「功能预览」在真机/模拟器里根本看不见（属于看不见的假入口）。故左移到胶囊左侧安全区。 */
 .nav-preview {
   position: absolute;
-  right: 28rpx;
+  right: 200rpx;
   font-size: 21rpx;
   color: #7048E8;
   background: rgba(112, 72, 232, .10);

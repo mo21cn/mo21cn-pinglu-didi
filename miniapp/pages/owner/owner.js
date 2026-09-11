@@ -52,6 +52,7 @@ Page({
   data: {
     view: 'hall',            // hall=货源大厅 fleet=我的船队 registry=船舶备案
     defaultPortLabel: '南宁 · 平塘港',
+    userCode: '',            // 顶栏用户 ID（用户1024）——与「我的」页同一口径
 
     // 港口选择弹层（13 项超过 wx.showActionSheet 的 itemList 上限 6，改走 port-picker 组件）
     ppVisible: false, ppTitle: '选择港口', ppTip: '', ppCurrent: '', ppPorts: PORTS_FULL, ppAction: '',
@@ -86,6 +87,7 @@ Page({
 
   onShow() {
     syncTabBar(this)
+    this.fetchIdentity()
     if (this.data.view === 'fleet') this.fetchShipList()
   },
 
@@ -233,6 +235,18 @@ Page({
         if (res.confirm) wx.navigateTo({ url: '/pages/publish/ship/ship' })
       }
     })
+  },
+
+  // ---- 顶栏身份（用户头像 + 用户 ID + 常用港）----
+  /** 与货主页同一实现：用户 ID 口径对齐「我的」页，缺失时给中性占位 */
+  fetchIdentity() {
+    const user = auth.getUser() || {}
+    this.setData({ userCode: user.user_id ? '用户' + user.user_id : '未登录' })
+  },
+
+  /** 头像 → 「我的」（tabBar 页，必须 switchTab） */
+  goMine() {
+    wx.switchTab({ url: '/pages/mine/mine' })
   },
 
   // ---- 我的船队 / 备案（保留已开发能力） ----

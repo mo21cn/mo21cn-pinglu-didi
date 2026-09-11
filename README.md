@@ -138,6 +138,8 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 | 合同降级 | PR #35 | 18 JSON / 14 页面 / 46 路由 / 170 事件 | TODO-10 闭环：LLM 故障时降级（注入 `LLMError`）→ **200 + `degraded=true/network`**，正文保留核心金额与内置标准四条、风险点照常；审计单行 `success=False`。正常路径与 `LLM_MOCK` 结果不变 |
 | **智能入口** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 189 事件 | **Agent 五领域补齐 5/5**。F14 前端入口接线（`assistant` 双模式 + 发布页「智能填写」草稿回填）、F17 合规初筛即时预检（2 端点 / 9 条确定性规则）、F18 商务条款类风险 R6–R9（滞期费/保险/违约金/在途不可抗力）、F20 统一意图路由 `/agent/route`（四意图 + 派发失败不 500）。`pytest` **142 passed**；`verify_ui_interactions` **173 项全绿**；`verify_frontend_e2e` **176/0**；`verify_login_flow` 22/0；真机走查 **125/125 全绿 · 0 运行期 `console.error`** |
 
+| **UI 打磨** | 本次 PR | 19 JSON / 14 页面 / 46 路由 / 185 事件 | **①「智能搜索」页面化**：弃用 `wx.showModal({editable})`（长占位文案挤成两行被截断），改为「智能客服」同款页面外壳 + 第三模式 `mode=search`（结果按意图渲染解析卡/合规卡/回答气泡）；**②顶栏身份**：货主/船东顶栏换成纯 CSS 矢量人物头像 + 用户 ID + 常用港（原 emoji 快捷入口功能未丢，页内另有入口）；**③订单页自绘导航**：补上 `navigationStyle:custom` 缺失的导航栏，修「统计行顶到状态栏、被胶囊压住」；顺带发现并修「我的」页「功能预览」被胶囊整块遮住（看不见的假入口）。`verify_ui_interactions` **197/0**；`verify_frontend_e2e` 176/0；`verify_login_flow` 22/0；真机走查 **140/140 · 0 运行期 `console.error`** |
+
 **三者状态机口径（可直接用于汇报答辩）**
 
 | 域 | 状态机 | 幂等 / 并发防线 | 留痕 |
