@@ -7,6 +7,7 @@
 - POST   /api/v1/cargo/shipments/{id}/publish   发布进入撮合池
 - POST   /api/v1/cargo/shipments/{id}/cancel    取消
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -98,7 +99,9 @@ def update_shipment(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/shipments/{cargo_id}/publish", response_model=CargoResponse, summary="发布进入撮合池")
+@router.post(
+    "/shipments/{cargo_id}/publish", response_model=CargoResponse, summary="发布进入撮合池"
+)
 def publish_shipment(
     cargo_id: int,
     user: User = Depends(get_current_user),

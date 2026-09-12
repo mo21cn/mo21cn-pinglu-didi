@@ -10,6 +10,7 @@
 合规初筛与合同风险点均为**确定性规则引擎**产物（零 LLM）；
 Router 只做分派，不代用户执行任何写操作（工程底线 2）。
 """
+
 from __future__ import annotations
 
 from typing import Any

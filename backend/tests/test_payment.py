@@ -1,4 +1,5 @@
 """F7 支付域测试：状态机 + 防重复支付 + 幂等回调 + 撤单联动 + 角色权限。"""
+
 from __future__ import annotations
 
 API_SHIP = "/api/v1/ship/registry"
@@ -34,8 +35,12 @@ def _ship_payload(**overrides) -> dict:
 
 
 def _make_verified_ship(client, owner, port_user, **overrides) -> int:
-    sid = client.post(API_SHIP, json=_ship_payload(**overrides), headers=owner["_headers"]).json()["id"]
-    resp = client.post(f"{API_SHIP}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"])
+    sid = client.post(API_SHIP, json=_ship_payload(**overrides), headers=owner["_headers"]).json()[
+        "id"
+    ]
+    resp = client.post(
+        f"{API_SHIP}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"]
+    )
     assert resp.status_code == 200, resp.text
     return sid
 
@@ -67,9 +72,7 @@ def _make_matched_order(client, shipper, owner, port_user, freight_price=12000) 
 def test_payment_create_pending(owner, port_user, shipper, client):
     """货主对 matched 订单发起支付 → pending，金额锁定订单运费。"""
     order = _make_matched_order(client, shipper, owner, port_user, freight_price=12000)
-    resp = client.post(
-        API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"]
-    )
+    resp = client.post(API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"])
     assert resp.status_code == 201, resp.text
     pay = resp.json()
     assert pay["status"] == "pending"
@@ -84,7 +87,12 @@ def test_payment_create_pending(owner, port_user, shipper, client):
 def test_payment_duplicate_409(owner, port_user, shipper, client):
     """同一订单重复发起支付 → 409（防重复支付）。"""
     order = _make_matched_order(client, shipper, owner, port_user)
-    assert client.post(API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"]).status_code == 201
+    assert (
+        client.post(
+            API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"]
+        ).status_code
+        == 201
+    )
     resp = client.post(API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"])
     assert resp.status_code == 409
     assert "重复" in resp.json()["detail"]
@@ -101,7 +109,9 @@ def test_payment_requires_freight_price(owner, port_user, shipper, client):
 def test_payment_requires_matched_order(owner, port_user, shipper, client):
     """启运后订单不可发起支付。"""
     order = _make_matched_order(client, shipper, owner, port_user)
-    assert client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"]).status_code == 200
+    assert (
+        client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"]).status_code == 200
+    )
     resp = client.post(API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"])
     assert resp.status_code == 400
     assert "不可发起支付" in resp.json()["detail"]
@@ -127,9 +137,7 @@ def test_payment_mock_pay_transitions(owner, port_user, shipper, client):
     assert paid["paid_at"] is not None
 
     # 幂等：重复回调不重复记账，paid_at 不变
-    again = client.post(
-        f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"]
-    )
+    again = client.post(f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"])
     assert again.status_code == 200
     assert again.json()["status"] == "paid"
     assert again.json()["paid_at"] == paid["paid_at"]
@@ -141,7 +149,11 @@ def test_payment_mock_pay_after_refunded_400(owner, port_user, shipper, client):
     order = _make_matched_order(client, shipper, owner, port_user)
     pay = client.post(API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"]).json()
     client.post(f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"])
-    client.post(f"{API_ORDER}/{order['id']}/cancel", json={"reason": "计划变更"}, headers=shipper["_headers"])
+    client.post(
+        f"{API_ORDER}/{order['id']}/cancel",
+        json={"reason": "计划变更"},
+        headers=shipper["_headers"],
+    )
 
     resp = client.post(f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"])
     assert resp.status_code == 400
@@ -191,7 +203,9 @@ def test_payment_cancel_while_pending_closes(owner, port_user, shipper, client):
 def test_payment_cancel_without_payment_noop(owner, port_user, shipper, client):
     """未发起支付的订单撤单 → 无支付单，按订单查 → 404。"""
     order = _make_matched_order(client, shipper, owner, port_user)
-    client.post(f"{API_ORDER}/{order['id']}/cancel", json={"reason": "x"}, headers=shipper["_headers"])
+    client.post(
+        f"{API_ORDER}/{order['id']}/cancel", json={"reason": "x"}, headers=shipper["_headers"]
+    )
     resp = client.get(f"{API_PAY}/order/{order['id']}", headers=shipper["_headers"])
     assert resp.status_code == 404
 
@@ -239,8 +253,15 @@ def test_payment_full_trade_loop(owner, port_user, shipper, client):
     """端到端：出单 → 支付 → 启运 → 签收，支付单保持 paid 终态。"""
     order = _make_matched_order(client, shipper, owner, port_user, freight_price=25600)
     pay = client.post(API_PAY, json={"order_id": order["id"]}, headers=shipper["_headers"]).json()
-    assert client.post(f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"]).status_code == 200
-    assert client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"]).status_code == 200
+    assert (
+        client.post(
+            f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"]
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"]).status_code == 200
+    )
     resp = client.post(f"{API_ORDER}/{order['id']}/complete", headers=shipper["_headers"])
     assert resp.status_code == 200
 

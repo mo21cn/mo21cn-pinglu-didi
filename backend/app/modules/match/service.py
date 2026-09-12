@@ -1,4 +1,5 @@
 """撮合模块业务逻辑（F5 Stage1）：DB 取数 → 确定性引擎打分 → 组装响应。"""
+
 from __future__ import annotations
 
 from sqlalchemy import select

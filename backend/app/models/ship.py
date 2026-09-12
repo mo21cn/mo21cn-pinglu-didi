@@ -6,6 +6,7 @@
 
 尺度字段（载重吨/吃水）是撮合引擎 Stage1 硬约束的核心输入。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -39,9 +40,7 @@ class Ship(Base):
     # pending_verify | verified | rejected
     status: Mapped[str] = mapped_column(String(16), default="pending_verify", index=True)
     reject_reason: Mapped[str] = mapped_column(String(255), default="", comment="驳回原因")
-    created_at: Mapped[str] = mapped_column(
-        DateTime, server_default=func.now(), comment="创建时间"
-    )
+    created_at: Mapped[str] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at: Mapped[str] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间"
     )

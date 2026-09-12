@@ -1,4 +1,5 @@
 """F6 订单域测试：状态机推进 + 防重复出单 + 硬约束前置 + 角色权限。"""
+
 from __future__ import annotations
 
 API_SHIP = "/api/v1/ship/registry"
@@ -33,8 +34,12 @@ def _ship_payload(**overrides) -> dict:
 
 
 def _make_verified_ship(client, owner, port_user, **overrides) -> int:
-    sid = client.post(API_SHIP, json=_ship_payload(**overrides), headers=owner["_headers"]).json()["id"]
-    resp = client.post(f"{API_SHIP}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"])
+    sid = client.post(API_SHIP, json=_ship_payload(**overrides), headers=owner["_headers"]).json()[
+        "id"
+    ]
+    resp = client.post(
+        f"{API_SHIP}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"]
+    )
     assert resp.status_code == 200, resp.text
     return sid
 
@@ -137,8 +142,12 @@ def test_order_rejects_unverified_ship(owner, port_user, shipper, client):
 
 def test_order_rejects_incompatible_pair(owner, port_user, shipper, client):
     """载重不足 / 船型不兼容的组合不可出单。"""
-    small_sid = _make_verified_ship(client, owner, port_user, ship_name="小船", cert_no="C-SM", deadweight_t=500)
-    tank_sid = _make_verified_ship(client, owner, port_user, ship_name="油轮", cert_no="C-TK", ship_type="tanker")
+    small_sid = _make_verified_ship(
+        client, owner, port_user, ship_name="小船", cert_no="C-SM", deadweight_t=500
+    )
+    tank_sid = _make_verified_ship(
+        client, owner, port_user, ship_name="油轮", cert_no="C-TK", ship_type="tanker"
+    )
     cargo = _make_cargo(client, shipper)
 
     for sid in (small_sid, tank_sid):
@@ -186,7 +195,9 @@ def test_order_double_ship_400(owner, port_user, shipper, client):
     sid = _make_verified_ship(client, owner, port_user)
     cargo = _make_cargo(client, shipper)
     order = _make_order(client, shipper, cargo["id"], sid)
-    assert client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"]).status_code == 200
+    assert (
+        client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"]).status_code == 200
+    )
     resp = client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"])
     assert resp.status_code == 400
 
@@ -197,7 +208,9 @@ def test_order_cancel_after_shipped_400(owner, port_user, shipper, client):
     cargo = _make_cargo(client, shipper)
     order = _make_order(client, shipper, cargo["id"], sid)
     client.post(f"{API_ORDER}/{order['id']}/ship", headers=owner["_headers"])
-    resp = client.post(f"{API_ORDER}/{order['id']}/cancel", json={"reason": "x"}, headers=shipper["_headers"])
+    resp = client.post(
+        f"{API_ORDER}/{order['id']}/cancel", json={"reason": "x"}, headers=shipper["_headers"]
+    )
     assert resp.status_code == 400
 
 
@@ -289,37 +302,71 @@ def test_engine_pair_violation():
     from app.modules.match.engine import CargoInput, ShipInput, pair_violation
 
     cargo = CargoInput(
-        id=1, cargo_type="bulk", weight_t=1000, origin_port="NNG",
-        dest_port="QNZ", expect_date=date(2026, 10, 1), status="published",
+        id=1,
+        cargo_type="bulk",
+        weight_t=1000,
+        origin_port="NNG",
+        dest_port="QNZ",
+        expect_date=date(2026, 10, 1),
+        status="published",
     )
     ok_ship = ShipInput(
-        id=1, ship_type="bulk", deadweight_t=1500, draft_m=3.5,
-        home_port="NNG", cert_expiry=date(2027, 12, 31), status="verified",
+        id=1,
+        ship_type="bulk",
+        deadweight_t=1500,
+        draft_m=3.5,
+        home_port="NNG",
+        cert_expiry=date(2027, 12, 31),
+        status="verified",
     )
     assert pair_violation(cargo, ok_ship) is None
 
     # 四类硬约束逐一违反
     assert "审核" in pair_violation(
-        cargo, ShipInput(
-            id=2, ship_type="bulk", deadweight_t=1500, draft_m=3.5,
-            home_port="NNG", cert_expiry=date(2027, 12, 31), status="pending_verify",
-        )
+        cargo,
+        ShipInput(
+            id=2,
+            ship_type="bulk",
+            deadweight_t=1500,
+            draft_m=3.5,
+            home_port="NNG",
+            cert_expiry=date(2027, 12, 31),
+            status="pending_verify",
+        ),
     )
     assert "证书" in pair_violation(
-        cargo, ShipInput(
-            id=3, ship_type="bulk", deadweight_t=1500, draft_m=3.5,
-            home_port="NNG", cert_expiry=date(2026, 9, 20), status="verified",
-        )
+        cargo,
+        ShipInput(
+            id=3,
+            ship_type="bulk",
+            deadweight_t=1500,
+            draft_m=3.5,
+            home_port="NNG",
+            cert_expiry=date(2026, 9, 20),
+            status="verified",
+        ),
     )
     assert "载重" in pair_violation(
-        cargo, ShipInput(
-            id=4, ship_type="bulk", deadweight_t=500, draft_m=3.5,
-            home_port="NNG", cert_expiry=date(2027, 12, 31), status="verified",
-        )
+        cargo,
+        ShipInput(
+            id=4,
+            ship_type="bulk",
+            deadweight_t=500,
+            draft_m=3.5,
+            home_port="NNG",
+            cert_expiry=date(2027, 12, 31),
+            status="verified",
+        ),
     )
     assert "兼容" in pair_violation(
-        cargo, ShipInput(
-            id=5, ship_type="tanker", deadweight_t=1500, draft_m=3.5,
-            home_port="NNG", cert_expiry=date(2027, 12, 31), status="verified",
-        )
+        cargo,
+        ShipInput(
+            id=5,
+            ship_type="tanker",
+            deadweight_t=1500,
+            draft_m=3.5,
+            home_port="NNG",
+            cert_expiry=date(2027, 12, 31),
+            status="verified",
+        ),
     )

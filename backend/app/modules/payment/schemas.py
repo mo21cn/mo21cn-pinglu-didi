@@ -1,4 +1,5 @@
 """支付模块 Pydantic 模型（F7）。"""
+
 from __future__ import annotations
 
 from datetime import datetime

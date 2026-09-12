@@ -13,6 +13,7 @@ BerthAppt（泊位预约）——稀缺资源防超卖核心：
     预约"确认即锁定"，是订单状态机防超卖体系的一环
     （见《开发需求文档 V2.0》6. 数据需求——稀缺资源型实体）。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -37,9 +38,7 @@ class Berth(Base):
     """泊位（港口方维护的靠泊资源）。"""
 
     __tablename__ = "berths"
-    __table_args__ = (
-        UniqueConstraint("port_code", "berth_no", name="uq_berth_port_no"),
-    )
+    __table_args__ = (UniqueConstraint("port_code", "berth_no", name="uq_berth_port_no"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     # 港口代码（13 港体系：NNG/GGU/WUZ/QNZ/FCG/BHZ...）

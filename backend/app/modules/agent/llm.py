@@ -8,6 +8,7 @@
 - 错误分类（LLMError.kind）：timeout / network / auth / rate_limit / bad_request /
   bad_response（JSON 解析失败）/ unknown，调用方可据此降级（返回 503 提示稍后重试）。
 """
+
 from __future__ import annotations
 
 import json
@@ -120,17 +121,35 @@ async def chat_json(
 
 # 13 港中文名 → 代码（与 cargo.schemas.PORT_CODES 对齐）
 _MOCK_PORT_ALIASES: dict[str, str] = {
-    "南宁": "NNG", "贵港": "GGU", "梧州": "WUZ", "来宾": "BIN",
-    "柳州": "LZH", "百色": "BSZ", "崇左": "CHZ", "桂林": "GXL",
-    "贺州": "HEZ", "玉林": "YUL", "钦州": "QNZ", "防城港": "FCG",
+    "南宁": "NNG",
+    "贵港": "GGU",
+    "梧州": "WUZ",
+    "来宾": "BIN",
+    "柳州": "LZH",
+    "百色": "BSZ",
+    "崇左": "CHZ",
+    "桂林": "GXL",
+    "贺州": "HEZ",
+    "玉林": "YUL",
+    "钦州": "QNZ",
+    "防城港": "FCG",
     "北海": "BHZ",
 }
 
 _MOCK_TYPE_HINTS: list[tuple[str, str]] = [
     ("集装箱", "container"),
-    ("液货", "tanker"), ("油", "tanker"), ("化工", "tanker"),
-    ("水泥", "bulk"), ("矿", "bulk"), ("煤", "bulk"), ("砂", "bulk"), ("石", "bulk"), ("粮", "bulk"),
-    ("钢", "general"), ("设备", "general"), ("件杂", "general"),
+    ("液货", "tanker"),
+    ("油", "tanker"),
+    ("化工", "tanker"),
+    ("水泥", "bulk"),
+    ("矿", "bulk"),
+    ("煤", "bulk"),
+    ("砂", "bulk"),
+    ("石", "bulk"),
+    ("粮", "bulk"),
+    ("钢", "general"),
+    ("设备", "general"),
+    ("件杂", "general"),
 ]
 
 _WEIGHT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:吨|t|T)")

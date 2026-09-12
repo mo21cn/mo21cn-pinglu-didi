@@ -3,6 +3,7 @@
 全部走 LLM_MOCK 规则模板（显式 monkeypatch，避免本机 .env.local 的真实 Key
 让测试产生真实网络调用）；审计落库用独立内存库直连 session 断言。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -90,7 +91,11 @@ def test_cargo_parse_llm_failure_degrades(shipper, client, monkeypatch):
     async def _boom(*, system, user, temperature=0.1):
         raise LLMError("timeout", "LLM 调用超时（60s）")
 
-    monkeypatch.setattr(service, "llm_gateway", type("M", (), {"chat_json": staticmethod(_boom), "LLMError": LLMError}))
+    monkeypatch.setattr(
+        service,
+        "llm_gateway",
+        type("M", (), {"chat_json": staticmethod(_boom), "LLMError": LLMError}),
+    )
 
     resp = client.post(
         "/api/v1/agent/cargo-parse",
@@ -102,6 +107,7 @@ def test_cargo_parse_llm_failure_degrades(shipper, client, monkeypatch):
 
 
 # ---------- F10 客服导购 ----------
+
 
 def test_assistant_mock_faq(shipper, client):
     """关键词命中 FAQ 模板（mock 模式）。"""
@@ -145,9 +151,7 @@ def test_audit_row_written_on_success_and_failure():
     db = session_factory()
 
     # 成功路径
-    result = asyncio.run(
-        service.parse_cargo(db, user_id=1, text="我有800吨水泥从南宁运到贵港")
-    )
+    result = asyncio.run(service.parse_cargo(db, user_id=1, text="我有800吨水泥从南宁运到贵港"))
     assert result.draft.weight_t == 800.0
 
     # 失败路径
@@ -175,6 +179,7 @@ def test_audit_row_written_on_success_and_failure():
 
 
 # ---------- F11 智能合同 ----------
+
 
 def _make_order(shipper, owner, client, **kw):
     """货主建货源→船东备案船→撮合→下单，返回 order_id（走业务 API 全链路）。"""
@@ -222,7 +227,11 @@ def _make_order(shipper, owner, client, **kw):
     )  # 探测（非必须）
     order = client.post(
         "/api/v1/order/orders",
-        json={"cargo_id": cargo["id"], "ship_id": ship["id"], "freight_price": kw.get("price", 25000)},
+        json={
+            "cargo_id": cargo["id"],
+            "ship_id": ship["id"],
+            "freight_price": kw.get("price", 25000),
+        },
         headers=shipper["_headers"],
     )
     assert order.status_code == 200, order.text
@@ -264,9 +273,7 @@ def test_contract_generate_owner_participant_ok(shipper, owner, port_user, clien
     assert resp.status_code == 200, resp.text
 
 
-def test_contract_generate_non_participant_rejected(
-    shipper, owner, port_user, client
-):
+def test_contract_generate_non_participant_rejected(shipper, owner, port_user, client):
     """非参与方（第三方货主）禁止生成。"""
     from tests.conftest import _login
 
@@ -284,12 +291,15 @@ def test_contract_generate_non_participant_rejected(
 def test_contract_risk_rules_hit(shipper, owner, port_user, client):
     """风险规则引擎：面议未锁价 + 日期临近 + 证书临期 + 液货。"""
     oid = _make_order(
-        shipper, owner, client,
+        shipper,
+        owner,
+        client,
         port_headers=port_user["_headers"],
-        days=1,            # 装货日期临近（<3 天）
-        cert_days=10,      # 证书临期（<30 天）
-        cargo_type="tanker", ship_type="tanker",  # 液货
-        price=None,        # 面议未锁价
+        days=1,  # 装货日期临近（<3 天）
+        cert_days=10,  # 证书临期（<30 天）
+        cargo_type="tanker",
+        ship_type="tanker",  # 液货
+        price=None,  # 面议未锁价
     )
     resp = client.post(
         "/api/v1/agent/contract/generate",
@@ -333,6 +343,7 @@ def test_contract_order_not_found(shipper, client):
 
 
 # ---------- F12 RAG 知识检索 ----------
+
 
 def test_rag_search_single_port_hit():
     """问单港 → 精确命中该港文档。"""
@@ -477,9 +488,7 @@ def test_contract_llm_failure_audit_marks_failure(monkeypatch):
     assert result.degraded is True
     assert result.degraded_reason == "timeout"
 
-    rows = (
-        db.execute(select(AgentCall).where(AgentCall.agent_name == "contract")).scalars().all()
-    )
+    rows = db.execute(select(AgentCall).where(AgentCall.agent_name == "contract")).scalars().all()
     assert len(rows) == 1
     assert rows[0].success is False
     assert rows[0].error_kind == "timeout"
@@ -491,10 +500,12 @@ def test_contract_llm_failure_audit_marks_failure(monkeypatch):
 def test_contract_business_clause_rules_hit(shipper, owner, port_user, client):
     """滞期费（散货/液货）+ 保险（大额）+ 违约金量化（临近装货）三条同时命中。"""
     oid = _make_order(
-        shipper, owner, client,
+        shipper,
+        owner,
+        client,
         port_headers=port_user["_headers"],
-        days=5,        # 装货日在 7 日内 → R8 违约金标准未量化
-        price=31000,   # ≥ 20000 → R7 货物保险未约定
+        days=5,  # 装货日在 7 日内 → R8 违约金标准未量化
+        price=31000,  # ≥ 20000 → R7 货物保险未约定
     )
     resp = client.post(
         "/api/v1/agent/contract/generate",
@@ -504,9 +515,9 @@ def test_contract_business_clause_rules_hit(shipper, owner, port_user, client):
     assert resp.status_code == 200, resp.text
     risks = resp.json()["risks"]
     titles = [r["title"] for r in risks]
-    assert "滞期费未约定" in titles          # R6（散货装卸耗时长）
-    assert "货物保险未约定" in titles        # R7（大额运输）
-    assert "违约金标准未量化" in titles      # R8（matched + 装货日 ≤7 天）
+    assert "滞期费未约定" in titles  # R6（散货装卸耗时长）
+    assert "货物保险未约定" in titles  # R7（大额运输）
+    assert "违约金标准未量化" in titles  # R8（matched + 装货日 ≤7 天）
     # 商务条款类均为中/低风险，不与事实类高风险混同等级
     by_title = {r["title"]: r["severity"] for r in risks}
     assert by_title["滞期费未约定"] == "medium"
@@ -517,9 +528,7 @@ def test_contract_business_clause_rules_hit(shipper, owner, port_user, client):
 def test_contract_shipped_order_flags_force_majeure(shipper, owner, port_user, client):
     """在途（shipped）订单命中 R9 在途不可抗力风险。"""
     oid = _make_order(shipper, owner, client, port_headers=port_user["_headers"], days=5)
-    started = client.post(
-        f"/api/v1/order/orders/{oid}/ship", json={}, headers=owner["_headers"]
-    )
+    started = client.post(f"/api/v1/order/orders/{oid}/ship", json={}, headers=owner["_headers"])
     assert started.status_code == 200, started.text
     resp = client.post(
         "/api/v1/agent/contract/generate",
@@ -723,14 +732,23 @@ def test_compliance_and_router_audit_rows_written():
     db = sessionmaker(bind=engine)()
 
     cargo_req = CargoComplianceRequest(
-        cargo_name="散装水泥", cargo_type="bulk", weight_t=800,
-        origin_port="NNG", dest_port="GGU",
+        cargo_name="散装水泥",
+        cargo_type="bulk",
+        weight_t=800,
+        origin_port="NNG",
+        dest_port="GGU",
         expect_date=_dt.date.today() + _dt.timedelta(days=10),
     )
     ship_req = ShipComplianceRequest(
-        ship_name="平陆 001", ship_type="bulk", deadweight_t=1500,
-        length_m=60, width_m=12, draft_m=3.5, home_port="GGU",
-        cert_no="C-AUDIT-F17", cert_expiry=_dt.date.today() + _dt.timedelta(days=300),
+        ship_name="平陆 001",
+        ship_type="bulk",
+        deadweight_t=1500,
+        length_m=60,
+        width_m=12,
+        draft_m=3.5,
+        home_port="GGU",
+        cert_no="C-AUDIT-F17",
+        cert_expiry=_dt.date.today() + _dt.timedelta(days=300),
     )
     assert service.screen_cargo_compliance(db, user_id=1, req=cargo_req).target == "cargo"
     assert service.screen_ship_compliance(db, user_id=1, req=ship_req).target == "ship"
@@ -853,6 +871,7 @@ def test_route_contract_with_order_context(shipper, owner, port_user, client):
 
 def test_route_downstream_failure_is_not_500(shipper, client, monkeypatch):
     """下游 LLM 故障 → 路由层不报 5xx，返回引导语（dispatched=False）。"""
+
     async def _boom(*, system, user, temperature=0.1):
         raise LLMError("timeout", "LLM 调用超时（模拟）")
 

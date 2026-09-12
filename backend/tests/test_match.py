@@ -1,4 +1,5 @@
 """F5 撮合引擎 Stage1 测试：硬约束过滤 + 多目标评分 + 双向撮合端点。"""
+
 from __future__ import annotations
 
 API_SHIP = "/api/v1/ship/registry"
@@ -33,8 +34,12 @@ def _ship_payload(**overrides) -> dict:
 
 
 def _make_verified_ship(client, owner, port_user, **overrides) -> int:
-    sid = client.post(API_SHIP, json=_ship_payload(**overrides), headers=owner["_headers"]).json()["id"]
-    resp = client.post(f"{API_SHIP}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"])
+    sid = client.post(API_SHIP, json=_ship_payload(**overrides), headers=owner["_headers"]).json()[
+        "id"
+    ]
+    resp = client.post(
+        f"{API_SHIP}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"]
+    )
     assert resp.status_code == 200, resp.text
     return sid
 
@@ -52,9 +57,15 @@ def _make_cargo(client, shipper, **overrides) -> dict:
 
 def test_match_cargo_returns_ranked_verified_ships(owner, port_user, shipper, client):
     """高利用率船排前；待审船被过滤并计入 filter_stats。"""
-    _make_verified_ship(client, owner, port_user, ship_name="满载号", deadweight_t=1000)  # 利用率 1.0
-    _make_verified_ship(client, owner, port_user, ship_name="半载号", deadweight_t=2000)  # 利用率 0.5
-    client.post(API_SHIP, json=_ship_payload(ship_name="待审号"), headers=owner["_headers"])  # 不审核
+    _make_verified_ship(
+        client, owner, port_user, ship_name="满载号", deadweight_t=1000
+    )  # 利用率 1.0
+    _make_verified_ship(
+        client, owner, port_user, ship_name="半载号", deadweight_t=2000
+    )  # 利用率 0.5
+    client.post(
+        API_SHIP, json=_ship_payload(ship_name="待审号"), headers=owner["_headers"]
+    )  # 不审核
 
     cargo = _make_cargo(client, shipper)
     resp = client.post(f"{API_MATCH}/cargos/{cargo['id']}/ships", headers=shipper["_headers"])
@@ -76,11 +87,19 @@ def test_match_cargo_hard_filters(owner, port_user, shipper, client):
     """证书过期 / 载重不足 / 船型不兼容 各自被过滤且计数正确。"""
     _make_verified_ship(client, owner, port_user, ship_name="好船", cert_no="C-OK")
     _make_verified_ship(
-        client, owner, port_user, ship_name="证书过期", cert_no="C-EXP",
+        client,
+        owner,
+        port_user,
+        ship_name="证书过期",
+        cert_no="C-EXP",
         cert_expiry="2026-09-20",  # 覆盖今天但早于装货日
     )
-    _make_verified_ship(client, owner, port_user, ship_name="小船", cert_no="C-SMALL", deadweight_t=500)
-    _make_verified_ship(client, owner, port_user, ship_name="油轮", cert_no="C-TANK", ship_type="tanker")
+    _make_verified_ship(
+        client, owner, port_user, ship_name="小船", cert_no="C-SMALL", deadweight_t=500
+    )
+    _make_verified_ship(
+        client, owner, port_user, ship_name="油轮", cert_no="C-TANK", ship_type="tanker"
+    )
 
     cargo = _make_cargo(client, shipper)
     resp = client.post(f"{API_MATCH}/cargos/{cargo['id']}/ships", headers=shipper["_headers"])
@@ -97,8 +116,12 @@ def test_match_cargo_hard_filters(owner, port_user, shipper, client):
 
 def test_match_cargo_type_compat_scores_lower_than_exact(owner, port_user, shipper, client):
     """件杂货船承运散货（兼容 0.6）得分应低于散货船精确匹配。"""
-    _make_verified_ship(client, owner, port_user, ship_name="散货船", ship_type="bulk", deadweight_t=1000)
-    _make_verified_ship(client, owner, port_user, ship_name="件杂货船", ship_type="general", deadweight_t=1000)
+    _make_verified_ship(
+        client, owner, port_user, ship_name="散货船", ship_type="bulk", deadweight_t=1000
+    )
+    _make_verified_ship(
+        client, owner, port_user, ship_name="件杂货船", ship_type="general", deadweight_t=1000
+    )
 
     cargo = _make_cargo(client, shipper)
     resp = client.post(f"{API_MATCH}/cargos/{cargo['id']}/ships", headers=shipper["_headers"])
@@ -112,8 +135,12 @@ def test_match_cargo_type_compat_scores_lower_than_exact(owner, port_user, shipp
 
 def test_match_cargo_home_port_bonus(owner, port_user, shipper, client):
     """船籍港等于起运港（NNG）的船获 20 分就近加分。"""
-    _make_verified_ship(client, owner, port_user, ship_name="本地船", home_port="NNG", cert_no="C-LOCAL")
-    _make_verified_ship(client, owner, port_user, ship_name="外地船", home_port="WUZ", cert_no="C-FAR")
+    _make_verified_ship(
+        client, owner, port_user, ship_name="本地船", home_port="NNG", cert_no="C-LOCAL"
+    )
+    _make_verified_ship(
+        client, owner, port_user, ship_name="外地船", home_port="WUZ", cert_no="C-FAR"
+    )
 
     cargo = _make_cargo(client, shipper)  # 起运港 NNG
     resp = client.post(f"{API_MATCH}/cargos/{cargo['id']}/ships", headers=shipper["_headers"])
@@ -184,7 +211,9 @@ def test_match_ship_role_guard(owner, port_user, shipper, client):
     sid = _make_verified_ship(client, owner, port_user)
     resp = client.post(f"{API_MATCH}/ships/{sid}/cargos", headers=shipper["_headers"])
     if resp.status_code == 404:  # 非本人船路径 → 404；先造本人船测 403
-        sid = client.post(API_SHIP, json=_ship_payload(ship_name="shipper的船"), headers=shipper["_headers"]).json()["id"]
+        sid = client.post(
+            API_SHIP, json=_ship_payload(ship_name="shipper的船"), headers=shipper["_headers"]
+        ).json()["id"]
         resp = client.post(f"{API_MATCH}/ships/{sid}/cargos", headers=shipper["_headers"])
     assert resp.status_code == 403
 
@@ -199,16 +228,42 @@ def test_engine_pure_functions():
     from app.modules.match.engine import CargoInput, ShipInput, match_cargo_to_ships
 
     cargo = CargoInput(
-        id=1, cargo_type="bulk", weight_t=800, origin_port="NNG",
-        dest_port="QNZ", expect_date=date(2026, 10, 1), status="published",
+        id=1,
+        cargo_type="bulk",
+        weight_t=800,
+        origin_port="NNG",
+        dest_port="QNZ",
+        expect_date=date(2026, 10, 1),
+        status="published",
     )
     ships = [
-        ShipInput(id=1, ship_type="bulk", deadweight_t=800, draft_m=3.0,
-                  home_port="NNG", cert_expiry=date(2026, 12, 1), status="verified"),  # 理论满分 80
-        ShipInput(id=2, ship_type="bulk", deadweight_t=1600, draft_m=3.0,
-                  home_port="WUZ", cert_expiry=date(2026, 10, 15), status="verified"),
-        ShipInput(id=3, ship_type="tanker", deadweight_t=800, draft_m=3.0,
-                  home_port="NNG", cert_expiry=date(2027, 12, 31), status="verified"),
+        ShipInput(
+            id=1,
+            ship_type="bulk",
+            deadweight_t=800,
+            draft_m=3.0,
+            home_port="NNG",
+            cert_expiry=date(2026, 12, 1),
+            status="verified",
+        ),  # 理论满分 80
+        ShipInput(
+            id=2,
+            ship_type="bulk",
+            deadweight_t=1600,
+            draft_m=3.0,
+            home_port="WUZ",
+            cert_expiry=date(2026, 10, 15),
+            status="verified",
+        ),
+        ShipInput(
+            id=3,
+            ship_type="tanker",
+            deadweight_t=800,
+            draft_m=3.0,
+            home_port="NNG",
+            cert_expiry=date(2027, 12, 31),
+            status="verified",
+        ),
     ]
     result = match_cargo_to_ships(cargo, ships)
 

@@ -16,6 +16,7 @@
   航位推算空驶里程）
 - 证书余量     20 分：证书有效期覆盖装货日之外剩余天数，90 天封顶
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -121,19 +122,23 @@ def match_cargo_to_ships(cargo: CargoInput, ships: list[ShipInput]) -> MatchResu
     result = MatchResult()
     for ship in ships:
         if ship.status != "verified":
-            result.filter_stats["ship_not_verified"] = result.filter_stats.get("ship_not_verified", 0) + 1
+            result.filter_stats["ship_not_verified"] = (
+                result.filter_stats.get("ship_not_verified", 0) + 1
+            )
             continue
         if ship.cert_expiry < cargo.expect_date:
             result.filter_stats["cert_expired"] = result.filter_stats.get("cert_expired", 0) + 1
             continue
         if ship.deadweight_t < cargo.weight_t:
-            result.filter_stats["deadweight_insufficient"] = result.filter_stats.get(
-                "deadweight_insufficient", 0
-            ) + 1
+            result.filter_stats["deadweight_insufficient"] = (
+                result.filter_stats.get("deadweight_insufficient", 0) + 1
+            )
             continue
         compat = CARGO_SHIP_COMPAT.get(cargo.cargo_type, {})
         if ship.ship_type not in compat:
-            result.filter_stats["type_incompatible"] = result.filter_stats.get("type_incompatible", 0) + 1
+            result.filter_stats["type_incompatible"] = (
+                result.filter_stats.get("type_incompatible", 0) + 1
+            )
             continue
 
         score, breakdown = _score(cargo, ship)
@@ -159,21 +164,23 @@ def match_ship_to_cargos(ship: ShipInput, cargos: list[CargoInput]) -> MatchResu
 
     for cargo in cargos:
         if cargo.status != "published":
-            result.filter_stats["cargo_not_published"] = result.filter_stats.get(
-                "cargo_not_published", 0
-            ) + 1
+            result.filter_stats["cargo_not_published"] = (
+                result.filter_stats.get("cargo_not_published", 0) + 1
+            )
             continue
         if cargo.expect_date > ship.cert_expiry:
             result.filter_stats["cert_expired"] = result.filter_stats.get("cert_expired", 0) + 1
             continue
         if cargo.weight_t > ship.deadweight_t:
-            result.filter_stats["deadweight_insufficient"] = result.filter_stats.get(
-                "deadweight_insufficient", 0
-            ) + 1
+            result.filter_stats["deadweight_insufficient"] = (
+                result.filter_stats.get("deadweight_insufficient", 0) + 1
+            )
             continue
         compat = CARGO_SHIP_COMPAT.get(cargo.cargo_type, {})
         if ship.ship_type not in compat:
-            result.filter_stats["type_incompatible"] = result.filter_stats.get("type_incompatible", 0) + 1
+            result.filter_stats["type_incompatible"] = (
+                result.filter_stats.get("type_incompatible", 0) + 1
+            )
             continue
 
         score, breakdown = _score(cargo, ship)

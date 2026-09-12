@@ -11,6 +11,7 @@
 
 client fixture 见 tests/conftest.py。
 """
+
 from __future__ import annotations
 
 import uuid
@@ -37,6 +38,7 @@ def _auth_headers(token: str) -> dict:
 
 # ---------- 登录 ----------
 
+
 def test_login_new_user_defaults_shipper(client):
     data = _login(client, code="code-1001")
     assert data["current_role"] == "shipper"
@@ -53,6 +55,7 @@ def test_login_existing_user_same_identity(client):
 
 
 # ---------- 角色绑定与切换 ----------
+
 
 def test_bind_role_then_switch(client):
     data = _login(client, code="code-1003")
@@ -83,6 +86,7 @@ def test_switch_unbound_role_rejected(client):
 
 # ---------- 鉴权 ----------
 
+
 def test_me_without_token_401(client):
     assert client.get("/api/v1/auth/me").status_code == 401
 
@@ -112,6 +116,7 @@ def test_token_payload_carries_audit_fields(client):
 
 
 # ---------- 非微信侧校验 ----------
+
 
 def test_login_empty_code_422(client):
     resp = client.post("/api/v1/auth/login", json={"code": ""})

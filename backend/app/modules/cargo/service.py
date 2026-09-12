@@ -1,4 +1,5 @@
 """货域（发货单）业务逻辑（F2）。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -84,9 +85,9 @@ def list_my_cargo(
         stmt = stmt.where(Cargo.status == status)
     total = len(db.execute(stmt).scalars().all())
     items = list(
-        db.execute(
-            stmt.order_by(Cargo.id.desc()).offset((page - 1) * size).limit(size)
-        ).scalars().all()
+        db.execute(stmt.order_by(Cargo.id.desc()).offset((page - 1) * size).limit(size))
+        .scalars()
+        .all()
     )
     return total, items
 

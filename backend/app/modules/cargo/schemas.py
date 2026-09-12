@@ -1,4 +1,5 @@
 """货域（发货单）请求/响应模型（F2）。"""
+
 from __future__ import annotations
 
 from datetime import date

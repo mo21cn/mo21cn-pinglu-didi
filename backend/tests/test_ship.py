@@ -4,6 +4,7 @@
 港口方审核通过/驳回、重复审核拒绝、非船东 403、非港口方审核 403、
 过期证书校验、越权 404、待审核列表。
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -31,6 +32,7 @@ def _payload(**overrides) -> dict:
 
 # ---------- 备案 ----------
 
+
 def test_register_ship_defaults_pending(owner, client):
     resp = client.post(API, json=_payload(), headers=owner["_headers"])
     assert resp.status_code == 200, resp.text
@@ -39,9 +41,7 @@ def test_register_ship_defaults_pending(owner, client):
 
 
 def test_register_expired_cert_rejected(owner, client):
-    resp = client.post(
-        API, json=_payload(cert_expiry="2020-01-01"), headers=owner["_headers"]
-    )
+    resp = client.post(API, json=_payload(cert_expiry="2020-01-01"), headers=owner["_headers"])
     assert resp.status_code == 422
 
 
@@ -56,6 +56,7 @@ def test_register_draft_validation(owner, client):
 
 
 # ---------- 列表与详情 ----------
+
 
 def test_list_my_fleet_with_filter(owner, client):
     client.post(API, json=_payload(ship_name="A船"), headers=owner["_headers"])
@@ -72,12 +73,17 @@ def test_other_owner_cannot_see(owner, client):
     # other 默认 shipper，先切 owner
     h = _auth(other["access_token"])
     client.post("/api/v1/auth/bind-role", json={"role": "owner"}, headers=h)
-    h = _auth(client.post("/api/v1/auth/switch-role", json={"role": "owner"}, headers=h).json()["access_token"])
+    h = _auth(
+        client.post("/api/v1/auth/switch-role", json={"role": "owner"}, headers=h).json()[
+            "access_token"
+        ]
+    )
     resp = client.get(f"{API}/{sid}", headers=h)
     assert resp.status_code == 404
 
 
 # ---------- 编辑与降级重审 ----------
+
 
 def test_update_pending_ship(owner, client):
     sid = client.post(API, json=_payload(), headers=owner["_headers"]).json()["id"]
@@ -93,13 +99,12 @@ def test_verified_update_critical_back_to_pending(owner, port_user, client):
     )
     assert resp.json()["status"] == "verified"
     # 改载重吨（关键信息）→ 自动降级待审
-    resp = client.patch(
-        f"{API}/{sid}", json={"deadweight_t": 2500}, headers=owner["_headers"]
-    )
+    resp = client.patch(f"{API}/{sid}", json={"deadweight_t": 2500}, headers=owner["_headers"])
     assert resp.json()["status"] == "pending_verify"
 
 
 # ---------- 审核 ----------
+
 
 def test_verify_approve_and_reject(owner, port_user, client):
     sid1 = client.post(API, json=_payload(cert_no="C-1"), headers=owner["_headers"]).json()["id"]
@@ -121,7 +126,9 @@ def test_verify_approve_and_reject(owner, port_user, client):
 def test_double_verify_rejected(owner, port_user, client):
     sid = client.post(API, json=_payload(), headers=owner["_headers"]).json()["id"]
     client.post(f"{API}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"])
-    resp = client.post(f"{API}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"])
+    resp = client.post(
+        f"{API}/{sid}/verify", json={"approved": True}, headers=port_user["_headers"]
+    )
     assert resp.status_code == 400
 
 

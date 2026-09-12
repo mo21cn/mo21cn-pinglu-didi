@@ -1,4 +1,5 @@
 """订单模块 Pydantic 模型（F6）。"""
+
 from __future__ import annotations
 
 from datetime import date, datetime

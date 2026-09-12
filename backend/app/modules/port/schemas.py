@@ -1,4 +1,5 @@
 """港域（泊位与泊位预约）请求/响应模型（F4）。"""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -20,9 +21,7 @@ class BerthCreate(BaseModel):
     max_dwt: float = Field(..., gt=0, le=50000, description="允许靠泊最大载重吨")
     max_draft: float = Field(..., gt=0, le=15, description="泊位允许吃水（米）")
     allowed_ship_types: list[Literal["bulk", "general", "container", "tanker"]] = Field(
-        default_factory=lambda: list[Literal["bulk", "general", "container", "tanker"]](
-            ["bulk"]
-        ),
+        default_factory=lambda: list[Literal["bulk", "general", "container", "tanker"]](["bulk"]),
         min_length=1,
         description="适靠船型",
     )

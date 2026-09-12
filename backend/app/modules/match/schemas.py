@@ -1,4 +1,5 @@
 """撮合模块（match）请求/响应模型（F5）。"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

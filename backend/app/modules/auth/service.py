@@ -5,6 +5,7 @@
 2. 用户 upsert：首次登录自动注册并绑定所选角色。
 3. 角色绑定与切换的业务校验。
 """
+
 from __future__ import annotations
 
 import logging
@@ -105,8 +106,13 @@ def upsert_user(db: Session, openid: str, unionid: str, nickname: str, role: str
     """按 openid 查找用户；不存在则注册（新用户绑定首个角色）。"""
     user = db.query(User).filter(User.openid == openid).first()
     if user is None:
-        user = User(openid=openid, unionid=unionid or None, nickname=nickname, roles=[role],
-                    current_role=role)
+        user = User(
+            openid=openid,
+            unionid=unionid or None,
+            nickname=nickname,
+            roles=[role],
+            current_role=role,
+        )
         db.add(user)
     else:
         # 老用户：绑定新角色（幂等），昵称仅在传入非空时更新

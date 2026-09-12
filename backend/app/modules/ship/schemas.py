@@ -1,4 +1,5 @@
 """船域（船舶备案）请求/响应模型（F3）。"""
+
 from __future__ import annotations
 
 from datetime import date

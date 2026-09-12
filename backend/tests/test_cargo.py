@@ -3,6 +3,7 @@
 覆盖：创建/直发布、列表与状态筛选、draft 编辑、发布/取消状态机、
 非法转移拒绝、非货主 403、同港校验、过期日期校验、越权 404。
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -31,6 +32,7 @@ def _payload(**overrides) -> dict:
 
 # ---------- 创建 ----------
 
+
 def test_create_draft_shipment(shipper, client):
     resp = client.post(API, json=_payload(), headers=shipper["_headers"])
     assert resp.status_code == 200, resp.text
@@ -50,9 +52,7 @@ def test_create_same_port_rejected(shipper, client):
 
 
 def test_create_past_date_rejected(shipper, client):
-    resp = client.post(
-        API, json=_payload(expect_date="2020-01-01"), headers=shipper["_headers"]
-    )
+    resp = client.post(API, json=_payload(expect_date="2020-01-01"), headers=shipper["_headers"])
     assert resp.status_code == 422
 
 
@@ -68,9 +68,10 @@ def test_create_non_shipper_403(owner, client):
 
 # ---------- 列表 ----------
 
+
 def test_list_my_shipments_with_status_filter(shipper, client):
-    client.post(API, json=_payload(), headers=shipper["_headers"])                       # draft
-    client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"])       # published
+    client.post(API, json=_payload(), headers=shipper["_headers"])  # draft
+    client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"])  # published
     resp = client.get(API, params={"status": "published"}, headers=shipper["_headers"])
     assert resp.status_code == 200
     body = resp.json()
@@ -80,6 +81,7 @@ def test_list_my_shipments_with_status_filter(shipper, client):
 
 # ---------- 编辑 ----------
 
+
 def test_update_draft_shipment(shipper, client):
     sid = client.post(API, json=_payload(), headers=shipper["_headers"]).json()["id"]
     resp = client.patch(f"{API}/{sid}", json={"weight_t": 950}, headers=shipper["_headers"])
@@ -88,33 +90,47 @@ def test_update_draft_shipment(shipper, client):
 
 
 def test_update_published_rejected(shipper, client):
-    sid = client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"]).json()["id"]
+    sid = client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"]).json()[
+        "id"
+    ]
     resp = client.patch(f"{API}/{sid}", json={"weight_t": 950}, headers=shipper["_headers"])
     assert resp.status_code == 400
 
 
 # ---------- 状态机 ----------
 
+
 def test_publish_then_cancel(shipper, client):
     sid = client.post(API, json=_payload(), headers=shipper["_headers"]).json()["id"]
-    assert client.post(f"{API}/{sid}/publish", headers=shipper["_headers"]).json()["status"] == "published"
-    assert client.post(f"{API}/{sid}/cancel", headers=shipper["_headers"]).json()["status"] == "cancelled"
+    assert (
+        client.post(f"{API}/{sid}/publish", headers=shipper["_headers"]).json()["status"]
+        == "published"
+    )
+    assert (
+        client.post(f"{API}/{sid}/cancel", headers=shipper["_headers"]).json()["status"]
+        == "cancelled"
+    )
 
 
 def test_double_publish_rejected(shipper, client):
-    sid = client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"]).json()["id"]
+    sid = client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"]).json()[
+        "id"
+    ]
     resp = client.post(f"{API}/{sid}/publish", headers=shipper["_headers"])
     assert resp.status_code == 400
 
 
 def test_cancel_twice_rejected(shipper, client):
-    sid = client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"]).json()["id"]
+    sid = client.post(API, json=_payload(publish_now=True), headers=shipper["_headers"]).json()[
+        "id"
+    ]
     client.post(f"{API}/{sid}/cancel", headers=shipper["_headers"])
     resp = client.post(f"{API}/{sid}/cancel", headers=shipper["_headers"])
     assert resp.status_code == 400
 
 
 # ---------- 越权 ----------
+
 
 def test_other_shipper_cannot_access(shipper, client):
     sid = client.post(API, json=_payload(), headers=shipper["_headers"]).json()["id"]

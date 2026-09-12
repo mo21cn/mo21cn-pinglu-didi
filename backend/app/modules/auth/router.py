@@ -6,6 +6,7 @@
 - POST /api/v1/auth/bind-role      绑定新角色
 - GET  /api/v1/auth/me             获取当前用户信息
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,9 +33,7 @@ async def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenRespo
     try:
         wx = await service.code2session(body.code, body.dev_code)
     except service.WechatAuthError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     user = service.upsert_user(db, wx["openid"], wx["unionid"], body.nickname, role="shipper")
     token = create_access_token(user.id, user.openid, user.current_role)
@@ -81,8 +80,13 @@ def bind_role(
     db.commit()
     db.refresh(user)
     return UserInfoResponse(
-        user_id=user.id, openid=user.openid, nickname=user.nickname, avatar=user.avatar,
-        phone=user.phone, roles=user.roles or [], current_role=user.current_role,
+        user_id=user.id,
+        openid=user.openid,
+        nickname=user.nickname,
+        avatar=user.avatar,
+        phone=user.phone,
+        roles=user.roles or [],
+        current_role=user.current_role,
         status=user.status,
     )
 
@@ -90,7 +94,12 @@ def bind_role(
 @router.get("/me", response_model=UserInfoResponse, summary="当前用户信息")
 def me(user: User = Depends(get_current_user)) -> UserInfoResponse:
     return UserInfoResponse(
-        user_id=user.id, openid=user.openid, nickname=user.nickname, avatar=user.avatar,
-        phone=user.phone, roles=user.roles or [], current_role=user.current_role,
+        user_id=user.id,
+        openid=user.openid,
+        nickname=user.nickname,
+        avatar=user.avatar,
+        phone=user.phone,
+        roles=user.roles or [],
+        current_role=user.current_role,
         status=user.status,
     )

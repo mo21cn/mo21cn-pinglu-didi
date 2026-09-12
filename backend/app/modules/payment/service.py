@@ -12,6 +12,7 @@
 4. 全链路留痕——每次迁移落时间戳 + 双流水号。
 5. 金额锁定——创建支付单时锁定订单运费，后续订单字段变化不影响。
 """
+
 from __future__ import annotations
 
 import uuid
@@ -51,12 +52,8 @@ def create_payment(db: Session, payer_id: int, data: PaymentCreate) -> Payment:
         raise PaymentStateError("订单运费为面议，须先与船东议定运价再支付")
 
     # 防重复支付：锁订单行，串行化同一订单的并发发起
-    db.execute(
-        select(Order).where(Order.id == order.id).with_for_update()
-    ).scalar_one()
-    existing = db.execute(
-        select(Payment).where(Payment.order_id == order.id)
-    ).scalar_one_or_none()
+    db.execute(select(Order).where(Order.id == order.id).with_for_update()).scalar_one()
+    existing = db.execute(select(Payment).where(Payment.order_id == order.id)).scalar_one_or_none()
     if existing is not None:
         raise PaymentConflictError("该订单已存在支付单，不可重复发起")
 
@@ -98,9 +95,7 @@ def settle_on_cancel(db: Session, order: Order) -> None:
     - pending → closed（未付关闭）
     - 无支付单/已终态支付单 → 无操作
     """
-    payment = db.execute(
-        select(Payment).where(Payment.order_id == order.id)
-    ).scalar_one_or_none()
+    payment = db.execute(select(Payment).where(Payment.order_id == order.id)).scalar_one_or_none()
     if payment is None:
         return
     if payment.status == "paid":
@@ -117,9 +112,7 @@ def get_payment(db: Session, payment_id: int) -> Payment | None:
 
 
 def get_by_order(db: Session, order_id: int) -> Payment | None:
-    return db.execute(
-        select(Payment).where(Payment.order_id == order_id)
-    ).scalar_one_or_none()
+    return db.execute(select(Payment).where(Payment.order_id == order_id)).scalar_one_or_none()
 
 
 def is_participant(payment: Payment, user_id: int) -> bool:
