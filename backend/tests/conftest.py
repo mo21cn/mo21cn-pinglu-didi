@@ -45,6 +45,12 @@ def client(monkeypatch):
     test_session_factory = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(bind=test_engine)
 
+    # 迁移管理的表（ent_ 前缀）不进 create_all，这里显式应用迁移，
+    # 保证测试库结构与 migrations/ 保持一致（见 docs/06-database-migration.md）
+    from migrate import apply_pending
+
+    apply_pending(test_engine)
+
     def override_get_db():
         db = test_session_factory()
         try:

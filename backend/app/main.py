@@ -31,8 +31,15 @@ app = FastAPI(
 
 @app.on_event("startup")
 def on_startup() -> None:
-    """启动钩子：MVP 阶段自动建表（正式迁移由 Alembic 接管后移除）。"""
-    Base.metadata.create_all(bind=engine)
+    """启动钩子：自动建表，但**排除迁移管理的表**。
+
+    委托支线新增表统一使用 `ent_` 前缀（`MIGRATION_MANAGED_TABLE_PREFIX`），
+    由 `backend/migrations/` + `python migrate.py` 创建，不在这里自动建，
+    以保证结构变更始终有版本记录（决策见 docs/entrust/decisions/0001）。
+    """
+    prefix = settings.MIGRATION_MANAGED_TABLE_PREFIX
+    auto_tables = [t for t in Base.metadata.sorted_tables if not t.name.startswith(prefix)]
+    Base.metadata.create_all(bind=engine, tables=auto_tables)
 
 
 @app.get("/healthz", tags=["system"])

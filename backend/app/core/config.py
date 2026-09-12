@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     DB_USER: str = "root"
     DB_PASSWORD: str = ""
 
+    # ---- 数据库迁移 ----
+    # 由 backend/migrations/ 管理的表名前缀；这些表不进 create_all，
+    # 必须经 `python migrate.py` 创建（见 docs/06-database-migration.md）
+    MIGRATION_MANAGED_TABLE_PREFIX: str = "ent_"
+
     # ---- 认证（JWT） ----
     JWT_SECRET_KEY: str = "change-me-in-env"  # 生产由 CI/CD secrets 注入
     JWT_ALGORITHM: str = "HS256"
