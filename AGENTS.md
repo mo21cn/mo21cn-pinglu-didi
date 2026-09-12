@@ -60,6 +60,7 @@
 
 - 接口层：校验 / 身份 / 转换。服务层：状态、权限、事务。Agent 层：只做理解与提案，经受限服务写入。
 - Python：Ruff（`line-length=100`）+ `ruff format` + mypy `strict`。
+- **`ruff` 版本精确锁定**（DR-0004）：本地安装的 ruff 必须与 `backend/requirements.txt` 中的锁定版本 `0.16.7` **完全一致**，否则会出现"本地绿、CI 红"。升级走独立 PR：改版本号 + `ruff format` 全量重跑（单独 `style` 提交）。`mypy` 保持区间，升级产生的新报错视为真实信号。
 - 小程序：沿用现有 JS 风格，**第一阶段不顺带重写前端**。
 - 新增页面须注册路由，且通过 `node scripts/verify_miniapp.js` 路由可达检查。
 
@@ -88,8 +89,8 @@
 ```bash
 cd backend
 ruff check app tests            # lint
-ruff format --check app tests   # 格式门禁（CI 阻塞）
-mypy app                        # 类型检查
+ruff format --check app tests   # 格式门禁（CI 阻塞；ruff 版本已锁定 0.16.7，见 DR-0004）
+mypy app migrations migrate.py  # 类型检查
 pytest                          # 单测（APP_ENV=test）
 python migrate.py --status      # 迁移状态
 python migrate.py --verify      # 执行迁移 + 校验 + 断言无待执行（CI 用）

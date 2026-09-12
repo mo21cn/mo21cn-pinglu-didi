@@ -35,7 +35,8 @@ jobs:
         run: ruff check app tests
 
       - name: 格式门禁（ruff format --check，阻塞）
-        # 与本地/CI 的 ruff 版本强相关；若需固定格式化风格请锁定 ruff 版本（见 DR-0004）
+        # ruff 版本已精确锁定在 requirements.txt（DR-0004），保证 CI 与本地结果一致。
+        # 升级 ruff 必须走独立 PR：改版本号 + 全量重跑格式化（单独 style 提交）。
         run: ruff format --check app tests
 
       - name: 类型检查（mypy，阻塞——my 闭环后 0 errors）
