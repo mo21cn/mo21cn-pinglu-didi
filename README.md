@@ -100,12 +100,13 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 
 | 规范 | 文档 |
 |------|------|
+| **甲方实操评审指南（独立跑通 + 验收）** | [docs/甲方实操评审指南.md](docs/甲方实操评审指南.md) |
+| **真机预览部署指南（手机微信体验本机实例）** | [docs/真机预览部署指南.md](docs/真机预览部署指南.md) |
 | 开发环境 | [docs/01-development-environment.md](docs/01-development-environment.md) |
 | 分支管理（Git Flow） | [docs/02-git-flow.md](docs/02-git-flow.md) |
 | 提交规范（Conventional Commits） | [docs/03-commit-convention.md](docs/03-commit-convention.md) |
 | 代码审查 | [docs/04-code-review.md](docs/04-code-review.md) |
 | 环境隔离 | [docs/05-environment-isolation.md](docs/05-environment-isolation.md) |
-| 汇报演示脚本 | [docs/汇报演示脚本.md](docs/汇报演示脚本.md) |
 | 汇报演示脚本（操作手册 + 答辩口径） | [docs/汇报演示脚本.md](docs/汇报演示脚本.md) |
 | 三级页效果预览（HTML） | [合同页](docs/三级页-合同页-效果预览.html) · [S2 支付与撮合](docs/三级页-S2-支付与撮合-效果预览.html) · [S3 港口域](docs/三级页-S3-港口域-效果预览.html) |
 

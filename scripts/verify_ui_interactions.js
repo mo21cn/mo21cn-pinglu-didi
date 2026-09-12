@@ -519,13 +519,15 @@ section('⑤ 静态防线')
     check('auth.js 导出 enterRole / ensureDevAccount',
       /module\.exports[\s\S]*enterRole/.test(authSrc) && /ensureDevAccount/.test(authSrc))
     const ER = authSrc.match(/function enterRole\([\s\S]*?\n\}/)
+    // 只断言「顺序」，不绑定调用参数写法（login 可带 role 以便回退预览身份）
+    const erSrc = ER ? ER[0] : ''
+    const iMap = erSrc.indexOf('ensureDevAccount(role)')
+    const iLogin = erSrc.search(/login\(/)
+    const iBind = erSrc.indexOf('bindRole(role')
+    const iSwitch = erSrc.indexOf('switchRole(role')
     check('auth.js enterRole 内部顺序 映射账号 → login → bindRole → switchRole',
-      !!ER &&
-        ER[0].indexOf('ensureDevAccount(role)') >= 0 &&
-        ER[0].indexOf('ensureDevAccount(role)') < ER[0].indexOf('login(silent)') &&
-        ER[0].indexOf('login(silent)') < ER[0].indexOf('bindRole(role') &&
-        ER[0].indexOf('bindRole(role') < ER[0].indexOf('switchRole(role'),
-      ER ? ER[0].slice(0, 60).replace(/\n/g, ' ') : 'not found')
+      iMap >= 0 && iMap < iLogin && iLogin < iBind && iBind < iSwitch,
+      ER ? `map=${iMap} login=${iLogin} bind=${iBind} switch=${iSwitch}` : 'not found')
     check('DEV_ROLE_CODE 映射到演示账号（映射错=登录空账号=列表全空）',
       /DEV_ROLE_CODE\s*=\s*\{[^}]*shipper:\s*'seed-shipper'[^}]*owner:\s*'seed-owner'/.test(authSrc),
       (authSrc.match(/DEV_ROLE_CODE\s*=\s*\{[^}]*\}/) || ['?'])[0])
@@ -708,6 +710,24 @@ section('⑤ 静态防线')
     const d0 = RQ.describeError({ errMsg: 'request:fail 神秘错误' })
     check('describeError · 兜底给人话且保留原始 errMsg',
       d0.cause === '网络异常，请稍后重试' && /神秘错误/.test(d0.hint), JSON.stringify(d0))
+
+    // —— 真机 / 模拟器的提示必须分流 ——
+    // 开发者工具里的「不校验合法域名」只对电脑模拟器生效，真机照做无效。
+    // 若提示不区分环境，真机用户会被指向一个永远修不好问题的开关（真实踩坑）。
+    {
+      const hadWx = Object.prototype.hasOwnProperty.call(global, 'wx')
+      const savedWx = global.wx
+      global.wx = { getDeviceInfo: () => ({ platform: 'android' }) }
+      try {
+        const dReal = RQ.describeError({ errMsg: 'request:fail url not in domain list' })
+        check('describeError · 真机提示指向「开发调试」而非工具设置',
+          dReal.cause === '请求域名未通过校验' && /开发调试/.test(dReal.hint),
+          dReal.hint.slice(0, 50))
+      } finally {
+        if (hadWx) global.wx = savedWx
+        else delete global.wx
+      }
+    }
   }
 
   // —— 开发期身份稳定：AppID 是占位值时 wx.login 拿不到真实身份，

@@ -18,6 +18,12 @@ class LoginRequest(BaseModel):
 
     code: str = Field(..., min_length=1, max_length=128, description="wx.login 返回的临时凭证")
     nickname: str = Field(default="", max_length=64, description="昵称（可选，首次注册时使用")
+    dev_code: str = Field(
+        default="",
+        max_length=64,
+        description="预览期回退身份（演示账号 code，如 seed-shipper）。"
+        "仅当后端尚无微信凭据/仍处 Mock 时启用，配齐 WX_APP_SECRET 后自动忽略。",
+    )
 
 
 class SwitchRoleRequest(BaseModel):
