@@ -30,7 +30,7 @@ router = APIRouter()
 async def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     """wx.login 的 code 换 openid；新用户自动注册，默认角色为货主（shipper）。"""
     try:
-        wx = await service.code2session(body.code)
+        wx = await service.code2session(body.code, body.dev_code)
     except service.WechatAuthError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)

@@ -25,8 +25,28 @@ class WechatAuthError(Exception):
     """微信登录失败（code 无效/网络异常等）。"""
 
 
-async def code2session(code: str) -> dict[str, str]:
+# 本地种子身份码前缀：seed-* / mock-*，只在开发与联调期出现，
+# 真实 wx.login 返回的 code 不会长这样。
+_PREVIEW_DEV_CODE_PREFIXES = ("seed-", "mock-")
+
+
+def _is_preview_dev_code(code: str) -> bool:
+    """是否为本地种子身份码（后端 Mock 模式下「code 即身份」）。"""
+    return code.startswith(_PREVIEW_DEV_CODE_PREFIXES)
+
+
+def _preview_openid(dev_code: str) -> str:
+    """预览期回退 openid：与 seed_demo.py 的演示账号 openid 保持同一命名。"""
+    return f"mock-openid-{dev_code}"
+
+
+async def code2session(code: str, dev_code: str = "") -> dict[str, str]:
     """用临时凭证换取 openid/session_key。
+
+    Args:
+        code: wx.login 返回的临时凭证；开发期也可能是种子身份码（如 seed-shipper）。
+        dev_code: 预览期回退身份（演示账号 code）。仅当后端拿不到真实微信身份时启用，
+            保证真机预览也能命中演示数据，而不是每次登录新建一个空账号。
 
     Returns:
         {"openid": ..., "unionid": ...}（unionid 可能为空）
@@ -35,10 +55,25 @@ async def code2session(code: str) -> dict[str, str]:
         WechatAuthError: 调用失败或微信返回错误码。
     """
     if settings.WECHAT_MOCK:
-        # Mock 模式：openid 由 code 确定性生成，便于开发/测试复现同一用户
+        # Mock 模式：openid 由 code 确定性生成，便于开发/测试复现同一用户。
+        # 但真机 wx.login 的 code 每次都不同 —— 直接拿它当身份，等于每次登录都新建空账号，
+        # 表现与「功能故障」完全一致。故 code 非种子身份时改用客户端附带的预览回退身份。
+        if not _is_preview_dev_code(code) and dev_code and not settings.is_production:
+            logger.warning(
+                "WECHAT_MOCK 下 code 非种子身份，回退预览身份 openid=%s", _preview_openid(dev_code)
+            )
+            return {"openid": _preview_openid(dev_code), "unionid": ""}
+        return {"openid": f"mock-openid-{code}", "unionid": ""}
+
+    if not settings.is_production and _is_preview_dev_code(code):
+        # 真实凭据就绪（WECHAT_MOCK=false）后，本地校验脚本仍以 seed-* 直连后端；
+        # 真实登录的 code 不可能长这样，故开发期保留此直通，避免本地校验被微信链路卡住。
         return {"openid": f"mock-openid-{code}", "unionid": ""}
 
     if not settings.WX_APP_ID or not settings.WX_APP_SECRET:
+        if not settings.is_production and dev_code:
+            logger.warning("未配置微信凭据，回退预览身份 openid=%s", _preview_openid(dev_code))
+            return {"openid": _preview_openid(dev_code), "unionid": ""}
         raise WechatAuthError("未配置 WX_APP_ID/WX_APP_SECRET（开发环境可设 WECHAT_MOCK=true）")
 
     params = {

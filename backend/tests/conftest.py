@@ -19,6 +19,20 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 from app.models import Base  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def force_wechat_mock(monkeypatch):
+    """所有用例强制微信 Mock 链路。
+
+    config 的 env_file 叠加了 `.env.local`（本机敏感值，不入库）。本机一旦填入真实
+    WX_APP_ID / WX_APP_SECRET，单元测试就会真的去调 code2session —— 网络依赖、超时、
+    不可复现，且会把「真实凭据」当成测试前提。与 test_agent.py 的 force_llm_mock 同理。
+    需要验证真实链路的用例，自行在函数内再 monkeypatch 覆盖。
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "WECHAT_MOCK", True)
+
+
 @pytest.fixture()
 def client(monkeypatch):
     """每个测试用独立的 SQLite 内存库 + TestClient。"""
