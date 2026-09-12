@@ -5,6 +5,7 @@
 
 一个微信用户（openid 唯一）可绑定多个角色，登录时选定当前角色。
 """
+
 from __future__ import annotations
 
 from datetime import datetime

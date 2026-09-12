@@ -1,4 +1,5 @@
 """健康检查与基础冒烟测试（不依赖数据库，供 CI 冒烟）。"""
+
 from fastapi.testclient import TestClient
 
 from app.main import app

@@ -9,6 +9,7 @@
     from app.core.config import get_settings
     settings = get_settings()   # 进程内单例，惰性加载
 """
+
 from __future__ import annotations
 
 import os

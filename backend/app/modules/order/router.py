@@ -7,6 +7,7 @@
 - POST   /api/v1/order/orders/{id}/complete 货主签收（shipped→completed）
 - POST   /api/v1/order/orders/{id}/cancel  撤单（matched→cancelled，任一方）
 """
+
 from __future__ import annotations
 
 from typing import Any

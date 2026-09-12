@@ -4,6 +4,7 @@
 - POST /api/v1/match/cargos/{cargo_id}/ships   为货源找候选船（货主）
 - POST /api/v1/match/ships/{ship_id}/cargos    为船找候选货源（船东）
 """
+
 from __future__ import annotations
 
 from typing import Any

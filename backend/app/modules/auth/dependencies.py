@@ -1,4 +1,5 @@
 """认证相关的 FastAPI 依赖：解析 Bearer JWT 并加载当前用户。"""
+
 from __future__ import annotations
 
 import jwt
@@ -37,7 +38,5 @@ def get_current_user(
 
     user = db.get(User, int(payload["sub"]))
     if user is None or user.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已被禁用"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已被禁用")
     return user

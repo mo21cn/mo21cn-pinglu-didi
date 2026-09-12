@@ -4,6 +4,7 @@
 - payload 中固定携带 user_id / openid / role / jti，服务端可据此审计。
 - 过期时间由配置统一管理（JWT_EXPIRE_MINUTES）。
 """
+
 from __future__ import annotations
 
 import uuid

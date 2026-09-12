@@ -5,6 +5,7 @@
 2. Agent 无直写 —— 解析产物是"草稿"，写操作由用户确认后走业务领域 API。
 3. 交易全链路留痕 —— 每次调用落 AgentCall 审计行。
 """
+
 from app.modules.agent.router import router
 
 __all__ = ["router"]

@@ -12,6 +12,7 @@
 4. 状态机：confirmed 不可再确认/驳回；cancelled/completed 不可撤销
 5. 权限：船东不可审核、港口方不可申请预约
 """
+
 from __future__ import annotations
 
 import os
@@ -76,14 +77,17 @@ def _create_verified_ship(client, owner, port_user, **overrides) -> int:
 
 
 def _create_berth(client, port_user, **overrides) -> int:
-    resp = client.post(f"{API}/berths", json=_berth_payload(**overrides), headers=port_user["_headers"])
+    resp = client.post(
+        f"{API}/berths", json=_berth_payload(**overrides), headers=port_user["_headers"]
+    )
     assert resp.status_code == 200, resp.text
     return resp.json()["id"]
 
 
 def _apply_appt(client, owner, berth_id: int, ship_id: int, start_h=24, end_h=48) -> dict:
     resp = client.post(
-        f"{API}/appts", json=_appt_payload(berth_id, ship_id, start_h, end_h),
+        f"{API}/appts",
+        json=_appt_payload(berth_id, ship_id, start_h, end_h),
         headers=owner["_headers"],
     )
     assert resp.status_code == 200, resp.text
@@ -91,6 +95,7 @@ def _apply_appt(client, owner, berth_id: int, ship_id: int, start_h=24, end_h=48
 
 
 # ---------- 泊位管理 ----------
+
 
 def test_create_berth_by_port(client, port_user):
     resp = client.post(f"{API}/berths", json=_berth_payload(), headers=port_user["_headers"])
@@ -133,13 +138,24 @@ def test_list_and_update_berth(client, port_user):
 
 # ---------- 预约申请硬校验 ----------
 
+
 def test_appt_requires_verified_ship(client, owner, port_user):
     berth_id = _create_berth(client, port_user)
-    resp = client.post(SHIP_API, json={
-        "ship_name": "未审船", "ship_type": "bulk", "deadweight_t": 2000,
-        "length_m": 90, "width_m": 15, "draft_m": 4.0,
-        "home_port": "NNG", "cert_no": "CERT-P", "cert_expiry": "2030-12-31",
-    }, headers=owner["_headers"])
+    resp = client.post(
+        SHIP_API,
+        json={
+            "ship_name": "未审船",
+            "ship_type": "bulk",
+            "deadweight_t": 2000,
+            "length_m": 90,
+            "width_m": 15,
+            "draft_m": 4.0,
+            "home_port": "NNG",
+            "cert_no": "CERT-P",
+            "cert_expiry": "2030-12-31",
+        },
+        headers=owner["_headers"],
+    )
     pending_ship_id = resp.json()["id"]
     resp = client.post(
         f"{API}/appts", json=_appt_payload(berth_id, pending_ship_id), headers=owner["_headers"]
@@ -191,7 +207,9 @@ def test_appt_ship_type_not_allowed(client, owner, port_user):
 def test_appt_inactive_berth_rejected(client, owner, port_user):
     berth_id = _create_berth(client, port_user)
     ship_id = _create_verified_ship(client, owner, port_user)
-    client.patch(f"{API}/berths/{berth_id}", json={"status": "inactive"}, headers=port_user["_headers"])
+    client.patch(
+        f"{API}/berths/{berth_id}", json={"status": "inactive"}, headers=port_user["_headers"]
+    )
     resp = client.post(
         f"{API}/appts", json=_appt_payload(berth_id, ship_id), headers=owner["_headers"]
     )
@@ -200,6 +218,7 @@ def test_appt_inactive_berth_rejected(client, owner, port_user):
 
 
 # ---------- 确认流程与防超卖（核心） ----------
+
 
 def _confirm(client, port_user, appt_id: int):
     return client.post(f"{API}/appts/{appt_id}/confirm", headers=port_user["_headers"])
@@ -234,7 +253,8 @@ def test_oversell_blocked_same_window(client, owner, port_user):
     assert "档期冲突" in resp.json()["detail"]
     # B 仍为 pending，可由港口方驳回
     resp = client.post(
-        f"{API}/appts/{appt_b['id']}/reject", json={"reason": "档期已满"},
+        f"{API}/appts/{appt_b['id']}/reject",
+        json={"reason": "档期已满"},
         headers=port_user["_headers"],
     )
     assert resp.status_code == 200 and resp.json()["status"] == "rejected"
@@ -260,9 +280,7 @@ def test_capacity_two_allows_double_booking(client, owner, port_user):
         _create_verified_ship(client, owner, port_user, ship_name=f"船{i}", cert_no=f"C-{i}")
         for i in range(3)
     ]
-    appts = [
-        _apply_appt(client, owner, berth_id, s, start_h=24, end_h=48) for s in ships
-    ]
+    appts = [_apply_appt(client, owner, berth_id, s, start_h=24, end_h=48) for s in ships]
     assert _confirm(client, port_user, appts[0]["id"]).status_code == 200
     assert _confirm(client, port_user, appts[1]["id"]).status_code == 200
     assert _confirm(client, port_user, appts[2]["id"]).status_code == 409
@@ -286,6 +304,7 @@ def test_cancel_releases_window(client, owner, port_user):
 
 
 # ---------- 状态机与权限 ----------
+
 
 def test_state_machine_guards(client, owner, port_user):
     berth_id = _create_berth(client, port_user)
@@ -316,9 +335,7 @@ def test_cancel_only_by_applier(client, owner, port_user, shipper):
 
 
 def test_port_cannot_apply_appt(client, port_user):
-    resp = client.post(
-        f"{API}/appts", json=_appt_payload(1, 1), headers=port_user["_headers"]
-    )
+    resp = client.post(f"{API}/appts", json=_appt_payload(1, 1), headers=port_user["_headers"])
     assert resp.status_code == 403
 
 

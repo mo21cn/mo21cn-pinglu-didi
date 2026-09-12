@@ -2,6 +2,7 @@
 
 各角色用户通过 Mock 登录创建，再 bind-role + switch-role 组合出多角色账号。
 """
+
 from __future__ import annotations
 
 import os

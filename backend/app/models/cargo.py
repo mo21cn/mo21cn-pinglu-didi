@@ -6,6 +6,7 @@
 
 硬校验：吨位>0、起讫港不同、期望日期不早于今天。
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -42,9 +43,7 @@ class Cargo(Base):
     remark: Mapped[str] = mapped_column(String(255), default="", comment="备注")
     # draft | published | matched | shipped | completed | cancelled
     status: Mapped[str] = mapped_column(String(16), default="draft", index=True, comment="状态")
-    created_at: Mapped[str] = mapped_column(
-        DateTime, server_default=func.now(), comment="创建时间"
-    )
+    created_at: Mapped[str] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at: Mapped[str] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间"
     )

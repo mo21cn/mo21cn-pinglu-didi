@@ -1,4 +1,5 @@
 """船域（船舶备案）业务逻辑（F3）。"""
+
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -38,8 +39,16 @@ def update_ship(db: Session, ship: Ship, data: ShipUpdate) -> Ship:
     if ship.status == "rejected":
         raise ShipStateError("已驳回的备案不可编辑，请重新提交新备案")
     changes = data.model_dump(exclude_unset=True)
-    critical = ("ship_name", "ship_type", "deadweight_t", "length_m", "width_m", "draft_m",
-                "cert_no", "cert_expiry")
+    critical = (
+        "ship_name",
+        "ship_type",
+        "deadweight_t",
+        "length_m",
+        "width_m",
+        "draft_m",
+        "cert_no",
+        "cert_expiry",
+    )
     touched_critical = any(field in changes for field in critical)
     for field, value in changes.items():
         setattr(ship, field, value)
@@ -76,9 +85,9 @@ def list_my_ships(
         stmt = stmt.where(Ship.status == ship_status)
     total = len(db.execute(stmt).scalars().all())
     items = list(
-        db.execute(
-            stmt.order_by(Ship.id.desc()).offset((page - 1) * size).limit(size)
-        ).scalars().all()
+        db.execute(stmt.order_by(Ship.id.desc()).offset((page - 1) * size).limit(size))
+        .scalars()
+        .all()
     )
     return total, items
 

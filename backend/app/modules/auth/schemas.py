@@ -1,4 +1,5 @@
 """认证模块的请求/响应模型（F1）。"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

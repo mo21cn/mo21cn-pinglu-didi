@@ -25,5 +25,9 @@ pytest-asyncio>=0.24,<1.0
 pytest-cov>=5.0,<6.0
 
 # ===== 代码质量 =====
-ruff>=0.6,<1.0
+# ruff 精确锁定（DR-0004）：0.x 次版本会改变 `ruff format` 排版风格，
+# 区间约束会让 `ruff format --check` 门禁随上游发布随机变红。
+# 升级流程见 docs/entrust/decisions/0004-工具链版本锁定.md：改版本号 + 全量重跑格式化，独立 PR。
+ruff==0.16.7
+# mypy 有意保持区间：升级带来的新报错多为真实类型问题，视为有价值信号。
 mypy>=1.11,<2.0

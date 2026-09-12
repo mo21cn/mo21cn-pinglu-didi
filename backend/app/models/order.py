@@ -11,6 +11,7 @@ completed_at/cancelled_at），撤单记录原因。
 创建时 FOR UPDATE 锁货源行串行化并发出单（MySQL 生效，
 SQLite 测试环境单连接天然串行）。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -30,18 +31,12 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    cargo_id: Mapped[int] = mapped_column(
-        ForeignKey("cargo.id"), index=True, comment="货源 ID"
-    )
-    ship_id: Mapped[int] = mapped_column(
-        ForeignKey("ships.id"), index=True, comment="承运船舶 ID"
-    )
+    cargo_id: Mapped[int] = mapped_column(ForeignKey("cargo.id"), index=True, comment="货源 ID")
+    ship_id: Mapped[int] = mapped_column(ForeignKey("ships.id"), index=True, comment="承运船舶 ID")
     shipper_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), index=True, comment="货主用户 ID"
     )
-    owner_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"), index=True, comment="船东用户 ID"
-    )
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, comment="船东用户 ID")
     # 成交运费（元）；创建时取入参或货源出价
     freight_price: Mapped[float | None] = mapped_column(
         Numeric(12, 2), nullable=True, comment="成交运费（元），空为面议"
@@ -54,9 +49,7 @@ class Order(Base):
     matched_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), comment="撮合成交时间"
     )
-    shipped_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, comment="启运时间"
-    )
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="启运时间")
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, comment="签收时间"
     )

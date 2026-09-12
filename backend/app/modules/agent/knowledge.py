@@ -8,6 +8,7 @@
 - embedding 向量检索留 ``EMBEDDING_PROVIDER`` 配置替换点（后续接
   向量库/远程 embedding API 时仅替换 ``search`` 实现，文档层不变）。
 """
+
 from __future__ import annotations
 
 import math
@@ -39,9 +40,17 @@ def _port(idx: str, name: str, code: str, kind: str, desc: str) -> KnowledgeDoc:
 
 KNOWLEDGE_BASE: list[KnowledgeDoc] = [
     # ---- 航线港口（13 个，一港一篇，支持单港精确命中） ----
-    _port("nng", "南宁", "NNG", "内河港", "平陆运河江海联运枢纽，运河起点，货源腹地覆盖首府经济圈。"),
+    _port(
+        "nng", "南宁", "NNG", "内河港", "平陆运河江海联运枢纽，运河起点，货源腹地覆盖首府经济圈。"
+    ),
     _port("ggu", "贵港", "GGU", "内河港", "广西内河第一大港，煤炭/水泥/钢材等大宗散货核心中转港。"),
-    _port("wuz", "梧州", "WUZ", "内河港", "东向粤港澳大湾区门户，西江黄金水道咽喉，集装箱与件杂货优势明显。"),
+    _port(
+        "wuz",
+        "梧州",
+        "WUZ",
+        "内河港",
+        "东向粤港澳大湾区门户，西江黄金水道咽喉，集装箱与件杂货优势明显。",
+    ),
     _port("bin", "来宾", "BIN", "内河港", "西江中游节点，铝工业与糖业货源为主。"),
     _port("lzh", "柳州", "LZH", "内河港", "工业重镇，钢材、汽车零部件等件杂货货源充足。"),
     _port("bsz", "百色", "BSZ", "内河港", "右江上游节点，铝土矿等资源型货源为主。"),
@@ -210,22 +219,14 @@ class KnowledgeIndex:
             df.update(grams.keys())
         n = max(len(self._doc_grams), 1)
         # idf 权重（平滑，避免除零）
-        self._idf: dict[str, float] = {
-            t: math.log((n + 1) / (c + 1)) + 1.0 for t, c in df.items()
-        }
+        self._idf: dict[str, float] = {t: math.log((n + 1) / (c + 1)) + 1.0 for t, c in df.items()}
 
     def _score(self, query_grams: Counter[str], doc_grams: Counter[str]) -> float:
-        qa: Counter[str] = Counter(
-            {t: w * self._idf.get(t, 1.0) for t, w in query_grams.items()}
-        )
-        da: Counter[str] = Counter(
-            {t: w * self._idf.get(t, 1.0) for t, w in doc_grams.items()}
-        )
+        qa: Counter[str] = Counter({t: w * self._idf.get(t, 1.0) for t, w in query_grams.items()})
+        da: Counter[str] = Counter({t: w * self._idf.get(t, 1.0) for t, w in doc_grams.items()})
         return _cosine(qa, da)
 
-    def search(
-        self, question: str, *, top_k: int = 4
-    ) -> list[tuple[KnowledgeDoc, float]]:
+    def search(self, question: str, *, top_k: int = 4) -> list[tuple[KnowledgeDoc, float]]:
         """检索最相关的 top_k 条知识文档（按相似度降序）。"""
         if not question.strip():
             return []

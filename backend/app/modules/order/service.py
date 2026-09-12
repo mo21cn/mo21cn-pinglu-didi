@@ -11,6 +11,7 @@
    matched → shipped（船东启运）→ completed（货主签收）
    matched → cancelled（任一方撤单，货源释放回撮合池）
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -89,9 +90,7 @@ def create_order(db: Session, shipper_id: int, data: OrderCreate) -> Order:
         raise OrderStateError(f"该组合不满足承运硬约束：{violation}")
 
     # 防重复出单：锁货源行，串行化同一货源的并发下单
-    locked = db.execute(
-        select(Cargo).where(Cargo.id == cargo.id).with_for_update()
-    ).scalar_one()
+    locked = db.execute(select(Cargo).where(Cargo.id == cargo.id).with_for_update()).scalar_one()
     active = db.execute(
         select(func.count())
         .select_from(Order)

@@ -9,6 +9,7 @@
 digest 截断说明：只存摘要不存全文（隐私 + 表膨胀控制），
 原始 prompt/response 的全量留档由后续观测平台（如 LangSmith）承接。
 """
+
 from __future__ import annotations
 
 from datetime import datetime

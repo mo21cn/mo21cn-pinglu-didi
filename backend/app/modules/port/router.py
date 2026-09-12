@@ -16,6 +16,7 @@
 - POST   /api/v1/port/appts/{id}/cancel      撤销预约（船东本人）
 - POST   /api/v1/port/appts/{id}/complete    核销完成（港口方）
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -64,6 +65,7 @@ def _get_appt_or_404(db: Session, appt_id: int) -> BerthAppt:
 
 
 # ---------- 泊位管理（港口方） ----------
+
 
 @router.post("/berths", response_model=BerthResponse, summary="新建泊位")
 def create_berth(
@@ -126,6 +128,7 @@ def berth_schedule(
 
 # ---------- 泊位预约（船东申请） ----------
 
+
 @router.post("/appts", response_model=BerthApptResponse, summary="申请泊位预约")
 def create_appt(
     body: BerthApptCreate,
@@ -157,6 +160,7 @@ def list_my_appts(
 
 # ---------- 预约审核（港口方） ----------
 
+
 @router.get("/appts-review", response_model=BerthApptListResponse, summary="预约审核列表（港口方）")
 def list_review(
     berth_id: int | None = Query(default=None),
@@ -173,7 +177,9 @@ def list_review(
     )
 
 
-@router.post("/appts/{appt_id}/confirm", response_model=BerthApptResponse, summary="确认预约（防超卖）")
+@router.post(
+    "/appts/{appt_id}/confirm", response_model=BerthApptResponse, summary="确认预约（防超卖）"
+)
 def confirm_appt(
     appt_id: int,
     user: User = Depends(get_current_user),
@@ -204,7 +210,9 @@ def reject_appt(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/appts/{appt_id}/cancel", response_model=BerthApptResponse, summary="撤销预约（船东本人）")
+@router.post(
+    "/appts/{appt_id}/cancel", response_model=BerthApptResponse, summary="撤销预约（船东本人）"
+)
 def cancel_appt(
     appt_id: int,
     user: User = Depends(get_current_user),
@@ -218,7 +226,9 @@ def cancel_appt(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
-@router.post("/appts/{appt_id}/complete", response_model=BerthApptResponse, summary="核销完成（港口方）")
+@router.post(
+    "/appts/{appt_id}/complete", response_model=BerthApptResponse, summary="核销完成（港口方）"
+)
 def complete_appt(
     appt_id: int,
     user: User = Depends(get_current_user),

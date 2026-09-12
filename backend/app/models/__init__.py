@@ -1,4 +1,5 @@
 """数据模型包。"""
+
 from app.models.agent import AgentCall
 from app.models.cargo import Cargo
 from app.models.order import Order

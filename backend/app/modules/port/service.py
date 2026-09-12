@@ -7,6 +7,7 @@
 3. MySQL 生产环境确认时对泊位行加 FOR UPDATE 行锁串行化并发确认；
    SQLite 测试环境单连接天然串行。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,12 +30,11 @@ class BerthConflictError(Exception):
 
 # ---------- 泊位 ----------
 
+
 def create_berth(db: Session, data: BerthCreate) -> Berth:
     """新建泊位（默认 active）。"""
     exists = db.execute(
-        select(Berth).where(
-            Berth.port_code == data.port_code, Berth.berth_no == data.berth_no
-        )
+        select(Berth).where(Berth.port_code == data.port_code, Berth.berth_no == data.berth_no)
     ).scalar_one_or_none()
     if exists is not None:
         raise PortStateError(f"泊位 {data.port_code}-{data.berth_no} 已存在")
@@ -65,8 +65,11 @@ def update_berth(db: Session, berth: Berth, data: BerthUpdate) -> Berth:
 
 
 def list_berths(
-    db: Session, port_code: str | None = None, berth_status: str | None = None,
-    page: int = 1, size: int = 20,
+    db: Session,
+    port_code: str | None = None,
+    berth_status: str | None = None,
+    page: int = 1,
+    size: int = 20,
 ) -> tuple[int, list[Berth]]:
     """泊位列表（可按港/状态过滤）。"""
     stmt = select(Berth)
@@ -88,6 +91,7 @@ def get_berth(db: Session, berth_id: int) -> Berth | None:
 
 
 # ---------- 泊位预约 ----------
+
 
 def _overlaps(start: datetime, end: datetime, other_start: datetime, other_end: datetime) -> bool:
     """时间窗重叠判定（左闭右开语义：首尾相接不算重叠）。"""
@@ -222,8 +226,11 @@ def complete_appt(db: Session, appt: BerthAppt) -> BerthAppt:
 
 
 def list_my_appts(
-    db: Session, applier_id: int, appt_status: str | None = None,
-    page: int = 1, size: int = 20,
+    db: Session,
+    applier_id: int,
+    appt_status: str | None = None,
+    page: int = 1,
+    size: int = 20,
 ) -> tuple[int, list[BerthAppt]]:
     """船东自己的预约列表。"""
     stmt = select(BerthAppt).where(BerthAppt.applier_id == applier_id)
@@ -239,8 +246,11 @@ def list_my_appts(
 
 
 def list_berth_appts(
-    db: Session, berth_id: int | None = None, appt_status: str | None = None,
-    page: int = 1, size: int = 20,
+    db: Session,
+    berth_id: int | None = None,
+    appt_status: str | None = None,
+    page: int = 1,
+    size: int = 20,
 ) -> tuple[int, list[BerthAppt]]:
     """港口方查看预约（默认待确认）。"""
     stmt = select(BerthAppt)

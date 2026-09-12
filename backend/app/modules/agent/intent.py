@@ -11,6 +11,7 @@
 
 优先级：合同 > 合规 > 货源解析 > 客服（长尾兜底）。
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -27,13 +28,34 @@ TARGETS: dict[str, str] = {
 
 _CONTRACT_KW = ("合同", "条款", "风险点", "违约责任", "滞期")
 _COMPLIANCE_KW = (
-    "合规", "禁运", "违禁", "管制", "能不能运", "可不可以运", "能不能拉",
-    "能否承运", "适装", "资质", "预检",
+    "合规",
+    "禁运",
+    "违禁",
+    "管制",
+    "能不能运",
+    "可不可以运",
+    "能不能拉",
+    "能否承运",
+    "适装",
+    "资质",
+    "预检",
 )
 _CARGO_PARSE_KW = ("发货", "发布货源", "发一批", "运一批", "我有", "帮我发", "要发货")
 _PORT_WORDS = (
-    "南宁", "贵港", "梧州", "来宾", "柳州", "百色", "崇左", "桂林", "贺州",
-    "玉林", "钦州", "防城港", "北海", "平塘",
+    "南宁",
+    "贵港",
+    "梧州",
+    "来宾",
+    "柳州",
+    "百色",
+    "崇左",
+    "桂林",
+    "贺州",
+    "玉林",
+    "钦州",
+    "防城港",
+    "北海",
+    "平塘",
 )
 _WEIGHT_HINTS = ("吨", "t", "T")
 
@@ -46,9 +68,7 @@ def _hit(text: str, keywords: tuple[str, ...]) -> str | None:
     return None
 
 
-def classify(
-    text: str, *, role: str, order_id: int | None = None
-) -> tuple[Intent, float, str]:
+def classify(text: str, *, role: str, order_id: int | None = None) -> tuple[Intent, float, str]:
     """把一句话分类到某个领域 Agent。
 
     返回 ``(intent, confidence, matched)``；``matched`` 为可读的命中依据。

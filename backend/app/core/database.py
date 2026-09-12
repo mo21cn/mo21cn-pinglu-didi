@@ -4,6 +4,7 @@
 - 提供 `get_db` FastAPI 依赖：每请求一会话，请求结束自动关闭。
 - 测试环境可用 SQLite（内存或文件），通过 DATABASE_URL 覆盖。
 """
+
 from __future__ import annotations
 
 from collections.abc import Generator

@@ -14,6 +14,7 @@ FOR UPDATE 锁订单行串行化，MySQL 生效，SQLite 测试天然串行）�
 渠道抽象：channel 字段区分 mock（联调模拟）/ wechat_mp（微信小程序
 支付，后续接入），MVP 默认 mock。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -46,12 +47,8 @@ class Payment(Base):
     # pending | paid | refunded | closed
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True, comment="状态")
     # mock | wechat_mp
-    channel: Mapped[str] = mapped_column(
-        String(16), default="mock", comment="支付渠道"
-    )
-    transaction_no: Mapped[str] = mapped_column(
-        String(64), default="", comment="支付成功流水号"
-    )
+    channel: Mapped[str] = mapped_column(String(16), default="mock", comment="支付渠道")
+    transaction_no: Mapped[str] = mapped_column(String(64), default="", comment="支付成功流水号")
     refund_no: Mapped[str] = mapped_column(String(64), default="", comment="退款流水号")
 
     # ---- 全链路留痕 ----
@@ -64,9 +61,7 @@ class Payment(Base):
     refunded_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, comment="退款时间"
     )
-    closed_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, comment="关闭时间"
-    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="关闭时间")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间"
     )

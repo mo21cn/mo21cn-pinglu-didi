@@ -8,6 +8,7 @@
 
 本文件同时承载 F17 合规初筛与 F20 统一入口（Router）的模型。
 """
+
 from __future__ import annotations
 
 from datetime import date

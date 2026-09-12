@@ -11,6 +11,7 @@
 - GET    /api/v1/ship/registry-pending        待审核列表（港口方）
 - POST   /api/v1/ship/registry/{id}/verify    审核（港口方）
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -72,7 +73,9 @@ def list_my_ships(
     return ShipListResponse(total=total, items=[ShipResponse.model_validate(s) for s in items])
 
 
-@router.get("/registry-pending", response_model=ShipListResponse, summary="待审核船舶列表（港口方）")
+@router.get(
+    "/registry-pending", response_model=ShipListResponse, summary="待审核船舶列表（港口方）"
+)
 def list_pending(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),

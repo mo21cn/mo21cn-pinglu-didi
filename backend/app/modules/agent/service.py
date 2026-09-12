@@ -6,6 +6,7 @@
 Agent 无直写（工程底线 2）：本模块不 import cargo.service，不写任何业务表
 （除审计表 agent_calls）；确定性内核零接触。
 """
+
 from __future__ import annotations
 
 import time
@@ -115,13 +116,20 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
     confidences: list[float] = []
 
     for field in (
-        "cargo_name", "cargo_type", "weight_t",
-        "origin_port", "dest_port", "expect_date", "offer_price",
+        "cargo_name",
+        "cargo_type",
+        "weight_t",
+        "origin_port",
+        "dest_port",
+        "expect_date",
+        "offer_price",
     ):
         value, review = _sanitize(field, raw.get(field), today)
         if review:
             needs_review.append(field)
-        confidences.append(float(field_conf.get(field) or (0.9 if value is not None and not review else 0.0)))
+        confidences.append(
+            float(field_conf.get(field) or (0.9 if value is not None and not review else 0.0))
+        )
         cleaned[field] = value
 
     draft = ParsedCargoField(**cleaned)
@@ -172,10 +180,7 @@ def _build_system_prompt(question: str, *, top_k: int = 4) -> str:
         core_ids = {"roles", "flow-main"}
         hits = [(d, 0.0) for d in KNOWLEDGE_BASE if d.id in core_ids]
     refs = "\n".join(f"- {d.topic}：{d.text}" for d, _score in hits)
-    return (
-        f"{ASSISTANT_RULES_PROMPT}\n"
-        f"## 参考资料（平台知识库检索结果）\n{refs}\n"
-    )
+    return f"{ASSISTANT_RULES_PROMPT}\n## 参考资料（平台知识库检索结果）\n{refs}\n"
 
 
 def _mock_answer(question: str) -> dict[str, str]:
@@ -231,7 +236,9 @@ async def answer_question(
         for m in history[-6:]
         if isinstance(m, dict) and m.get("content")
     )
-    user_content = f"（最近对话，供参考）\n{context}\n\n当前问题：{question}" if context else question
+    user_content = (
+        f"（最近对话，供参考）\n{context}\n\n当前问题：{question}" if context else question
+    )
 
     try:
         # RAG：按问题检索相关知识，动态拼装 system prompt
@@ -289,12 +296,26 @@ CONTRACT_SYSTEM_PROMPT = """你是内河航运运输合同的法务助理。任�
 
 def _mock_contract_clauses(_: str) -> dict[str, list[dict[str, str]]]:
     """合同 Agent 的 LLM_MOCK 规则模板（固定标准条款，CI 用；编号由拼接层统一）。"""
-    return {"supplementary_clauses": [
-        {"title": "不可抗力", "text": "因洪水、大风、封航、政府管制等不可抗力导致无法履约的，受影响方应及时通知对方并提供证明，双方均免责；合同期限相应顺延或协商解除。"},
-        {"title": "违约与责任划分", "text": "甲方逾期备货或乙方逾期到船的，按日向对方支付违约金；运输途中货物毁损、灭失由乙方承担赔偿责任，甲方自行申报的货物性质不实导致的损失除外。"},
-        {"title": "争议解决", "text": "本合同履行发生争议的，双方应先行协商；协商不成的，提交平台调解或向合同签订地有管辖权的人民法院提起诉讼。"},
-        {"title": "安全与环保责任", "text": "乙方应确保船舶适航、证书有效，遵守航道与港口安全管理规定；双方共同落实货物遮盖与污染防治要求，杜绝污染物排入水体。"},
-    ]}
+    return {
+        "supplementary_clauses": [
+            {
+                "title": "不可抗力",
+                "text": "因洪水、大风、封航、政府管制等不可抗力导致无法履约的，受影响方应及时通知对方并提供证明，双方均免责；合同期限相应顺延或协商解除。",
+            },
+            {
+                "title": "违约与责任划分",
+                "text": "甲方逾期备货或乙方逾期到船的，按日向对方支付违约金；运输途中货物毁损、灭失由乙方承担赔偿责任，甲方自行申报的货物性质不实导致的损失除外。",
+            },
+            {
+                "title": "争议解决",
+                "text": "本合同履行发生争议的，双方应先行协商；协商不成的，提交平台调解或向合同签订地有管辖权的人民法院提起诉讼。",
+            },
+            {
+                "title": "安全与环保责任",
+                "text": "乙方应确保船舶适航、证书有效，遵守航道与港口安全管理规定；双方共同落实货物遮盖与污染防治要求，杜绝污染物排入水体。",
+            },
+        ]
+    }
 
 
 async def generate_contract(db: Session, *, user_id: int, order_id: int) -> ContractDraftResult:
@@ -337,9 +358,7 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
     ship = db.get(Ship, order.ship_id)
     shipper = db.get(User, order.shipper_id)
     owner = db.get(User, order.owner_id)
-    payment = db.execute(
-        _select(Payment).where(Payment.order_id == order.id)
-    ).scalar_one_or_none()
+    payment = db.execute(_select(Payment).where(Payment.order_id == order.id)).scalar_one_or_none()
     if not all((cargo, ship, shipper, owner)):
         raise AgentServiceError("bad_request", "订单关联数据不完整")
     # 收窄 cargo/ship/shipper/owner 为非 None（mypy 不可推断 .get() 返回值，已显式 None 检查）
@@ -347,9 +366,7 @@ async def generate_contract(db: Session, *, user_id: int, order_id: int) -> Cont
     assert shipper is not None and owner is not None
 
     # ---- 确定性部分（零 LLM）：主体条款 + 风险规则 ----
-    main_text = contract_kernel.render_contract(
-        order, cargo, ship, shipper, owner, payment
-    )
+    main_text = contract_kernel.render_contract(order, cargo, ship, shipper, owner, payment)
     risks = [
         ContractRisk(
             severity=r["severity"],  # type: ignore[arg-type]
@@ -441,23 +458,23 @@ def _audit_compliance(
     合规初筛不走 LLM，故 ``mocked=False``、``provider="rule-engine"``，
     与 LLM 类 Agent 的调用在审计表里可一眼区分。
     """
-    db.add(AgentCall(
-        user_id=user_id,
-        agent_name=agent_name,
-        provider="rule-engine",
-        model="deterministic",
-        mocked=False,
-        prompt_digest=digest[:_DIGEST_LEN],
-        response_digest="",
-        latency_ms=latency_ms,
-        success=True,
-    ))
+    db.add(
+        AgentCall(
+            user_id=user_id,
+            agent_name=agent_name,
+            provider="rule-engine",
+            model="deterministic",
+            mocked=False,
+            prompt_digest=digest[:_DIGEST_LEN],
+            response_digest="",
+            latency_ms=latency_ms,
+            success=True,
+        )
+    )
     db.commit()
 
 
-def _to_compliance_result(
-    target: str, raw: dict[str, Any]
-) -> ComplianceResult:
+def _to_compliance_result(target: str, raw: dict[str, Any]) -> ComplianceResult:
     """规则引擎 dict 输出 → pydantic（收敛一次，两条链路共用）。"""
     findings = [
         ComplianceFinding(
@@ -549,9 +566,7 @@ async def route_request(
     而不是把一份 502/504 丢给用户。
     """
     started = time.monotonic()
-    intent, confidence, matched = intent_router.classify(
-        text, role=role, order_id=order_id
-    )
+    intent, confidence, matched = intent_router.classify(text, role=role, order_id=order_id)
     target = intent_router.TARGETS[intent]
     result: dict[str, Any] | None = None
     dispatched = False
@@ -594,18 +609,20 @@ async def route_request(
             f"{exc}。可稍后重试或手动操作相应页面。"
         )
 
-    db.add(AgentCall(
-        user_id=user_id,
-        agent_name="router",
-        provider="rule-engine",
-        model="deterministic",
-        mocked=False,
-        prompt_digest=text[:_DIGEST_LEN],
-        response_digest=f"intent={intent} dispatched={dispatched}",
-        latency_ms=int((time.monotonic() - started) * 1000),
-        success=dispatched,
-        error_kind=None if dispatched else "not_dispatched",
-    ))
+    db.add(
+        AgentCall(
+            user_id=user_id,
+            agent_name="router",
+            provider="rule-engine",
+            model="deterministic",
+            mocked=False,
+            prompt_digest=text[:_DIGEST_LEN],
+            response_digest=f"intent={intent} dispatched={dispatched}",
+            latency_ms=int((time.monotonic() - started) * 1000),
+            success=dispatched,
+            error_kind=None if dispatched else "not_dispatched",
+        )
+    )
     db.commit()
 
     return RouteResult(

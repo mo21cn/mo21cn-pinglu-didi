@@ -8,6 +8,7 @@
 退款/关闭由撤单联动（order.cancel_order → payment.settle_on_cancel），
 不开放独立端点，保证资金流与订单流的状态一致性由确定性内核驱动。
 """
+
 from __future__ import annotations
 
 from typing import Any
