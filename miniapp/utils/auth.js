@@ -4,21 +4,58 @@ const { request, setToken, clearToken, getToken } = require('./request')
 const USER_KEY = 'user_info'
 
 /**
- * 开发期登录策略（⚠️ 接入真实 AppID 后必须改为 false）
+ * 开发期登录策略 —— 是否使用「固定身份」由**是否配了真实 AppID**自动决定。
  *
- * 背景：本仓库 project.config.json 的 appid 仍是占位值（wxYOUR_APPID_HERE），
- * 开发者工具拿不到真实微信身份；而后端 WECHAT_MOCK=true 时
- * openid = mock-openid-{code}，等于说 **code 本身就是身份**。
- * 若走 wx.login：每次调用返回的 code 都不同 → 每次登录都注册出一个新用户
- * →「我的货源 / 我的订单」永远是空的；更糟的是微信登录服务一旦不可达
- * （无 APPID / 代理拦截），整条进入链路会直接卡在「登录失败」。
- * 故开发期固定使用一个本地 code：身份稳定，且不依赖 wx.login。
+ * 背景：后端 WECHAT_MOCK=true 时 openid = mock-openid-{code}，等于说 **code 本身就是身份**。
+ * 若在没有真实 AppID 的情况下走 wx.login：每次调用返回的 code 都不同 →
+ * 每次登录都注册出一个新用户 →「我的货源 / 我的订单」永远是空的；更糟的是微信登录服务
+ * 一旦不可达（无 APPID / 代理拦截），整条进入链路会直接卡在「登录失败」。
  *
- * 但「稳定」还不够 —— 还必须**落在有数据的账号上**，见下方 DEV_ROLE_CODE。
+ * 所以分两种情况：
+ *   ① 无真实 AppID（占位值 / 游客态 touristappid / Node 校验环境）
+ *      → 用固定 code 登录：身份稳定，且不依赖 wx.login，clone 后开箱即用。
+ *   ② 有真实 AppID（开发者工具已填真实值 / 真机预览）
+ *      → 走真实 wx.login：真实 openid 由微信号决定、天然稳定，
+ *        不需要固定身份机制，也不该再让假 code 去请求 code2session。
+ *
+ * 因此「接入真实 AppID 后必须改为 false」这条要求现在是**自动满足**的，
+ * 不需要人工改代码。需要人工干预时，用 Storage 的 dev_stable_identity 强制覆盖。
+ *
+ * 情况 ② 还有一个断层：**真实 AppID 填上了，后端却可能还没有微信凭据**
+ * （WX_APP_SECRET 未配，或 WECHAT_MOCK 仍为 true）。此时 wx.login 拿到的真实 code
+ * 每次都不一样，后端若拿它当身份 → 每次登录都是全新空账号，看起来和功能故障一模一样。
+ * 故走 wx.login 时会**附带一个预览回退身份 dev_code**（该角色对应的演示账号 code）：
+ * 后端有真实凭据就用真实 openid，没有就用 dev_code 落回演示账号。
+ * 凭据配齐后这层回退自动失效，客户端无需再改。
  */
-const DEV_STABLE_IDENTITY = true
+const STABLE_IDENTITY_FALLBACK = true
 const DEV_CODE_KEY = 'dev_device_code'
 const DEV_DEFAULT_CODE = 'seed-shipper'
+
+/** 判断当前是否运行在「有真实 AppID」的环境（真实 appid = wx + 16 位字母数字） */
+function _hasRealAppId() {
+  try {
+    const info = typeof wx.getAccountInfoSync === 'function' ? wx.getAccountInfoSync() : null
+    const id = (info && info.miniProgram && info.miniProgram.appId) || ''
+    return /^wx[a-z0-9]{16}$/i.test(id)
+  } catch (e) {
+    // 非小程序环境（Node 校验脚本）没有该 API → 按「无真实 AppID」处理
+    return false
+  }
+}
+
+/**
+ * 是否启用固定身份。
+ * 优先级：Storage 显式指定 > 按是否配了真实 AppID 自动判定。
+ */
+function _stableIdentityEnabled() {
+  try {
+    const forced = wx.getStorageSync('dev_stable_identity')
+    if (forced === true || forced === 'true') return true
+    if (forced === false || forced === 'false') return false
+  } catch (e) { /* Storage 不可用时忽略，走自动判定 */ }
+  return _hasRealAppId() ? false : STABLE_IDENTITY_FALLBACK
+}
 
 /**
  * 开发期「角色 → 演示账号」映射。
@@ -77,17 +114,28 @@ function isLoggedIn() {
  *
  * 身份优先级：
  *   ① Storage 里的 `dev_login_code`（联调指定身份，如 seed-shipper / seed-owner）
- *   ② 开发期固定身份 `dev_device_code`（见 DEV_STABLE_IDENTITY 说明）
- *   ③ 生产：真实 wx.login
+ *   ② 无真实 AppID 时的固定身份 `dev_device_code`（见 _stableIdentityEnabled 说明）
+ *   ③ 有真实 AppID：真实 wx.login（openid 由微信号决定，天然稳定）
  *
- * @param {object} [opts] {silent} silent=true 时不弹错误提示，由调用方统一处理
+ * @param {object} [opts] {silent, role}
+ *   silent=true 时不弹错误提示，由调用方统一处理；
+ *   role 用于给出「预览回退身份」（见 DEV_ROLE_CODE），缺省按货主演示账号。
  */
 function login(opts) {
   const silent = !!(opts && opts.silent)
+  const role = opts && opts.role
   const override = wx.getStorageSync('dev_login_code')
   if (override) return _loginWithCode(override, silent)
-  if (DEV_STABLE_IDENTITY) return _loginWithCode(_devCode(), silent)
-  return _wxLoginCode().then((code) => _loginWithCode(code, silent))
+  if (_stableIdentityEnabled()) return _loginWithCode(_devCode(), silent)
+  return _wxLoginCode().then((code) => _loginWithCode(code, silent, _previewCode(role)))
+}
+
+/**
+ * 预览回退身份：该角色对应的演示账号 code。
+ * 后端尚无微信凭据（或仍 WECHAT_MOCK=true）时由后端启用，保证真机也命中演示数据。
+ */
+function _previewCode(role) {
+  return DEV_ROLE_CODE[role] || DEV_DEFAULT_CODE
 }
 
 /** 取 wx.login 的临时 code（仅生产路径使用） */
@@ -127,13 +175,16 @@ function _devCode() {
 }
 
 /** 用指定 code 完成登录（token + 用户信息落地） */
-function _loginWithCode(code, silent) {
+function _loginWithCode(code, silent, previewCode) {
+  const data = { code }
+  // 仅在真实 wx.login 路径附带：后端有真实凭据时不会读它
+  if (previewCode) data.dev_code = previewCode
   return request({
     url: '/api/v1/auth/login',
     method: 'POST',
     auth: false,
     silent: !!silent,
-    data: { code }
+    data
   }).then((data) => {
     setToken(data.access_token)
     setUser({
@@ -183,6 +234,8 @@ function switchRole(role, opts) {
 
 /**
  * 开发期：把身份切到该角色对应的演示账号。
+ * 仅在「无真实 AppID」时生效 —— 配了真实 AppID 后身份由微信号决定，
+ * 切角色不再需要换账号（同一个 user 绑多角色即可）。
  *
  * @returns {boolean} true = 换了账号。此时旧 token / user_info 已被清掉，
  *   调用方**必须**按「未登录」重新走 login → bindRole → switchRole，
@@ -192,7 +245,7 @@ function switchRole(role, opts) {
  * 存在时不干预，免得把联调用的固定身份冲掉。
  */
 function ensureDevAccount(role) {
-  if (!DEV_STABLE_IDENTITY) return false
+  if (!_stableIdentityEnabled()) return false
   if (wx.getStorageSync('dev_login_code')) return false
   const code = DEV_ROLE_CODE[role]
   if (!code) return false
@@ -229,7 +282,7 @@ function enterRole(role, opts) {
     })
     .then(() => {
       if (!isLoggedIn()) {
-        return _stage('login', login(silent))
+        return _stage('login', login({ silent: silent.silent, role }))
           .then(() => _stage('bind', bindRole(role, silent)))
           .then(() => _stage('switch', switchRole(role, silent)))
       }

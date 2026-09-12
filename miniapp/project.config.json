@@ -14,11 +14,12 @@
       "ignore": [],
       "disablePlugins": [],
       "outputPath": ""
-    }
+    },
+    "condition": true
   },
   "compileType": "miniprogram",
   "libVersion": "3.0.0",
-  "appid": "wxYOUR_APPID_HERE",
+  "appid": "wx4a57f29bc38ca11d",
   "projectname": "pinglu-didi",
   "condition": {}
 }
