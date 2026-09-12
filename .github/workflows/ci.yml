@@ -31,8 +31,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Lint（ruff）
+      - name: Lint（ruff check）
         run: ruff check app tests
+
+      - name: 格式门禁（ruff format --check，阻塞）
+        # 与本地/CI 的 ruff 版本强相关；若需固定格式化风格请锁定 ruff 版本（见 DR-0004）
+        run: ruff format --check app tests
 
       - name: 类型检查（mypy，阻塞——my 闭环后 0 errors）
         run: mypy app

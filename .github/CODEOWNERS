@@ -1,6 +1,8 @@
 # 代码所有者（CODEOWNERS）
 # 作用：当 PR 涉及对应路径时，自动指定审查人（GitHub 会在 PR 中 @ 这些账号）
 # 说明：正式研发团队组建后，请将占位的 @mo21cn 替换为实际负责人。
+# ⚠️ 待决 DR-0003：实际审查人名单、是否启用 main/develop 分支保护尚未确认；
+#    在此之前本文件只表达"按风险分配审查重点"，不足以支撑双人审查要求。
 
 # 全局默认审查人（项目负责人）
 * @mo21cn
@@ -17,8 +19,23 @@
 # 智能体平台（Agent 网关无直写红线）
 /backend/app/modules/agent/ @mo21cn
 
+# ---- 委托发货支线（ENT）----
+# 审查重点：权限与组织边界、版本与客户确认（revision 绑定）
+/backend/app/modules/entrust/ @mo21cn
+
+# 审查重点：数据库迁移（id 只增不改、双方言、回退方式），资金与权限类变更须最严
+/backend/migrations/ @mo21cn
+/backend/migrate.py @mo21cn
+
 # 微信小程序
 /miniapp/ @mo21cn
+
+# 审查重点：经理人/客户双端页面，页面栈深度与返回策略
+/miniapp/pages/manager/ @mo21cn
+/miniapp/pages/entrust/ @mo21cn
+
+# 委托支线文档（PRD、交付计划、决策记录、验收）
+/docs/entrust/ @mo21cn
 
 # 工程规范文档
 /docs/ @mo21cn
