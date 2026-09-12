@@ -40,12 +40,50 @@ jobs:
         run: ruff format --check app tests
 
       - name: 类型检查（mypy，阻塞——my 闭环后 0 errors）
-        run: mypy app
+        run: mypy app migrations migrate.py
 
       - name: 测试（pytest）
         env:
           APP_ENV: test
         run: pytest --tb=short --cov=app --cov-report=term-missing
+
+  # ─────────────────────────────────────────────────────────────
+  # 数据库迁移：全新 SQLite 库上跑通迁移，并证明重复执行是幂等的
+  #   ⚠️ MySQL 方言尚未在 CI 真实执行（依赖 D2 / DR-0002），
+  #      相关验收子项在补齐前记 not-run，不得记为通过。
+  # ─────────────────────────────────────────────────────────────
+  db-migration:
+    name: 数据库迁移（SQLite 冒烟 + 幂等）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      APP_ENV: test
+      DATABASE_URL: sqlite:///./migration_smoke.db
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 迁移状态（全新库，应全部待执行）
+        run: python migrate.py --status
+
+      - name: 执行迁移并校验（首次）
+        run: python migrate.py --verify
+
+      - name: 再次执行应无待执行（幂等）
+        run: python migrate.py --verify
 
   # ─────────────────────────────────────────────────────────────
   # 前端静态契约：不依赖后端，秒级完成
