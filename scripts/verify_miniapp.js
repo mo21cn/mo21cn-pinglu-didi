@@ -10,6 +10,7 @@
  *   5. 路由引用可达：页面/wxml 中出现的 /pages/... 必须在 app.json 注册
  *   6. tabBar 页面用 switchTab、非 tabBar 页面用 navigateTo（错用会导致静默失败）
  *   7. wxml 事件绑定的方法在同名 .js 中已定义（抓事件名写错/漏定义）
+ *   8. project.config.json 的 AppID 格式合法（wx + 16 位 = 18 位；抓手抄漏字符）
  *
  * 用法：node scripts/verify_miniapp.js
  * 退出码：0 通过 / 1 有问题
@@ -133,6 +134,24 @@ for (const f of files.filter((x) => x.endsWith('.wxml'))) {
     checked.handlers++
     const defined = new RegExp('(^|[^\\w.$])' + name + '\\s*[(:]').test(js)
     if (!defined) errors.push(`[EVENT] ${rel} 绑定了未定义的方法: ${name}`)
+  }
+}
+
+// ---- 5. AppID 格式（抓「手抄漏字符」这类只在真机预览时才暴露的错误） ----
+// 背景：AppID 少一位时工具不会报「格式错」，而是静默降级成游客模式 ——
+// 表现是「点预览没反应 + 真机调试灰显」，极易被误判成账号权限问题。
+const APPID_RE = /^wx[\da-z]{16}$/
+// 本机开发可接受的占位值（无法生成预览码，但工具能正常打开项目）
+const APPID_PLACEHOLDERS = ['', 'wxYOUR_APPID_HERE', 'touristappid']
+const cfgPath = path.join(ROOT, 'project.config.json')
+if (fs.existsSync(cfgPath)) {
+  const appid = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).appid || ''
+  if (APPID_PLACEHOLDERS.indexOf(appid) === -1 && !APPID_RE.test(appid)) {
+    errors.push(
+      `[APPID] project.config.json 的 appid 非法: "${appid}"（${appid.length} 位）` +
+        '—— 微信 AppID 固定为 wx + 16 位小写字母/数字，共 18 位。' +
+        '请从公众平台「开发管理 → 开发设置」复制，勿手抄'
+    )
   }
 }
 
