@@ -17,6 +17,9 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 addopts = "-q --strict-markers"
+markers = [
+    "mysql: 需要真实 MySQL 的并发集成测试（未设置 MYSQL_TEST_URL 时自动跳过，ENT-007）",
+]
 
 [tool.mypy]
 python_version = "3.12"

@@ -147,6 +147,61 @@ jobs:
         run: python migrate.py --verify
 
   # ─────────────────────────────────────────────────────────────
+  # pytest-MySQL 并发集成（ENT-007，DR-0002 后续）：
+  #   真实 MySQL 8.0 上验证并发正确性锚点：双认领（AC-03）、
+  #   乐观锁并发编辑（AC-11）、幂等并发副作用恰好一次。
+  #   SQLite 结果不作为 MySQL 锁正确性的证据（计划 §7.3）。
+  # ─────────────────────────────────────────────────────────────
+  pytest-mysql:
+    name: 并发集成（MySQL 8.0 真实执行）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: entrust_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      MYSQL_TEST_URL: mysql+pymysql://root:root@127.0.0.1:3306/entrust_test?charset=utf8mb4
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pymysql
+
+      - name: 等待 MySQL 就绪
+        run: |
+          for i in $(seq 1 30); do
+            if python -c "import os; from sqlalchemy import create_engine, text; e = create_engine(os.environ['MYSQL_TEST_URL']); c = e.connect(); c.execute(text('SELECT 1')); c.close(); print('mysql ready')" 2>/dev/null; then exit 0; fi
+            echo "waiting mysql ($i/30)"; sleep 2
+          done
+          echo "MySQL 60s 内未就绪"; exit 1
+
+      - name: 并发集成测试（仅 -m mysql；其余用例由 backend job 覆盖）
+        run: pytest -m mysql --tb=short -v
+
+  # ─────────────────────────────────────────────────────────────
   # 前端静态契约：不依赖后端，秒级完成
   #   verify_miniapp       JSON 语法 / 页面四件套 / tabBar / 路由可达 / 事件函数存在性
   #   verify_ui_interactions 组件 props 与事件 / 弹层闭环 / 长列表与日期等静态防线
