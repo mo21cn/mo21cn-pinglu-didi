@@ -266,6 +266,10 @@ function loadPage(file, ctx) {
     if (s.indexOf('utils/ports') !== -1) return U('ports.js')
     if (s.indexOf('utils/constants') !== -1) return U('constants.js')
     if (s.indexOf('utils/dates') !== -1) return U('dates.js')
+    // 路由注册表：纯数据 + 纯函数（加载期不碰 wx），直接加载真实实现。
+    // 页面用 R.go()/R.canDeepLink() 时必须走真实表，否则「未登记路由」这类
+    // 问题会被桩掩盖掉（与 routes 在 CI 里承担的门禁职责一致）。
+    if (s.indexOf('utils/routes') !== -1) return U('routes.js')
     // 委托发货入口契约模块：纯函数部分加载真实实现，只把「入口探测」桩成
     // 「无权限」—— 本脚本关注的是已登录状态下各页面拿真数据渲染；入口可见性
     // 的四种分支由 scripts/verify_entrust_ui.js 用真实输入逐一覆盖。
