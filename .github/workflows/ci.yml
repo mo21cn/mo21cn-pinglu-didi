@@ -32,14 +32,19 @@ jobs:
           pip install -r requirements.txt
 
       - name: Lint（ruff check）
-        run: ruff check app tests
+        # scripts/ 同样在范围内：它是**CI 自己会执行的代码**（见下方 frontend-e2e
+        # 里的 `python scripts/seed_demo.py`），不该比 app/tests 低一档标准。
+        run: ruff check app tests scripts
 
       - name: 格式门禁（ruff format --check，阻塞）
         # ruff 版本已精确锁定在 requirements.txt（DR-0004），保证 CI 与本地结果一致。
         # 升级 ruff 必须走独立 PR：改版本号 + 全量重跑格式化（单独 style 提交）。
-        run: ruff format --check app tests
+        run: ruff format --check app tests scripts
 
       - name: 类型检查（mypy，阻塞——my 闭环后 0 errors）
+        # 有意**不含** scripts/：它们是演示/种子脚本，刻意写得松（json dict 拼装、
+        # SQLAlchemy Row 直接索引），补齐 strict 注解约需 31 处改动，收益低且会稀释
+        # 门禁信号。这是**显式决策**，不是漏配 —— 将来若这些脚本进入生产路径再一并纳入。
         run: mypy app migrations migrate.py
 
       - name: 测试（pytest）

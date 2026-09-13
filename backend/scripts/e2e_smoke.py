@@ -7,6 +7,7 @@
 场景 A（完整履约）：货主发布货源 → 撮合选船 → 下单 → 支付 → 船东启运 → 货主签收
 场景 B（撤单退款）：另发一单 → 支付 → 撤单 → 验证支付单 refunded + 货源回到撮合池
 """
+
 from __future__ import annotations
 
 import json
@@ -37,11 +38,21 @@ def login(code: str, role: str) -> str:
 
 
 def publish_cargo(tok: str, name: str, price: float) -> int:
-    c = call("POST", "/cargo/shipments", token=tok, body={
-        "cargo_name": name, "cargo_type": "bulk", "weight_t": 800, "volume_m3": 500,
-        "origin_port": "NNG", "dest_port": "WUZ", "expect_date": "2026-09-18",
-        "freight_price": price,
-    })
+    c = call(
+        "POST",
+        "/cargo/shipments",
+        token=tok,
+        body={
+            "cargo_name": name,
+            "cargo_type": "bulk",
+            "weight_t": 800,
+            "volume_m3": 500,
+            "origin_port": "NNG",
+            "dest_port": "WUZ",
+            "expect_date": "2026-09-18",
+            "freight_price": price,
+        },
+    )
     call("POST", f"/cargo/shipments/{c['id']}/publish", token=tok)
     return c["id"]
 
@@ -60,15 +71,28 @@ def main() -> None:
     top = m["items"][0]
     print(f"[2] 撮合首选：船 #{top['ship_id']} {top['ship_name']} score={top['score']}")
 
-    order = call("POST", "/order/orders", token=tok_shipper, body={
-        "cargo_id": cargo_id, "ship_id": top["ship_id"], "freight_price": 35500,
-    })
+    order = call(
+        "POST",
+        "/order/orders",
+        token=tok_shipper,
+        body={
+            "cargo_id": cargo_id,
+            "ship_id": top["ship_id"],
+            "freight_price": 35500,
+        },
+    )
     print(f"[3] 订单 #{order['id']} 已创建（{order['status']}，运费 {order['freight_price']}）")
 
-    pay = call("POST", "/payment/payments", token=tok_shipper,
-               body={"order_id": order["id"], "channel": "mock"})
+    pay = call(
+        "POST",
+        "/payment/payments",
+        token=tok_shipper,
+        body={"order_id": order["id"], "channel": "mock"},
+    )
     pay = call("POST", f"/payment/payments/{pay['id']}/mock-pay", token=tok_shipper, body={})
-    print(f"[4] 支付单 #{pay['id']} {pay['status']}（金额 {pay['amount']}，流水 {pay['transaction_no'][:16]}...）")
+    print(
+        f"[4] 支付单 #{pay['id']} {pay['status']}（金额 {pay['amount']}，流水 {pay['transaction_no'][:16]}...）"
+    )
 
     order = call("POST", f"/order/orders/{order['id']}/ship", token=tok_owner, body={})
     print(f"[5] 船东启运：{order['status']}（{order['shipped_at']}）")
@@ -79,16 +103,31 @@ def main() -> None:
     # ---- 场景 B：撤单退款 ----
     print("\n===== 场景 B：下单 → 支付 → 撤单 → 退款联动 =====")
     cargo_id2 = publish_cargo(tok_shipper, "E2E 冒烟化肥 800 吨（撤单分支）", 28000)
-    order2 = call("POST", "/order/orders", token=tok_shipper, body={
-        "cargo_id": cargo_id2, "ship_id": top["ship_id"], "freight_price": 27000,
-    })
-    pay2 = call("POST", "/payment/payments", token=tok_shipper,
-                body={"order_id": order2["id"], "channel": "mock"})
+    order2 = call(
+        "POST",
+        "/order/orders",
+        token=tok_shipper,
+        body={
+            "cargo_id": cargo_id2,
+            "ship_id": top["ship_id"],
+            "freight_price": 27000,
+        },
+    )
+    pay2 = call(
+        "POST",
+        "/payment/payments",
+        token=tok_shipper,
+        body={"order_id": order2["id"], "channel": "mock"},
+    )
     call("POST", f"/payment/payments/{pay2['id']}/mock-pay", token=tok_shipper, body={})
     print(f"[1] 订单 #{order2['id']} 已支付")
 
-    order2 = call("POST", f"/order/orders/{order2['id']}/cancel", token=tok_shipper,
-                  body={"reason": "货主计划变更，联调撤单"})
+    order2 = call(
+        "POST",
+        f"/order/orders/{order2['id']}/cancel",
+        token=tok_shipper,
+        body={"reason": "货主计划变更，联调撤单"},
+    )
     print(f"[2] 撤单：订单 {order2['status']}，货源 {order2['cargo_id']} 释放回撮合池")
 
     pay2 = call("GET", f"/payment/payments/order/{order2['id']}", token=tok_shipper)

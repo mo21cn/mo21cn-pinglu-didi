@@ -88,9 +88,9 @@
 
 ```bash
 cd backend
-ruff check app tests            # lint
-ruff format --check app tests   # 格式门禁（CI 阻塞；ruff 版本已锁定 0.16.7，见 DR-0004）
-mypy app migrations migrate.py  # 类型检查
+ruff check app tests scripts            # lint（scripts 是 CI 会执行的代码，同在门禁内）
+ruff format --check app tests scripts   # 格式门禁（CI 阻塞；ruff 版本已锁定 0.16.7，见 DR-0004）
+mypy app migrations migrate.py  # 类型检查（有意不含 scripts，见 ci.yml 注释）
 pytest                          # 单测（APP_ENV=test）
 python migrate.py --status      # 迁移状态
 python migrate.py --verify      # 执行迁移 + 校验 + 断言无待执行（CI 用）

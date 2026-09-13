@@ -28,6 +28,7 @@
   这是为了让单一账号能看全两个视角；撮合时可能推荐到自己的船，属预期行为。
 - 本脚本面向本机开发库。生产环境不要执行。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -95,8 +96,7 @@ def resolve_target(conn, explicit: str | None) -> tuple[int, str]:
     ).first()
     if row is None:
         raise SystemExit(
-            "× 没有找到非演示账号。\n"
-            "  请先在开发者工具或手机上用真实微信登录一次，再执行本脚本。"
+            "× 没有找到非演示账号。\n  请先在开发者工具或手机上用真实微信登录一次，再执行本脚本。"
         )
     print(f"  自动选中最近创建的账号：id={row[0]} openid={row[1]} nickname={row[2] or '(空)'}")
     print("  （若不对，用 --openid <真实openid> 显式指定）")
@@ -158,9 +158,7 @@ def main() -> None:
             )
 
         conn.execute(
-            text(
-                "update users set roles = :r, current_role = 'shipper' where id = :t"
-            ),
+            text("update users set roles = :r, current_role = 'shipper' where id = :t"),
             {"r": TARGET_ROLES, "t": target_id},
         )
 

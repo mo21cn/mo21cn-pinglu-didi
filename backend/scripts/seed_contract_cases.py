@@ -40,6 +40,7 @@ R3 / R4 为什么能正常成单
 
 边界：已撤单订单后端拒绝生成合同（`订单已撤销，无法生成合同` → 400），故不铺撤单样本。
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -69,12 +70,22 @@ def ensure_ship_cert(tok_owner: str, tok_port: str, spec: dict) -> tuple[dict, b
         hit = call("POST", "/ship/registry", token=tok_owner, body=spec)
         created = True
     elif hit["cert_expiry"] != spec["cert_expiry"]:
-        hit = call("PATCH", f"/ship/registry/{hit['id']}", token=tok_owner,
-                   body={"cert_expiry": spec["cert_expiry"]})
-        print(f"      船 #{hit['id']} {hit['ship_name']} 证书刷新为 {spec['cert_expiry']}（编辑后已降级，待重审）")
+        hit = call(
+            "PATCH",
+            f"/ship/registry/{hit['id']}",
+            token=tok_owner,
+            body={"cert_expiry": spec["cert_expiry"]},
+        )
+        print(
+            f"      船 #{hit['id']} {hit['ship_name']} 证书刷新为 {spec['cert_expiry']}（编辑后已降级，待重审）"
+        )
     if hit["status"] != "verified":
-        call("POST", f"/ship/registry/{hit['id']}/verify", token=tok_port,
-             body={"approved": True, "reason": "仿真案例：证件齐全，准予入池"})
+        call(
+            "POST",
+            f"/ship/registry/{hit['id']}/verify",
+            token=tok_port,
+            body={"approved": True, "reason": "仿真案例：证件齐全，准予入池"},
+        )
         hit = call("GET", f"/ship/registry/{hit['id']}", token=tok_owner)
     return hit, created
 
@@ -108,52 +119,114 @@ def main() -> None:
     print(f"      货主 #{shipper['user_id']} / 船东 #{owner['user_id']}")
 
     print("\n[2/3] 专项船舶（合同风险样本专用）")
-    ship_cert, c1 = ensure_ship_cert(tok_owner, tok_port, {
-        "ship_name": "仿真船 · 证书临期 20 天", "ship_type": "bulk", "deadweight_t": 1000,
-        "length_m": 70, "width_m": 12, "draft_m": 3.0, "home_port": "GGU",
-        "cert_no": "CERT-SIM-EXPIRY",
-        "cert_expiry": (date.today() + timedelta(days=20)).isoformat(),
-    })
-    print(f"      船 #{ship_cert['id']} {ship_cert['ship_name']} 证书 {ship_cert['cert_expiry']} "
-          f"→ {ship_cert['status']} {'（新建）' if c1 else '（复用）'}")
-    ship_tank, c2 = ensure_ship_cert(tok_owner, tok_port, {
-        "ship_name": "仿真船 · 液货 3001", "ship_type": "tanker", "deadweight_t": 1200,
-        "length_m": 76, "width_m": 12.5, "draft_m": 3.2, "home_port": "QNZ",
-        "cert_no": "CERT-SIM-TANK",
-        "cert_expiry": (date.today() + timedelta(days=400)).isoformat(),
-    })
-    print(f"      船 #{ship_tank['id']} {ship_tank['ship_name']} → {ship_tank['status']} "
-          f"{'（新建）' if c2 else '（复用）'}")
+    ship_cert, c1 = ensure_ship_cert(
+        tok_owner,
+        tok_port,
+        {
+            "ship_name": "仿真船 · 证书临期 20 天",
+            "ship_type": "bulk",
+            "deadweight_t": 1000,
+            "length_m": 70,
+            "width_m": 12,
+            "draft_m": 3.0,
+            "home_port": "GGU",
+            "cert_no": "CERT-SIM-EXPIRY",
+            "cert_expiry": (date.today() + timedelta(days=20)).isoformat(),
+        },
+    )
+    print(
+        f"      船 #{ship_cert['id']} {ship_cert['ship_name']} 证书 {ship_cert['cert_expiry']} "
+        f"→ {ship_cert['status']} {'（新建）' if c1 else '（复用）'}"
+    )
+    ship_tank, c2 = ensure_ship_cert(
+        tok_owner,
+        tok_port,
+        {
+            "ship_name": "仿真船 · 液货 3001",
+            "ship_type": "tanker",
+            "deadweight_t": 1200,
+            "length_m": 76,
+            "width_m": 12.5,
+            "draft_m": 3.2,
+            "home_port": "QNZ",
+            "cert_no": "CERT-SIM-TANK",
+            "cert_expiry": (date.today() + timedelta(days=400)).isoformat(),
+        },
+    )
+    print(
+        f"      船 #{ship_tank['id']} {ship_tank['ship_name']} → {ship_tank['status']} "
+        f"{'（新建）' if c2 else '（复用）'}"
+    )
 
     print("\n[3/3] 仿真订单（覆盖 R3 / R4 / R5 / R9，商务条款类 R6–R8 叠加命中）")
     expect = (date.today() + timedelta(days=5)).isoformat()
     soon = (date.today() + timedelta(days=2)).isoformat()
     # (标签, 货源规格, 指定船 id, 出单后是否启运)
     cases = [
-        ("R3 装货日期临近", {
-            "cargo_name": "仿真案例 · R3 装货日期临近（2 天后）", "cargo_type": "general",
-            "weight_t": 600, "volume_m3": 400, "origin_port": "NNG", "dest_port": "GGU",
-            "expect_date": soon, "offer_price": 26000,
-            "remark": "仿真：期望装货日期在 3 日内 → 合同风险 R3",
-        }, None, False),
-        ("R4 船舶证书临期", {
-            "cargo_name": "仿真案例 · R4 承运船证书临期（20 天）", "cargo_type": "bulk",
-            "weight_t": 700, "volume_m3": 450, "origin_port": "GGU", "dest_port": "WUZ",
-            "expect_date": expect, "offer_price": 31000,
-            "remark": "仿真：指定证书临期船承运 → 合同风险 R4",
-        }, ship_cert["id"], False),
-        ("R5 液货危险品", {
-            "cargo_name": "仿真案例 · R5 液货危险品（甲醇 500 吨）", "cargo_type": "tanker",
-            "weight_t": 500, "volume_m3": 600, "origin_port": "QNZ", "dest_port": "GGU",
-            "expect_date": expect, "offer_price": 45000,
-            "remark": "仿真：液货运输 → 合同风险 R5",
-        }, ship_tank["id"], False),
-        ("R9 在途不可抗力", {
-            "cargo_name": "仿真案例 · R9 在途不可抗力（在途货物）", "cargo_type": "general",
-            "weight_t": 550, "volume_m3": 380, "origin_port": "LZH", "dest_port": "WUZ",
-            "expect_date": expect, "offer_price": 24000,
-            "remark": "仿真：出单后启运 → 合同风险 R9（在途）",
-        }, None, True),
+        (
+            "R3 装货日期临近",
+            {
+                "cargo_name": "仿真案例 · R3 装货日期临近（2 天后）",
+                "cargo_type": "general",
+                "weight_t": 600,
+                "volume_m3": 400,
+                "origin_port": "NNG",
+                "dest_port": "GGU",
+                "expect_date": soon,
+                "offer_price": 26000,
+                "remark": "仿真：期望装货日期在 3 日内 → 合同风险 R3",
+            },
+            None,
+            False,
+        ),
+        (
+            "R4 船舶证书临期",
+            {
+                "cargo_name": "仿真案例 · R4 承运船证书临期（20 天）",
+                "cargo_type": "bulk",
+                "weight_t": 700,
+                "volume_m3": 450,
+                "origin_port": "GGU",
+                "dest_port": "WUZ",
+                "expect_date": expect,
+                "offer_price": 31000,
+                "remark": "仿真：指定证书临期船承运 → 合同风险 R4",
+            },
+            ship_cert["id"],
+            False,
+        ),
+        (
+            "R5 液货危险品",
+            {
+                "cargo_name": "仿真案例 · R5 液货危险品（甲醇 500 吨）",
+                "cargo_type": "tanker",
+                "weight_t": 500,
+                "volume_m3": 600,
+                "origin_port": "QNZ",
+                "dest_port": "GGU",
+                "expect_date": expect,
+                "offer_price": 45000,
+                "remark": "仿真：液货运输 → 合同风险 R5",
+            },
+            ship_tank["id"],
+            False,
+        ),
+        (
+            "R9 在途不可抗力",
+            {
+                "cargo_name": "仿真案例 · R9 在途不可抗力（在途货物）",
+                "cargo_type": "general",
+                "weight_t": 550,
+                "volume_m3": 380,
+                "origin_port": "LZH",
+                "dest_port": "WUZ",
+                "expect_date": expect,
+                "offer_price": 24000,
+                "remark": "仿真：出单后启运 → 合同风险 R9（在途）",
+            },
+            None,
+            True,
+        ),
     ]
     anchors: list[tuple[str, int]] = []
     for tag, spec, sid, ship_after in cases:

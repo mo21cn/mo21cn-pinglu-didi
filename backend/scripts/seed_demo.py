@@ -19,6 +19,7 @@
 - 货主：4 个货源 → 4 张订单，覆盖 已完成 / 待支付 / 已退款 / 面议 四种态
 - 港域：4 条预约 → 2 条已锁定 + 1 条**因档期占满被 409 拦截**（防超卖演示）+ 1 条错峰已锁定
 """
+
 from __future__ import annotations
 
 import json
@@ -120,7 +121,9 @@ def ensure_cargo(tok_shipper: str, spec: dict) -> tuple[dict, bool]:
     cargos = call("GET", "/cargo/shipments", token=tok_shipper, params={"size": 100})["items"]
     hit = pick(cargos, cargo_name=spec["cargo_name"])
     if hit is None:
-        hit = call("POST", "/cargo/shipments", token=tok_shipper, body={**spec, "publish_now": True})
+        hit = call(
+            "POST", "/cargo/shipments", token=tok_shipper, body={**spec, "publish_now": True}
+        )
         return hit, True
     if hit["status"] == "draft":
         call("POST", f"/cargo/shipments/{hit['id']}/publish", token=tok_shipper)
@@ -135,7 +138,10 @@ def best_ship(tok_shipper: str, cargo_id: int) -> int | None:
 
 
 def ensure_order(
-    tok_shipper: str, cargo: dict, want_cancelled: bool = False, require_unpaid_payment: bool = False
+    tok_shipper: str,
+    cargo: dict,
+    want_cancelled: bool = False,
+    require_unpaid_payment: bool = False,
 ) -> tuple[dict | None, bool]:
     """按货源复用已有订单；必要时重新出单。
 
@@ -153,14 +159,24 @@ def ensure_order(
             if want_cancelled:
                 return latest, False
         elif require_unpaid_payment and latest["status"] in ("matched", "shipped"):
-            pm = call("GET", f"/payment/payments/order/{latest['id']}", token=tok_shipper, soft=True)
+            pm = call(
+                "GET", f"/payment/payments/order/{latest['id']}", token=tok_shipper, soft=True
+            )
             if ok(pm) and pm.get("status") != "pending":
-                res = call("POST", f"/order/orders/{latest['id']}/cancel", token=tok_shipper,
-                           body={"reason": "演示脚本：待支付锚点已被消耗，撤销后重新出单"})
+                res = call(
+                    "POST",
+                    f"/order/orders/{latest['id']}/cancel",
+                    token=tok_shipper,
+                    body={"reason": "演示脚本：待支付锚点已被消耗，撤销后重新出单"},
+                )
                 if ok(res):
-                    print(f"    订单 #{latest['id']} 支付单为 {pm.get('status')}（锚点已被消耗）→ 已撤销并重新出单")
+                    print(
+                        f"    订单 #{latest['id']} 支付单为 {pm.get('status')}（锚点已被消耗）→ 已撤销并重新出单"
+                    )
                 else:
-                    print(f"    !! 订单 #{latest['id']} 无法撤销（{res.get('__err__')}），待支付锚点可能不可复现")
+                    print(
+                        f"    !! 订单 #{latest['id']} 无法撤销（{res.get('__err__')}），待支付锚点可能不可复现"
+                    )
                     return latest, False
             else:
                 return latest, False
@@ -169,8 +185,12 @@ def ensure_order(
             and latest["freight_price"] is None
             and cargo.get("offer_price") is not None
         ):
-            call("POST", f"/order/orders/{latest['id']}/cancel", token=tok_shipper,
-                 body={"reason": "演示脚本：清理运费为空的历史脏单"})
+            call(
+                "POST",
+                f"/order/orders/{latest['id']}/cancel",
+                token=tok_shipper,
+                body={"reason": "演示脚本：清理运费为空的历史脏单"},
+            )
             print(f"    订单 #{latest['id']} 运费为空但货源有出价，已撤销并重新出单")
         else:
             return latest, False
@@ -192,7 +212,9 @@ def ensure_paid(tok_shipper: str, order_id: int) -> dict:
     p = call("GET", f"/payment/payments/order/{order_id}", token=tok_shipper, soft=True)
     if not ok(p) or not p.get("id"):
         p = call(
-            "POST", "/payment/payments", token=tok_shipper,
+            "POST",
+            "/payment/payments",
+            token=tok_shipper,
             body={"order_id": order_id, "channel": "mock"},
         )
     if p["status"] == "pending":
@@ -214,7 +236,9 @@ def advance_order(tok_shipper: str, tok_owner: str, order: dict, flow: str) -> s
         p = call("GET", f"/payment/payments/order/{oid}", token=tok_shipper, soft=True)
         if not ok(p) or not p.get("id"):
             p = call(
-                "POST", "/payment/payments", token=tok_shipper,
+                "POST",
+                "/payment/payments",
+                token=tok_shipper,
                 body={"order_id": oid, "channel": "mock"},
             )
         return f"支付 #{p['id']} {p['status']}（现场点「模拟支付」）→ 订单待承运"
@@ -223,8 +247,12 @@ def advance_order(tok_shipper: str, tok_owner: str, order: dict, flow: str) -> s
         p = ensure_paid(tok_shipper, oid)
         if flow == "refund":
             if order["status"] == "matched":
-                order = call("POST", f"/order/orders/{oid}/cancel", token=tok_shipper,
-                             body={"reason": "演示：撤单联动退款"})
+                order = call(
+                    "POST",
+                    f"/order/orders/{oid}/cancel",
+                    token=tok_shipper,
+                    body={"reason": "演示：撤单联动退款"},
+                )
             p = call("GET", f"/payment/payments/order/{oid}", token=tok_shipper, soft=True)
             st = p.get("status") if ok(p) else "?"
             return f"支付 #{p.get('id')} → 撤单 → 订单 {order['status']} / 支付单 {st}"
@@ -262,72 +290,167 @@ def main() -> None:
     shipper, tok_shipper = login(SHIPPER_CODE, "shipper")
     owner, tok_owner = login(OWNER_CODE, "owner")
     port_user, tok_port = login(PORT_CODE, "port")
-    print(f"      货主 #{shipper['user_id']} / 船东 #{owner['user_id']} / 港口 #{port_user['user_id']}")
+    print(
+        f"      货主 #{shipper['user_id']} / 船东 #{owner['user_id']} / 港口 #{port_user['user_id']}"
+    )
 
     print("\n[2/6] 港口方：泊位")
     # 演示独占泊位（DEMO- 前缀）：与本机其它联调数据隔离，保证档期演示可复现
-    berth_main, c1 = ensure_berth(tok_port, {
-        "port_code": "NNG", "berth_no": "DEMO-01", "berth_name": "南宁演示泊位1号（满档样本）",
-        "max_dwt": 3000, "max_draft": 6.0,
-        "allowed_ship_types": ["bulk", "container", "general"], "concurrent_capacity": 2,
-    })
-    print(f"      泊位 #{berth_main['id']} NNG-DEMO-01 容量 {berth_main['concurrent_capacity']} {'（新建）' if c1 else '（复用）'}")
-    berth_empty, c2 = ensure_berth(tok_port, {
-        "port_code": "GGU", "berth_no": "DEMO-02", "berth_name": "贵港演示泊位2号（空档样本）",
-        "max_dwt": 8000, "max_draft": 7.5,
-        "allowed_ship_types": ["bulk", "container", "general"], "concurrent_capacity": 1,
-    })
-    print(f"      泊位 #{berth_empty['id']} GGU-DEMO-02 容量 {berth_empty['concurrent_capacity']} {'（新建）' if c2 else '（复用）'}")
+    berth_main, c1 = ensure_berth(
+        tok_port,
+        {
+            "port_code": "NNG",
+            "berth_no": "DEMO-01",
+            "berth_name": "南宁演示泊位1号（满档样本）",
+            "max_dwt": 3000,
+            "max_draft": 6.0,
+            "allowed_ship_types": ["bulk", "container", "general"],
+            "concurrent_capacity": 2,
+        },
+    )
+    print(
+        f"      泊位 #{berth_main['id']} NNG-DEMO-01 容量 {berth_main['concurrent_capacity']} {'（新建）' if c1 else '（复用）'}"
+    )
+    berth_empty, c2 = ensure_berth(
+        tok_port,
+        {
+            "port_code": "GGU",
+            "berth_no": "DEMO-02",
+            "berth_name": "贵港演示泊位2号（空档样本）",
+            "max_dwt": 8000,
+            "max_draft": 7.5,
+            "allowed_ship_types": ["bulk", "container", "general"],
+            "concurrent_capacity": 1,
+        },
+    )
+    print(
+        f"      泊位 #{berth_empty['id']} GGU-DEMO-02 容量 {berth_empty['concurrent_capacity']} {'（新建）' if c2 else '（复用）'}"
+    )
 
     print("\n[3/6] 船东：船舶备案（2 通过 + 1 待审）")
-    ship1, s1 = ensure_ship(tok_owner, tok_port, {
-        "ship_name": "桂平航 6688", "ship_type": "bulk", "deadweight_t": 1500,
-        "length_m": 88, "width_m": 13.5, "draft_m": 3.4, "home_port": "NNG",
-        "cert_no": "CERT-2026-06688", "cert_expiry": "2027-08-31",
-    }, verify=True)
-    print(f"      船 #{ship1['id']} {ship1['ship_name']} → {ship1['status']} {'（新建）' if s1 else '（复用）'}")
-    ship2, s2 = ensure_ship(tok_owner, tok_port, {
-        "ship_name": "横州集运 101", "ship_type": "container", "deadweight_t": 900,
-        "length_m": 75, "width_m": 12, "draft_m": 2.9, "home_port": "GGU",
-        "cert_no": "CERT-2026-01101", "cert_expiry": "2027-05-31",
-    }, verify=True)
-    print(f"      船 #{ship2['id']} {ship2['ship_name']} → {ship2['status']} {'（新建）' if s2 else '（复用）'}")
-    ship3, s3 = ensure_ship(tok_owner, tok_port, {
-        "ship_name": "邕江 3008", "ship_type": "general", "deadweight_t": 2000,
-        "length_m": 92, "width_m": 14, "draft_m": 3.8, "home_port": "NNG",
-        "cert_no": "CERT-2026-03008", "cert_expiry": "2027-11-30",
-    }, verify=False)
-    print(f"      船 #{ship3['id']} {ship3['ship_name']} → {ship3['status']} {'（新建，保留待审态）' if s3 else '（复用）'}")
+    ship1, s1 = ensure_ship(
+        tok_owner,
+        tok_port,
+        {
+            "ship_name": "桂平航 6688",
+            "ship_type": "bulk",
+            "deadweight_t": 1500,
+            "length_m": 88,
+            "width_m": 13.5,
+            "draft_m": 3.4,
+            "home_port": "NNG",
+            "cert_no": "CERT-2026-06688",
+            "cert_expiry": "2027-08-31",
+        },
+        verify=True,
+    )
+    print(
+        f"      船 #{ship1['id']} {ship1['ship_name']} → {ship1['status']} {'（新建）' if s1 else '（复用）'}"
+    )
+    ship2, s2 = ensure_ship(
+        tok_owner,
+        tok_port,
+        {
+            "ship_name": "横州集运 101",
+            "ship_type": "container",
+            "deadweight_t": 900,
+            "length_m": 75,
+            "width_m": 12,
+            "draft_m": 2.9,
+            "home_port": "GGU",
+            "cert_no": "CERT-2026-01101",
+            "cert_expiry": "2027-05-31",
+        },
+        verify=True,
+    )
+    print(
+        f"      船 #{ship2['id']} {ship2['ship_name']} → {ship2['status']} {'（新建）' if s2 else '（复用）'}"
+    )
+    ship3, s3 = ensure_ship(
+        tok_owner,
+        tok_port,
+        {
+            "ship_name": "邕江 3008",
+            "ship_type": "general",
+            "deadweight_t": 2000,
+            "length_m": 92,
+            "width_m": 14,
+            "draft_m": 3.8,
+            "home_port": "NNG",
+            "cert_no": "CERT-2026-03008",
+            "cert_expiry": "2027-11-30",
+        },
+        verify=False,
+    )
+    print(
+        f"      船 #{ship3['id']} {ship3['ship_name']} → {ship3['status']} {'（新建，保留待审态）' if s3 else '（复用）'}"
+    )
 
     print("\n[4/6] 货主：货源 → 订单四态")
     expect = (date.today() + timedelta(days=5)).isoformat()
     specs = [
-        ("complete", {
-            "cargo_name": "演示货源 01 · 水泥熟料 1200 吨", "cargo_type": "bulk",
-            "weight_t": 1200, "volume_m3": 800, "origin_port": "NNG", "dest_port": "GGU",
-            "expect_date": expect, "offer_price": 48000, "remark": "演示：已完成订单",
-        }),
-        ("matched", {
-            "cargo_name": "演示货源 02 · 钢材 800 吨", "cargo_type": "bulk",
-            "weight_t": 800, "volume_m3": 500, "origin_port": "NNG", "dest_port": "WUZ",
-            "expect_date": expect, "offer_price": 36000, "remark": "演示：待支付订单",
-        }),
-        ("refund", {
-            "cargo_name": "演示货源 03 · 砂石 1500 吨", "cargo_type": "bulk",
-            "weight_t": 1500, "volume_m3": 900, "origin_port": "NNG", "dest_port": "QNZ",
-            "expect_date": expect, "offer_price": 42000, "remark": "演示：撤单退款订单",
-        }),
-        ("negotiable", {
-            "cargo_name": "演示货源 04 · 集装箱设备 8 标箱", "cargo_type": "container",
-            "weight_t": 200, "volume_m3": 160, "origin_port": "GGU", "dest_port": "WUZ",
-            "expect_date": expect, "remark": "演示：面议运费订单",
-        }),
+        (
+            "complete",
+            {
+                "cargo_name": "演示货源 01 · 水泥熟料 1200 吨",
+                "cargo_type": "bulk",
+                "weight_t": 1200,
+                "volume_m3": 800,
+                "origin_port": "NNG",
+                "dest_port": "GGU",
+                "expect_date": expect,
+                "offer_price": 48000,
+                "remark": "演示：已完成订单",
+            },
+        ),
+        (
+            "matched",
+            {
+                "cargo_name": "演示货源 02 · 钢材 800 吨",
+                "cargo_type": "bulk",
+                "weight_t": 800,
+                "volume_m3": 500,
+                "origin_port": "NNG",
+                "dest_port": "WUZ",
+                "expect_date": expect,
+                "offer_price": 36000,
+                "remark": "演示：待支付订单",
+            },
+        ),
+        (
+            "refund",
+            {
+                "cargo_name": "演示货源 03 · 砂石 1500 吨",
+                "cargo_type": "bulk",
+                "weight_t": 1500,
+                "volume_m3": 900,
+                "origin_port": "NNG",
+                "dest_port": "QNZ",
+                "expect_date": expect,
+                "offer_price": 42000,
+                "remark": "演示：撤单退款订单",
+            },
+        ),
+        (
+            "negotiable",
+            {
+                "cargo_name": "演示货源 04 · 集装箱设备 8 标箱",
+                "cargo_type": "container",
+                "weight_t": 200,
+                "volume_m3": 160,
+                "origin_port": "GGU",
+                "dest_port": "WUZ",
+                "expect_date": expect,
+                "remark": "演示：面议运费订单",
+            },
+        ),
     ]
     anchors = {}
     for flow, spec in specs:
         cargo, cnew = ensure_cargo(tok_shipper, spec)
         order, onew = ensure_order(
-            tok_shipper, cargo,
+            tok_shipper,
+            cargo,
             want_cancelled=(flow == "refund"),
             require_unpaid_payment=(flow == "matched"),
         )
@@ -341,24 +464,50 @@ def main() -> None:
 
     print("\n[5/6] 港域：泊位预约（防超卖演示）")
     base = (datetime.now() + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
-    all_appts = call("GET", "/port/appts-review", token=tok_port,
-                     params={"status": "", "size": 100})["items"]
+    all_appts = call(
+        "GET", "/port/appts-review", token=tok_port, params={"status": "", "size": 100}
+    )["items"]
     appt_specs = [
-        {"ship": ship1, "start": base.replace(hour=8), "end": base.replace(hour=18),
-         "plan": "主窗口 A（08:00–18:00）", "remark": "演示窗口 A1", "confirm": True},
-        {"ship": ship2, "start": base.replace(hour=12), "end": base.replace(hour=12) + timedelta(hours=16),
-         "plan": "主窗口 B（12:00–次日04:00，与 A 重叠）", "remark": "演示窗口 A2", "confirm": True},
-        {"ship": ship2, "start": base.replace(hour=14), "end": base.replace(hour=14) + timedelta(hours=8),
-         "plan": "冲突窗口 C（14:00–22:00，与 A+B 重叠 → 预期 409）", "remark": "演示窗口 A3", "confirm": False},
-        {"ship": ship1, "start": (base + timedelta(days=3)).replace(hour=7),
-         "end": (base + timedelta(days=3)).replace(hour=15),
-         "plan": "错峰窗口 D（+3 日 07:00–15:00，不重叠）", "remark": "演示窗口 A4", "confirm": True},
+        {
+            "ship": ship1,
+            "start": base.replace(hour=8),
+            "end": base.replace(hour=18),
+            "plan": "主窗口 A（08:00–18:00）",
+            "remark": "演示窗口 A1",
+            "confirm": True,
+        },
+        {
+            "ship": ship2,
+            "start": base.replace(hour=12),
+            "end": base.replace(hour=12) + timedelta(hours=16),
+            "plan": "主窗口 B（12:00–次日04:00，与 A 重叠）",
+            "remark": "演示窗口 A2",
+            "confirm": True,
+        },
+        {
+            "ship": ship2,
+            "start": base.replace(hour=14),
+            "end": base.replace(hour=14) + timedelta(hours=8),
+            "plan": "冲突窗口 C（14:00–22:00，与 A+B 重叠 → 预期 409）",
+            "remark": "演示窗口 A3",
+            "confirm": False,
+        },
+        {
+            "ship": ship1,
+            "start": (base + timedelta(days=3)).replace(hour=7),
+            "end": (base + timedelta(days=3)).replace(hour=15),
+            "plan": "错峰窗口 D（+3 日 07:00–15:00，不重叠）",
+            "remark": "演示窗口 A4",
+            "confirm": True,
+        },
     ]
     appt_anchors = []
     for s in appt_specs:
         body = {
-            "berth_id": berth_main["id"], "ship_id": s["ship"]["id"],
-            "plan_start": s["start"].isoformat(), "plan_end": s["end"].isoformat(),
+            "berth_id": berth_main["id"],
+            "ship_id": s["ship"]["id"],
+            "plan_start": s["start"].isoformat(),
+            "plan_end": s["end"].isoformat(),
             "remark": s["remark"],
         }
         appt, note = ensure_appt(tok_owner, all_appts, body)
@@ -386,9 +535,13 @@ def main() -> None:
 
     print("\n[6/6] 档期快照")
     sch = call("GET", f"/port/berths/{berth_main['id']}/schedule", token=tok_port)
-    print(f"      泊位 #{berth_main['id']} 容量 {sch['berth']['concurrent_capacity']}，已确认 {len(sch['confirmed'])} 条")
+    print(
+        f"      泊位 #{berth_main['id']} 容量 {sch['berth']['concurrent_capacity']}，已确认 {len(sch['confirmed'])} 条"
+    )
     for c in sch["confirmed"]:
-        print(f"        预约 #{c['appt_id']} 船 #{c['ship_id']} {c['plan_start']} ~ {c['plan_end']}")
+        print(
+            f"        预约 #{c['appt_id']} 船 #{c['ship_id']} {c['plan_start']} ~ {c['plan_end']}"
+        )
 
     print("\n" + "=" * 68)
     print("演示就绪。小程序侧无需任何配置：开发期点「货主」自动登 seed-shipper、")
@@ -396,12 +549,16 @@ def main() -> None:
     print("  如需港口方等其它联调身份，再在开发者工具 Storage 面板设 dev_login_code：")
     print("  seed-shipper → 货主端 · seed-owner → 船东端 · seed-port → 港口方")
     print("演示锚点：")
-    print(f"  订单/支付：已完成 #{anchors.get('complete', {}).get('order', '-')} · "
-          f"待支付 #{anchors.get('matched', {}).get('order', '-')} · "
-          f"已退款 #{anchors.get('refund', {}).get('order', '-')} · "
-          f"面议 #{anchors.get('negotiable', {}).get('order', '-')}")
-    print(f"  泊位档期：# {berth_main['id']} NNG-DEMO-01（满档演示）· "
-          f"#{berth_empty['id']} GGU-DEMO-02（空档演示）")
+    print(
+        f"  订单/支付：已完成 #{anchors.get('complete', {}).get('order', '-')} · "
+        f"待支付 #{anchors.get('matched', {}).get('order', '-')} · "
+        f"已退款 #{anchors.get('refund', {}).get('order', '-')} · "
+        f"面议 #{anchors.get('negotiable', {}).get('order', '-')}"
+    )
+    print(
+        f"  泊位档期：# {berth_main['id']} NNG-DEMO-01（满档演示）· "
+        f"#{berth_empty['id']} GGU-DEMO-02（空档演示）"
+    )
     print(f"  预约审核：{', '.join(f'#{i}({s})' for i, s in appt_anchors)}")
     print("=" * 68)
 
