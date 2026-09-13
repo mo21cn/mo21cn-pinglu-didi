@@ -22,11 +22,35 @@
 //   · `kind`（tab / root / detail）**不再被当成自动清栈**：清不清栈由**实际调用的
 //     导航操作**决定，不由页面类别决定。
 //
+// ── ENT-019 的修订：把声明层接到运行期（页面接入时暴露的三个缺口）────────
+// 接入 `pages/entrust/workbench` 与 `pages/entrust/detail` 时发现，模型里已经**声明**的
+// 语义在 `go()` 里没有执行路径 —— 声明与事实又分家了。三条都在本次补齐：
+//
+//   ① `reset` 策略**没有对应动作**。`resolveNavigation()` 只可能返回
+//      switchTab / reuse / replace / push，于是 `strategy:'reset'` 的边
+//      （workbench→index、detail→index）落到第 ④ 步被当成 **push** 执行成
+//      `wx.navigateTo` —— 又压了一层首页，而不是 `wx.reLaunch` 重置栈。
+//   ② `reset` 边**会被复用分支降级**成 `wx.navigateBack`。冷启动深链进工作台时栈里
+//      只有工作台自己没有首页，退化成 push；而栈底有首页时会变成 navigateBack(2)，
+//      看起来"也到了首页"，但栈没有清空 —— 与「重置栈、重走身份链路」不是一回事。
+//      ⇒ 复用分支只对 push / replace / back / reuse 生效，`reset` 优先。
+//   ③ 页面里没有任何一处调用 `go()` / `guardEntry()`（`miniapp/` 内对 routes 零引用），
+//      也就是说初版的页面栈预算与深链契约**运行期完全没生效**。本步起两个委托页
+//      改走 `go()`，并在 `onLoad` 执行入口守卫。
+//
+// ── 接入范围（`MIGRATED_PAGES`）────────────────────────────────────────
+// 「已接入运行期治理」是一份**可被 CI 核对**的名单，而不是口头结论：
+// 名单内的页面不得再出现裸 `wx.navigateTo / redirectTo / reLaunch`（由
+// `verify_routes.js` 强制）。旧页面（发布 / 撮合 / 港口 / 我的 …）不在名单内，
+// 按 HO 第 4 条「不要求全量改造旧页面」保持现状，逐批迁移。
+//
 // ── CI 强制约束（`scripts/verify_routes.js`）────────────────────────────
 //   1. `app.json` 的每个页面都必须登记，反之注册表里也不得有多余项（禁止偷偷加页）
 //   2. 声明链深 `chainDepth()` 不得超过 `STACK_BUDGET`
 //   3. 实际导航边必须已被声明在 `NAV_EDGES` 里；push/replace 边若无代码证据必须标 `pending`
 //   4. 深链参数契约：`paramSchema` 必须覆盖 `deepLink` 的强度（非空 + 类型／枚举）
+//   5. `MIGRATED_PAGES` 里的页面不得再直接调用 `wx.navigateTo / redirectTo / reLaunch`
+//      （必须经 `go()`），且必须真的出现 `go(` 调用 —— 防「名单写了但代码没接」
 //
 // ── 本模块是纯数据 + 纯函数 ───────────────────────────────────────────
 // 可在 Node 里直接 `require`（CI 静态校验与行为测试要用），**模块加载期不触碰 `wx`**；
@@ -310,6 +334,23 @@ const TAB_BAR_PAGES = Object.keys(ROUTES).filter(function (p) {
   return ROUTES[p].kind === 'tab'
 })
 
+/**
+ * 已接入运行期治理的页面（ENT-019 起）。
+ *
+ * 语义：这些页面的**所有跳转都经 `go()`**，且 `onLoad` 执行 `guardEntry()`。
+ * 它们不得再出现裸 `wx.navigateTo / redirectTo / reLaunch` —— 那会让页面栈预算
+ * （`STACK_BUDGET`）与深链参数契约重新变成"只在 CI 里成立的声明"。
+ *
+ * 这是一份**增量名单**：HO 第 4 条明确「不要求全量改造旧页面，但新增委托页面必须
+ * 从首个切片起接入」。每迁移一个页面就往这里加一行，CI 会同时核对两件事：
+ * 名单内页面有 `go(` 调用、且没有裸 wx 导航调用。
+ */
+const MIGRATED_PAGES = [
+  // ENT-019：委托支线第一个切片的两个页面
+  'pages/entrust/workbench/workbench',
+  'pages/entrust/detail/detail'
+]
+
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */
 function normalize(url) {
   const raw = String(url == null ? '' : url)
@@ -555,11 +596,23 @@ const FALLBACK = { label: '返回工作台', url: '/pages/entrust/workbench/work
  * 按 DR-0011 §3.4 的策略链，命中即停：
  *   0) 未登记 / 参数非法            → blocked
  *   1) tabBar 页                    → switchTab（必须剥掉查询串）
+ *   1.5) 边声明为 reset             → reset（reLaunch，**重置栈**）
  *   2) 目标已在栈中且上下文相同        → reuse / back（返回并刷新目标成果）
  *   3) 边/页面声明为 replace          → replace（未保存编辑先提示）
  *   4) 预算内（depth < STACK_BUDGET） → push
  *   5) 有未保存编辑                  → confirm-unsaved（不静默卸载）
  *   6) 仍无法安全进入                → blocked + fallback（返回工作台）
+ *
+ * ⚠️ 1.5 必须排在 2 之前：`reset` 的语义就是「清空页面栈重来」，若先过复用分支，
+ *    目标恰好在栈底时（冷启动深链：index → mine → workbench）会被降级成
+ *    `navigateBack(2)` —— 落点看起来一样，但栈没清、身份链路没重走。
+ *    同理 `reset` 也不能落到第 4 步（那是 push，会再叠一层首页）。
+ *
+ * ⚠️ 第 4 步排在"未保存编辑"（第 5 步）之前，**这是刻意的**：`push` 不卸载当前页，
+ *    未保存的编辑还在栈里、没丢。真正会丢编辑的只有 `replace`（第 3 步）与
+ *    `reset` / `switchTab`（重置栈）、以及栈满之后的兜底。所以"有未保存编辑"只在
+ *    **替换**与**预算耗尽**两处拦截 —— 否则会把"往下走一层"也变成一次弹窗，
+ *    用户会被训练成一律点确定（那比不提示更糟）。这条语义由行为测试钉住。
  *
  * 与 HO 五步的对应关系：① ≡ 2、② ≡ 4、③ ≡ 3、④ ≡ 5、⑤ ≡ 6。
  * ⚠️ 有意与 HO 字面顺序不同的一点：HO 把「压栈」写在「声明式替换」之前，
@@ -614,6 +667,20 @@ function resolveNavigation(url, ctx) {
   const edge = from ? edgeOf(from, p) : null
   const strategy = (edge && edge.strategy) || (options.strategy || STRATEGY.PUSH)
 
+  // 1.5) 声明为 reset：`wx.reLaunch`，清空页面栈重来。
+  //      reLaunch **可以**带查询串（与 switchTab 不同），故 url 原样保留。
+  //      位置在复用分支之前的原因是语义性的，不是顺手：见函数头 ⚠️。
+  if (strategy === STRATEGY.RESET) {
+    return {
+      ok: true,
+      action: 'reset',
+      strategy: STRATEGY.RESET,
+      path: p,
+      url: full,
+      reason: '声明为重置栈（reLaunch）：清空页面栈并重建，不走复用/压栈'
+    }
+  }
+
   // 2) 目标已在栈中且业务上下文相同 → 返回／复用，并刷新目标成果
   const key = options.key != null ? options.key : pageKey(p, query, options.ctx)
   let found = -1
@@ -642,8 +709,14 @@ function resolveNavigation(url, ctx) {
     }
   }
 
+  // ⚠️ `back` 策略**只在上面的复用分支被消费**：目标在栈中就 `navigateBack`，
+  //    不在栈中则继续往下走 —— 此时唯一能到它的办法就是压栈，故退化为 push
+  //    （并留下 reason，见第 4 步）。本注册表当前没有 `back` 边；将来真要声明时
+  //    请注意这条退化路径，别以为写了 back 就一定会"返回"。
+  //
   // 3) 边/页面声明为 replace：替换当前页（未保存编辑先提示，不静默卸载）
   if (strategy === STRATEGY.REPLACE) {
+    const replacePlan = { ok: true, action: 'replace', strategy: STRATEGY.REPLACE, path: p, url: full, reason: '声明为替换的同级页面' }
     if (options.hasUnsaved) {
       return {
         ok: false,
@@ -652,17 +725,15 @@ function resolveNavigation(url, ctx) {
         strategy: STRATEGY.REPLACE,
         path: p,
         url: full,
+        // ENT-019：用户答复"放弃编辑"之后**该执行的那个计划**。
+        // 页面用 `performPlan(plan.afterConfirm)` 执行它，从而不必重新
+        // `resolveNavigation()` —— 重算会让 `hasUnsaved` 从 true 变 false 而在
+        // 预算类分支上落进另一条路径，提示与结果自相矛盾（见 performPlan 注释）。
+        afterConfirm: replacePlan,
         reason: '该目标是声明式替换（同级），但当前页有未保存编辑：先保存或明确放弃'
       }
     }
-    return {
-      ok: true,
-      action: 'replace',
-      strategy: STRATEGY.REPLACE,
-      path: p,
-      url: full,
-      reason: '声明为替换的同级页面'
-    }
+    return replacePlan
   }
 
   // 4) 预算内 → 正常压栈
@@ -678,6 +749,18 @@ function resolveNavigation(url, ctx) {
       code: 'unsaved-edit',
       path: p,
       url: full,
+      // 预算已满：**放弃编辑也进不去**（第 6 步会给出兜底去处），所以 afterConfirm
+      // 是一个 blocked 计划而不是 push —— 页面必须把这件事如实说出来，不能假装
+      // "存下来就能进"。
+      afterConfirm: {
+        ok: false,
+        action: 'blocked',
+        code: 'stack-budget',
+        path: p,
+        url: full,
+        reason: '页面栈已达项目预算 ' + STACK_BUDGET + ' 层（平台硬限 ' + MAX_STACK + '），且该目标未声明为可替换',
+        fallback: options.fallback || FALLBACK
+      },
       reason: '页面栈已达项目预算 ' + STACK_BUDGET + ' 层，且当前页有未保存编辑：先保存或明确放弃'
     }
   }
@@ -702,6 +785,7 @@ function resolveNavigation(url, ctx) {
  *
  * @param {string} url 目标（带 `/` 前缀与查询串）
  * @param {object} [opts]
+ *   from                当前页路径（不传则取页面栈顶；页面**应当显式传**）
  *   fail()              失败回调
  *   stack               注入页面栈（测试用）
  *   ctx.orgId           当前组织（复用键用）
@@ -732,35 +816,65 @@ function go(url, opts) {
     return plan
   }
 
+  return performPlan(plan, options)
+}
+
+/**
+ * 执行一个**已经解析好**的策略计划（不发散、不重新判定）。
+ *
+ * 页面一般不需要直接调用它 —— 只有一种情形例外：`confirm-unsaved` 提示得到用户
+ * 「确认放弃编辑」之后。此时必须执行**原来那个计划**，不能重新 `resolveNavigation()`：
+ * 重算可能因为 `hasUnsaved` 从 true 变 false 而落进另一条分支（典型是"预算是唯一阻碍"
+ * 的情形：用户刚说要放弃编辑，却又被告知栈满），于是交互与提示自相矛盾。
+ *
+ * @param {object} plan resolveNavigation() 的返回值（必须 ok）
+ * @param {object} [opts] 同 go() 的 fail / onBlocked / onReuse
+ * @returns {object} 同一个 plan（performed 表示是否真的发起了 wx 调用）
+ */
+function performPlan(plan, opts) {
+  const options = opts || {}
+  const out = plan || {}
+  out.performed = false
+  if (!out.ok || typeof wx === 'undefined') return out
+
   const fail = options.fail
-  switch (plan.action) {
+  switch (out.action) {
     case 'switchTab':
-      wx.switchTab({ url: plan.url, fail: fail })
+      wx.switchTab({ url: out.url, fail: fail })
+      break
+    case 'reset':
+      // ENT-019 补：声明为 reset 的边必须真的重置栈。初版没有这个分支，
+      // 于是 `strategy:'reset'` 会落到 default 变成 navigateTo（多压一层首页）。
+      wx.reLaunch({ url: out.url, fail: fail })
       break
     case 'reuse':
-      if (plan.delta > 0) {
+      if (out.delta > 0) {
         // 返回栈中已有的目标页；目标页在 onShow 里刷新自己的成果
-        wx.navigateBack({ delta: plan.delta })
+        wx.navigateBack({ delta: out.delta })
       } else if (typeof options.onReuse === 'function') {
-        options.onReuse(plan)
+        options.onReuse(out)
+      } else {
+        // 目标就是当前页（delta=0）而页面没给 onReuse：**什么都不会发生**。
+        // 这种"点了没反应"必须留下痕迹，否则会被当成随机的 UI 卡顿排查。
+        console.warn('[routes] ' + out.path + ' 就是当前页，且未提供 onReuse —— 页面需要自己刷新成果')
       }
       break
     case 'replace':
-      wx.redirectTo({ url: plan.url, fail: fail })
+      wx.redirectTo({ url: out.url, fail: fail })
       break
     case 'push':
     default:
       if (currentDepth() >= MAX_STACK) {
         // 平台硬限兜底：到这里说明策略链与真实栈已经脱节，必须留下可归因的日志
-        console.warn('[routes] 页面栈已达平台硬限 ' + MAX_STACK + '，' + plan.path + ' 无法进入')
-        if (typeof options.onBlocked === 'function') options.onBlocked(plan)
-        return plan
+        console.warn('[routes] 页面栈已达平台硬限 ' + MAX_STACK + '，' + out.path + ' 无法进入')
+        if (typeof options.onBlocked === 'function') options.onBlocked(out)
+        return out
       }
-      wx.navigateTo({ url: plan.url, fail: fail })
+      wx.navigateTo({ url: out.url, fail: fail })
       break
   }
-  plan.performed = true
-  return plan
+  out.performed = true
+  return out
 }
 
 /**
@@ -832,6 +946,13 @@ function guardEntry(url, ctx) {
   }
 
   // 「缺少上次选择的组织」**可以进入选择流程**，不视为拒绝深链（HO 第三章）
+  //
+  // ⚠️ 本分支当前**没有任何页面会命中**，而且这是**有意**的：唯一声明了
+  //    `keyContext: ['org']` 的页面是 `pages/entrust/workbench/workbench`，
+  //    它本身就是组织选择流程（自带 onPickOrg 与「需要选择服务经营主体」
+  //    「还没有加入服务经营主体」两态），所以它**不声明** `requiresOrg` ——
+  //    否则会把「进工作台来选组织」判成「先去别处选组织」，形成循环。
+  //    将来出现「必须已有组织、自己不选」的页面时再声明 requiresOrg。
   const contexts = r.keyContext || []
   if (contexts.indexOf('org') !== -1 && r.requiresOrg && !options.orgId) {
     return {
@@ -876,6 +997,7 @@ module.exports = {
   FALLBACK,
   ROUTES,
   TAB_BAR_PAGES,
+  MIGRATED_PAGES,
   normalize,
   queryOf,
   parseQuery,
@@ -892,6 +1014,7 @@ module.exports = {
   requiredParamsOf,
   resolveNavigation,
   go,
+  performPlan,
   canDeepLink,
   guardEntry,
   countByDomain
