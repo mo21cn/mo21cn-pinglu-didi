@@ -132,14 +132,7 @@ jobs:
       - name: 等待 MySQL 就绪
         run: |
           for i in $(seq 1 30); do
-            if python -c "
-import os, sys
-from sqlalchemy import create_engine, text
-e = create_engine(os.environ['DATABASE_URL'])
-with e.connect() as c:
-    c.execute(text('SELECT 1'))
-print('mysql ready')
-" 2>/dev/null; then exit 0; fi
+            if python -c "import os; from sqlalchemy import create_engine, text; e = create_engine(os.environ['DATABASE_URL']); c = e.connect(); c.execute(text('SELECT 1')); c.close(); print('mysql ready')" 2>/dev/null; then exit 0; fi
             echo "waiting mysql ($i/30)"; sleep 2
           done
           echo "MySQL 60s 内未就绪"; exit 1
