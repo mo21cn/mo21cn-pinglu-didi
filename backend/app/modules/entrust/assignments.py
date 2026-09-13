@@ -469,12 +469,40 @@ def cancel_assignment(
     return cancelled
 
 
+#: LIKE 转义字符。用户输入里的 `%` / `_` / `!` 必须当成**字面字符**：
+#: 不转义的话，搜一个 `%` 会匹配到全部委托 —— 那看起来像"搜到了很多"，
+#: 实际是过滤条件被静默丢掉了，任何"有结果就算通过"的断言都发现不了。
+#:
+#: **刻意不用反斜杠**：MySQL 在字符串字面量里把 `\` 当 C 风格转义符，于是
+#: `ESCAPE '\'` 的结束引号会被吃掉，服务端报语法错误（SQLite 却完全正常）。
+#: 开发/测试库是 SQLite、生产是 MySQL，而 CI 的 MySQL job 不跑这条查询路径，
+#: 用反斜杠会让这个问题一路绿灯到生产。`!` 在所有目标方言里都是普通字符，
+#: 也不受 MySQL `NO_BACKSLASH_ESCAPES` 影响。
+_LIKE_ESCAPE = "!"
+
+
+def _like_pattern(keyword: str | None) -> str | None:
+    """搜索词 → LIKE 模式；空白词返回 `None`（不加过滤，而不是"匹配空串"）。"""
+    if keyword is None:
+        return None
+    word = keyword.strip()
+    if not word:
+        return None
+    escaped = (
+        word.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", _LIKE_ESCAPE + "%")
+        .replace("_", _LIKE_ESCAPE + "_")
+    )
+    return f"%{escaped}%"
+
+
 def list_assignments(
     session: Session,
     *,
     owner_user_id: int | None = None,
     org_id: int | None = None,
     status: str | None = None,
+    keyword: str | None = None,
     page: int = 1,
     size: int = 20,
 ) -> tuple[int, list[dict[str, Any]]]:
@@ -483,6 +511,10 @@ def list_assignments(
     货主视角传 `owner_user_id`，组织视角传 `org_id`（经理工作台队列）。
     两者都给则取交集（用于"该组织中我作为货主的委托"这类查询）；
     都不给返回空集 —— 列表必须有明确的可见性边界，不做全表浏览。
+
+    `keyword` 是**在已限定可见范围之内**再做一次文本过滤（UI-02 的委托搜索）。
+    它不参与可见性判定：可见范围仍然只由 `owner_user_id` / `org_id` 决定，
+    所以搜索不可能被用来"扫"到范围外的委托。
     """
     if owner_user_id is None and org_id is None:
         return 0, []
@@ -498,6 +530,11 @@ def list_assignments(
     if status is not None:
         where.append("status = :status")
         params["status"] = status
+    pattern = _like_pattern(keyword)
+    if pattern is not None:
+        # 标题或货物概述命中即算（经理找人时通常记得其中一个，记不全两个）。
+        where.append("(title LIKE :kw ESCAPE '!' OR cargo_summary LIKE :kw ESCAPE '!')")
+        params["kw"] = pattern
     clause = " AND ".join(where)
 
     total_row = (
