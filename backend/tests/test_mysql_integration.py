@@ -14,7 +14,8 @@ MySQL 8.0 验证三条并发正确性锚点：
 4. **基线建表**（AC-25）：`create_all` 能在真实 MySQL 上建出全部基线表
    （外键两侧类型必须一致）—— SQLite 类型宽松，只有 MySQL 拦得住。
 5. **API 层时间列方言**（BASE-002 / R14）：MySQL 的 DATETIME 由驱动取回 `datetime`，
-   而响应模型声明 `str | None` —— 只有真实 MySQL 才能证明 API 层不因类型不符而降级。
+   而响应模型声明 `str | None` —— 只有真实 MySQL 才能证明 API 层不因类型不符而降级
+   （委托接口一条、会话与作业接口一条）。
 
 运行方式
 --------
@@ -401,6 +402,137 @@ def test_assignment_api_timestamps_render_on_mysql(mysql):
     finally:
         app.dependency_overrides.clear()
         settings.ENTRUST_ENABLED = previous
+
+
+def test_session_and_job_api_timestamps_render_on_mysql(mysql):
+    """BASE-002 教训的延伸：会话与作业接口的时间列也必须归一为文本。
+
+    ENT-011 新增的 `ent_session` / `ent_session_message` / `ent_agent_job` /
+    `ent_agent_job_attempt` 与既有表一样，在 SQLite 上是 TEXT、在 MySQL 上由驱动
+    取回 `datetime`，而响应模型声明 `str`。这类缺陷只有真实 MySQL 才拦得住，
+    所以幂等/并发之外，**时间列方言**也属于"必须在 MySQL 上验"的面。
+    """
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from app.core.config import get_settings
+    from app.main import app
+    from app.modules.auth.dependencies import get_current_user
+    from app.modules.auth.router import get_db
+    from app.modules.entrust import sessions as sess_svc
+
+    manager_id, owner_id = 5151, 5152
+    db = mysql()
+    org_id = _seed_org_with_entrustment(db, owner_id)
+    now_ts = utcnow_naive().strftime(_TS)
+    db.execute(
+        text(
+            "INSERT INTO ent_org_member (org_id, user_id, member_role, status, created_at) "
+            "VALUES (:o, :u, 'manager', 'active', :c)"
+        ),
+        {"o": org_id, "u": manager_id, "c": now_ts},
+    )
+    # 授出 Agent 作业权限（作用域按该货主）
+    db.execute(
+        text(
+            "UPDATE ent_entrustment SET permissions = :p WHERE entrust_user_id = :u AND org_id = :o"
+        ),
+        {"p": '["entrust:view","entrust:agent:job"]', "u": owner_id, "o": org_id},
+    )
+    db.commit()
+    entrustment_id = int(
+        db.execute(
+            text(
+                "SELECT id FROM ent_entrustment WHERE entrust_user_id = :u AND org_id = :o "
+                "ORDER BY id DESC LIMIT 1"
+            ),
+            {"u": owner_id, "o": org_id},
+        ).scalar_one()
+    )
+    created = svc.create_assignment(db, owner_user_id=owner_id, title="方言-会话作业")
+    submitted = svc.submit_assignment(
+        db,
+        assignment_id=created["assignment_id"],
+        actor_id=owner_id,
+        org_id=org_id,
+        expected_revision=created["revision"],
+    )
+    session_row = sess_svc.create_session(
+        db,
+        entrustment_id=entrustment_id,
+        assignment_id=submitted["assignment_id"],
+        owner_user_id=owner_id,
+        org_id=org_id,
+        created_by=manager_id,
+        specialty="agent_01",
+        title="方言用例",
+    )
+    session_id = session_row["session_id"]
+    db.close()
+
+    def override_get_db():
+        session = mysql()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    settings = get_settings()
+    previous_enabled = settings.ENTRUST_ENABLED
+    previous_mock = settings.LLM_MOCK
+    previous_key = settings.LLM_API_KEY
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=manager_id)
+    settings.ENTRUST_ENABLED = True
+    settings.LLM_MOCK = True
+    settings.LLM_API_KEY = ""
+    headers = {"Authorization": "Bearer dialect-test"}
+
+    def assert_times(body: dict[str, object], keys: tuple[str, ...]) -> None:
+        for key in keys:
+            value = body.get(key)
+            assert value is None or isinstance(value, str), (
+                f"{key} 未归一为文本：{type(value)} = {value!r}"
+            )
+
+    try:
+        with TestClient(app) as client:
+            detail = client.get(f"/api/v1/entrust/sessions/{session_id}", headers=headers)
+            assert detail.status_code == 200, detail.text
+            assert_times(detail.json()["session"], ("created_at", "updated_at"))
+
+            msg = client.post(
+                f"/api/v1/entrust/sessions/{session_id}/messages",
+                json={"content": "方言检查"},
+                headers={**headers, "Idempotency-Key": _unique("msg")},
+            )
+            assert msg.status_code == 200, msg.text
+            assert_times(msg.json(), ("created_at",))
+
+            job = client.post(
+                f"/api/v1/entrust/sessions/{session_id}/jobs",
+                json={"base_revision": 1},
+                headers={**headers, "Idempotency-Key": _unique("job")},
+            )
+            assert job.status_code == 200, job.text
+            job_id = job.json()["job_id"]
+            assert_times(job.json(), ("created_at", "updated_at", "started_at", "cancelled_at"))
+
+            run = client.post(f"/api/v1/entrust/agent/jobs/{job_id}/run", headers=headers)
+            assert run.status_code == 200, run.text
+            assert run.json()["job"]["status"] == "succeeded"
+            assert_times(
+                run.json()["job"],
+                ("created_at", "updated_at", "started_at", "finished_at", "lease_expires_at"),
+            )
+            assert isinstance(run.json()["job"]["finished_at"], str)
+            assert_times(run.json()["attempts"][0], ("started_at", "finished_at"))
+    finally:
+        app.dependency_overrides.clear()
+        settings.ENTRUST_ENABLED = previous_enabled
+        settings.LLM_MOCK = previous_mock
+        settings.LLM_API_KEY = previous_key
 
 
 def _seed_org_with_entrustment(db, owner_id: int) -> int:

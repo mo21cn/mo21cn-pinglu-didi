@@ -242,3 +242,156 @@ def attachment_out(data: dict[str, Any]) -> AttachmentOut:
     做**白名单投影**（只取声明过的字段），避免内部存储键顺带外泄。
     """
     return AttachmentOut.model_validate(data)
+
+
+# ── 会话与 Agent 作业（ENT-011） ─────────────────────────────────────────────
+# 会话与作业是**经理侧**能力：货主看不到内部比价、也看不到 Agent 的建议动作，
+# 所以这两组模型只在管理端点使用，不参与客户投影。
+
+
+class SessionCreate(BaseModel):
+    """创建会话：必须绑定委托授权或委托单之一（无上下文的会话无处取数）。"""
+
+    entrustment_id: int | None = Field(default=None, ge=1)
+    assignment_id: int | None = Field(default=None, ge=1)
+    agent_specialty: str | None = Field(default=None, max_length=16)
+    title: str = Field(min_length=1, max_length=128)
+
+
+class SessionMessageIn(BaseModel):
+    """追加一条操作者消息（角色固定 user，避免调用方伪造 agent 消息）。"""
+
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class SessionOut(BaseModel):
+    """会话投影。`agent_specialty` 为 None 表示通用会话壳（无专业能力）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    session_id: int
+    entrustment_id: int | None
+    assignment_id: int | None
+    owner_user_id: int
+    org_id: int | None
+    created_by: int
+    agent_specialty: str | None
+    agent_specialty_label: str | None
+    title: str
+    status: str
+    revision: int
+    created_at: str
+    updated_at: str
+
+
+class SessionMessageOut(BaseModel):
+    """消息投影。`source` 区分 manual / agent / deterministic —— UI 必须按它标注来源。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    message_id: int
+    session_id: int
+    seq: int
+    role: str
+    content: str
+    source: str
+    job_id: int | None
+    created_by: int
+    created_at: str
+
+
+class SessionDetailOut(BaseModel):
+    session: SessionOut
+    messages: list[SessionMessageOut]
+
+
+class SessionListOut(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: list[SessionOut]
+
+
+def session_out(data: dict[str, Any]) -> SessionOut:
+    return SessionOut.model_validate(data)
+
+
+def message_out(data: dict[str, Any]) -> SessionMessageOut:
+    return SessionMessageOut.model_validate(data)
+
+
+class JobCreate(BaseModel):
+    """提交 Agent 作业。
+
+    `input` 是操作者当场提供的作业输入（如粘贴的报价文本、候选清单）。
+    它与**附件**不同：附件是不可信数据，按 `source_refs` 核对；
+    操作者输入是当面提交的可信输入。
+    """
+
+    task_id: int | None = Field(default=None, ge=1)
+    artifact_id: int | None = Field(default=None, ge=1)
+    base_revision: int | None = Field(default=None, ge=0)
+    input: dict[str, Any] | None = None
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+
+
+class JobAttemptOut(BaseModel):
+    attempt_no: int
+    status: str
+    error_kind: str | None
+    error_message: str | None
+    latency_ms: int | None
+    mocked: bool
+    started_at: str
+    finished_at: str
+
+
+class AgentJobOut(BaseModel):
+    """作业投影。
+
+    `raw_output` **不出现在这里**（只在服务端尝试日志里，供审计）：
+    原始模型输出未经过任何校验，把它返回给前端会诱导调用方直接使用它。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    job_id: int
+    session_id: int | None
+    entrustment_id: int | None
+    assignment_id: int | None
+    task_id: int | None
+    artifact_id: int | None
+    specialty: str
+    status: str
+    attempt_count: int
+    max_attempts: int
+    lease_expires_at: str | None
+    base_revision: int | None
+    input: dict[str, Any] | None
+    envelope: dict[str, Any] | None
+    error_kind: str | None
+    error_message: str | None
+    requires_review: bool
+    created_by: int
+    started_at: str | None
+    finished_at: str | None
+    cancelled_at: str | None
+    created_at: str
+    updated_at: str
+
+
+class AgentJobDetailOut(BaseModel):
+    job: AgentJobOut
+    attempts: list[JobAttemptOut]
+
+
+class AgentJobListOut(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: list[AgentJobOut]
+
+
+def job_out(data: dict[str, Any]) -> AgentJobOut:
+    """服务层 dict → 响应模型（白名单投影：未声明字段不会外泄）。"""
+    return AgentJobOut.model_validate(data)
