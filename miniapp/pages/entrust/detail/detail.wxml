@@ -1,0 +1,71 @@
+<!--
+  委托发货 · 委托详情（ENT-012）
+  只读展示：本批不提供受理 / 任务 / 成果 / Agent 写动作，页底明确标注「下一批开放」，
+  而不是给一堆点了没反应的按钮。
+-->
+<view class="page">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">委托详情</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub" wx:if="{{detail}}">{{detail.title}}</view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期 -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 无权限 / 不存在（服务端对非参与方统一 404，不泄漏存在性） -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <!-- 正常 -->
+    <block wx:else>
+      <view class="card">
+        <view class="row-between detail-top">
+          <text class="detail-title">{{detail.title}}</text>
+          <text class="{{detail.statusClass}}">{{detail.statusLabel}}</text>
+        </view>
+        <view
+          wx:for="{{fields}}"
+          wx:key="label"
+          class="field-row row-between"
+        >
+          <text class="field-label">{{item.label}}</text>
+          <text class="field-value">{{item.value}}</text>
+        </view>
+      </view>
+
+      <view class="card status-note">
+        <view class="status-note-title">当前状态说明</view>
+        <view class="status-note-body">{{detail.statusHint || '该状态暂无说明'}}</view>
+      </view>
+
+      <view class="card next-batch" bindtap="onNextBatch" hover-class="row-hover">
+        <view class="next-batch-title">受理 / 任务 / 成果 / Agent 助理</view>
+        <view class="next-batch-body">下一批开放：届时在这里受理委托、派发任务、查看成果提案</view>
+      </view>
+    </block>
+  </view>
+</view>

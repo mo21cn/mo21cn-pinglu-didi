@@ -266,6 +266,16 @@ function loadPage(file, ctx) {
     if (s.indexOf('utils/ports') !== -1) return U('ports.js')
     if (s.indexOf('utils/constants') !== -1) return U('constants.js')
     if (s.indexOf('utils/dates') !== -1) return U('dates.js')
+    // 委托发货入口契约模块：纯函数部分加载真实实现，只把「入口探测」桩成
+    // 「无权限」—— 本脚本关注的是已登录状态下各页面拿真数据渲染；入口可见性
+    // 的四种分支由 scripts/verify_entrust_ui.js 用真实输入逐一覆盖。
+    // ⚠️ 新增 utils/*.js 时必须在此登记：未登记的模块会落到末尾的 `return {}`，
+    // 表现为页面调用时 "xxx is not a function"（本模块首次接入时就这样红过一次）。
+    if (s.indexOf('utils/entrust') !== -1) {
+      return Object.assign({}, U('entrust.js'), {
+        probeEntry: () => Promise.resolve({ visible: false, reason: 'denied', hint: '' }),
+      })
+    }
     if (s.indexOf('auth') !== -1) {
       return {
         getUser: () => ({ current_role: ctx.role, user_id: ctx.uid || 1 }),

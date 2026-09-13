@@ -14,7 +14,9 @@
     "pages/port/appt/appt",
     "pages/assistant/assistant",
     "pages/preview/preview",
-    "pages/mine/mine"
+    "pages/mine/mine",
+    "pages/entrust/workbench/workbench",
+    "pages/entrust/detail/detail"
   ],
   "window": {
     "navigationBarTitleText": "船好多",

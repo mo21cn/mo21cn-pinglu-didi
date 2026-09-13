@@ -46,6 +46,25 @@
       </view>
     </view>
 
+    <!-- 委托发货入口（ENT-012 / AC-02 入口隔离）
+         整块由服务端静默探测结果驱动：无权限时这里什么都不渲染，
+         而不是给一个点进去必然 403 的按钮。 -->
+    <view
+      wx:if="{{showEntrust}}"
+      class="section-card entrust-entry"
+      bindtap="onEntrust"
+      hover-class="row-hover"
+    >
+      <view class="row-between">
+        <view class="entrust-entry-main">
+          <view class="entrust-entry-title">📋 委托发货</view>
+          <view class="entrust-entry-sub">受理货主委托 · 派发任务 · 查看成果</view>
+        </view>
+        <text class="entrust-entry-caret">›</text>
+      </view>
+      <view wx:if="{{entrustHint}}" class="entrust-entry-hint">{{entrustHint}}</view>
+    </view>
+
     <!-- 资产行 -->
     <view class="section-card assets">
       <view class="asset-cell" data-key="balance" bindtap="onAssetTap" hover-class="row-hover">

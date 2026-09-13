@@ -1,0 +1,92 @@
+<!--
+  委托发货 · 经理工作台（ENT-012 / AC-04）
+  五态（AC-21）：loading / error / expired / denied / empty / ready —— 由 `view` 一个字段驱动。
+  判定集中在 utils/entrust.js（可被 scripts/verify_entrust_ui.js 在 CI 里直接驱动），
+  模板本身不做判断，只做映射。
+-->
+<view class="page">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">委托发货</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub">经理工作台 · 组织委托队列</view>
+  </view>
+
+  <!-- 状态筛选：错误/空态下也保留，用户要先能改条件再重试 -->
+  <scroll-view class="filter-scroll" scroll-x="true" enable-flex="true">
+    <view class="filter-bar">
+      <view
+        wx:for="{{filters}}"
+        wx:key="key"
+        class="filter-pill {{activeStatus === item.key ? 'filter-pill-active' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="onFilter"
+        hover-class="hover-dim"
+      >{{item.label}}</view>
+    </view>
+  </scroll-view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期 -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 无权限 / 需选组织 / 功能未开放 -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <!-- 空 -->
+    <view wx:elif="{{view === 'empty'}}" class="empty">
+      <text class="empty-icon">📭</text>
+      {{viewTitle}}
+      <view class="empty-hint">{{viewHint}}</view>
+    </view>
+
+    <!-- 正常 -->
+    <block wx:else>
+      <view class="list-head row-between">
+        <text class="result-count">{{pageHint}}</text>
+        <text class="chip chip-muted">只读列表</text>
+      </view>
+      <view
+        wx:for="{{items}}"
+        wx:key="assignmentId"
+        class="card list-card"
+        data-id="{{item.assignmentId}}"
+        bindtap="onOpen"
+        hover-class="row-hover"
+      >
+        <view class="row-between">
+          <text class="card-title">{{item.title}}</text>
+          <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+        </view>
+        <view class="card-line">{{item.cargoSummary}}</view>
+        <view class="card-line card-line-weak">{{item.quantityText}}</view>
+        <view class="card-foot row-between">
+          <text class="card-meta">#{{item.assignmentId}} · {{item.createdAt}}</text>
+          <text class="card-caret">›</text>
+        </view>
+      </view>
+    </block>
+  </view>
+</view>

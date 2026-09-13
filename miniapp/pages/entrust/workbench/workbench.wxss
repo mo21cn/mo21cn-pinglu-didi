@@ -1,0 +1,115 @@
+/* 委托发货 · 经理工作台（ENT-012）
+   只写本页特有部分：顶栏 / 筛选条滚动容器 / 卡片内的排版。
+   颜色、圆角、阴影、chip、err-card、filter-pill 全部复用 app.wxss，避免第二套设计语言。 */
+
+.head-bg {
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  padding-bottom: 24rpx;
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  height: 88rpx;
+  padding: 0 24rpx;
+}
+
+.nav-back {
+  width: 64rpx;
+  font-size: 48rpx;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+/* 与 nav-back 等宽，保证标题真正居中 */
+.nav-spacer {
+  width: 64rpx;
+}
+
+.head-sub {
+  padding: 0 28rpx;
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.filter-scroll {
+  white-space: nowrap;
+  padding-top: 20rpx;
+}
+
+.filter-scroll .filter-bar {
+  display: inline-flex;
+  padding: 0 24rpx 20rpx;
+}
+
+.list-head {
+  padding: 8rpx 4rpx 16rpx;
+}
+
+.list-card {
+  margin-bottom: 20rpx;
+}
+
+.card-title {
+  flex: 1;
+  margin-right: 16rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.card-line {
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: #3D4C63;
+}
+
+.card-line-weak {
+  color: #6B7A8C;
+}
+
+.card-foot {
+  margin-top: 18rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #EEF1F6;
+}
+
+.card-meta {
+  font-size: 23rpx;
+  color: #98A6B8;
+}
+
+.card-caret {
+  font-size: 30rpx;
+  color: #C2CCDA;
+}
+
+.empty-hint {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #B4BECC;
+}
+
+/* ---- 本页 hover 反馈 ----
+   `hover-dim` / `row-hover` 是**页面级**类（app.wxss 里没有，各页面自己声明），
+   所以每个用到 hover-class 的页面都必须自带一份。漏声明不会报错，
+   只在点击时没有任何视觉反馈 —— 静默失效，肉眼很难发现，
+   由 scripts/verify_entrust_ui.js 的"hover-class 类存在性"检查兜住。 */
+.hover-dim {
+  opacity: .6;
+}
+
+.row-hover {
+  background: #F5F8FF;
+}

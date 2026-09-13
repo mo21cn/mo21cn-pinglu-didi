@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "委托详情",
+  "enablePullDownRefresh": false,
+  "backgroundTextStyle": "dark"
+}

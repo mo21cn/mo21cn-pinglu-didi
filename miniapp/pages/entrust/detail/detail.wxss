@@ -1,0 +1,107 @@
+/* 委托发货 · 委托详情（ENT-012）—— 只写本页特有排版，其余复用 app.wxss */
+
+.head-bg {
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  padding-bottom: 24rpx;
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  height: 88rpx;
+  padding: 0 24rpx;
+}
+
+.nav-back {
+  width: 64rpx;
+  font-size: 48rpx;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.nav-spacer {
+  width: 64rpx;
+}
+
+.head-sub {
+  padding: 0 28rpx;
+  font-size: 25rpx;
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detail-top {
+  padding-bottom: 20rpx;
+  border-bottom: 1rpx solid #EEF1F6;
+}
+
+.detail-title {
+  flex: 1;
+  margin-right: 16rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.field-row {
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #F4F6FB;
+}
+
+.field-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.field-label {
+  font-size: 25rpx;
+  color: #98A6B8;
+}
+
+.field-value {
+  max-width: 420rpx;
+  font-size: 26rpx;
+  color: #3D4C63;
+  text-align: right;
+}
+
+.status-note,
+.next-batch {
+  margin-top: 20rpx;
+}
+
+.status-note-title,
+.next-batch-title {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.status-note-body,
+.next-batch-body {
+  margin-top: 10rpx;
+  font-size: 25rpx;
+  color: #6B7A8C;
+  line-height: 1.6;
+}
+
+/* ---- 本页 hover 反馈 ----
+   `hover-dim` / `row-hover` 是页面级类（app.wxss 未定义），用到就自带一份；
+   漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */
+.hover-dim {
+  opacity: .6;
+}
+
+.row-hover {
+  background: #F5F8FF;
+}

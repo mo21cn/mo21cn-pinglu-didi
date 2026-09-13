@@ -205,6 +205,8 @@ jobs:
   # 前端静态契约：不依赖后端，秒级完成
   #   verify_miniapp       JSON 语法 / 页面四件套 / tabBar / 路由可达 / 事件函数存在性
   #   verify_ui_interactions 组件 props 与事件 / 弹层闭环 / 长列表与日期等静态防线
+  #   verify_entrust_ui    委托发货：入口隔离（AC-02）/ 五态判定（AC-21）/
+  #                        跨端状态取值域 / 工作台用到的 CSS 类存在性
   # 真机走查（verify_miniapp_device）依赖微信开发者工具，无法在 CI 运行，仍由本机执行。
   # ─────────────────────────────────────────────────────────────
   frontend-static:
@@ -224,6 +226,11 @@ jobs:
 
       - name: UI 交互契约校验
         run: node scripts/verify_ui_interactions.js
+
+      - name: 委托发货前端契约校验
+        # 页面 onLoad/onShow 在 CI 里跑不了，故入口可见性与五态判定被抽成
+        # miniapp/utils/entrust.js 的纯函数，由本脚本驱动（含跨端取值域交叉断言）。
+        run: node scripts/verify_entrust_ui.js
 
   # ─────────────────────────────────────────────────────────────
   # 前端端到端：真起后端 → 铺演示数据 → 真载荷驱动页面逻辑
