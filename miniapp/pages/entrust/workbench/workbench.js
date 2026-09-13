@@ -14,7 +14,7 @@ const {
   pageHint,
   pickOrg,
   viewState
-} = require('../../utils/entrust')
+} = require('../../../utils/entrust')
 
 const PAGE_SIZE = 20
 

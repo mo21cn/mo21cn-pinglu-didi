@@ -243,6 +243,13 @@ jobs:
         # 新增页面不在 miniapp/utils/routes.js 登记 → 本步红。
         run: node scripts/verify_routes.js
 
+      - name: 小程序 require 相对路径校验
+        # 2026-09-13 真机走查发现：三层目录的页面把 utils 写成 '../../utils/entrust'，
+        # 解析成不存在的 pages/utils/entrust.js → 页面在**真机白屏**，而静态门禁全绿
+        # （verify_*_ui 只读源码文本做断言、verify_frontend_e2e 用 requireStub 替换依赖，
+        #   两者都不做真实路径解析）。本步补上「解析出的目标文件必须真实存在」这一维。
+        run: node scripts/verify_require_paths.js
+
   # ─────────────────────────────────────────────────────────────
   # 前端端到端：真起后端 → 铺演示数据 → 真载荷驱动页面逻辑
   #   verify_login_flow     登录链路顺序 / 鉴权头 / token 角色
