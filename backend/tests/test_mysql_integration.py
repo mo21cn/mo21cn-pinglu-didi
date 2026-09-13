@@ -52,11 +52,14 @@ _ROUNDS = 4  # 竞争轮数：每轮重新播种一张 submitted 委托单
 
 @pytest.fixture(scope="module")
 def mysql():
-    """模块级 MySQL 引擎与会话工厂：全新结构。
+    """模块级 MySQL 引擎与会话工厂（只应用迁移，不 create_all）。
 
-    为可重复执行，先尽力清掉历史表（CI 每次都是新库；本地重跑也能干净开始）。
+    **已知基线问题**（ENT-007 CI 首跑发现，待独立修复）：基线模型的
+    `create_all` 在 MySQL 上失败 —— `users.id` 是 `BigInteger`（SQLite
+    variant 为 Integer），而 `ships.owner_id` 等 FK 列是 `Integer`，
+    MySQL 严格校验外键类型兼容性（错误 3780）。本模块只用 `ent_` 表，
+    因此只应用 `migrations/`，不触发基线建表。
     """
-    from app.models import Base
     from migrate import apply_pending
 
     engine = create_engine(
@@ -65,11 +68,10 @@ def mysql():
         pool_size=10,
         max_overflow=20,
     )
-    Base.metadata.create_all(bind=engine)  # user 等基线表（IF NOT EXISTS 语义）
     apply_pending(engine)  # ent_ 表按迁移创建（已应用的跳过）
 
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    yield factory, engine
+    yield factory
     engine.dispose()
 
 
