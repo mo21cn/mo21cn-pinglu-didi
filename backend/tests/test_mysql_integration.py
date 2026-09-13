@@ -179,9 +179,14 @@ def test_double_claim_race_exactly_one_winner(mysql):
         verify.close()
         assert row is not None and row["claimed_by"] == won[0][1]
 
-    # 4 轮全部由条件更新裁决；输家的原因必须可读（不是异常崩塌）
+    # 4 轮全部有且仅有一个赢家；输家得到可读的状态冲突（不是异常崩塌）。
+    # 输家有两种合法路径：进入时已读到 claimed（"只有待受理可认领"），
+    # 或通过检查后输给条件 UPDATE（"认领失败"）—— 两者都是 AssignmentStateError。
     assert len(winners) == _ROUNDS
-    assert all("认领失败" in reason or "状态已变化" in reason for reason in loser_reasons)
+    assert all(
+        ("认领失败" in reason or "状态已变化" in reason or "只有待受理可认领" in reason)
+        for reason in loser_reasons
+    )
 
 
 def test_concurrent_edit_same_revision_one_winner(mysql):
