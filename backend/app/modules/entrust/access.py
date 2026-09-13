@@ -47,6 +47,9 @@ PERM_QUOTE_CREATE = "entrust:quote:create"
 PERM_QUOTE_PUBLISH = "entrust:quote:publish"
 PERM_TASK_DISPATCH = "entrust:task:dispatch"
 PERM_SETTLEMENT_CREATE = "entrust:settlement:create"
+# 发起 Agent 作业（会话内提交/推进/重试/取消）。与"看得到会话"分开：
+# 只读成员能看见会话与历史消息，但**不能**让 Agent 干活。
+PERM_AGENT_JOB = "entrust:agent:job"
 PERM_MEMBER_MANAGE = "org:member:manage"
 PERM_ENTRUSTMENT_MANAGE = "org:entrustment:manage"
 
@@ -58,6 +61,7 @@ ALL_PERMISSIONS = frozenset(
         PERM_QUOTE_PUBLISH,
         PERM_TASK_DISPATCH,
         PERM_SETTLEMENT_CREATE,
+        PERM_AGENT_JOB,
         PERM_MEMBER_MANAGE,
         PERM_ENTRUSTMENT_MANAGE,
     }
@@ -68,7 +72,7 @@ ORG_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "owner": ALL_PERMISSIONS,
     # 管理员：可管理成员与授权，但不能发布报价/派单/结算（业务动作需经理人角色）
     "admin": frozenset({PERM_VIEW, PERM_MEMBER_MANAGE, PERM_ENTRUSTMENT_MANAGE}),
-    # 经理人：一线执行，可认领委托、制作并发布报价、派单、生成结算
+    # 经理人：一线执行，可认领委托、制作并发布报价、派单、生成结算、发起 Agent 作业
     "manager": frozenset(
         {
             PERM_VIEW,
@@ -77,6 +81,7 @@ ORG_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_QUOTE_PUBLISH,
             PERM_TASK_DISPATCH,
             PERM_SETTLEMENT_CREATE,
+            PERM_AGENT_JOB,
         }
     ),
     # 普通成员：只读
