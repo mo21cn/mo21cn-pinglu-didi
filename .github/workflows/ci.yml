@@ -49,8 +49,7 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────
   # 数据库迁移：全新 SQLite 库上跑通迁移，并证明重复执行是幂等的
-  #   ⚠️ MySQL 方言尚未在 CI 真实执行（依赖 D2 / DR-0002），
-  #      相关验收子项在补齐前记 not-run，不得记为通过。
+  #   MySQL 方言由下方 db-migration-mysql job 真实执行（DR-0002）。
   # ─────────────────────────────────────────────────────────────
   db-migration:
     name: 数据库迁移（SQLite 冒烟 + 幂等）
@@ -80,6 +79,68 @@ jobs:
         run: python migrate.py --status
 
       - name: 执行迁移并校验（首次）
+        run: python migrate.py --verify
+
+      - name: 再次执行应无待执行（幂等）
+        run: python migrate.py --verify
+
+  # ─────────────────────────────────────────────────────────────
+  # 数据库迁移（MySQL 真实执行，DR-0002）：
+  #   证明迁移的 mysql 方言 SQL 在真实 MySQL 8.0 上可执行且幂等。
+  #   范围界定：仅覆盖迁移 SQL；pytest 对接 MySQL 的并发集成测试
+  #   属后续增量（见 DR-0002「范围界定」）。
+  # ─────────────────────────────────────────────────────────────
+  db-migration-mysql:
+    name: 数据库迁移（MySQL 8.0 真实执行）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: entrust_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      APP_ENV: test
+      DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/entrust_test?charset=utf8mb4
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # pymysql 仅 CI 用（纯 Python，无编译依赖）；生产驱动选型不在 DR-0002 范围
+          pip install pymysql
+
+      - name: 等待 MySQL 就绪
+        run: |
+          for i in $(seq 1 30); do
+            if python -c "import os; from sqlalchemy import create_engine, text; e = create_engine(os.environ['DATABASE_URL']); c = e.connect(); c.execute(text('SELECT 1')); c.close(); print('mysql ready')" 2>/dev/null; then exit 0; fi
+            echo "waiting mysql ($i/30)"; sleep 2
+          done
+          echo "MySQL 60s 内未就绪"; exit 1
+
+      - name: 迁移状态（全新库，应全部待执行）
+        run: python migrate.py --status
+
+      - name: 执行迁移并校验（首次，MySQL 方言）
         run: python migrate.py --verify
 
       - name: 再次执行应无待执行（幂等）
