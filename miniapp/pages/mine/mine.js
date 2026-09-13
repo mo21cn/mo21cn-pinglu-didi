@@ -2,6 +2,9 @@
 // 用户卡 / 会员卡 / 资产行 / 常用功能网格（多数原型占位）+ 账号（角色切换 / 退出）
 const { getUser, clearUser, enterRole } = require('../../utils/auth')
 const { syncTabBar } = require('../../utils/tabbar')
+// 委托发货入口的可见性判定（AC-02 入口隔离）——判定逻辑在 utils/entrust.js，
+// 那里是不接触 wx 的纯函数，可被 CI 的 scripts/verify_entrust_ui.js 直接驱动。
+const entrust = require('../../utils/entrust')
 
 // 账号区可选身份：仅货主 / 船东（港口方身份已下线）
 const ROLE_LIST = [
@@ -35,7 +38,10 @@ Page({
     roleLabel: '登录后使用',
     currentRole: '',
     roleList: ROLE_LIST,
-    functions: FUNCTIONS
+    functions: FUNCTIONS,
+    // 委托发货入口：默认隐藏，仅当服务端静默探测放行才显示（AC-02）
+    showEntrust: false,
+    entrustHint: ''
   },
 
   onLoad() {
@@ -70,6 +76,31 @@ Page({
         roleLabel: '登录后使用'
       })
     }
+    this.probeEntrust()
+  },
+
+  /**
+   * 静默探测「委托发货」入口的可见性（AC-02 入口隔离）。
+   *
+   * 判定依据是**服务端**：组织成员资格 + 该货主的委托授权 + `entrust:view` 权限，
+   * 三者都满足才放行。绝不用本地的 `current_role` 判断 —— 它存在 Storage 里，
+   * 改一下就能造出一个"看起来是经理"的界面，而真正的权限只在服务端。
+   *
+   * 探测失败（401/403/404/断网）一律保持隐藏：显示一个"点进去必然失败"的入口
+   * 比不显示更糟，用户会以为功能坏了，而不是"这个身份没有这项能力"。
+   */
+  probeEntrust() {
+    const self = this
+    entrust.probeEntry().then(function (decision) {
+      self.setData({
+        showEntrust: !!decision.visible,
+        entrustHint: decision.hint || ''
+      })
+    })
+  },
+
+  onEntrust() {
+    wx.navigateTo({ url: '/pages/entrust/workbench/workbench' })
   },
 
   getInitials(name) {

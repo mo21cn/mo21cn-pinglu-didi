@@ -108,6 +108,14 @@ page { background: #F5F7FA; }
 .vip-btn-hover { opacity: .85; }
 .vip-tag { font-size: 20rpx; color: rgba(255, 255, 255, .85); }
 
+/* ---- 委托发货入口（经理能力：服务端静默探测放行才渲染） ---- */
+.entrust-entry { display: flex; flex-direction: column; }
+.entrust-entry-main { flex: 1; min-width: 0; }
+.entrust-entry-title { font-size: 30rpx; font-weight: 600; color: #14233B; }
+.entrust-entry-sub { margin-top: 8rpx; font-size: 23rpx; color: #7C8CA0; }
+.entrust-entry-caret { font-size: 38rpx; color: #C3CCD8; font-weight: 300; }
+.entrust-entry-hint { margin-top: 12rpx; font-size: 22rpx; color: #F08C00; }
+
 /* ---- 资产行 ---- */
 .assets {
   display: flex;
