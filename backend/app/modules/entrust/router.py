@@ -164,6 +164,12 @@ def list_assignments(
     view: str = Query(default="owner", description="owner=我的委托；org=授权组织的队列"),
     org_id: int | None = Query(default=None, ge=1),
     assignment_status: str | None = Query(default=None, alias="status"),
+    keyword: str | None = Query(
+        default=None,
+        alias="q",
+        max_length=64,
+        description="按标题/货物概述模糊匹配；**在已限定的可见范围内**过滤（UI-02 委托搜索）",
+    ),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -205,6 +211,7 @@ def list_assignments(
         owner_user_id=owner_user_id,
         org_id=scope_org_id,
         status=assignment_status,
+        keyword=keyword,
         page=page,
         size=size,
     )

@@ -962,6 +962,169 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
   const mdd = await (await mp.currentPage()).data()
   rec('⑫ 我的页渲染', !mdd.error, `role=${mdd.currentRole} functions=${(mdd.functions || []).length}`)
 
+  // ==================== 委托发货 · 组织选择器（ENT-012 / AC-02 · DR-0008） ====================
+  //
+  // 为什么这一节必须真机做：CI 里 verify_entrust_ui.js 已经断言过 pickOrg 的 4 条规则
+  // （纯函数）和模板里 .org-bar / .org-pill 的静态结构，但两者都证明不了
+  // **选择器真的驱动了界面** —— 点了 pill 之后队列是否真的换成另一个组织的委托、
+  // Storage 是否跟随、重新进入是否沿用上次选择，只有真机点击 + 读 page.data() 才拿得到。
+  //
+  // 种子（backend/scripts/seed_entrust_orgpicker.py，需先跑）：
+  //   seed-mgr-multi  甲乙双组织（A=manager / B=member，同时是 DR-0008 的回归样本）
+  //   seed-mgr-single 仅甲组织（manager）
+  //   seed-mgr-none   不属于任何组织
+  //
+  // ⚠️ 三段有**顺序依赖**，不要单独重跑第二段：第一段结尾会把「已选乙」写进 Storage，
+  // 第二段正是靠这个"已失效的旧选择"验证 pickOrg 不会放行不属于当前清单的组织。
+  {
+    const ORG_A = '演示经营主体·甲'
+    const ORG_B = '演示经营主体·乙'
+    const TITLE_A = '演示委托·甲组织队列样本'
+    const TITLE_B = '演示委托·乙组织队列样本'
+    const WB = 'pages/entrust/workbench/workbench'
+    const ORG_KEY = 'entrust_active_org'
+    // 组织定位完成才放行：loading 态没有 orgReason，拿它当"已结算"判据
+    const ORG_SETTLED = (d) => !!d && d.view !== 'loading' && !!d.orgReason
+    const pillCount = async (p) => (await p.$$('.org-pill')).length
+    const activeCount = async (p) => (await p.$$('.org-pill-active')).length
+    const noteOf = (d) => `view=${d.view} reason=${d.orgReason} org=${d.activeOrgId}`
+    const firstTitle = (d) => ((d.items || [])[0] || {}).title || ''
+    // 段一结束时写入 Storage 的"乙"组织 id；段二要拿它证明"旧选择已失效则不放行"。
+    // 用外层变量接出来 —— 段一里的 const 出了 if 块就没了。
+    let lastStored = ''
+
+    /** 身份 → 「我的」页 → 点委托入口 → 工作台 Page（登录必须真点身份卡，见踩坑 11） */
+    async function openWorkbench(code) {
+      await loginAs(mp, code)
+      const idx = await mp.currentPage()
+      await tapAt(idx, '.role-card', 0) // 我是货主：这一步才真正登录
+      const home = await waitPath(mp, 'pages/shipper/shipper', 40)
+      if (!home) {
+        rec(`⑯ [${code}] 前置登录`, false, '未进入货主工作台')
+        return null
+      }
+      await nav(mp, 'tab', '/pages/mine/mine', 'pages/mine/mine')
+      await sleep(1600)
+      const me = await mp.currentPage()
+      // showEntrust 由服务端静默探测驱动：入口可见本身就是一条 AC-02 的断言
+      const md = await waitData(me, (d) => !!d && d.showEntrust !== undefined, 30, 400)
+      rec(`⑯ [${code}] 「我的」页委托入口可见（服务端放行）`, md.showEntrust === true, String(md.showEntrust))
+      if (md.showEntrust !== true) return null
+      await scrollIntoView(mp, '.entrust-entry', 0)
+      const entry = await me.$('.entrust-entry')
+      if (!entry) {
+        rec(`⑯ [${code}] 委托入口已渲染`, false, '未找到 .entrust-entry')
+        return null
+      }
+      await entry.tap()
+      const wb = await waitPath(mp, WB, 30)
+      rec(`⑯ [${code}] 点击入口进入经理工作台`, !!wb, wb ? wb.path : '未跳转')
+      return wb || null
+    }
+
+    /** 不重新登录，从「我的」再进一次（验证"沿用上次选择"） */
+    async function reenterWorkbench() {
+      await nav(mp, 'tab', '/pages/mine/mine', 'pages/mine/mine')
+      await sleep(1400)
+      const me = await mp.currentPage()
+      await scrollIntoView(mp, '.entrust-entry', 0)
+      const entry = await me.$('.entrust-entry')
+      if (!entry) return null
+      await entry.tap()
+      return (await waitPath(mp, WB, 30)) || null
+    }
+
+    // ---------- 段一：多组织且未选择 → 不猜，要求用户选 ----------
+    // 先清掉上次选择，否则会以 saved 直接放行，测不到 ambiguous 分支
+    await mp.evaluate((k) => wx.removeStorageSync(k), ORG_KEY)
+    let wb = await openWorkbench('seed-mgr-multi')
+    if (wb) {
+      let d = await waitData(wb, ORG_SETTLED, 40, 500)
+      await sleep(900)
+      await shot(mp, '16-组织选择器-多组织未选')
+      rec('⑯ 多组织：服务端清单含甲乙两个组织', (d.orgs || []).length === 2, `orgs=${(d.orgs || []).length}`)
+      rec(
+        '⑯ 多组织：清单里同时有甲与乙',
+        (d.orgs || []).some((o) => o.name === ORG_A) && (d.orgs || []).some((o) => o.name === ORG_B),
+        JSON.stringify((d.orgs || []).map((o) => o.name))
+      )
+      rec('⑯ 多组织未选：reason=ambiguous（不猜，猜错会看到别人的组织）', d.orgReason === 'ambiguous', noteOf(d))
+      rec('⑯ 多组织未选：activeOrgId 为空', d.activeOrgId === '', String(d.activeOrgId))
+      rec('⑯ 多组织未选：view=denied 且不渲染队列', d.view === 'denied' && (d.items || []).length === 0, noteOf(d))
+      rec('⑯ 多组织未选：文案指向「需要选择服务经营主体」', d.viewTitle === '需要选择服务经营主体', String(d.viewTitle))
+
+      const pc = await pillCount(wb)
+      const ac0 = await activeCount(wb)
+      rec('⑯ 多组织未选：真机渲染出 2 个组织 pill', pc === 2, String(pc))
+      rec('⑯ 多组织未选：初始无 active pill', ac0 === 0, String(ac0))
+
+      // 点第 0 个 pill → 甲组织队列
+      await tapAt(await mp.currentPage(), '.org-pill', 0)
+      wb = await mp.currentPage()
+      d = await waitData(wb, (x) => firstTitle(x) === TITLE_A, 40, 500)
+      await sleep(800)
+      await shot(mp, '16-组织选择器-选中甲')
+      rec('⑯ 点「甲」：理由变为 picked（来自用户操作）', d.orgReason === 'picked', noteOf(d))
+      rec('⑯ 点「甲」：队列渲染出甲组织委托', firstTitle(d) === TITLE_A, firstTitle(d) || '(空)')
+      rec('⑯ 点「甲」：恰好 1 个 active pill', (await activeCount(await mp.currentPage())) === 1, String(await activeCount(await mp.currentPage())))
+      const storedA = await mp.evaluate((k) => wx.getStorageSync(k), ORG_KEY)
+      rec('⑯ 点「甲」：选择已写入 Storage（下次进来不用再选）', String(storedA || '') === String(d.activeOrgId), String(storedA))
+
+      // 点第 1 个 pill → 乙组织队列（标题必须不同，否则"点了没反应"看不出来）
+      await tapAt(await mp.currentPage(), '.org-pill', 1)
+      wb = await mp.currentPage()
+      d = await waitData(wb, (x) => firstTitle(x) === TITLE_B, 40, 500)
+      await sleep(800)
+      await shot(mp, '16-组织选择器-选中乙')
+      rec('⑯ 点「乙」：队列换成乙组织委托（标题确实不同）', firstTitle(d) === TITLE_B, firstTitle(d) || '(空)')
+      rec('⑯ 点「乙」：两个组织的标题互不相同（否则切换看起来没反应）', TITLE_A !== TITLE_B, `${TITLE_A} / ${TITLE_B}`)
+      const storedB = await mp.evaluate((k) => wx.getStorageSync(k), ORG_KEY)
+      lastStored = String(storedB || '')
+      rec('⑯ 点「乙」：Storage 跟随更新', lastStored === String(d.activeOrgId), lastStored)
+
+      // 重进一次（不重新登录）→ 应沿用"乙"，且理由为 saved
+      let re = await reenterWorkbench()
+      if (re) {
+        const rd = await waitData(re, ORG_SETTLED, 40, 500)
+        await sleep(800)
+        await shot(mp, '16-组织选择器-沿用上次选择')
+        rec('⑯ 重进：沿用上次选择（reason=saved，且等于乙）', rd.orgReason === 'saved' && String(rd.activeOrgId) === String(storedB), noteOf(rd))
+        rec('⑯ 重进：直接渲染乙组织队列，不再要求选择', firstTitle(rd) === TITLE_B, firstTitle(rd) || '(空)')
+      } else {
+        rec('⑯ 重进工作台', false, '未跳转')
+      }
+    }
+
+    // ---------- 段二：单组织 → 不该让用户为唯一选项做选择 ----------
+    // 此时 Storage 里还留着上一段的「乙」，而该身份只属于甲 →
+    // pickOrg 必须判它失效（第 2 条规则），退到 only。这正是本段的重点断言。
+    wb = await openWorkbench('seed-mgr-single')
+    if (wb) {
+      const d = await waitData(wb, ORG_SETTLED, 40, 500)
+      await sleep(900)
+      await shot(mp, '16-组织选择器-单组织不出现')
+      rec('⑯ 单组织：清单只有 1 个组织', (d.orgs || []).length === 1, `orgs=${(d.orgs || []).length}`)
+      rec('⑯ 单组织：组织为甲', ((d.orgs || [])[0] || {}).name === ORG_A, JSON.stringify((d.orgs || []).map((o) => o.name)))
+      rec('⑯ 单组织：reason=only（唯一选项自动选中）', d.orgReason === 'only', noteOf(d))
+      rec('⑯ 单组织：旧选择（乙）已失效则不放行 → 仍落到甲', String(d.activeOrgId) !== lastStored || lastStored === '', noteOf(d) + ` saved=${lastStored}`)
+      rec('⑯ 单组织：不出现组织选择器（唯一选项是噪音）', (await pillCount(await mp.currentPage())) === 0, String(await pillCount(await mp.currentPage())))
+      rec('⑯ 单组织：直接 ready 且渲染甲组织队列', d.view === 'ready' && firstTitle(d) === TITLE_A, `${noteOf(d)} title=${firstTitle(d)}`)
+    }
+
+    // ---------- 段三：无任何组织 → 不是"没有数据"，而是还没被加入组织 ----------
+    wb = await openWorkbench('seed-mgr-none')
+    if (wb) {
+      const d = await waitData(wb, ORG_SETTLED, 40, 500)
+      await sleep(900)
+      await shot(mp, '16-组织选择器-无组织')
+      rec('⑯ 无组织：服务端返回空清单（200 + 空，不是 403/404）', Array.isArray(d.orgs) && d.orgs.length === 0, `orgs=${(d.orgs || []).length}`)
+      rec('⑯ 无组织：reason=none', d.orgReason === 'none', noteOf(d))
+      rec('⑯ 无组织：不出现组织选择器', (await pillCount(await mp.currentPage())) === 0, String(await pillCount(await mp.currentPage())))
+      rec('⑯ 无组织：文案说清"还没被加入组织"', d.viewTitle === '还没有加入服务经营主体', String(d.viewTitle))
+      rec('⑯ 无组织：不渲染任何委托条目', (await (await mp.currentPage()).$$('.list-card')).length === 0, String((await (await mp.currentPage()).$$('.list-card')).length))
+    }
+  }
+
   // ============================ 汇总 ============================
   console.log('\n================ 汇总 ================')
   const fail = R.filter((x) => !x.ok)

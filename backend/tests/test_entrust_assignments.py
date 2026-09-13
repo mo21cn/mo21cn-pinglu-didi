@@ -457,6 +457,74 @@ def test_list_by_owner_and_org(session):
     assert total == 0
 
 
+def test_list_keyword_matches_title_or_cargo(session):
+    """UI-02 委托搜索：标题或货物概述命中即算（经理通常只记得其中一个）。"""
+    org = _org(session)
+    _entrust(session, org, owner_id=1)
+    by_title = _submitted(session, 1, org)  # 标题「钢材运输」
+    by_cargo = svc.create_assignment(
+        session, owner_user_id=1, title="散货一票", cargo_summary="卷钢 一批"
+    )
+
+    total, items = svc.list_assignments(session, owner_user_id=1, keyword="钢材")
+    assert total == 1 and items[0]["assignment_id"] == by_title["assignment_id"]
+
+    total, items = svc.list_assignments(session, owner_user_id=1, keyword="卷钢")
+    assert total == 1 and items[0]["assignment_id"] == by_cargo["assignment_id"]
+
+    total, _ = svc.list_assignments(session, owner_user_id=1, keyword="查无此词")
+    assert total == 0
+
+
+def test_list_keyword_does_not_widen_visibility(session):
+    """搜索只在**已限定的可见范围内**过滤，不能被用来扫范围外的委托。"""
+    org = _org(session)
+    _entrust(session, org, owner_id=1)
+    _submitted(session, 1, org)
+    svc.create_assignment(session, owner_user_id=2, title="他人的钢材委托")
+
+    total, _ = svc.list_assignments(session, owner_user_id=1, keyword="钢材")
+    assert total == 1
+    total, _ = svc.list_assignments(session, owner_user_id=1, keyword="他人的")
+    assert total == 0
+
+
+def test_list_keyword_wildcards_are_literal(session):
+    """`%` / `_` / `!` 当字面字符。
+
+    反例（本用例要挡住的行为）：裸 `%` 被当成通配符 → 命中全部委托。
+    那看起来像"搜到了很多"，实际是过滤条件被静默丢掉，
+    任何"有结果就算通过"的断言都发现不了。
+    """
+    org = _org(session)
+    _entrust(session, org, owner_id=1)
+    svc.create_assignment(session, owner_user_id=1, title="正常委托")
+    svc.create_assignment(session, owner_user_id=1, title="含%号的委托")
+    svc.create_assignment(session, owner_user_id=1, title="含_下划线的委托")
+    svc.create_assignment(session, owner_user_id=1, title="含!叹号的委托")
+
+    total, items = svc.list_assignments(session, owner_user_id=1, keyword="%")
+    assert total == 1 and items[0]["title"] == "含%号的委托"
+
+    total, items = svc.list_assignments(session, owner_user_id=1, keyword="_")
+    assert total == 1 and items[0]["title"] == "含_下划线的委托"
+
+    # 转义字符自身也要被转义，否则搜 `!` 会退化成"匹配任意单字符"
+    total, items = svc.list_assignments(session, owner_user_id=1, keyword="!")
+    assert total == 1 and items[0]["title"] == "含!叹号的委托"
+
+
+def test_list_keyword_blank_means_no_filter(session):
+    """空白搜索词 = 不加过滤，而不是"匹配空串"把结果清空。"""
+    org = _org(session)
+    _entrust(session, org, owner_id=1)
+    _submitted(session, 1, org)
+
+    for blank in (None, "", "   "):
+        total, _ = svc.list_assignments(session, owner_user_id=1, keyword=blank)
+        assert total == 1, f"keyword={blank!r} 不应改变结果集"
+
+
 # ─────────────────────────────────────────── API 层
 
 
@@ -628,6 +696,34 @@ def test_api_org_view_requires_membership(env):
     assert visible.status_code == 200
     assert visible.json()["total"] == 1
     assert visible.json()["items"][0]["assignment_id"] == a["assignment_id"]
+
+
+def test_api_list_keyword_query(env):
+    """`?q=` 走通接口层：在可见范围内过滤，空白 q 视为不过滤（UI-02）。"""
+    owner = _login(env.client, "shipper")
+    # 幂等键必须是 ASCII（httpx 以 ascii 编码请求头），别把中文标题拼进去
+    for idx, title in enumerate(("钢材运输", "煤炭运输")):
+        created = env.client.post(
+            "/api/v1/entrust/assignments",
+            json={"title": title},
+            headers={**_headers(owner), "Idempotency-Key": f"k-list-{idx}"},
+        )
+        assert created.status_code == 200, created.text
+
+    hit = env.client.get(
+        "/api/v1/entrust/assignments", params={"q": "钢材"}, headers=_headers(owner)
+    )
+    assert hit.status_code == 200, hit.text
+    assert hit.json()["total"] == 1
+    assert hit.json()["items"][0]["title"] == "钢材运输"
+
+    # 空白 q：等价于不传（不要变成"搜空串 → 0 条"）
+    for blank in ("", "   "):
+        all_rows = env.client.get(
+            "/api/v1/entrust/assignments", params={"q": blank}, headers=_headers(owner)
+        )
+        assert all_rows.status_code == 200, all_rows.text
+        assert all_rows.json()["total"] == 2, f"q={blank!r} 应视为不过滤"
 
 
 # ─────────────────────────── BASE-002 / R14：时间列的方言归一
