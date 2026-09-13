@@ -187,3 +187,58 @@ class TaskListOut(BaseModel):
 def task_out(data: dict[str, Any]) -> TaskOut:
     """服务层 dict → 响应模型。"""
     return TaskOut.model_validate(data)
+
+
+# ── 附件（ENT-009） ──────────────────────────────────────────────────────────
+# 上传走 multipart（小程序 `wx.uploadFile` 原生就是 multipart），
+# 其余字段用 Form 传；大小与类型校验在服务层（服务端实测，不信客户端声明）。
+
+
+class AttachmentOut(BaseModel):
+    """附件投影。
+
+    `storage_key` 与 `sha256` **都不出现在这里**：前者是服务端内部键，
+    后者是内容指纹 —— 对外只需要"多大、什么类型、什么时候传的、提取到哪一步"。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    attachment_id: int
+    entrustment_id: int | None
+    assignment_id: int | None
+    owner_user_id: int
+    org_id: int | None
+    uploader_user_id: int
+    filename: str
+    content_type: str
+    size_bytes: int
+    extract_status: str
+    extract_error: str | None
+    extracted_chars: int | None
+    source_event_at: str | None
+    created_at: str
+    updated_at: str
+
+
+class AttachmentListOut(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: list[AttachmentOut]
+
+
+class AttachmentBindOut(BaseModel):
+    """绑定结果：`created=False` 表示这次是幂等重放（此前已绑定）。"""
+
+    artifact_id: int
+    attachment_id: int
+    created: bool
+
+
+def attachment_out(data: dict[str, Any]) -> AttachmentOut:
+    """服务层 dict → 响应模型。
+
+    `_row_to_attachment` 会带上 `storage_key` / `sha256`；这里通过响应模型
+    做**白名单投影**（只取声明过的字段），避免内部存储键顺带外泄。
+    """
+    return AttachmentOut.model_validate(data)
