@@ -26,6 +26,12 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, text
 from sqlalchemy.orm import Session
 
+from app.modules.entrust.registry import (
+    UnknownArtifactTypeError,
+    unknown_fields,
+    validate_payload,
+)
+
 SOURCE_AGENT = "agent"
 SOURCE_MANUAL = "manual"
 
@@ -47,6 +53,10 @@ class ArtifactVoidError(ArtifactError):
 
 class ManualTakeoverError(ArtifactError):
     """人工接管中，Agent 不得替换生效版本。HTTP 层应转 409。"""
+
+
+class ArtifactPayloadError(ArtifactError):
+    """成果内容不符合该类型的字段契约（未知字段 / 未知类型）。HTTP 层应转 400。"""
 
 
 def utcnow_naive() -> datetime:
@@ -118,6 +128,9 @@ def _get_artifact_row(session: Session, artifact_id: int) -> Any:
 def get_artifact(session: Session, artifact_id: int) -> dict[str, Any]:
     """读取成果（含当前生效版本的完整内容）。
 
+    `missing_fields` 由注册表的字段契约**即时派生**（不落库）：
+    缺项是"这份成果当前还缺什么"，随每次编辑自然变化；一旦落库就会与内容漂移。
+
     Raises:
         ArtifactNotFoundError: 成果不存在。
     """
@@ -126,6 +139,8 @@ def get_artifact(session: Session, artifact_id: int) -> dict[str, Any]:
         raise ArtifactNotFoundError(f"成果 {artifact_id} 不存在")
     artifact = _row_to_artifact(row)
     artifact["current_revision"] = None
+    artifact["missing_fields"] = []
+    artifact["unknown_fields"] = []
     if artifact["current_revision_id"] is not None:
         cur = (
             session.execute(
@@ -140,7 +155,20 @@ def get_artifact(session: Session, artifact_id: int) -> dict[str, Any]:
             .first()
         )
         if cur is not None:
-            artifact["current_revision"] = _row_to_revision(cur)
+            revision = _row_to_revision(cur)
+            artifact["current_revision"] = revision
+            try:
+                artifact["missing_fields"] = validate_payload(
+                    artifact["artifact_type"], revision["payload"]
+                )
+                artifact["unknown_fields"] = unknown_fields(
+                    artifact["artifact_type"], revision["payload"]
+                )
+            except UnknownArtifactTypeError:
+                # 历史数据可能早于注册表（类型当时未受约束）：如实标记，不假装合规
+                artifact["missing_fields"] = []
+                artifact["unknown_fields"] = []
+                artifact["registry_status"] = "unknown_type"
     return artifact
 
 
@@ -170,6 +198,9 @@ def create_artifact(
 ) -> dict[str, Any]:
     """创建成果，首个版本 `revision_no = 1` 并立即绑定生效。
 
+    内容按**注册表的字段契约**校验：未知类型、未知字段一律 400；
+    缺必填字段不算错误（草稿允许不完整），但会在读取时如实出现在 `missing_fields`。
+
     Args:
         source: `agent`（模型产出）或 `manual`（人工产出）。
     """
@@ -177,6 +208,11 @@ def create_artifact(
         raise ArtifactError("artifact_type 不能为空")
     if source not in (SOURCE_AGENT, SOURCE_MANUAL):
         raise ArtifactError(f"未知来源 {source!r}，必须是 agent 或 manual")
+    artifact_type = artifact_type.strip()
+    try:
+        validate_payload(artifact_type, payload)
+    except UnknownArtifactTypeError as exc:
+        raise ArtifactPayloadError(str(exc)) from exc
     current = now or utcnow_naive()
     ts = _fmt(current)
 
@@ -253,6 +289,10 @@ def append_revision(
         raise ArtifactNotFoundError(f"成果 {artifact_id} 不存在")
     if str(row["status"]) == STATUS_VOID:
         raise ArtifactVoidError(f"成果 {artifact_id} 已作废，不能再追加版本")
+    try:
+        missing = validate_payload(str(row["artifact_type"]), payload)
+    except UnknownArtifactTypeError as exc:
+        raise ArtifactPayloadError(str(exc)) from exc
 
     current = now or utcnow_naive()
     ts = _fmt(current)
@@ -298,6 +338,7 @@ def append_revision(
         "artifact_id": artifact_id,
         "revision_no": next_no,
         "superseding_current": False,
+        "missing_fields": missing,
     }
 
 

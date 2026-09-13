@@ -64,6 +64,20 @@ class Settings(BaseSettings):
     # 开关与服务端权限相互独立：开启后每个端点仍各自做叠加层权限校验。
     ENTRUST_ENABLED: bool = False
 
+    # ---- 附件（S1 第 5 条）----
+    # 20 MiB 上限**可配置**（计划 §3.2 建模红线），不是硬编码常量。
+    ATTACHMENT_MAX_BYTES: int = 20 * 1024 * 1024
+    # 存储目录：**公共静态路径之外**（默认 backend/var/attachments，.gitignore 排除）。
+    # 相对路径按 backend/ 解析；下载必须走授权端点，不允许任何静态目录直出。
+    ATTACHMENT_STORAGE_DIR: str = "var/attachments"
+    # 允许的 MIME 白名单（逗号分隔）。空字符串表示不限制 —— 生产不应留空。
+    ATTACHMENT_ALLOWED_TYPES: str = (
+        "text/plain,text/csv,text/markdown,application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+        "application/vnd.ms-excel,image/jpeg,image/png,image/webp"
+    )
+
     # ---- 认证（JWT） ----
     JWT_SECRET_KEY: str = "change-me-in-env"  # 生产由 CI/CD secrets 注入
     JWT_ALGORITHM: str = "HS256"

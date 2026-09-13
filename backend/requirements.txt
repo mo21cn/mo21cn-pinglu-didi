@@ -4,6 +4,9 @@ uvicorn[standard]>=0.32,<1.0
 pydantic>=2.9,<3.0
 pydantic-settings>=2.6,<3.0
 python-dotenv>=1.0,<2.0
+# multipart 表单解析（附件上传走 multipart：小程序 wx.uploadFile 原生即 multipart，
+# 服务端不额外造一套 base64 协议）。纯 Python，无编译依赖。
+python-multipart>=0.0.9,<1.0
 
 # ===== 认证 =====
 pyjwt>=2.9,<3.0

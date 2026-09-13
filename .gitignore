@@ -60,6 +60,11 @@ temp/
 *.db
 *.sqlite3
 
+# ===== 附件存储（公共静态路径之外，不入库） =====
+# ATTACHMENT_STORAGE_DIR 默认指到这里；上传的客户材料绝不进版本库
+backend/var/
+var/attachments/
+
 # ===== 密钥与证书 =====
 *.pem
 *.key

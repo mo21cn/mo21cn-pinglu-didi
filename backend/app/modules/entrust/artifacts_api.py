@@ -3,21 +3,23 @@
 R1 最小接口集（计划 §3.3「成果」组）的底座部分：
 
 - POST   /api/v1/entrust/entrustments/{eid}/artifacts      创建成果（v1 即生效，幂等）
-- GET    /api/v1/entrust/artifacts/{aid}                   成果详情（含生效版本）
+- GET    /api/v1/entrust/artifact-types                    成果类型注册表（取值域 + 字段契约）
+- GET    /api/v1/entrust/artifacts/{aid}                   成果详情（含生效版本 + 缺项）
 - GET    /api/v1/entrust/artifacts/{aid}/revisions         版本历史（append-only 审计视图）
+- GET    /api/v1/entrust/artifacts/{aid}/changes           字段变化清单（按注册表字段比对）
 - POST   /api/v1/entrust/artifacts/{aid}/revisions         追加新版本（编辑，不改生效版本，幂等）
 - POST   /api/v1/entrust/artifacts/{aid}/confirm           确认绑定精确版本（幂等）
 - POST   /api/v1/entrust/artifacts/{aid}/void              作废（作废后不可确认/追加，幂等）
 
-可见性与权限（AC-10，全部服务端校验）：
+可见性与权限（AC-10，全部服务端校验，统一走 `authz.py` 这条唯一入口）：
 * 成果挂在**委托授权**（`ent_entrustment`）下：
-  - **货主本人**（授权的 entrust_user_id）：只读（详情 + 版本历史），不可写；
+  - **货主本人**（授权的 entrust_user_id）：只读（详情 + 版本历史 + 变化清单），不可写；
   - **组织成员**：写操作要求叠加层按货主作用域授予权限
-    （`assert_can(..., owner_user_id=授权的货主)`），且操作者必须是
-    **该授权所属组织**的成员 —— 防止"拿到 A 货主授权的组织成员操作 A 货主
-    挂在另一组织下的成果"；
+    （`assert_can_write_entrustment`），且操作者必须是**该授权所属组织**的成员；
   - **其他人**：一律 404，不区分"不存在"与"无权"。
 * 权限代码：创建/追加/确认用 `entrust:quote:create`；作废用 `entrust:quote:publish`。
+* 内容校验：未知类型 / 未知字段一律 400（取值域由 `registry.py` 固定），
+  缺必填字段不报错但会进入 `missing_fields`。
 * `ENTRUST_ENABLED=false` 时整组 404；写操作全部幂等。
 
 已知限制（如实记录，不假装已做）：
@@ -30,15 +32,15 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.entrust import artifacts as art
+from app.modules.entrust import registry as reg
 from app.modules.entrust._http import (
     guard_or_400,
     map_access_denied,
@@ -48,8 +50,12 @@ from app.modules.entrust._http import (
 from app.modules.entrust.access import (
     PERM_QUOTE_CREATE,
     PERM_QUOTE_PUBLISH,
-    AccessContext,
-    resolve_context,
+)
+from app.modules.entrust.authz import (
+    assert_can_view_entrustment,
+    assert_can_write_entrustment,
+    load_entrustment,
+    not_found,
 )
 
 router = APIRouter()
@@ -93,27 +99,6 @@ def _map_artifact_error(exc: Exception) -> HTTPException | None:
     return None
 
 
-_ENTRUSTMENT_COLS = "id, org_id, entrust_user_id, status"
-
-
-def _get_entrustment(db: Session, entrustment_id: int) -> dict[str, Any] | None:
-    row = (
-        db.execute(
-            text(f"SELECT {_ENTRUSTMENT_COLS} FROM ent_entrustment WHERE id = :eid"),
-            {"eid": entrustment_id},
-        )
-        .mappings()
-        .first()
-    )
-    return dict(row) if row is not None else None
-
-
-def _assert_org_member(ctx_org_ids: frozenset[int], entrustment: dict[str, Any]) -> None:
-    """操作者必须是该授权所属组织的成员（叠加层作用域之外的定位检查）。"""
-    if int(entrustment["org_id"]) not in ctx_org_ids:
-        raise HTTPException(status_code=404, detail="成果不存在")
-
-
 def _artifact_with_entrustment(
     db: Session, artifact_id: int
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -122,52 +107,10 @@ def _artifact_with_entrustment(
         artifact = art.get_artifact(db, artifact_id)
     except art.ArtifactError as exc:
         raise _map_artifact_error(exc) or exc from exc
-    entrustment = _get_entrustment(db, artifact["entrustment_id"])
+    entrustment = load_entrustment(db, artifact["entrustment_id"])
     if entrustment is None:
-        raise HTTPException(status_code=404, detail="成果不存在")
+        raise not_found("成果不存在")
     return artifact, entrustment
-
-
-def _assert_can_view(
-    db: Session,
-    *,
-    user_id: int,
-    artifact: dict[str, Any],
-    entrustment: dict[str, Any],
-) -> None:
-    """读可见性：货主本人，或该授权所属组织的成员。"""
-    owner_user_id = int(entrustment["entrust_user_id"])
-    if user_id == owner_user_id:
-        return
-    ctx = resolve_context(db, user_id=user_id)
-    _assert_org_member(ctx.org_ids, entrustment)
-    if not ctx.can("entrust:view"):
-        raise HTTPException(status_code=404, detail="成果不存在")
-
-
-def _assert_can_write(
-    db: Session,
-    *,
-    user_id: int,
-    permission: str,
-    entrustment: dict[str, Any],
-) -> AccessContext:
-    """写权限：组织成员 + 按货主作用域的生效授权 + 授权自身处于 active。
-
-    顺序有讲究：先做成员资格判断（非本组织成员 → 404，不泄漏授权存在性），
-    再做作用域权限判断（是成员但没有该货主的生效授权 → 403）。
-    """
-    ctx = resolve_context(db, user_id=user_id)
-    _assert_org_member(ctx.org_ids, entrustment)
-    if str(entrustment["status"]) != "active":
-        raise HTTPException(status_code=409, detail="委托授权未生效或已失效，不能操作成果")
-    owner_user_id = int(entrustment["entrust_user_id"])
-    if not ctx.can(permission, owner_user_id=owner_user_id):
-        raise HTTPException(
-            status_code=403,
-            detail=f"用户 {user_id} 缺少权限 {permission}（作用于货主 {owner_user_id}）",
-        )
-    return ctx
 
 
 @router.post(
@@ -183,11 +126,15 @@ def create_artifact(
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> Any:
     key = guard_or_400(idempotency_key)
-    entrustment = _get_entrustment(db, entrustment_id)
+    entrustment = load_entrustment(db, entrustment_id)
     if entrustment is None:
-        raise HTTPException(status_code=404, detail="委托授权不存在")
-    _assert_can_write(
-        db, user_id=int(user.id), permission=PERM_QUOTE_CREATE, entrustment=entrustment
+        raise not_found("委托授权不存在")
+    assert_can_write_entrustment(
+        db,
+        user_id=int(user.id),
+        permission=PERM_QUOTE_CREATE,
+        entrustment=entrustment,
+        detail="成果不存在",
     )
     payload = data.model_dump(mode="json")
     return run_write(
@@ -220,7 +167,7 @@ def get_artifact(
     db: Session = Depends(get_db),
 ) -> Any:
     artifact, entrustment = _artifact_with_entrustment(db, artifact_id)
-    _assert_can_view(db, user_id=int(user.id), artifact=artifact, entrustment=entrustment)
+    assert_can_view_entrustment(db, user_id=int(user.id), entrustment=entrustment)
     return artifact
 
 
@@ -235,7 +182,7 @@ def list_revisions(
     db: Session = Depends(get_db),
 ) -> Any:
     artifact, entrustment = _artifact_with_entrustment(db, artifact_id)
-    _assert_can_view(db, user_id=int(user.id), artifact=artifact, entrustment=entrustment)
+    assert_can_view_entrustment(db, user_id=int(user.id), entrustment=entrustment)
     return {"items": art.list_revisions(db, artifact_id)}
 
 
@@ -253,8 +200,12 @@ def append_revision(
 ) -> Any:
     key = guard_or_400(idempotency_key)
     _, entrustment = _artifact_with_entrustment(db, artifact_id)
-    _assert_can_write(
-        db, user_id=int(user.id), permission=PERM_QUOTE_CREATE, entrustment=entrustment
+    assert_can_write_entrustment(
+        db,
+        user_id=int(user.id),
+        permission=PERM_QUOTE_CREATE,
+        entrustment=entrustment,
+        detail="成果不存在",
     )
     payload = data.model_dump(mode="json")
     return run_write(
@@ -289,8 +240,12 @@ def confirm_revision(
 ) -> Any:
     key = guard_or_400(idempotency_key)
     _, entrustment = _artifact_with_entrustment(db, artifact_id)
-    _assert_can_write(
-        db, user_id=int(user.id), permission=PERM_QUOTE_CREATE, entrustment=entrustment
+    assert_can_write_entrustment(
+        db,
+        user_id=int(user.id),
+        permission=PERM_QUOTE_CREATE,
+        entrustment=entrustment,
+        detail="成果不存在",
     )
     payload = data.model_dump(mode="json")
     return run_write(
@@ -324,8 +279,12 @@ def void_artifact(
 ) -> Any:
     key = guard_or_400(idempotency_key)
     _, entrustment = _artifact_with_entrustment(db, artifact_id)
-    _assert_can_write(
-        db, user_id=int(user.id), permission=PERM_QUOTE_PUBLISH, entrustment=entrustment
+    assert_can_write_entrustment(
+        db,
+        user_id=int(user.id),
+        permission=PERM_QUOTE_PUBLISH,
+        entrustment=entrustment,
+        detail="成果不存在",
     )
     payload = data.model_dump(mode="json")
     return run_write(
@@ -339,3 +298,63 @@ def void_artifact(
         ),
         map_domain_error=_map_artifact_error,
     )
+
+
+@router.get(
+    "/artifact-types",
+    summary="成果类型注册表（取值域 + 字段契约 + 内部字段 + 可绑证据类别）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def list_artifact_types(user: User = Depends(get_current_user)) -> Any:
+    """列出全部成果类型契约。
+
+    这是**静态契约**，不是租户数据：任何登录用户都可以读到"有哪些成果类型、
+    每种类型有哪些字段、哪些字段属于内部字段"。前端据此渲染表单与字段标签，
+    服务端据此校验内容 —— 两端用同一份取值域，避免各写一套。
+    """
+    return {
+        "items": reg.list_specs(),
+        "customer_visible_types": sorted(reg.CUSTOMER_VISIBLE_TYPES),
+        "evidence_kinds": sorted(reg.ALL_EVIDENCE_KINDS),
+    }
+
+
+@router.get(
+    "/artifacts/{artifact_id}/changes",
+    summary="两个版本之间的字段变化清单（同可见性；内部字段被标注）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def list_changes(
+    artifact_id: int,
+    from_revision: int = Query(ge=1),
+    to_revision: int = Query(ge=1),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """字段级变化清单（计划 §3.3「成果」组的「字段变化清单」）。
+
+    只比较注册表声明的已知字段；`internal` 标记该字段是否属于内部成本口径 ——
+    货主看清单时前端据此折叠内部字段（真正的白名单投影在 S3 的客户投影落地）。
+    """
+    artifact, entrustment = _artifact_with_entrustment(db, artifact_id)
+    assert_can_view_entrustment(db, user_id=int(user.id), entrustment=entrustment)
+    try:
+        reg.get_spec(artifact["artifact_type"])
+    except reg.UnknownArtifactTypeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    revisions = {
+        int(item["revision_no"]): item["payload"] for item in art.list_revisions(db, artifact_id)
+    }
+    missing = [no for no in (from_revision, to_revision) if no not in revisions]
+    if missing:
+        raise not_found(f"成果 {artifact_id} 不存在版本 {sorted(missing)}")
+    return {
+        "artifact_id": artifact_id,
+        "artifact_type": artifact["artifact_type"],
+        "from_revision": from_revision,
+        "to_revision": to_revision,
+        "changes": reg.diff_payloads(
+            artifact["artifact_type"], revisions[from_revision], revisions[to_revision]
+        ),
+    }
