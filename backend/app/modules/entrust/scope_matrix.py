@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（48 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（49 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -146,6 +146,13 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         GUARD_OWNER_SELF,
         idempotent=True,
         note="仅货主本人撤回；已认领的不能由货主单方撤回",
+    ),
+    _r(
+        "GET",
+        "/my-orgs",
+        GUARD_AUTHENTICATED,
+        note="只列调用者自己的 active 成员关系（org_id / name / member_role / permissions）；"
+        "不含他人数据，故登录即可 —— 要求业务权限反而会让新加入组织的人看不到自己的组织",
     ),
     # ── 成果版本与类型注册表（artifacts_api.py）──────────────────────────
     _r(

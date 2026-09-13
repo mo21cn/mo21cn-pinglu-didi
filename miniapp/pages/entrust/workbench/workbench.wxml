@@ -12,6 +12,27 @@
       <view class="nav-spacer"></view>
     </view>
     <view class="head-sub">经理工作台 · 组织委托队列</view>
+
+    <!--
+      组织选择器（ENT-012 第二切片）：只在**多于一个组织**时出现 ——
+      唯一组织时让用户做一次没有选择余地的选择，是纯噪音。
+      候选来自服务端 `GET /my-orgs`：前端无法自行枚举（本地角色字段可篡改，
+      且它表达的从来不是"我属于哪些组织"）。
+    -->
+    <view wx:if="{{orgs.length > 1}}" class="org-bar">
+      <scroll-view class="org-scroll" scroll-x="true" enable-flex="true">
+        <view class="org-pills">
+          <view
+            wx:for="{{orgs}}"
+            wx:key="orgId"
+            class="org-pill {{activeOrgId === item.orgId ? 'org-pill-active' : ''}}"
+            data-org="{{item.orgId}}"
+            bindtap="onPickOrg"
+            hover-class="hover-dim"
+          >{{item.name}}</view>
+        </view>
+      </scroll-view>
+    </view>
   </view>
 
   <!-- 状态筛选：错误/空态下也保留，用户要先能改条件再重试 -->

@@ -58,6 +58,38 @@ const VIEW = {
   DENIED: 'denied'
 }
 
+/**
+ * 组织内角色 → 中文。键与后端 `access.ORG_ROLE_PERMISSIONS` 的键**逐字对应**。
+ * 后端新增角色而这里没跟 → 界面会把"经理人"显示成默认的"成员"，这是误导
+ * （用户会以为自己不能受理）。所以 verify_entrust_ui.js 拿后端源码做交叉断言。
+ */
+const ORG_ROLE_LABELS = {
+  owner: '所有者',
+  admin: '管理员',
+  manager: '经理人',
+  member: '成员'
+}
+
+/**
+ * 权限码 → 中文。键必须**覆盖后端 `access.py` 里全部 `PERM_*` 常量**：
+ * 少一个，界面就会把原始权限码（`entrust:quote:publish`）直接显示给用户。
+ * 交叉断言同样在 verify_entrust_ui.js，与上面的角色表一并检查。
+ *
+ * 注意：这张表只用于**展示**。任何权限判定都在服务端 ——
+ * 前端即使把标签写错，也不会让人多出一点权限。
+ */
+const ORG_PERMISSION_LABELS = {
+  'entrust:view': '查看委托',
+  'entrust:assignment:claim': '受理委托',
+  'entrust:quote:create': '制作报价',
+  'entrust:quote:publish': '发布报价',
+  'entrust:task:dispatch': '派发任务',
+  'entrust:settlement:create': '生成结算',
+  'entrust:agent:job': '使用 Agent',
+  'org:member:manage': '管理成员',
+  'org:entrustment:manage': '管理授权'
+}
+
 function statusLabel(status) {
   const meta = STATUS_META[status]
   return meta ? meta.label : '未知状态'
@@ -127,7 +159,10 @@ function viewState(input) {
     return { state: VIEW.DENIED, title: '无查看权限', hint: '当前身份不在该组织内，或缺少「委托查看」权限' }
   }
   if (status === 400) {
-    return { state: VIEW.DENIED, title: '需要选择服务经营主体', hint: '你属于多个组织，请先指定要查看的组织' }
+    // 服务端说"属于多个组织，请用 org_id 指定"。这个状态**可由用户操作解决**：
+    // 工作台顶部会显示组织选择器，选中即重取 —— 所以提示要指向"上方"，
+    // 而不是让用户以为功能坏了。
+    return { state: VIEW.DENIED, title: '需要选择服务经营主体', hint: '你属于多个组织，请在上方选择要查看的组织' }
   }
   if (status === 404) {
     return { state: VIEW.DENIED, title: '功能未开放', hint: '委托发货当前未启用' }
@@ -208,6 +243,65 @@ function fetchAssignment(assignmentId) {
 }
 
 /**
+ * 拉取「我所在的组织」清单（组织选择器的数据源）。
+ *
+ * 为什么必须有这个请求：`GET /assignments?view=org` 在「属于多个组织且未指定
+ * org_id」时返回 400，而前端**无法自行枚举候选** —— `current_role` 存在本地
+ * Storage、可被改写，且它表达的从来不是"我属于哪些组织"。没有它，多组织身份
+ * 就是一个死局：服务端说"请指定组织"，界面却拿不出可选项。
+ */
+function fetchMyOrgs() {
+  return request({ url: BASE + '/my-orgs', method: 'GET' })
+}
+
+/** 组织清单投影：模板不做事，且**不把 `member_role` 原样交给界面**（要译成中文）。 */
+function decorateOrg(row) {
+  const data = row || {}
+  const labels = (data.permissions || []).map(function (p) {
+    return ORG_PERMISSION_LABELS[p] || p
+  })
+  return {
+    orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id),
+    name: data.name || '未命名组织',
+    roleLabel: ORG_ROLE_LABELS[data.member_role] || data.member_role || '成员',
+    permissions: labels,
+    permissionText: labels.join(' · ')
+  }
+}
+
+function decorateOrgs(rows) {
+  return (rows || []).map(decorateOrg)
+}
+
+/**
+ * 决定「当前该用哪个组织」。
+ *
+ * 规则顺序不可调换：
+ * 1. 清单为空 → `none`（**没有任何组织身份**，界面要说清这是"没被加入组织"，
+ *    而不是"没有数据"—— 两者的下一步动作完全不同）；
+ * 2. 上次选的组织**仍在**清单里 → 用它（尊重选择，但必须仍然有效，
+ *    否则用户会停在一个他已经不属于的组织上，看到的永远是空列表）；
+ * 3. 只有一个组织 → 直接用它（不该让用户为唯一选项做一次选择）；
+ * 4. 多个且没有有效记录 → `ambiguous`，**不猜**。
+ *
+ * 第 4 条是重点：猜错会让用户在毫无察觉的情况下看到**另一个组织**的队列 ——
+ * 那比"请先选择"糟糕得多。看错组织的数据，用户几乎不可能自己发现。
+ */
+function pickOrg(orgs, savedOrgId) {
+  const list = orgs || []
+  const saved = savedOrgId === null || savedOrgId === undefined ? '' : String(savedOrgId)
+  if (!list.length) return { orgId: '', reason: 'none' }
+  if (saved) {
+    const hit = list.filter(function (o) {
+      return String(o.orgId) === saved
+    })
+    if (hit.length) return { orgId: String(hit[0].orgId), reason: 'saved' }
+  }
+  if (list.length === 1) return { orgId: String(list[0].orgId), reason: 'only' }
+  return { orgId: '', reason: 'ambiguous' }
+}
+
+/**
  * 详情页字段投影（模板不做事）。
  *
  * **只投影货主自己填的字段**：受理价、成本口径、内部比价一律不出现在这里 ——
@@ -227,6 +321,8 @@ function decorateDetail(row) {
 
 module.exports = {
   BASE,
+  ORG_PERMISSION_LABELS,
+  ORG_ROLE_LABELS,
   STATUS_HINT,
   STATUS_META,
   STATUS_ORDER,
@@ -234,10 +330,14 @@ module.exports = {
   decorateAssignment,
   decorateDetail,
   decorateList,
+  decorateOrg,
+  decorateOrgs,
   entryDecision,
   fetchAssignment,
+  fetchMyOrgs,
   fetchQueue,
   pageHint,
+  pickOrg,
   probeEntry,
   statusClass,
   statusLabel,

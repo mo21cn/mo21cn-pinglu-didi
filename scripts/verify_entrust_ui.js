@@ -348,6 +348,115 @@ check('[路由] 入口用 navigateTo（工作台不是 tabBar 页）', /navigate
 const pageSizeMatch = wbJs.match(/PAGE_SIZE\s*=\s*(\d+)/)
 check('[接线] 工作台 PAGE_SIZE 是正整数', !!pageSizeMatch && NUM_RE.test(pageSizeMatch[1]))
 
+// ─────────────────────────────────────────────────────────────
+// 9. 组织选择器（ENT-012 第二切片）：候选来自服务端，标签必须与后端逐字对齐
+// ─────────────────────────────────────────────────────────────
+const accessSrc = read(path.join(REPO, 'backend/app/modules/entrust/access.py'))
+
+// 后端权限常量：源码里是 `PERM_XXX = "entrust:xxx"`
+const backendPerms = []
+accessSrc.replace(/^PERM_[A-Z_]+\s*=\s*"([^"]+)"/gm, function (_, code) {
+  backendPerms.push(code)
+  return ''
+})
+check(
+  '[组织] 从 access.py 抽到了权限常量（抽取失败会让下面的覆盖断言变成空转）',
+  backendPerms.length >= 8,
+  '实际抽到 ' + backendPerms.length + ' 个'
+)
+
+const frontPermKeys = Object.keys(E.ORG_PERMISSION_LABELS || {})
+const missingPerm = backendPerms.filter(function (p) {
+  return frontPermKeys.indexOf(p) === -1
+})
+check(
+  '[组织] 前端权限标签覆盖后端全部权限常量（缺一个就会把原始权限码显示给用户）',
+  missingPerm.length === 0,
+  '缺标签：' + JSON.stringify(missingPerm)
+)
+const extraPerm = frontPermKeys.filter(function (p) {
+  return backendPerms.indexOf(p) === -1
+})
+check(
+  '[组织] 前端没有后端不存在的权限标签（防拼错与僵尸标签）',
+  extraPerm.length === 0,
+  '多余标签：' + JSON.stringify(extraPerm)
+)
+
+// 后端角色取值域：ORG_ROLE_PERMISSIONS 字典的键
+const roleBlock = accessSrc.match(/ORG_ROLE_PERMISSIONS[^=]*=\s*\{([\s\S]*?)\n\}/)
+const backendRoles = []
+if (roleBlock) {
+  roleBlock[1].replace(/^\s*"([a-z]+)"\s*:/gm, function (_, r) {
+    backendRoles.push(r)
+    return ''
+  })
+}
+check('[组织] 从 access.py 抽到了角色取值域', backendRoles.length >= 4, '实际 ' + backendRoles.length)
+const missingRole = backendRoles.filter(function (r) {
+  return !Object.prototype.hasOwnProperty.call(E.ORG_ROLE_LABELS || {}, r)
+})
+check('[组织] 前端角色标签覆盖后端全部角色', missingRole.length === 0, '缺标签：' + JSON.stringify(missingRole))
+
+// ── 「选哪个组织」的决策规则：不猜，也不用已经失效的旧选择
+const orgList = [
+  { orgId: '1', name: '甲' },
+  { orgId: '2', name: '乙' }
+]
+check('[组织] 清单为空 → none（是"没有组织身份"，不是"没有数据"）', E.pickOrg([], '1').reason === 'none')
+check(
+  '[组织] 只有一个组织 → 直接用，不要求用户做没有余地的选择',
+  E.pickOrg([orgList[0]], '').orgId === '1' && E.pickOrg([orgList[0]], '').reason === 'only'
+)
+check(
+  '[组织] 多组织且无记录 → ambiguous（**不猜**，猜错会让人看另一个组织的数据）',
+  E.pickOrg(orgList, '').reason === 'ambiguous' && E.pickOrg(orgList, '').orgId === ''
+)
+check(
+  '[组织] 上次选择仍在清单里 → 沿用',
+  E.pickOrg(orgList, '2').orgId === '2' && E.pickOrg(orgList, '2').reason === 'saved'
+)
+check(
+  '[组织] 上次选择已不在清单里 → 不放行旧值（否则会停在一个已不属于的组织上）',
+  E.pickOrg(orgList, '9').orgId === '' && E.pickOrg(orgList, '9').reason === 'ambiguous'
+)
+
+// ── 组织投影：译成中文，且不把内部字段交给界面
+const orgProj = E.decorateOrg({
+  org_id: 7,
+  name: '平陆航运',
+  member_role: 'manager',
+  permissions: ['entrust:view', 'entrust:assignment:claim'],
+  internal_cost_rate: 0.12
+})
+check('[组织] org_id 投影为字符串（避免与数字比较时类型不一致）', orgProj.orgId === '7', '实际 ' + orgProj.orgId)
+check(
+  '[组织] 角色译成中文，而不是把 member_role 原样显示',
+  orgProj.roleLabel === '经理人',
+  '实际 ' + orgProj.roleLabel
+)
+check('[组织] 权限码译成中文', orgProj.permissionText.indexOf('受理委托') !== -1, '实际 ' + orgProj.permissionText)
+check('[组织] 不把内部字段带进投影', !('internal_cost_rate' in orgProj))
+check(
+  '[组织] 组织名为空时给中性默认值（不臆造）',
+  E.decorateOrg({ org_id: 1 }).name === '未命名组织'
+)
+
+// ── 页面接线：候选来自服务端，失败与队列取数同一裁决
+check('[组织] 工作台有组织选择器容器', /class="org-bar"/.test(wbWxml))
+check('[组织] 选择器只在多组织时出现', /wx:if="\{\{orgs\.length > 1\}\}"/.test(wbWxml))
+check('[组织] 选择器绑定 onPickOrg', /bindtap="onPickOrg"/.test(wbWxml))
+check('[组织] 工作台实现了 onPickOrg', /onPickOrg\s*\(/.test(wbJs))
+check('[组织] 工作台调用服务端清单接口（不自行枚举组织）', /fetchMyOrgs\(/.test(wbJs))
+check(
+  '[组织] 工作台把选择存进 Storage 仅作下次默认值',
+  /setStorageSync\(\s*STORAGE_ORG_KEY/.test(wbJs)
+)
+check(
+  '[组织] none / ambiguous 都被显式处理（组织问题不被渲染成"没有委托"）',
+  /reason === 'none'/.test(wbJs) && /reason === 'ambiguous'/.test(wbJs)
+)
+
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)
 if (errors.length) {

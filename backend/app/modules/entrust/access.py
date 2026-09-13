@@ -334,6 +334,87 @@ def _active_delegations(
     return tuple(result)
 
 
+def list_my_orgs(
+    session: Session, *, user_id: int, now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """列出「我在哪些组织里有身份」以及「在每个组织内能做什么」。
+
+    ## 为什么需要它
+
+    `GET /assignments?view=org` 在**多组织且未指定 `org_id`** 时返回 400
+    （"用户属于多个组织，请用 org_id 指定"）。而前端**没有任何合法手段**枚举候选：
+
+    * `User.current_role` 存在本地 Storage，**可被改写**，且它表达的从来不是
+      "我属于哪些组织"（真正的依据是 `ent_org_member`）；
+    * 硬编码组织列表会在每次组织变动后失真；
+    * 猜一个 `org_id` 试错，等于把权限判定推给"试到不报错为止"。
+
+    所以没有这个端点，多组织身份就是**死局**：服务端说"请指定组织"，
+    前端却无从获得可选项。这也是工作台此前只能显示「需要选择服务经营主体」的原因。
+
+    ## 可见性口径（为什么 guard 只需 `authenticated`）
+
+    本函数只返回**调用者自己**的成员关系，且**成员与组织都必须是 `active`**：
+
+    * 不含他人数据（`WHERE m.user_id = :user_id`）；
+    * `org_id` 本身不是秘密 —— 货主提交委托时自己就要指定它；
+    * "我属于哪个组织"不是客户数据。
+
+    因此**不额外要求业务权限**（如 `entrust:view`）。反过来若要求它，
+    在新组织里刚被加入、角色尚未生效的人会看不到自己的组织清单 ——
+    那恰好又制造了一个新的死局。
+
+    ## 与 `resolve_context` 的关系
+
+    成员身份的唯一事实来源仍是 `resolve_context`（它同时产出权限）。
+    这里复用它的结果做**过滤**，只额外查一次组织名称，
+    因此两处不可能给出互相矛盾的清单。
+    """
+    ctx = resolve_context(session, user_id=user_id, now=now)
+    if not ctx.org_ids:
+        return []
+
+    ids = sorted(ctx.org_ids)
+    placeholders = ", ".join(f":org_{i}" for i in range(len(ids)))
+    params: dict[str, Any] = {
+        "user_id": user_id,
+        "m_status": STATUS_ACTIVE,
+        "o_status": STATUS_ACTIVE,
+    }
+    params.update({f"org_{i}": org_id for i, org_id in enumerate(ids)})
+
+    rows = session.execute(
+        text(
+            "SELECT m.org_id AS org_id, m.member_role AS member_role, o.name AS org_name "
+            "FROM ent_org_member m "
+            "JOIN ent_organization o ON o.id = m.org_id "
+            "WHERE m.user_id = :user_id AND m.status = :m_status AND o.status = :o_status "
+            f"AND m.org_id IN ({placeholders}) "
+            "ORDER BY m.org_id"
+        ),
+        params,
+    ).mappings()
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        org_id = int(row["org_id"])
+        if org_id not in ctx.org_ids:
+            # 双保险：与 resolve_context 的口径不一致时不返回，
+            # 否则界面会给出一个"点了就 403/空列表"的选项。
+            continue
+        result.append(
+            {
+                "org_id": org_id,
+                "name": str(row["org_name"]),
+                "member_role": str(row["member_role"]),
+                # 权限一律取自 ctx.permissions_in_org：角色权限与"授予该组织的授权"
+                # 都已在 resolve_context 里归位，这里**不再重算一遍**。
+                "permissions": sorted(ctx.permissions_in_org(org_id)),
+            }
+        )
+    return result
+
+
 def assert_can(
     session: Session,
     *,
