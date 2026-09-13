@@ -78,6 +78,21 @@ def _fmt(dt: datetime) -> str:
     return dt.strftime(_TS_FORMAT)
 
 
+def _text_ts(raw: Any) -> str | None:
+    """时间列 → 统一文本表示（响应模型声明 `str | None` 的方言归一）。
+
+    SQLite 的 DATETIME 以 TEXT 存放，取出来就是 `str`；MySQL 的 DATETIME 由
+    驱动转换成 `datetime`。若不归一，同一个响应模型在 SQLite 上通过、在 MySQL
+    上因类型校验失败而降级成 500/422 —— 这类"只在生产库暴露"的缺陷必须由
+    本层统一吸收（与 `tasks._text_ts` 同一口径）。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return _fmt(raw)
+    return str(raw)
+
+
 def _row_to_assignment(row: Any) -> dict[str, Any]:
     quantity = row["quantity"]
     return {
@@ -92,11 +107,11 @@ def _row_to_assignment(row: Any) -> dict[str, Any]:
         "status": str(row["status"]),
         "revision": int(row["revision"]),
         "claimed_by": int(row["claimed_by"]) if row["claimed_by"] is not None else None,
-        "claimed_at": row["claimed_at"],
-        "submitted_at": row["submitted_at"],
-        "cancelled_at": row["cancelled_at"],
-        "created_at": str(row["created_at"]),
-        "updated_at": str(row["updated_at"]),
+        "claimed_at": _text_ts(row["claimed_at"]),
+        "submitted_at": _text_ts(row["submitted_at"]),
+        "cancelled_at": _text_ts(row["cancelled_at"]),
+        "created_at": _text_ts(row["created_at"]),
+        "updated_at": _text_ts(row["updated_at"]),
     }
 
 
