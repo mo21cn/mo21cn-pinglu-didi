@@ -225,7 +225,26 @@ def update_draft(
         sets.append("quantity_unit = :unit")
         params["unit"] = quantity_unit
 
-    session.execute(text(f"UPDATE ent_assignment SET {', '.join(sets)} WHERE id = :aid"), params)
+    result = cast(
+        "CursorResult[Any]",
+        session.execute(
+            text(
+                f"UPDATE ent_assignment SET {', '.join(sets)} "
+                "WHERE id = :aid AND revision = :expected_rev"
+            ),
+            {**params, "expected_rev": expected_revision},
+        ),
+    )
+    if int(result.rowcount or 0) == 0:
+        # 条件更新没打中：读取间隙里 revision 被并发修改（乐观锁真正的裁决点）。
+        # 检查阶段只是快速失败；这里才是保证"过期命令必然 409"的地方。
+        fresh = get_assignment(session, assignment_id)
+        if fresh is None:
+            raise AssignmentNotFoundError(f"委托单 {assignment_id} 不存在")
+        raise RevisionConflictError(
+            f"版本冲突：当前 revision={fresh['revision']}，"
+            f"请求基于 revision={expected_revision}（数据可能已被他人修改）"
+        )
     session.commit()
     updated = _get_or_404(session, assignment_id)
     assert updated is not None
@@ -307,14 +326,37 @@ def submit_assignment(
         raise AccessDeniedError(f"货主 {actor_id} 对组织 {org_id} 没有生效的委托授权，不能提交")
 
     current = now or utcnow_naive()
-    session.execute(
-        text(
-            "UPDATE ent_assignment SET org_id = :org, status = :status, "
-            "submitted_at = :ts, revision = revision + 1, updated_at = :ts "
-            "WHERE id = :aid"
+    result = cast(
+        "CursorResult[Any]",
+        session.execute(
+            text(
+                "UPDATE ent_assignment SET org_id = :org, status = :status, "
+                "submitted_at = :ts, revision = revision + 1, updated_at = :ts "
+                "WHERE id = :aid AND revision = :expected_rev AND status = :from_status"
+            ),
+            {
+                "org": org_id,
+                "status": STATUS_SUBMITTED,
+                "ts": _fmt(current),
+                "aid": assignment_id,
+                "expected_rev": expected_revision,
+                "from_status": STATUS_DRAFT,
+            },
         ),
-        {"org": org_id, "status": STATUS_SUBMITTED, "ts": _fmt(current), "aid": assignment_id},
     )
+    if int(result.rowcount or 0) == 0:
+        # 提交也是条件更新：状态被并发改变或 revision 过期都在这里统一裁决
+        fresh = get_assignment(session, assignment_id)
+        if fresh is None:
+            raise AssignmentNotFoundError(f"委托单 {assignment_id} 不存在")
+        if fresh["revision"] != expected_revision:
+            raise RevisionConflictError(
+                f"版本冲突：当前 revision={fresh['revision']}，"
+                f"请求基于 revision={expected_revision}（数据可能已被他人修改）"
+            )
+        raise AssignmentStateError(
+            f"委托单 {assignment_id} 状态为 {fresh['status']}，只有草稿可提交"
+        )
     session.commit()
     submitted = _get_or_404(session, assignment_id)
     assert submitted is not None
