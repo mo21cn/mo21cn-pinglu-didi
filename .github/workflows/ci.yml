@@ -239,9 +239,16 @@ jobs:
 
       - name: 路由注册表校验（页面栈预算 / 深链参数契约）
         # verify_miniapp 已覆盖「可达性」与「tabBar 该用 switchTab」；本步补的是
-        # 注册表 ⇄ app.json 双向一致、声明链深 ≤ STACK_BUDGET、实际导航边已声明。
+        # 注册表 ⇄ app.json 双向一致、声明链深 ≤ STACK_BUDGET、导航边契约（ENT-018：
+        # 代码里的每条边都必须在 NAV_EDGES 声明过；push/replace 边无代码证据必须标 pending）。
         # 新增页面不在 miniapp/utils/routes.js 登记 → 本步红。
         run: node scripts/verify_routes.js
+
+      - name: 路由模块行为测试（参数契约 / 复用键 / 策略链 / 环）
+        # verify_routes 只能证明「声明与代码一致」，证明不了「声明本身是对的」。
+        # HO 实测的 4 个问题（空参通过、非法枚举通过、双向来路算成 Infinity、缺参仍
+        # navigateTo）全是**语义**问题，它们能在静态门禁全绿时存在，所以必须有这一层。
+        run: node scripts/verify_routes_behavior.js
 
       - name: 小程序 require 相对路径校验
         # 2026-09-13 真机走查发现：三层目录的页面把 utils 写成 '../../utils/entrust'，
