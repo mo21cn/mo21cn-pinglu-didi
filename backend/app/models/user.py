@@ -18,15 +18,20 @@ class Base(DeclarativeBase):
     """全局 ORM 基类。"""
 
 
+#: 用户主键列类型：MySQL BIGINT / SQLite INTEGER（SQLite 无 BigInteger 自增）。
+#:
+#: **任何引用 `users.id` 的外键列必须复用本类型**，否则 MySQL 建外键时因两侧
+#: 类型不一致报 errno 3780（Referencing column ... are incompatible）。此前基线
+#: 只在 SQLite 上 create_all，该问题在 CI 首跑 MySQL 时才暴露（见 AC-25）。
+USER_ID = BigInteger().with_variant(Integer, "sqlite")
+
+
 class User(Base):
     """平台用户（以微信 openid 为主键关联）。"""
 
     __tablename__ = "users"
 
-    # SQLite（开发/测试）无 BigInteger 自增，用 Integer 变体兼容
-    id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
-    )
+    id: Mapped[int] = mapped_column(USER_ID, primary_key=True, autoincrement=True)
     openid: Mapped[str] = mapped_column(String(64), unique=True, index=True, comment="微信 openid")
     unionid: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="微信 unionid")
     nickname: Mapped[str] = mapped_column(String(64), default="", comment="昵称")

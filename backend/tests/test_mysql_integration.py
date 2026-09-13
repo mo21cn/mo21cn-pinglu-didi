@@ -10,7 +10,9 @@ MySQL 8.0 验证三条并发正确性锚点：
 2. **乐观锁并发编辑**（AC-11）：两个会话基于同一 revision 并发编辑，恰好一个
    成功、另一个 409（`UPDATE ... WHERE revision = :expected` 的裁决点）；
 3. **幂等并发**（ENT-002 / AC-15 前置）：同一幂等键并发执行同一业务，
-   副作用恰好发生一次。
+   副作用恰好发生一次；
+4. **基线建表**（AC-25）：`create_all` 能在真实 MySQL 上建出全部基线表
+   （外键两侧类型必须一致）—— SQLite 类型宽松，只有 MySQL 拦得住。
 
 运行方式
 --------
@@ -29,7 +31,7 @@ import threading
 os.environ["APP_ENV"] = "test"
 
 import pytest  # noqa: E402
-from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy import create_engine, inspect, text  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from app.core.idempotency import (  # noqa: E402
@@ -54,11 +56,10 @@ _ROUNDS = 4  # 竞争轮数：每轮重新播种一张 submitted 委托单
 def mysql():
     """模块级 MySQL 引擎与会话工厂（只应用迁移，不 create_all）。
 
-    **已知基线问题**（ENT-007 CI 首跑发现，待独立修复）：基线模型的
-    `create_all` 在 MySQL 上失败 —— `users.id` 是 `BigInteger`（SQLite
-    variant 为 Integer），而 `ships.owner_id` 等 FK 列是 `Integer`，
-    MySQL 严格校验外键类型兼容性（错误 3780）。本模块只用 `ent_` 表，
-    因此只应用 `migrations/`，不触发基线建表。
+    **为什么 fixture 不建基线表**：本模块的用例只依赖 `ent_` 表；基线表
+    （users/ships/...）的建表由独立用例 `test_baseline_create_all_succeeds_on_mysql`
+    单独验证（AC-25）—— 那里曾暴露 `users.id` BIGINT 与引用列 INT 不兼容
+    （MySQL errno 3780），修复后由该用例持续守护，与并发用例的关注点分离。
     """
     from migrate import apply_pending
 
@@ -121,6 +122,26 @@ def test_migrations_settled_on_mysql(mysql):
 
     _, pending = split_entries(mysql.kw["bind"], load_entries())
     assert pending == []
+
+
+def test_baseline_create_all_succeeds_on_mysql(mysql):
+    """AC-25：基线模型能在真实 MySQL 上建表（外键两侧类型一致）。
+
+    ENT-007 首跑时此步失败：`users.id` 编译为 BIGINT，而 `ships.owner_id`
+    等 8 个引用列是 INT，MySQL 拒绝建外键（errno 3780）。修复后由本用例在
+    `pytest-mysql` job 中持续守护 —— SQLite 上类型宽松，拦不住这类问题。
+    """
+    from app.models import Base
+
+    engine = mysql.kw["bind"]
+    Base.metadata.create_all(bind=engine)  # 已存在的表按 IF NOT EXISTS 跳过
+
+    inspector = inspect(engine)
+    missing = sorted(t for t in Base.metadata.tables if not inspector.has_table(t))
+    assert missing == [], f"create_all 之后仍缺失的基线表：{missing}"
+
+    users_id = inspector.get_columns("users")[0]
+    print(f"users.id -> {users_id['type']}")
 
 
 def test_double_claim_race_exactly_one_winner(mysql):

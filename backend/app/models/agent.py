@@ -17,7 +17,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.user import Base
+from app.models.user import USER_ID, Base
 
 
 class AgentCall(Base):
@@ -28,7 +28,7 @@ class AgentCall(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"), index=True, comment="发起调用的用户 ID"
+        USER_ID, ForeignKey("users.id"), index=True, comment="发起调用的用户 ID"
     )
     agent_name: Mapped[str] = mapped_column(
         String(64), index=True, comment="领域 Agent 名（cargo_parse / faq / ops_analytics ...）"
