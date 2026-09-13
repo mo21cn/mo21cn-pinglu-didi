@@ -3,7 +3,7 @@
 // 本页只做**只读字段展示**：受理、任务、成果、Agent 提交等写动作属于后续批次。
 // 不做写动作也就不需要提前把内部字段（受理价 / 成本口径 / 内部比价）拉出来 ——
 // 客户数据白名单投影（`project_for_customer`）的完整分叉在 S3 处理。
-const { VIEW, decorateDetail, fetchAssignment, viewState } = require('../../utils/entrust')
+const { VIEW, decorateDetail, fetchAssignment, viewState } = require('../../../utils/entrust')
 
 Page({
   data: {
