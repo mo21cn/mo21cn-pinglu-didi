@@ -1,20 +1,53 @@
-// 委托发货 · 委托详情（ENT-012 / AC-04 第一个切片的只读半边）
+// 委托发货 · 单张委托工作台（UI-05 首片 / ENT-021）
 //
-// 本页只做**只读字段展示**：受理、任务、成果、Agent 提交等写动作属于后续批次。
-// 不做写动作也就不需要提前把内部字段（受理价 / 成本口径 / 内部比价）拉出来 ——
-// 客户数据白名单投影（`project_for_customer`）的完整分叉在 S3 处理。
+// 本页是**单张委托的工作台**：委托本体摘要 + 七个业务槽位（DR-0010 §3.1）。
+// 七槽位的顺序与 key 来自 `utils/entrust.js` 的 `WORKBENCH_SLOTS`，数据来自
+// `GET /assignments/{id}/workbench`（一条只读聚合查询，返回每槽四字段 + 计数）。
+//
+// 空值四态（DR-0010 §3.6）：投影层已经把「暂无记录 / 尚未分配 / 不适用 / 信息缺失」
+// 分别算好并给了各自的文案，本页**不做二次判断** —— 页面里再判一次就会与后端
+// 漂移，而且"错误被显示成空"这类问题正是页面自己判断时最容易发生的。
+//
+// 首片的人工落点（DR-0010 §3.8）：**记录任务**（每个开放槽位）+ **受理委托**
+// （待受理时）。都走既有端点，没有为工作台新开写口。成果的「编辑 / 确认」留给下一片,
+// 页面上不放假按钮 —— 那只会训练用户点它。
 //
 // ENT-019：本页已接入运行期导航治理（`utils/routes.js`）——
 //   · `onLoad` 的入口守卫与 `go()` 用**同一份** `paramSchema` 判定参数合法性；
 //   · 返回 / 回首页经 `go()`（`workbench → index` 声明为 `reset`，执行 `reLaunch`）；
 //   · 本页登记在 `MIGRATED_PAGES` 里，CI 会核对不得再出现裸 `wx.navigateTo /
 //     redirectTo / reLaunch`。
-const { VIEW, decorateDetail, fetchAssignment, viewState } = require('../../../utils/entrust')
+const {
+  VIEW,
+  TASK_TYPE_LABELS,
+  TASK_TYPE_ORDER,
+  claimAssignment,
+  createTask,
+  decorateDetail,
+  decorateWorkbench,
+  fetchAssignment,
+  fetchWorkbench,
+  newIdempotencyKey,
+  viewState
+} = require('../../../utils/entrust')
 
 const R = require('../../../utils/routes')
 
 /** 本页路径（注册表口径）；`go()` 需要知道"从哪来"才能查到导航边 */
 const SELF = 'pages/entrust/detail/detail'
+
+/**
+ * 任务类型选项（`plan_tasks` 的内联选择器用）。
+ *
+ * 用**页内展开的选择条**而不是 `wx.showActionSheet`：后者超过 6 项在真机上会滚动、
+ * 底部项容易被切断，项目约定是长列表走 `port-picker` 这类组件；而任务类型只有 7 项、
+ * 又已经在同一张卡里，直接展开比弹一层更少上下文切换。
+ * （`scripts/verify_ui_interactions.js` 的静态防线会拦下"showActionSheet + 动态列表"，
+ *  这条拦截是对的 —— 它拦住的正是我这个初版实现。）
+ */
+const TASK_TYPE_OPTIONS = TASK_TYPE_ORDER.map(function (t) {
+  return { key: t, label: TASK_TYPE_LABELS[t] || t }
+})
 
 Page({
   data: {
@@ -24,7 +57,15 @@ Page({
     viewHint: '',
     assignmentId: '',
     detail: null,
-    fields: []
+    fields: [],
+    slots: [],
+    /** 待受理（status=submitted）时给「受理委托」入口；是否有权限由服务端判定 */
+    canClaim: false,
+    /** 归属机制上线前的历史成果计数提示（0 时为空串） */
+    unassignedHint: '',
+    /** 已展开类型选择的槽位 key（空串＝都收起） */
+    pickKey: '',
+    taskTypes: TASK_TYPE_OPTIONS
   },
 
   onLoad(query) {
@@ -65,6 +106,7 @@ Page({
           title: miss.length ? '缺少委托编号' : '委托编号不合法',
           hint: miss.length ? '请从委托列表进入详情' : gate.reason
         },
+        null,
         null
       )
       return
@@ -76,41 +118,140 @@ Page({
 
   load() {
     const self = this
+    const id = this.data.assignmentId
     this.setData({ view: VIEW.LOADING, viewTitle: '加载中', viewHint: '' })
-    return fetchAssignment(this.data.assignmentId)
+    // 两个请求一起发：工作台是主内容，委托本体是它的头卡。任一失败都按失败处理 ——
+    // 「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
+    return Promise.all([fetchAssignment(id), fetchWorkbench(id)])
       .then(function (res) {
-        const detail = decorateDetail(res)
-        self.applyState(viewState({ status: 200, total: 1 }), detail)
+        const detail = decorateDetail(res[0])
+        const board = decorateWorkbench(res[1])
+        self.applyState(viewState({ status: 200, total: 1 }), detail, board)
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
         self.applyState(
           viewState({ status: status, netError: !status, detail: err && err.detail }),
+          null,
           null
         )
       })
   },
 
-  applyState(state, detail) {
+  applyState(state, detail, board) {
     this.setData({
       view: state.state,
       viewTitle: state.title,
       viewHint: state.hint,
       detail: detail,
-      fields: detail ? this.buildFields(detail) : []
+      fields: detail ? this.buildFields(detail) : [],
+      slots: board ? board.slots : [],
+      // 受理入口只看**委托状态**：有没有权限由服务端判定（前端不做权限判定，
+      // 也不假装知道）。无权限时服务端给 403，请求层会把原因如实提示出来。
+      canClaim: !!(board && board.status === 'submitted'),
+      unassignedHint: board ? board.unassignedHint : ''
     })
   },
 
-  /** 详情字段行（模板只做 wx:for，不做表达式） */
+  /** 头卡字段行（模板只做 wx:for，不做表达式）。货类/货量已进 `overview` 槽位，此处不重复。 */
   buildFields(detail) {
     return [
       { label: '委托编号', value: '#' + detail.assignmentId },
-      { label: '货类 / 货物', value: detail.cargoSummary },
-      { label: '货量', value: detail.quantityText },
       { label: '归属', value: detail.orgText },
       { label: '提交时间', value: detail.createdAt || '—' },
       { label: '数据版本', value: 'r' + (detail.revision || 1) }
     ]
+  },
+
+  // ── 人工落点：记录任务（每个开放槽位）────────────────────────────────
+
+  /**
+   * 记录一项任务。任务类型由槽位决定；`plan_tasks` 是**全单任务总览**，
+   * 不替用户假定类型，所以在卡内展开选择条让用户自己挑。
+   */
+  onRecordTask(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const taskType = ds.task || ''
+    if (taskType) {
+      this.promptTaskTitle(taskType)
+      return
+    }
+    // 再点一次同一槽位即收起（不要留下一个"必须点别处才能取消"的面板）
+    this.setData({ pickKey: this.data.pickKey === ds.key ? '' : ds.key || '' })
+  },
+
+  /** 选中任务类型 → 收起选择条并进入标题输入 */
+  onPickTaskType(e) {
+    const picked = (e && e.currentTarget && e.currentTarget.dataset.type) || ''
+    this.setData({ pickKey: '' })
+    if (picked) this.promptTaskTitle(picked)
+  },
+
+  promptTaskTitle(taskType) {
+    const self = this
+    const label = TASK_TYPE_LABELS[taskType] || taskType
+    wx.showModal({
+      title: '记录任务 · ' + label,
+      editable: true,
+      placeholderText: '任务标题（1-128 字）',
+      success: function (res) {
+        if (!res.confirm) return
+        const title = (res.content || '').trim()
+        if (!title) {
+          wx.showToast({ title: '任务标题不能为空', icon: 'none' })
+          return
+        }
+        self.submitTask(taskType, title)
+      }
+    })
+  },
+
+  submitTask(taskType, title) {
+    const self = this
+    wx.showLoading({ title: '提交中', mask: true })
+    // 幂等键每次提交新生成：重试同一次提交时会复用同一个键（此处是单次用户动作，
+    // 用户重新点击就是一次新的意图，应当新键）。
+    return createTask(
+      this.data.assignmentId,
+      { task_type: taskType, title: title },
+      newIdempotencyKey('task')
+    )
+      .then(function () {
+        wx.hideLoading()
+        wx.showToast({ title: '任务已记录', icon: 'success' })
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        // 服务端失败原因（无权限 / 委托未受理 / 校验不通过）已由请求层提示；
+        // 这里只兜底网络层（没有 httpStatus 的那类），避免静默失败。
+        if (!(err && err.httpStatus)) {
+          wx.showToast({ title: '任务未记录：网络异常', icon: 'none' })
+        }
+      })
+  },
+
+  // ── 人工落点：受理委托（待受理时）────────────────────────────────────
+
+  onClaim() {
+    const self = this
+    wx.showModal({
+      title: '受理委托',
+      content: '受理后该委托进入组织队列，可以派发任务。确认受理？',
+      success: function (res) {
+        if (!res.confirm) return
+        wx.showLoading({ title: '受理中', mask: true })
+        claimAssignment(self.data.assignmentId, newIdempotencyKey('claim'))
+          .then(function () {
+            wx.hideLoading()
+            wx.showToast({ title: '已受理', icon: 'success' })
+            return self.load()
+          })
+          .catch(function () {
+            wx.hideLoading()
+          })
+      }
+    })
   },
 
   onRetry() {
@@ -129,10 +270,5 @@ Page({
 
   onRelogin() {
     R.go('/pages/index/index', { from: SELF })
-  },
-
-  /** 明确告知后续能力未开放，而不是给一个点了没反应的按钮 */
-  onNextBatch() {
-    wx.showToast({ title: '受理 / 任务 / 成果 / Agent 在下一批开放', icon: 'none', duration: 2000 })
   }
 })

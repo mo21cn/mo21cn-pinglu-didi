@@ -319,23 +319,319 @@ function decorateDetail(row) {
   return decorated
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 委托工作台（UI-05 / ENT-021）：七槽位骨架 + 空值四态
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 七槽位配置表 —— 前端这一侧的**顺序与 key 权威**（DR-0010 §3.1、§5）。
+ *
+ * §5 要求"槽位划分先在前端配置表落地"：改划分＝改这张表，不牵动数据库、不牵动状态机。
+ * 接口按 `key` 返回数据，**渲染顺序由本表决定** —— 后端顺序错了界面仍然正确；
+ * 而 `scripts/verify_entrust_ui.js` 会把"本表与后端 `workbench.SLOT_SPECS`
+ * 不一致"直接判红（DR-0010 验证 #1）。两侧都有断言，就没人能单方面改顺序。
+ *
+ * `taskType` = 该槽位「记录任务」动作的默认任务类型（取值域 = 后端 `tasks.TASK_TYPES`）；
+ * 留空即不提供该动作。`taskPick` 表示让用户先选类型 —— `plan_tasks` 本来就是
+ * **全单任务总览**，不该替用户假定类型。
+ */
+const WORKBENCH_SLOTS = [
+  { key: 'overview', title: '委托概况', taskType: '' },
+  { key: 'plan_tasks', title: '方案与任务', taskType: '', taskPick: true },
+  { key: 'procurement', title: '采购与报价', taskType: 'purchase' },
+  { key: 'customer_contracts', title: '对客方案与合同', taskType: 'contract' },
+  { key: 'execution', title: '履约与交接', taskType: 'execution' },
+  { key: 'exceptions', title: '异常与变更', taskType: '' },
+  { key: 'settlement', title: '费用与结案', taskType: 'settlement' }
+]
+
+/** 任务类型 → 中文。键必须覆盖后端 `tasks.TASK_TYPES` 全部取值（静态断言守） */
+const TASK_TYPE_LABELS = {
+  collect_documents: '收集单证',
+  quote: '询价',
+  purchase: '采购',
+  contract: '合同',
+  execution: '履约',
+  handover: '交接',
+  settlement: '结算'
+}
+
+/** 任务类型的固定顺序（`plan_tasks` 的选择器按它排；与后端 `tasks.TASK_TYPES` 同集合） */
+const TASK_TYPE_ORDER = [
+  'collect_documents',
+  'quote',
+  'purchase',
+  'contract',
+  'execution',
+  'handover',
+  'settlement'
+]
+
+/**
+ * 空值四态文案（DR-0010 §3.6）—— **四句话必须不同**。
+ *
+ * 「暂无记录 / 尚未分配 / 不适用 / 信息缺失」各自回答不同的问题：
+ * 前两个是"还没发生"，第三个是"本单不需要"，第四个是"该有却没有"。
+ * 一律显示「待补充」的后果是用户分不清**该不该动手** —— 而这正是四态存在的理由。
+ * 「本期未开放」不属于四态：它是能力没做（§3.8），必须与"业务上没有"分开。
+ */
+const SLOT_EMPTY_TEXT = {
+  noRecord: '暂无记录',
+  unassigned: '尚未分配',
+  notApplicable: '不适用',
+  missingInfo: '信息缺失',
+  notOpen: '本期未开放'
+}
+
+/** 派生字段的固定标签与顺序（§3.5；顺序即展示顺序） */
+const SLOT_FIELD_LABELS = ['当前成果', '未决问题', '下一责任方', '最后更新']
+
+/**
+ * 未决问题的**类别**标签（后端 `WorkbenchIssueOut.kind`）。
+ *
+ * 类别由服务端给，界面**不靠描述文本的前缀去猜** —— 猜的写法一旦后端改了措辞就静默
+ * 失效，而且"缺项"和"阻断"对用户的意义完全不同：前者是去补数据，后者是这条路走不通。
+ * 少一个键 → 该类别会退化成只显示描述文本（`verify_entrust_ui.js` 会核对两侧取值域）。
+ */
+const ISSUE_KIND_LABELS = {
+  missing_field: '缺项',
+  blocked: '阻断',
+  waiting: '待确认',
+  unassigned_task: '未指派',
+  inactive_artifact: '失效成果'
+}
+
+function _slotField(label, value, empty, tone) {
+  // 样式类在这里算好：模板里写 `{{a ? 'x' : 'y'}}` 会让"类是否存在"变成运行期才知道，
+  // 而样式类拼错只会表现为"没有颜色"，静态脚本抓不到（verify_entrust_ui.js 有专门检查）。
+  let cls = 'field-value'
+  if (empty) cls += ' slot-empty'
+  else if (tone === 'warn') cls += ' slot-warn'
+  return { label: label, value: value, empty: !!empty, tone: tone || '', cls: cls }
+}
+
+/** 「当前成果」行 */
+function _currentField(slot) {
+  const current = slot.current || {}
+  const text = current.state === 'present' ? current.text || '' : ''
+  return _slotField(
+    SLOT_FIELD_LABELS[0],
+    text || SLOT_EMPTY_TEXT.noRecord,
+    !text
+  )
+}
+
+/** 「未决问题」行 —— 「信息缺失」是一种**有内容的**状态，不是空 */
+function _issuesField(slot) {
+  const issues = slot.issues || {}
+  const count = issues.count || 0
+  if (issues.state === 'missing_info') {
+    return _slotField(SLOT_FIELD_LABELS[1], SLOT_EMPTY_TEXT.missingInfo + ' · ' + count + ' 项', false, 'warn')
+  }
+  if (issues.state === 'present') {
+    return _slotField(SLOT_FIELD_LABELS[1], '未决 ' + count + ' 项', false, 'warn')
+  }
+  return _slotField(SLOT_FIELD_LABELS[1], '无未决问题', true)
+}
+
+/** 「下一责任方」行 —— 「尚未分配」与「不适用」是两件事 */
+function _ownerField(slot) {
+  const owner = slot.next_owner || {}
+  if (owner.state === 'assigned') {
+    const text = owner.text || (owner.user_id ? '成员 #' + owner.user_id : '已指派')
+    return _slotField(SLOT_FIELD_LABELS[2], text, false)
+  }
+  if (owner.state === 'unassigned') {
+    return _slotField(SLOT_FIELD_LABELS[2], SLOT_EMPTY_TEXT.unassigned, true, 'warn')
+  }
+  return _slotField(SLOT_FIELD_LABELS[2], SLOT_EMPTY_TEXT.notApplicable, true)
+}
+
+/** 「最后更新」行 */
+function _updatedField(slot) {
+  const at = slot.updated_at || ''
+  return _slotField(SLOT_FIELD_LABELS[3], at || SLOT_EMPTY_TEXT.noRecord, !at)
+}
+
+/** 计数摘要（只写有内容的项，避免出现「任务 0 · 成果 0」这种噪声） */
+function _countsText(slot) {
+  const counts = slot.counts || {}
+  const parts = []
+  if (counts.tasks) {
+    const open = counts.open_tasks || 0
+    parts.push('任务 ' + counts.tasks + (open ? '（未完成 ' + open + '）' : ''))
+  }
+  if (counts.artifacts) parts.push('成果 ' + counts.artifacts)
+  return parts.join(' · ')
+}
+
+/** 成果精确版本引用（PRD 第 187 行：对话与工作台引用**同一** artifact ID 与版本） */
+function _artifactRefs(slot) {
+  const current = slot.current || {}
+  return (current.refs || []).map(function (ref) {
+    const version = ref.revision_no === null || ref.revision_no === undefined ? '—' : ref.revision_no
+    return {
+      artifactId: ref.artifact_id,
+      label: ref.label || ref.artifact_type,
+      revisionNo: ref.revision_no,
+      text: (ref.label || ref.artifact_type) + ' · v' + version
+    }
+  })
+}
+
+/**
+ * 单槽位投影。**未开放 ≠ 空**：`available=false` 走独立分支，给「本期未开放」，
+ * 绝不落进四态 —— 否则「异常与变更本期没做」会被说成「这单没有异常」（DR-0010 §3.8）。
+ *
+ * 接口没返回该槽位时（版本不匹配 / 后端漏了一个 key）也走未开放分支，但**理由不同**：
+ * 文案如实说"接口未返回该槽位"，而不是伪造一个正常的业务空态。
+ */
+function decorateSlot(config, raw) {
+  const slot = raw || {}
+  const available = !!raw && slot.available !== false
+  if (!available) {
+    return {
+      key: config.key,
+      title: config.title,
+      available: false,
+      taskType: '',
+      taskPick: false,
+      tag: SLOT_EMPTY_TEXT.notOpen,
+      tagClass: 'chip chip-muted',
+      note: slot.unavailable_reason || '接口未返回该槽位（后端版本可能不匹配）',
+      fields: [],
+      issues: [],
+      countsText: '',
+      refs: [],
+      canRecordTask: false,
+      actionLabel: ''
+    }
+  }
+  const issues = slot.issues || {}
+  return {
+    key: config.key,
+    title: config.title,
+    available: true,
+    // 动作参数进模板 dataset：页面不必再查一遍配置表（少一份会漂移的映射）
+    taskType: config.taskType || '',
+    taskPick: !!config.taskPick,
+    tag: '',
+    tagClass: '',
+    note: '',
+    fields: [_currentField(slot), _issuesField(slot), _ownerField(slot), _updatedField(slot)],
+    issues: (issues.items || []).map(function (item) {
+      // 逐条同时给出类别标签与描述：只给描述时，用户得先读懂一句话才知道该不该动手
+      return {
+        kind: item.kind || '',
+        kindLabel: ISSUE_KIND_LABELS[item.kind] || '',
+        text: item.text
+      }
+    }),
+    countsText: _countsText(slot),
+    refs: _artifactRefs(slot),
+    canRecordTask: !!(config.taskType || config.taskPick),
+    actionLabel: config.taskPick ? '新建任务' : config.taskType ? '记录任务' : ''
+  }
+}
+
+/**
+ * 工作台载荷投影：接口 → 模板形状（模板只做 wx:for，不做表达式）。
+ *
+ * 遍历的是**前端配置表**而不是接口数组：接口按 key 提供数据，顺序由本表决定。
+ * 接口多返回未知 key 时忽略（不渲染一个配置表没声明的槽位 —— 那说明两侧不同步，
+ * 静态断言会红，界面上不该悄悄多出一块没人认识的东西）。
+ */
+function decorateWorkbench(res) {
+  const data = res || {}
+  const byKey = {}
+  ;(data.slots || []).forEach(function (slot) {
+    if (slot && slot.key) byKey[slot.key] = slot
+  })
+  const unassigned = Number(data.unassigned_artifact_total || 0)
+  return {
+    assignmentId: data.assignment_id,
+    orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id),
+    status: data.status,
+    statusLabel: statusLabel(data.status),
+    statusClass: statusClass(data.status),
+    slots: WORKBENCH_SLOTS.map(function (config) {
+      return decorateSlot(config, byKey[config.key])
+    }),
+    unassignedTotal: unassigned,
+    // 历史成果必须如实报数，不能因为"不属于任何槽位"就消失
+    unassignedHint: unassigned
+      ? '另有 ' + unassigned + ' 份历史成果尚未归属（归属机制上线前产生），不在上述槽位内'
+      : ''
+  }
+}
+
+/** 幂等键：写端点要求，重试同一次操作时复用同一个键 */
+function newIdempotencyKey(prefix) {
+  return (
+    (prefix || 'k') + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
+  )
+}
+
+/** 拉取单委托工作台（七槽位摘要）。可见性由服务端判定：非参与方 404。 */
+function fetchWorkbench(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/workbench', method: 'GET' })
+}
+
+/**
+ * 在工作台里**记录一项任务**（UI-05 首片的人工落点）。
+ *
+ * 用既有端点而不是为工作台新开一个写口：任务模型已经承载了"派单 / 前置 / 证据"，
+ * 工作台只是它的一个入口。`Idempotency-Key` 由调用方生成并在重试时复用，
+ * 否则一次网络抖动会留下两条一模一样的任务。
+ */
+function createTask(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/tasks',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 受理委托（货主已提交、经理认领）。原子认领，双认领后者 409。 */
+function claimAssignment(assignmentId, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/claim',
+    method: 'POST',
+    data: {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
 module.exports = {
   BASE,
+  ISSUE_KIND_LABELS,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
+  SLOT_EMPTY_TEXT,
+  SLOT_FIELD_LABELS,
   STATUS_HINT,
   STATUS_META,
   STATUS_ORDER,
+  TASK_TYPE_LABELS,
+  TASK_TYPE_ORDER,
   VIEW,
+  WORKBENCH_SLOTS,
+  claimAssignment,
+  createTask,
   decorateAssignment,
   decorateDetail,
   decorateList,
   decorateOrg,
   decorateOrgs,
+  decorateSlot,
+  decorateWorkbench,
   entryDecision,
   fetchAssignment,
   fetchMyOrgs,
   fetchQueue,
+  fetchWorkbench,
+  newIdempotencyKey,
   pageHint,
   pickOrg,
   probeEntry,

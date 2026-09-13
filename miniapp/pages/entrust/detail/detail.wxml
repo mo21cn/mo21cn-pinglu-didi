@@ -1,13 +1,14 @@
 <!--
-  委托发货 · 委托详情（ENT-012）
-  只读展示：本批不提供受理 / 任务 / 成果 / Agent 写动作，页底明确标注「下一批开放」，
-  而不是给一堆点了没反应的按钮。
+  委托发货 · 单张委托工作台（UI-05 首片 / ENT-021）
+  七槽位骨架 + 空值四态 + 每槽人工落点（记录任务）。
+  四态分支（loading / expired / denied / error）一个都不能少：少一个分支就少一种表现，
+  失败会被渲染成空白（verify_entrust_ui.js 有专门断言）。
 -->
 <view class="page">
   <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
     <view class="nav-inner">
       <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
-      <text class="nav-title">委托详情</text>
+      <text class="nav-title">委托工作台</text>
       <view class="nav-spacer"></view>
     </view>
     <view class="head-sub" wx:if="{{detail}}">{{detail.title}}</view>
@@ -42,29 +43,97 @@
 
     <!-- 正常 -->
     <block wx:else>
+      <!-- 委托本体（overview 之外的骨架信息；货类/货量在第一个槽位里） -->
       <view class="card">
         <view class="row-between detail-top">
           <text class="detail-title">{{detail.title}}</text>
           <text class="{{detail.statusClass}}">{{detail.statusLabel}}</text>
         </view>
-        <view
-          wx:for="{{fields}}"
-          wx:key="label"
-          class="field-row row-between"
-        >
+        <view wx:for="{{fields}}" wx:key="label" class="field-row row-between">
           <text class="field-label">{{item.label}}</text>
           <text class="field-value">{{item.value}}</text>
         </view>
       </view>
 
+      <!-- 待受理：给真实可执行的受理入口（无权限时服务端会如实拒绝） -->
+      <view wx:if="{{canClaim}}" class="card slot-card">
+        <view class="slot-note">该委托已提交，等待组织成员受理</view>
+        <view class="slot-actions">
+          <view class="slot-btn" bindtap="onClaim" hover-class="hover-dim">受理委托</view>
+        </view>
+      </view>
+
+      <!-- 归属机制上线前的历史成果：如实报数，不静默藏起来 -->
+      <view wx:if="{{unassignedHint}}" class="card slot-card">
+        <view class="slot-note">{{unassignedHint}}</view>
+      </view>
+
+      <!-- 七槽位（顺序与 key 由 utils/entrust.js 的 WORKBENCH_SLOTS 决定） -->
+      <view wx:for="{{slots}}" wx:key="key" class="card slot-card">
+        <view class="row-between slot-head">
+          <text class="slot-title">{{item.title}}</text>
+          <text wx:if="{{item.tag}}" class="{{item.tagClass}}">{{item.tag}}</text>
+        </view>
+
+        <!-- 本期未开放：说清"能力还没做"，而不是显示成"这单没有" -->
+        <view wx:if="{{!item.available}}" class="slot-note">{{item.note}}</view>
+
+        <block wx:else>
+          <view
+            wx:for="{{item.fields}}"
+            wx:for-item="f"
+            wx:key="label"
+            class="field-row row-between"
+          >
+            <text class="field-label">{{f.label}}</text>
+            <text class="{{f.cls}}">{{f.value}}</text>
+          </view>
+
+          <view wx:if="{{item.issues.length}}" class="slot-issues">
+            <view wx:for="{{item.issues}}" wx:for-item="it" wx:key="text" class="slot-issue">
+              <text wx:if="{{it.kindLabel}}" class="slot-issue-kind">{{it.kindLabel}}</text>
+              <text class="slot-issue-text">{{it.text}}</text>
+            </view>
+          </view>
+
+          <view wx:if="{{item.refs.length}}" class="slot-refs">
+            <view wx:for="{{item.refs}}" wx:for-item="rf" wx:key="artifactId" class="slot-ref">
+              成果 #{{rf.artifactId}} · {{rf.text}}
+            </view>
+          </view>
+
+          <view wx:if="{{item.countsText}}" class="slot-counts">{{item.countsText}}</view>
+
+          <view wx:if="{{item.actionLabel}}" class="slot-actions">
+            <!-- 任务类型选择：页内展开（不用 showActionSheet —— 超过 6 项在真机底部会被切断，
+                 项目约定长列表走专用组件；这里只有 7 项且同在一张卡内，展开更少上下文切换） -->
+            <view wx:if="{{item.taskPick && pickKey === item.key}}" class="slot-picks">
+              <view
+                wx:for="{{taskTypes}}"
+                wx:for-item="tt"
+                wx:key="key"
+                class="slot-pick"
+                data-type="{{tt.key}}"
+                bindtap="onPickTaskType"
+                hover-class="hover-dim"
+              >{{tt.label}}</view>
+            </view>
+            <view
+              class="slot-btn"
+              data-key="{{item.key}}"
+              data-task="{{item.taskType}}"
+              bindtap="onRecordTask"
+              hover-class="hover-dim"
+            >
+              {{item.actionLabel}}
+            </view>
+          </view>
+        </block>
+      </view>
+
       <view class="card status-note">
         <view class="status-note-title">当前状态说明</view>
         <view class="status-note-body">{{detail.statusHint || '该状态暂无说明'}}</view>
-      </view>
-
-      <view class="card next-batch" bindtap="onNextBatch" hover-class="row-hover">
-        <view class="next-batch-title">受理 / 任务 / 成果 / Agent 助理</view>
-        <view class="next-batch-body">下一批开放：届时在这里受理委托、派发任务、查看成果提案</view>
       </view>
     </block>
   </view>
