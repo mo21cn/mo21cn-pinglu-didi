@@ -13,6 +13,8 @@ MySQL 8.0 验证三条并发正确性锚点：
    副作用恰好发生一次；
 4. **基线建表**（AC-25）：`create_all` 能在真实 MySQL 上建出全部基线表
    （外键两侧类型必须一致）—— SQLite 类型宽松，只有 MySQL 拦得住。
+5. **API 层时间列方言**（BASE-002 / R14）：MySQL 的 DATETIME 由驱动取回 `datetime`，
+   而响应模型声明 `str | None` —— 只有真实 MySQL 才能证明 API 层不因类型不符而降级。
 
 运行方式
 --------
@@ -337,3 +339,83 @@ def test_idempotency_concurrent_duplicate_side_effect_once(mysql):
     verify.close()
     assert int(count) == 1, f"副作用发生了 {count} 次（应为 1）；outcomes={outcomes}"
     assert outcomes.count("created") == 1, outcomes
+
+
+def test_assignment_api_timestamps_render_on_mysql(mysql):
+    """BASE-002 / R14：真实 MySQL 上，委托详情接口必须返回字符串时间。
+
+    修复前 `_row_to_assignment` 原样透传 `datetime`，而 `AssignmentOut` 声明
+    时间为 `str | None` → 响应校验失败（500）。SQLite 上时间列是 TEXT，永远
+    测不出来，所以这条断言必须跑在真实 MySQL 上才有意义。
+    """
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from app.core.config import get_settings
+    from app.main import app
+    from app.modules.auth.dependencies import get_current_user
+    from app.modules.auth.router import get_db
+
+    owner_id = 4242
+    db = mysql()
+    created = svc.create_assignment(db, owner_user_id=owner_id, title="R14 时间列方言")
+    submitted = svc.submit_assignment(
+        db,
+        assignment_id=created["assignment_id"],
+        actor_id=owner_id,
+        org_id=_seed_org_with_entrustment(db, owner_id),
+        expected_revision=created["revision"],
+    )
+    db.close()
+
+    def override_get_db():
+        session = mysql()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    settings = get_settings()
+    previous = settings.ENTRUST_ENABLED
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=owner_id)
+    settings.ENTRUST_ENABLED = True
+    try:
+        with TestClient(app) as client:
+            resp = client.get(f"/api/v1/entrust/assignments/{submitted['assignment_id']}")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            for key in (
+                "created_at",
+                "updated_at",
+                "submitted_at",
+                "claimed_at",
+                "cancelled_at",
+            ):
+                assert body[key] is None or isinstance(body[key], str), (
+                    f"{key} 未归一为文本：{type(body[key])} = {body[key]!r}"
+                )
+            assert isinstance(body["created_at"], str)
+            assert isinstance(body["submitted_at"], str)
+    finally:
+        app.dependency_overrides.clear()
+        settings.ENTRUST_ENABLED = previous
+
+
+def _seed_org_with_entrustment(db, owner_id: int) -> int:
+    """造一个 active 组织 + 该货主的 active 委托授权，返回 org_id。"""
+    org_result = db.execute(
+        text("INSERT INTO ent_organization (name, status, created_at) VALUES (:n, 'active', :c)"),
+        {"n": _unique("方言组织"), "c": utcnow_naive().strftime(_TS)},
+    )
+    org_id = int(org_result.lastrowid or 0)
+    db.execute(
+        text(
+            "INSERT INTO ent_entrustment (org_id, entrust_user_id, permissions, status, created_at) "
+            "VALUES (:o, :u, '[\"entrust:view\"]', 'active', :c)"
+        ),
+        {"o": org_id, "u": owner_id, "c": utcnow_naive().strftime(_TS)},
+    )
+    db.commit()
+    return org_id

@@ -594,3 +594,68 @@ def test_api_org_view_requires_membership(env):
     assert visible.status_code == 200
     assert visible.json()["total"] == 1
     assert visible.json()["items"][0]["assignment_id"] == a["assignment_id"]
+
+
+# ─────────────────────────── BASE-002 / R14：时间列的方言归一
+
+
+def _row(**overrides) -> dict:
+    """构造一行 `_row_to_assignment` 的入参（默认 SQLite 风格：时间为字符串）。"""
+    base = {
+        "id": 7,
+        "owner_user_id": 11,
+        "org_id": None,
+        "title": "方言归一",
+        "cargo_summary": None,
+        "quantity": None,
+        "quantity_unit": None,
+        "status": "draft",
+        "revision": 1,
+        "claimed_by": None,
+        "claimed_at": None,
+        "submitted_at": None,
+        "cancelled_at": None,
+        "created_at": "2026-09-13 03:04:05",
+        "updated_at": "2026-09-13 03:04:05",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_assignment_row_normalizes_datetime_timestamps():
+    """MySQL 取回的是 `datetime`，响应模型声明 `str | None` → 必须归一。
+
+    这是 R14 的守护点：修复前 `created_at` 原样透传 `datetime`，
+    在 SQLite 上（时间列是 TEXT）永远测不出来，只在 MySQL 上让响应校验失败。
+    本用例直接喂 `datetime`，因此在 SQLite 上也能复现，不依赖 MySQL 实例。
+    """
+    from datetime import UTC, datetime
+
+    from app.modules.entrust.schemas import AssignmentOut
+
+    moment = datetime(2026, 9, 13, 3, 4, 5, tzinfo=UTC).replace(tzinfo=None)
+    out = svc._row_to_assignment(
+        _row(
+            claimed_at=moment,
+            submitted_at=moment,
+            cancelled_at=moment,
+            created_at=moment,
+            updated_at=moment,
+        )
+    )
+    for key in ("claimed_at", "submitted_at", "cancelled_at", "created_at", "updated_at"):
+        assert isinstance(out[key], str), f"{key} 未归一：{type(out[key])}"
+    assert out["created_at"] == "2026-09-13 03:04:05"
+    # 归一之后响应模型才在两种库上都成立（不抛 ResponseValidationError）
+    AssignmentOut.model_validate(out)
+
+
+def test_assignment_row_keeps_string_timestamps_and_null():
+    """SQLite 风格（已是字符串）与 NULL 保持原语义 —— 未知就是未知，不编造。"""
+    from app.modules.entrust.schemas import AssignmentOut
+
+    out = svc._row_to_assignment(_row(created_at="2026-01-02 03:04:05", claimed_at=None))
+    assert out["created_at"] == "2026-01-02 03:04:05"
+    assert out["claimed_at"] is None
+    assert out["submitted_at"] is None
+    AssignmentOut.model_validate(out)
