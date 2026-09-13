@@ -5,6 +5,7 @@ R1 最小接口集（计划 §3.3「委托」组）中的受理部分：
 - POST   /api/v1/entrust/assignments                 货主创建草稿（幂等）
 - GET    /api/v1/entrust/assignments                 列表（货主视角 / 组织视角）
 - GET    /api/v1/entrust/assignments/{id}            详情（创建人或该组织成员）
+- GET    /api/v1/entrust/assignments/{id}/workbench  工作台七槽位摘要（UI-05，只读，ENT-021）
 - PATCH  /api/v1/entrust/assignments/{id}            货主编辑草稿（expected_revision）
 - POST   /api/v1/entrust/assignments/{id}/submit     货主提交（需生效授权，幂等）
 - POST   /api/v1/entrust/assignments/{id}/claim      经理认领（原子，幂等）
@@ -35,12 +36,14 @@ from app.core.idempotency import IdempotencyError, idempotent, require_idempoten
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.entrust import assignments as svc
+from app.modules.entrust import workbench as wb
 from app.modules.entrust.access import (
     PERM_VIEW,
     AccessDeniedError,
     list_my_orgs,
     resolve_context,
 )
+from app.modules.entrust.authz import assert_can_view_assignment, not_found
 from app.modules.entrust.schemas import (
     AssignmentCreate,
     AssignmentListOut,
@@ -49,6 +52,7 @@ from app.modules.entrust.schemas import (
     AssignmentUpdate,
     MyOrgListOut,
     MyOrgOut,
+    WorkbenchOut,
     assignment_out,
 )
 
@@ -250,6 +254,38 @@ def get_assignment(
     if not visible:
         raise HTTPException(status_code=404, detail="委托单不存在")
     return assignment_out(assignment)
+
+
+@router.get(
+    "/assignments/{assignment_id}/workbench",
+    response_model=WorkbenchOut,
+    summary="单委托工作台七槽位摘要（UI-05，只读；非参与方 404）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def get_assignment_workbench(
+    assignment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """单张委托的工作台投影 —— UI-05 的取数入口（ENT-021）。
+
+    七槽位、四个派生字段与空值四态的推导规则全部在 `workbench.build_workbench`，
+    本层只做三件事：**取对象 → 判可见性 → 投影成响应模型**。
+
+    可见性复用 `authz.assert_can_view_assignment`，与
+    `GET /assignments/{id}/artifacts`（单委托成果清单）**同一份判据**：货主本人，
+    或该委托所属组织的成员（且具备 `entrust:view`）。非参与方一律 **404**，
+    **不区分"不存在"与"无权查看"** —— 换一个组织身份的经理连 403 都不会拿到。
+
+    与 `GET /assignments/{id}/artifacts` 的分工：那个端点是成果的分页清单（详情），
+    本端点是七槽位的**摘要投影**。工作台只给摘要与精确版本引用，不把每槽的全部
+    记录一次性拉出来 —— 那会让首屏随数据量线性变重，且大部分内容用户并不会看。
+    """
+    assignment = svc.get_assignment(db, assignment_id)
+    if assignment is None:
+        raise not_found("委托单不存在")
+    assert_can_view_assignment(db, user_id=int(user.id), assignment=assignment)
+    return WorkbenchOut.model_validate(wb.build_workbench(db, assignment=assignment))
 
 
 @router.patch(

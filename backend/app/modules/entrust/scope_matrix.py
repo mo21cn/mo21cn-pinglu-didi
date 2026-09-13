@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（51 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（52 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -117,6 +117,15 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "entrust:view",
         owner_scope=True,
         note="货主本人或组织内 entrust:view；非参与方 404",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/workbench",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="工作台七槽位摘要（UI-05，ENT-021）；可见性与单委托成果清单同一判据（"
+        "authz.assert_can_view_assignment），非参与方 404",
     ),
     _r(
         "PATCH",
