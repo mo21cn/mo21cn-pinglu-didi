@@ -44,13 +44,20 @@ def get_access_context(
 
 
 def require_permission(
-    permission: str, *, owner_user_id: int | None = None
+    permission: str,
+    *,
+    org_id: int | None = None,
+    owner_user_id: int | None = None,
 ) -> Callable[..., AccessContext]:
     """生成一个依赖：要求当前用户具备指定权限，否则 403。
 
     Args:
         permission: 权限代码常量（见 `app.modules.entrust.access`）。
-        owner_user_id: 可选。给出时要求该货主存在生效授权。
+        org_id: 校验"在该组织内是否具备该权限"。**与 owner_user_id 必须且只能给一个**。
+        owner_user_id: 校验"是否由该货主的生效授权提供该权限"。
+
+    注意：作用域参数在装饰期通常拿不到（要等请求体），这种场景请在函数体内调用
+    `assert_can(...)`，而不是把路由参数塞进 `Depends`。
     """
 
     def _dependency(
@@ -62,6 +69,7 @@ def require_permission(
                 db,
                 user_id=int(user.id),
                 permission=permission,
+                org_id=org_id,
                 owner_user_id=owner_user_id,
             )
         except AccessDeniedError as exc:

@@ -26,7 +26,9 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.modules.entrust import assignments as svc  # noqa: E402
 from app.modules.entrust.access import (  # noqa: E402
+    PERM_ASSIGN_CLAIM,
     AccessDeniedError,
+    resolve_context,
     utcnow_naive,
 )
 
@@ -362,6 +364,38 @@ def test_claim_requires_membership_and_permission(session):
         svc.claim_assignment(session, assignment_id=a["assignment_id"], actor_id=20)
     with pytest.raises(AccessDeniedError):
         svc.claim_assignment(session, assignment_id=a["assignment_id"], actor_id=21)
+
+
+def test_claim_denied_when_manager_role_comes_from_another_org(session):
+    """**越权回归用例**（2026-09-13 复现并修复）。
+
+    用户在组织 A 是 manager、在组织 B 只是 member（只读）。
+    若判定"能否认领组织 B 的委托单"时用了**跨组织权限并集**，就会错误放行 ——
+    修复前正是如此（用 `_repro_cross_org.py` 实测 claimed_by 被写成该用户）。
+
+    注意与上一条的区别：上一条的两种失败分别缺"本组织成员资格"或"任何组织的权限"，
+    **都掩盖不了这个 bug**；本条才是并集语义真正会造成越权的那一种组合。
+    """
+    org_a = _org(session, name="组织A")
+    org_b = _org(session, name="组织B")
+    _member(session, org_a, user_id=30, role="manager")  # A：经理（含 claim 权限）
+    _member(session, org_b, user_id=30, role="member")  # B：只读
+    _entrust(session, org_b, owner_id=1)
+    a = _submitted(session, 1, org_b)
+
+    # 前置断言：并集里确实有 claim，但按组织看 B 里没有 —— 证明本用例真的在测"用错维度"
+    ctx = resolve_context(session, user_id=30)
+    assert PERM_ASSIGN_CLAIM in ctx.permissions
+    assert ctx.can(PERM_ASSIGN_CLAIM, org_id=org_a) is True
+    assert ctx.can(PERM_ASSIGN_CLAIM, org_id=org_b) is False
+
+    with pytest.raises(AccessDeniedError):
+        svc.claim_assignment(session, assignment_id=a["assignment_id"], actor_id=30)
+
+    still = svc.get_assignment(session, a["assignment_id"])
+    assert still is not None
+    assert still["status"] == svc.STATUS_SUBMITTED  # 状态没被改动
+    assert still["claimed_by"] is None
 
 
 def test_claim_requires_submitted_state(session):

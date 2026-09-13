@@ -318,7 +318,7 @@ def list_sessions(
             raise HTTPException(
                 status_code=400, detail="用户属于多个组织，请用 org_id 指定要查看的组织"
             )
-        if not ctx.can(PERM_VIEW):
+        if not ctx.can(PERM_VIEW, org_id=scope_org):
             raise HTTPException(status_code=403, detail="缺少委托查看权限")
         total, items = sess_svc.list_sessions(
             db,

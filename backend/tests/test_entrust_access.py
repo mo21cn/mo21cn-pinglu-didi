@@ -20,8 +20,10 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.modules.entrust.access import (  # noqa: E402
+    PERM_ASSIGN_CLAIM,
     PERM_MEMBER_MANAGE,
     PERM_QUOTE_PUBLISH,
+    PERM_TASK_DISPATCH,
     PERM_VIEW,
     AccessDeniedError,
     assert_can,
@@ -118,7 +120,8 @@ def test_user_without_org_has_no_permissions(session):
     ctx = resolve_context(session, user_id=1)
     assert ctx.permissions == frozenset()
     assert ctx.org_ids == frozenset()
-    assert ctx.can(PERM_VIEW) is False
+    assert ctx.org_permissions == {}
+    assert ctx.can(PERM_VIEW, org_id=1) is False
 
 
 def test_member_role_grants_permissions(session):
@@ -130,9 +133,9 @@ def test_member_role_grants_permissions(session):
     ctx10 = resolve_context(session, user_id=10)
     ctx11 = resolve_context(session, user_id=11)
 
-    assert ctx10.can(PERM_QUOTE_PUBLISH) is True
-    assert ctx11.can(PERM_VIEW) is True
-    assert ctx11.can(PERM_QUOTE_PUBLISH) is False
+    assert ctx10.can(PERM_QUOTE_PUBLISH, org_id=org) is True
+    assert ctx11.can(PERM_VIEW, org_id=org) is True
+    assert ctx11.can(PERM_QUOTE_PUBLISH, org_id=org) is False
 
 
 def test_admin_does_not_get_business_actions(session):
@@ -141,8 +144,8 @@ def test_admin_does_not_get_business_actions(session):
     _member(session, org, user_id=10, role="admin")
 
     ctx = resolve_context(session, user_id=10)
-    assert ctx.can(PERM_MEMBER_MANAGE) is True
-    assert ctx.can(PERM_QUOTE_PUBLISH) is False
+    assert ctx.can(PERM_MEMBER_MANAGE, org_id=org) is True
+    assert ctx.can(PERM_QUOTE_PUBLISH, org_id=org) is False
 
 
 def test_removed_member_loses_permissions(session):
@@ -242,8 +245,94 @@ def test_assert_can_raises_without_permission(session):
     with pytest.raises(AccessDeniedError):
         assert_can(session, user_id=10, permission=PERM_QUOTE_PUBLISH, owner_user_id=100)
 
-    # 无作用域时，组织角色自带的权限可以通过
-    assert_can(session, user_id=10, permission=PERM_VIEW)
+    # 按组织判定时，组织角色自带的权限可以通过
+    assert_can(session, user_id=10, permission=PERM_VIEW, org_id=org)
+
+
+# ─────────────────────────────────────────── 权限按组织细分（越权修复）
+
+# 背景：早期 `permissions` 是**跨组织并集**，且 `can()` 允许不带作用域。
+# 于是"在 A 组织是 manager、在 B 组织只是 member"的用户，判定"能否认领 B 的委托单"
+# 时用并集 → 通过。2026-09-13 用真实数据复现了这个越权（见
+# test_cross_org_claim_is_denied）。下面几条把"按组织细分"钉死。
+
+
+def test_can_requires_an_explicit_scope(session):
+    """`can()` 不带作用域必须报错 —— 无作用域判定会退化成跨组织并集。"""
+    org = _org(session)
+    _member(session, org, user_id=10, role="manager")
+    ctx = resolve_context(session, user_id=10)
+
+    with pytest.raises(ValueError, match="必须指定作用域"):
+        ctx.can(PERM_VIEW)
+
+
+def test_can_with_both_scopes_is_an_and(session):
+    """同时给 org_id 与 owner_user_id 时按 AND 判定（更严，不会因多给而放行）。"""
+    org = _org(session)
+    _member(session, org, user_id=10, role="member")
+    _entrust(session, org, owner_id=100, permissions='["entrust:quote:publish"]')
+
+    ctx = resolve_context(session, user_id=10)
+    # 组织内有该权限 + 该货主授权提供该权限 → 通过
+    assert ctx.can(PERM_QUOTE_PUBLISH, org_id=org, owner_user_id=100) is True
+    # 换一个没授权过的货主 → 不通过
+    assert ctx.can(PERM_QUOTE_PUBLISH, org_id=org, owner_user_id=999) is False
+
+
+def test_permissions_are_scoped_to_each_org(session):
+    """同一用户在不同组织的权限互不串台 —— 这是越权修复的核心断言。"""
+    org_a = _org(session, "组织A")
+    org_b = _org(session, "组织B")
+    _member(session, org_a, user_id=10, role="manager")  # A：经理
+    _member(session, org_b, user_id=10, role="member")  # B：普通成员（只读）
+
+    ctx = resolve_context(session, user_id=10)
+    assert ctx.org_ids == frozenset({org_a, org_b})
+
+    # A 组织：经理应有尽有
+    assert ctx.can(PERM_ASSIGN_CLAIM, org_id=org_a) is True
+    assert ctx.can(PERM_TASK_DISPATCH, org_id=org_a) is True
+    # B 组织：只有只读 —— 修复前这里会被 A 的经理权限"顶"成 True
+    assert ctx.can(PERM_VIEW, org_id=org_b) is True
+    assert ctx.can(PERM_ASSIGN_CLAIM, org_id=org_b) is False
+    assert ctx.can(PERM_TASK_DISPATCH, org_id=org_b) is False
+    assert ctx.permissions_in_org(org_b) == frozenset({PERM_VIEW})
+
+    # 并集字段保留（诊断/兼容），但已**不是**任何授权判定的依据
+    assert PERM_ASSIGN_CLAIM in ctx.permissions
+
+
+def test_delegation_only_counts_in_its_own_org(session):
+    """授权是"授予某个组织"的：对 A 的授权不能在 B 生效。"""
+    org_a = _org(session, "组织A")
+    org_b = _org(session, "组织B")
+    _member(session, org_a, user_id=10, role="member")
+    _member(session, org_b, user_id=10, role="member")
+    _entrust(session, org_a, owner_id=100, permissions='["entrust:quote:publish"]')
+
+    ctx = resolve_context(session, user_id=10)
+    assert ctx.can(PERM_QUOTE_PUBLISH, org_id=org_a) is True
+    assert ctx.can(PERM_QUOTE_PUBLISH, org_id=org_b) is False
+    # 按货主维度仍是全局的：授权归货主所有，与它落在哪个组织无关
+    assert ctx.can(PERM_QUOTE_PUBLISH, owner_user_id=100) is True
+    # Delegation 现在带 org_id，可回答"这条授权是给哪个组织的"
+    assert [d.org_id for d in ctx.delegations] == [org_a]
+
+
+def test_org_permissions_are_exposed_for_each_org(session):
+    """`permissions_in_org` 按组织给出权限（组织选择器就靠它显示"我能做什么"）。"""
+    org_a = _org(session, "组织A")
+    org_b = _org(session, "组织B")
+    _member(session, org_a, user_id=10, role="owner")
+    _member(session, org_b, user_id=10, role="admin")
+
+    ctx = resolve_context(session, user_id=10)
+    assert PERM_QUOTE_PUBLISH in ctx.permissions_in_org(org_a)
+    assert PERM_QUOTE_PUBLISH not in ctx.permissions_in_org(org_b)
+    assert PERM_MEMBER_MANAGE in ctx.permissions_in_org(org_b)
+    # 查一个与己无关的组织 → 空集（不报错、不泄漏）
+    assert ctx.permissions_in_org(99999) == frozenset()
 
 
 # ─────────────────────────────────────────── AC-01 旧流程回归

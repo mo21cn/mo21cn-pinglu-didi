@@ -250,7 +250,11 @@ def _visible_task(session: Session, *, task_id: int, user_id: int) -> dict[str, 
     if task["owner_user_id"] == user_id:
         return task
     context = resolve_context(session, user_id=user_id)
-    if task["org_id"] is not None and task["org_id"] in context.org_ids and context.can(PERM_VIEW):
+    if (
+        task["org_id"] is not None
+        and task["org_id"] in context.org_ids
+        and context.can(PERM_VIEW, org_id=task["org_id"])
+    ):
         return task
     raise TaskNotFoundError(f"任务 {task_id} 不存在")
 
@@ -953,7 +957,9 @@ def list_visible_tasks(
     visible = int(assignment["owner_user_id"]) == user_id
     if not visible and assignment["org_id"] is not None:
         context = resolve_context(session, user_id=user_id)
-        visible = int(assignment["org_id"]) in context.org_ids and context.can(PERM_VIEW)
+        visible = int(assignment["org_id"]) in context.org_ids and context.can(
+            PERM_VIEW, org_id=int(assignment["org_id"])
+        )
     if not visible:
         raise TaskNotFoundError(f"委托 {assignment_id} 不存在")
 

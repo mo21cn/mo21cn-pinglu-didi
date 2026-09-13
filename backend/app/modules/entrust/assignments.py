@@ -404,7 +404,9 @@ def claim_assignment(
         raise AssignmentStateError(f"委托单 {assignment_id} 未选定服务主体，不能认领")
 
     ctx: AccessContext = resolve_context(session, user_id=actor_id, now=now)
-    if org_id not in ctx.org_ids or not ctx.can(PERM_ASSIGN_CLAIM):
+    # 权限必须按**该委托所属组织**判定。曾用 ctx.can(PERM_ASSIGN_CLAIM)（跨组织并集），
+    # 导致"在 A 组织是经理、在 B 组织只是普通成员"的用户能认领 B 组织的委托单 —— 已复现并修复。
+    if org_id not in ctx.org_ids or not ctx.can(PERM_ASSIGN_CLAIM, org_id=org_id):
         raise AccessDeniedError(f"用户 {actor_id} 不是组织 {org_id} 的成员或缺少认领权限")
 
     current = now or utcnow_naive()
