@@ -91,7 +91,7 @@ def assert_can_view_entrustment(
         return _ctx(session, user_id)
     context = _ctx(session, user_id)
     assert_org_member(context, org_id=entrustment["org_id"], detail=detail)
-    if not context.can(PERM_VIEW):
+    if not context.can(PERM_VIEW, org_id=entrustment["org_id"]):
         raise not_found(detail)
     return context
 
@@ -126,7 +126,7 @@ def assert_can_view_assignment(
         return _ctx(session, user_id)
     context = _ctx(session, user_id)
     assert_org_member(context, org_id=assignment["org_id"], detail=detail)
-    if not context.can(PERM_VIEW):
+    if not context.can(PERM_VIEW, org_id=assignment["org_id"]):
         raise not_found(detail)
     return context
 
@@ -150,7 +150,7 @@ def assert_can_view_scoped_object(
         return _ctx(session, user_id)
     context = _ctx(session, user_id)
     assert_org_member(context, org_id=org_id, detail=detail)
-    if not context.can(PERM_VIEW):
+    if not context.can(PERM_VIEW, org_id=org_id):
         raise not_found(detail)
     return context
 

@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -144,6 +145,9 @@ class Delegation:
 
     entrustment_id: int
     owner_user_id: int
+    #: 授权归属的组织（`ent_entrustment.org_id`）。按组织判定权限时必须用到 ——
+    #: 缺了它就无法回答"这条授权是给**哪个组织**的"。
+    org_id: int
     permissions: frozenset[str] = field(default_factory=frozenset)
 
 
@@ -151,29 +155,91 @@ class Delegation:
 class AccessContext:
     """某用户的委托支线访问上下文。
 
-    `permissions` 是**叠加层**带来的权限；它不替代、也不修改 `current_role`。
+    ## 权限的两个维度（**这是本模块最容易搞错的地方**）
+
+    权限必须同时回答"**在哪个组织**"与"**对哪个货主**"：
+
+    * `org_permissions[org_id]` —— 按组织细分的权限（该组织内的成员角色权限，
+      加上**授予该组织**的生效授权权限）；
+    * `delegations` —— 按货主细分的授权（**某货主**把权限授予了某组织）。
+
+    因此 `can()` **必须**指定其中一个维度：`org_id=` 或 `owner_user_id=`。
+
+    ## 为什么不允许"不带作用域"的判定
+
+    早期版本把 `permissions` 做成**跨组织并集**，且 `can(perm)` 允许不传作用域。
+    后果是真实的越权（2026-09-13 复现）：
+
+        用户 U 在组织 A 是 manager（有 `entrust:assignment:claim`），
+        在组织 B 只是 member（只有 `entrust:view`）。
+        判定"U 能否认领组织 B 的委托单"时用的是**并集** → 通过 → U 认领成功。
+
+    只要还有人能写出"不指定组织"的判定，这类漏洞就会随每个新端点复发。
+    所以这里把**不带作用域的判定变成错误**（`ValueError`），把约束交给运行时，
+    而不是交给"记得传参数"。
+
+    ## `permissions` 字段
+
+    跨组织并集，**仅供诊断与"是否有任何组织身份"判断**，
+    **不得**用于任何单个对象的授权判定（`can()` 已不接受无作用域调用）。
     """
 
     user_id: int
     org_ids: frozenset[int] = field(default_factory=frozenset)
     permissions: frozenset[str] = field(default_factory=frozenset)
+    #: 按组织细分的权限：`{org_id: frozenset[权限代码]}`。
+    org_permissions: Mapping[int, frozenset[str]] = field(default_factory=dict)
     delegations: tuple[Delegation, ...] = ()
     evaluated_at: datetime = field(default_factory=utcnow_naive)
 
-    def can(self, permission: str, *, owner_user_id: int | None = None) -> bool:
-        """是否具备某项权限。
+    def can(
+        self,
+        permission: str,
+        *,
+        org_id: int | None = None,
+        owner_user_id: int | None = None,
+    ) -> bool:
+        """是否具备某项权限。**至少**指定 `org_id` / `owner_user_id` 之一。
+
+        两个都给出时按 **AND** 判定（更严）：既要在该组织内有该权限，
+        又要有该货主的生效授权提供它。调用方能在手上拿到两个维度时就该给两个 ——
+        `assert_can_write_entrustment` 场景下委托授权的 `org_id` 与 `entrust_user_id`
+        都是现成的。
 
         Args:
             permission: 权限代码。
-            owner_user_id: 数据归属的货主。给出时，权限必须由**该货主**的
-                生效授权提供；不给则只检查组织成员角色带来的权限。
+            org_id: 在**该组织内**是否具备该权限（成员角色权限 ∪ 授予该组织的授权）。
+            owner_user_id: 是否有**该货主**的生效授权提供该权限。
+
+        Raises:
+            ValueError: 两个作用域都未给出。不指定作用域会退化成跨组织并集判定，
+                已导致过真实越权（见类文档），所以这里**报错而不是放行**。
         """
-        if owner_user_id is None:
-            return permission in self.permissions
+        if org_id is None and owner_user_id is None:
+            raise ValueError(
+                "ctx.can() 必须指定作用域：org_id（组织内权限）或 owner_user_id（该货主的授权）。"
+                "不指定作用域会退化成跨组织并集判定，已导致过真实越权（见类文档）。"
+            )
+        if org_id is not None and permission not in self.org_permissions.get(
+            int(org_id), frozenset()
+        ):
+            return False
+        return not (owner_user_id is not None and not self._delegated_by(owner_user_id, permission))
+
+    def _delegated_by(self, owner_user_id: int, permission: str) -> bool:
+        """是否有该货主的生效授权提供该权限（与组织无关，授权归货主所有）。"""
         return any(
             d.owner_user_id == owner_user_id and permission in d.permissions
             for d in self.delegations
         )
+
+    def can_in_org(self, org_id: int, permission: str) -> bool:
+        """`can(permission, org_id=...)` 的可读别名（调用点意图更直白）。"""
+        return self.can(permission, org_id=org_id)
+
+    def permissions_in_org(self, org_id: int) -> frozenset[str]:
+        """某组织内的全部权限（供组织选择器展示"我在这个组织能做什么"）。"""
+        return self.org_permissions.get(int(org_id), frozenset())
 
 
 def resolve_context(
@@ -198,10 +264,14 @@ def resolve_context(
 
     org_ids: set[int] = set()
     permissions: set[str] = set()
+    # 按组织细分：这是授权判定的**主维度**；`permissions`（并集）仅供诊断。
+    org_permissions: dict[int, set[str]] = {}
     for row in rows:
         org_id = int(row["org_id"])
         org_ids.add(org_id)
-        permissions |= ORG_ROLE_PERMISSIONS.get(str(row["member_role"]), frozenset())
+        role_perms = ORG_ROLE_PERMISSIONS.get(str(row["member_role"]), frozenset())
+        permissions |= role_perms
+        org_permissions.setdefault(org_id, set()).update(role_perms)
 
     delegations: tuple[Delegation, ...] = ()
     if org_ids:
@@ -209,11 +279,15 @@ def resolve_context(
 
     for delegation in delegations:
         permissions |= delegation.permissions
+        # 授权是授予**某个组织**的，只加进那个组织的权限集合 —— 这正是修复越权的关键：
+        # 组织 A 的经理角色不能让他在组织 B 获得任何权限。
+        org_permissions.setdefault(delegation.org_id, set()).update(delegation.permissions)
 
     return AccessContext(
         user_id=user_id,
         org_ids=frozenset(org_ids),
         permissions=frozenset(permissions),
+        org_permissions={oid: frozenset(p) for oid, p in org_permissions.items()},
         delegations=delegations,
         evaluated_at=current,
     )
@@ -232,7 +306,8 @@ def _active_delegations(
 
     rows = session.execute(
         text(
-            "SELECT id, entrust_user_id, permissions, valid_from, valid_until "
+            # org_id 必须取出来：授权是给**某个组织**的，按组织判定权限时要靠它归位。
+            "SELECT id, org_id, entrust_user_id, permissions, valid_from, valid_until "
             "FROM ent_entrustment "
             f"WHERE status = :status AND org_id IN ({placeholders})"
         ),
@@ -252,6 +327,7 @@ def _active_delegations(
             Delegation(
                 entrustment_id=int(row["id"]),
                 owner_user_id=int(row["entrust_user_id"]),
+                org_id=int(row["org_id"]),
                 permissions=_load_permissions(row["permissions"]),
             )
         )
@@ -263,17 +339,27 @@ def assert_can(
     *,
     user_id: int,
     permission: str,
+    org_id: int | None = None,
     owner_user_id: int | None = None,
     now: datetime | None = None,
 ) -> AccessContext:
-    """校验权限，不足则抛 `AccessDenied`。
+    """校验权限，不足则抛 `AccessDeniedError`。**必须**指定 `org_id` 或 `owner_user_id`。
 
     Args:
-        owner_user_id: 数据归属的货主。给出时要求**该货主**存在生效授权 —— 这是防止
+        org_id: 校验"在该组织内是否具备该权限"（成员角色权限 ∪ 授予该组织的授权）。
+        owner_user_id: 校验"是否由**该货主**的生效授权提供该权限" —— 这是防止
             "拿到 A 的授权去操作 B 的数据"的关键检查。
+
+    Raises:
+        ValueError: 未指定作用域（见 `AccessContext.can` 的说明：无作用域的判定
+            会退化成跨组织并集，已导致过真实越权）。
     """
     context = resolve_context(session, user_id=user_id, now=now)
-    if not context.can(permission, owner_user_id=owner_user_id):
-        scope = f"（作用于货主 {owner_user_id}）" if owner_user_id is not None else ""
+    if not context.can(permission, org_id=org_id, owner_user_id=owner_user_id):
+        scope = ""
+        if org_id is not None:
+            scope += f"（作用于组织 {org_id}）"
+        if owner_user_id is not None:
+            scope += f"（作用于货主 {owner_user_id}）"
         raise AccessDeniedError(f"用户 {user_id} 缺少权限 {permission}{scope}")
     return context

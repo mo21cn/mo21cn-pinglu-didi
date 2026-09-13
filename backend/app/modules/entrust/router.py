@@ -190,7 +190,7 @@ def list_assignments(
 
     if view == "org" and scope_org_id is not None:
         ctx = resolve_context(db, user_id=user_id)
-        if not ctx.can(PERM_VIEW):
+        if not ctx.can(PERM_VIEW, org_id=scope_org_id):
             raise HTTPException(status_code=403, detail="缺少委托查看权限")
 
     total, items = svc.list_assignments(
@@ -230,7 +230,9 @@ def get_assignment(
     visible = assignment["owner_user_id"] == int(user.id)
     if not visible and assignment["org_id"] is not None:
         ctx = resolve_context(db, user_id=int(user.id))
-        visible = assignment["org_id"] in ctx.org_ids and ctx.can(PERM_VIEW)
+        visible = assignment["org_id"] in ctx.org_ids and ctx.can(
+            PERM_VIEW, org_id=assignment["org_id"]
+        )
     if not visible:
         raise HTTPException(status_code=404, detail="委托单不存在")
     return assignment_out(assignment)
