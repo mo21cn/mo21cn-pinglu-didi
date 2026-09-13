@@ -237,6 +237,12 @@ jobs:
         # miniapp/utils/entrust.js 的纯函数，由本脚本驱动（含跨端取值域交叉断言）。
         run: node scripts/verify_entrust_ui.js
 
+      - name: 路由注册表校验（页面栈预算 / 深链参数契约）
+        # verify_miniapp 已覆盖「可达性」与「tabBar 该用 switchTab」；本步补的是
+        # 注册表 ⇄ app.json 双向一致、声明链深 ≤ STACK_BUDGET、实际导航边已声明。
+        # 新增页面不在 miniapp/utils/routes.js 登记 → 本步红。
+        run: node scripts/verify_routes.js
+
   # ─────────────────────────────────────────────────────────────
   # 前端端到端：真起后端 → 铺演示数据 → 真载荷驱动页面逻辑
   #   verify_login_flow     登录链路顺序 / 鉴权头 / token 角色
