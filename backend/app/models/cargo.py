@@ -14,7 +14,7 @@ from datetime import date
 from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.user import Base
+from app.models.user import USER_ID, Base
 
 
 class Cargo(Base):
@@ -24,7 +24,7 @@ class Cargo(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     shipper_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"), index=True, comment="货主用户 ID"
+        USER_ID, ForeignKey("users.id"), index=True, comment="货主用户 ID"
     )
     cargo_name: Mapped[str] = mapped_column(String(64), comment="货物名称")
     # 货类：bulk 散货 / general 件杂货 / container 集装箱 / tanker 液货危险品 / other

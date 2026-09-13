@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.user import Base
+from app.models.user import USER_ID, Base
 
 
 class Ship(Base):
@@ -24,7 +24,7 @@ class Ship(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     owner_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), index=True, comment="船东用户 ID"
+        USER_ID, ForeignKey("users.id"), index=True, comment="船东用户 ID"
     )
     ship_name: Mapped[str] = mapped_column(String(64), comment="船名")
     # 船型：bulk 散货船 / general 件杂货船 / container 集装箱船 / tanker 液货船

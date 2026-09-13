@@ -31,7 +31,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
-from app.models.user import Base
+from app.models.user import USER_ID, Base
 
 
 class Berth(Base):
@@ -89,7 +89,7 @@ class BerthAppt(Base):
         Integer, ForeignKey("ships.id"), index=True, comment="预约船舶 ID"
     )
     applier_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), index=True, comment="申请人（船东）用户 ID"
+        USER_ID, ForeignKey("users.id"), index=True, comment="申请人（船东）用户 ID"
     )
     plan_start: Mapped[datetime] = mapped_column(DateTime, comment="计划靠泊时间")
     plan_end: Mapped[datetime] = mapped_column(DateTime, comment="计划离泊时间")

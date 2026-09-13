@@ -22,7 +22,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.user import Base
+from app.models.user import USER_ID, Base
 
 
 class Payment(Base):
@@ -36,10 +36,10 @@ class Payment(Base):
         ForeignKey("orders.id"), unique=True, index=True, comment="订单 ID"
     )
     payer_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"), index=True, comment="付款方（货主）用户 ID"
+        USER_ID, ForeignKey("users.id"), index=True, comment="付款方（货主）用户 ID"
     )
     payee_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"), index=True, comment="收款方（船东）用户 ID"
+        USER_ID, ForeignKey("users.id"), index=True, comment="收款方（船东）用户 ID"
     )
     amount: Mapped[float] = mapped_column(
         Numeric(12, 2), comment="支付金额（元），下单时锁定订单运费"

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 # 运行时导入：SQLAlchemy 需要按注解解析关联目标类（cargo/ship 不反向依赖 order，无环）
 from app.models.cargo import Cargo
 from app.models.ship import Ship
-from app.models.user import Base
+from app.models.user import USER_ID, Base
 
 
 class Order(Base):
@@ -34,9 +34,11 @@ class Order(Base):
     cargo_id: Mapped[int] = mapped_column(ForeignKey("cargo.id"), index=True, comment="货源 ID")
     ship_id: Mapped[int] = mapped_column(ForeignKey("ships.id"), index=True, comment="承运船舶 ID")
     shipper_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"), index=True, comment="货主用户 ID"
+        USER_ID, ForeignKey("users.id"), index=True, comment="货主用户 ID"
     )
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, comment="船东用户 ID")
+    owner_id: Mapped[int] = mapped_column(
+        USER_ID, ForeignKey("users.id"), index=True, comment="船东用户 ID"
+    )
     # 成交运费（元）；创建时取入参或货源出价
     freight_price: Mapped[float | None] = mapped_column(
         Numeric(12, 2), nullable=True, comment="成交运费（元），空为面议"
