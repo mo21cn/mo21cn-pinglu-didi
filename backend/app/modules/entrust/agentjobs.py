@@ -46,7 +46,9 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, text
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.modules.agent.llm import LLMError
+from app.modules.entrust import attachments as attachments_svc
 from app.modules.entrust.agents.runner import (
     AgentRunOutcome,
     build_source_catalog,
@@ -697,7 +699,33 @@ def collect_context(session: Session, job: dict[str, Any]) -> dict[str, Any]:
                 {"aid": assignment_id},
             ).mappings()
         ]
+
+    _attach_text_excerpts(session, context["attachments"])
     return context
+
+
+def _attach_text_excerpts(session: Session, attachments: list[dict[str, Any]]) -> None:
+    """给附件补上**已提取的文本**（ENT-013），供 Agent 直接读文件内容。
+
+    只有 `extract_status == 'done'` 的附件才会有文本 —— 没提取过的附件对 Agent
+    而言只是"一个文件名"，这既让来源目录不虚（`attachment_text` 只在真有文本时
+    才出现在目录里），也避免把一堆空字符串塞进提示词。
+
+    截断用 `AGENT_ATTACHMENT_TEXT_CHARS`（比落库上限更严）：提示词还要留给任务、
+    成果与来源目录，不能让一段报价文本独占。被截断的事实随
+    `text_truncated` 一起进上下文，让模型知道"这不是全文"。
+    """
+    if not attachments:
+        return
+    limit = int(get_settings().AGENT_ATTACHMENT_TEXT_CHARS)
+    texts = attachments_svc.get_texts(
+        session, [int(item["attachment_id"]) for item in attachments], limit_chars=limit
+    )
+    for item in attachments:
+        row = texts.get(int(item["attachment_id"]))
+        item["text_excerpt"] = row["content"] if row is not None else None
+        item["text_truncated"] = bool(row["truncated"]) if row is not None else False
+        item["text_source"] = row["source"] if row is not None else None
 
 
 def scope_for_job(session: Session, job: dict[str, Any], *, operator_user_id: int) -> AgentScope:

@@ -67,7 +67,7 @@ _SCOPE_UPLOAD = "entrust:attachment:upload"
 _SCOPE_BIND = "entrust:artifact:attach"
 
 
-def _map_attachment_error(exc: Exception) -> HTTPException | None:
+def map_attachment_error(exc: Exception) -> HTTPException | None:
     """附件服务异常 → HTTP 语义；无法识别返回 None（不吞真实 bug）。"""
     mapped = map_access_denied(exc)
     if mapped is not None:
@@ -103,7 +103,12 @@ def _authorize_download(db: Session, *, attachment: dict[str, Any], user_id: int
     )
 
 
-def _load_visible_attachment(db: Session, *, attachment_id: int, user_id: int) -> dict[str, Any]:
+def load_visible_attachment(db: Session, *, attachment_id: int, user_id: int) -> dict[str, Any]:
+    """取附件并做可见性判定（非参与方 404）。
+
+    **公开**给同支线其它附件端点复用（提取文本、人工转录）——提取与转录的
+    可见性口径必须与元数据/下载完全一致，各写一遍迟早会漂。
+    """
     attachment = svc.get_attachment(db, attachment_id)
     if attachment is None:
         raise not_found("附件不存在")
@@ -206,7 +211,7 @@ def upload_attachment(
                 source_event_at=source_event_at,
             )
         ).model_dump(mode="json"),
-        map_domain_error=_map_attachment_error,
+        map_domain_error=map_attachment_error,
     )
 
 
@@ -221,7 +226,7 @@ def get_attachment(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    attachment = _load_visible_attachment(db, attachment_id=attachment_id, user_id=int(user.id))
+    attachment = load_visible_attachment(db, attachment_id=attachment_id, user_id=int(user.id))
     return attachment_out(attachment)
 
 
@@ -235,11 +240,11 @@ def download_attachment(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    attachment = _load_visible_attachment(db, attachment_id=attachment_id, user_id=int(user.id))
+    attachment = load_visible_attachment(db, attachment_id=attachment_id, user_id=int(user.id))
     try:
         path = svc.resolve_path(attachment)
     except svc.AttachmentError as exc:
-        raise _map_attachment_error(exc) or exc from exc
+        raise map_attachment_error(exc) or exc from exc
     return FileResponse(
         path=path,
         media_type=str(attachment["content_type"]),
@@ -331,7 +336,7 @@ def bind_attachment(
         business=lambda: svc.bind_to_artifact(
             db, artifact_id=artifact_id, attachment_id=attachment_id, actor_id=int(user.id)
         ),
-        map_domain_error=_map_attachment_error,
+        map_domain_error=map_attachment_error,
     )
 
 
@@ -361,4 +366,4 @@ def _artifact_and_entrustment(
     return artifact, entrustment
 
 
-__all__ = ["router"]
+__all__ = ["load_visible_attachment", "map_attachment_error", "router"]

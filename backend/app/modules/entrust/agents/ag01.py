@@ -21,7 +21,9 @@ from typing import Any
 CODE = "agent_01"
 LABEL = "委托助理"
 
-source_kinds = frozenset({"assignment", "task", "artifact", "attachment", "entrustment"})
+source_kinds = frozenset(
+    {"assignment", "task", "artifact", "attachment", "entrustment", "attachment_text"}
+)
 
 SYSTEM_PROMPT = """你是内河货运委托的受理助理。你的输出必须是 JSON 对象，结构如下：
 
@@ -180,6 +182,20 @@ def build_user_prompt(context: dict[str, Any], job_input: dict[str, Any]) -> str
             lines.append(f"- #{task.get('task_id')} {task.get('title')}（{task.get('status')}）")
     else:
         lines.append("（无）")
+
+    attachments = context.get("attachments") or []
+    if attachments:
+        # 只列**存在与提取状态**，不把正文塞进来：AG-01 的职责是"指出缺什么"，
+        # 把附件正文给它，等于邀请它从材料里"读出"货量 —— 而受理字段必须由
+        # 货主自己在表单里确认（本专业不产出成果，也不猜数字）。
+        lines += ["", "【附件】"]
+        for item in attachments:
+            state = item.get("extract_status")
+            lines.append(
+                f"- #{item.get('attachment_id')} {item.get('filename')}"
+                f"（{'已提取文本' if state == 'done' else f'未提取：{state}'}）"
+            )
+
     lines += ["", "【附加说明】", str(job_input.get("note") or "（无）")]
     return "\n".join(lines)
 

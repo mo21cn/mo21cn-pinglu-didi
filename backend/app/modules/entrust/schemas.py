@@ -244,6 +244,76 @@ def attachment_out(data: dict[str, Any]) -> AttachmentOut:
     return AttachmentOut.model_validate(data)
 
 
+# ── 文档提取（S1 第 6 条 / ENT-013） ────────────────────────────────────────
+
+
+class ExtractionResultOut(BaseModel):
+    """一次提取的结论。
+
+    `detail` 与 `notes` 都是**给人看的**：结论必须可解释 ——
+    "为什么这文件没有被提取" 与 "提取出来的文字能不能直接引用" 都要能回答。
+    `text_preview` 只返回开头一段，便于页面确认提取成功；完整文本走 `GET /text`。
+    """
+
+    attachment_id: int
+    extract_status: str
+    extract_error: str | None
+    extracted_chars: int | None
+    media_kind: str
+    truncated: bool
+    detail: str
+    notes: list[str]
+    text_preview: str | None
+
+
+class AttachmentTextOut(BaseModel):
+    """提取文本读取结果。
+
+    没有文本时**不返回 404**：`extract_status` 本身就是有用信息
+    （`needs_transcription` / `unsupported` / `failed` 各对应不同的下一步动作），
+    返回 404 会把这个区别抹掉，前端只能显示"没有"。
+    """
+
+    attachment_id: int
+    extract_status: str
+    extract_error: str | None
+    has_text: bool
+    text: str | None
+    char_count: int | None
+    truncated: bool
+    source: str | None
+    transcribed_by: int | None
+    updated_at: str | None
+
+
+class TranscriptionIn(BaseModel):
+    """人工转录提交（图片 / 扫描件 PDF / 老式 xls 的降级补录）。"""
+
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+def extraction_result_out(data: dict[str, Any]) -> ExtractionResultOut:
+    return ExtractionResultOut.model_validate(data)
+
+
+def attachment_text_out(
+    attachment: dict[str, Any], text_row: dict[str, Any] | None
+) -> AttachmentTextOut:
+    """附件状态 + 文本行合成一处（两者必须一起看才不矛盾）。"""
+    return AttachmentTextOut(
+        attachment_id=int(attachment["attachment_id"]),
+        extract_status=str(attachment["extract_status"]),
+        extract_error=attachment["extract_error"],
+        has_text=text_row is not None,
+        text=text_row["content"] if text_row is not None else None,
+        char_count=text_row["char_count"] if text_row is not None else None,
+        truncated=bool(text_row["truncated"]) if text_row is not None else False,
+        source=text_row["source"] if text_row is not None else None,
+        transcribed_by=text_row["created_by"] if text_row is not None else None,
+        updated_at=text_row["updated_at"] if text_row is not None else None,
+    )
+
+
 # ── 会话与 Agent 作业（ENT-011） ─────────────────────────────────────────────
 # 会话与作业是**经理侧**能力：货主看不到内部比价、也看不到 Agent 的建议动作，
 # 所以这两组模型只在管理端点使用，不参与客户投影。

@@ -551,3 +551,117 @@ def _seed_org_with_entrustment(db, owner_id: int) -> int:
     )
     db.commit()
     return org_id
+
+
+def test_extraction_api_timestamps_render_on_mysql(mysql):
+    """ENT-013 的 `ent_attachment_text` 与提取接口同样受时间列方言影响。
+
+    提取文本行的 `created_at` / `updated_at` 与附件元数据一样：SQLite 上是 TEXT、
+    MySQL 上由驱动取回 `datetime`，而响应模型声明 `str | None`。**只有真实 MySQL
+    才能证明归一函数确实生效** —— 漏归一时 Pydantic 不会把 datetime 强转成字符串，
+    而是直接抛校验错误（接口 500），SQLite 上永远看不到。
+    """
+    import tempfile
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from app.core.config import get_settings
+    from app.main import app
+    from app.modules.auth.dependencies import get_current_user
+    from app.modules.auth.router import get_db
+    from app.modules.entrust import attachments as att_svc
+
+    # 存储目录先指向临时目录：落盘与读取必须用同一处，否则下载/读取会因找不到文件而 500
+    settings = get_settings()
+    previous_enabled = settings.ENTRUST_ENABLED
+    previous_dir = settings.ATTACHMENT_STORAGE_DIR
+    temp_dir = tempfile.mkdtemp(prefix="att-dialect-")
+    settings.ATTACHMENT_STORAGE_DIR = temp_dir
+    settings.ENTRUST_ENABLED = True
+
+    manager_id, owner_id = 5251, 5252
+    db = mysql()
+    try:
+        org_id = _seed_org_with_entrustment(db, owner_id)
+        now_ts = utcnow_naive().strftime(_TS)
+        db.execute(
+            text(
+                "INSERT INTO ent_org_member (org_id, user_id, member_role, status, created_at) "
+                "VALUES (:o, :u, 'manager', 'active', :c)"
+            ),
+            {"o": org_id, "u": manager_id, "c": now_ts},
+        )
+        db.execute(
+            text(
+                "UPDATE ent_entrustment SET permissions = :p "
+                "WHERE entrust_user_id = :u AND org_id = :o"
+            ),
+            {"p": '["entrust:view","entrust:quote:create"]', "u": owner_id, "o": org_id},
+        )
+        db.commit()
+        entrustment_id = int(
+            db.execute(
+                text(
+                    "SELECT id FROM ent_entrustment WHERE entrust_user_id = :u AND org_id = :o "
+                    "ORDER BY id DESC LIMIT 1"
+                ),
+                {"u": owner_id, "o": org_id},
+            ).scalar_one()
+        )
+        attachment = att_svc.store_bytes(
+            db,
+            uploader_user_id=manager_id,
+            owner_user_id=owner_id,
+            org_id=org_id,
+            filename="报价.txt",
+            content_type="text/plain",
+            data="承运人：长江物流有限公司\n单价：38.00 元/吨".encode(),
+            entrustment_id=entrustment_id,
+        )
+    finally:
+        db.close()
+
+    attachment_id = int(attachment["attachment_id"])
+
+    def override_get_db():
+        session = mysql()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=manager_id)
+    headers = {"Authorization": "Bearer dialect-test"}
+    try:
+        with TestClient(app) as client:
+            extracted = client.post(
+                f"/api/v1/entrust/attachments/{attachment_id}/extract",
+                headers={**headers, "Idempotency-Key": _unique("ext")},
+            )
+            assert extracted.status_code == 200, extracted.text
+            assert extracted.json()["extract_status"] == "done"
+            assert isinstance(extracted.json()["extracted_chars"], int)
+
+            fetched = client.get(
+                f"/api/v1/entrust/attachments/{attachment_id}/text", headers=headers
+            )
+            assert fetched.status_code == 200, fetched.text
+            payload = fetched.json()
+            assert payload["has_text"] is True
+            assert payload["source"] == "extractor"
+            assert "长江物流" in payload["text"]
+            # 这两列在 MySQL 上是 DATETIME，未归一即会 500 或被强转 —— 必须仍是文本
+            assert isinstance(payload["updated_at"], str), type(payload["updated_at"])
+            assert payload["updated_at"]
+
+            meta = client.get(f"/api/v1/entrust/attachments/{attachment_id}", headers=headers)
+            assert meta.status_code == 200, meta.text
+            for key in ("created_at", "updated_at", "source_event_at"):
+                value = meta.json().get(key)
+                assert value is None or isinstance(value, str), (key, type(value))
+    finally:
+        app.dependency_overrides.clear()
+        settings.ENTRUST_ENABLED = previous_enabled
+        settings.ATTACHMENT_STORAGE_DIR = previous_dir

@@ -29,7 +29,9 @@ from typing import Any
 CODE = "agent_02"
 LABEL = "方案与采购"
 
-source_kinds = frozenset({"assignment", "task", "artifact", "attachment", "entrustment"})
+source_kinds = frozenset(
+    {"assignment", "task", "artifact", "attachment", "entrustment", "attachment_text"}
+)
 
 SYSTEM_PROMPT = """你是内河货运的方案与采购助理。输出必须是 JSON 对象，结构与要求：
 
@@ -104,7 +106,41 @@ def _parse_quote_text(text: str) -> dict[str, Any]:
     return payload
 
 
-def _refs(context: dict[str, Any], job_input: dict[str, Any]) -> list[dict[str, str]]:
+def _quote_source(context: dict[str, Any], job_input: dict[str, Any]) -> tuple[str, str | None]:
+    """确定"要解析的报价文本"从哪来 → (文本, 来源标记)。
+
+    优先序刻意固定：
+
+    1. **操作者当面粘贴的文本**（`quote_text`）优先。它是人当场给出的输入，
+       最新、最明确 —— 附件里的旧报价可能已被新报价取代；
+    2. 其次是**附件已提取的文本**（ENT-013）：上传报价单 PDF → 提取 →
+       直接解析，操作者不必再手打一遍；
+    3. 都没有 → 返回空，让上层走"解析不到任何字段"的分支（不猜）。
+
+    来源标记告诉调用方该引用 `operator_input` 还是 `attachment_text` ——
+    两者的可信度不同，随口引错会让"模型编造来源"的检查失去意义。
+    """
+    text = str(job_input.get("quote_text") or "").strip()
+    if text:
+        return text, "operator_input"
+
+    attachment_id = job_input.get("attachment_id")
+    if attachment_id is None:
+        return "", None
+    ref = str(attachment_id)
+    for item in context.get("attachments") or []:
+        if str(item.get("attachment_id")) != ref:
+            continue
+        excerpt = item.get("text_excerpt")
+        if excerpt:
+            return str(excerpt), "attachment_text"
+        return "", None
+    return "", None
+
+
+def _refs(
+    context: dict[str, Any], job_input: dict[str, Any], *, text_source: str | None = None
+) -> list[dict[str, str]]:
     refs: list[dict[str, str]] = []
     attachment_id = job_input.get("attachment_id")
     if attachment_id is not None:
@@ -112,20 +148,23 @@ def _refs(context: dict[str, Any], job_input: dict[str, Any]) -> list[dict[str, 
     assignment = context.get("assignment") or {}
     if assignment.get("assignment_id") is not None:
         refs.append({"kind": "assignment", "ref": str(assignment["assignment_id"])})
-    if job_input.get("quote_text"):
+    if text_source == "operator_input":
         # 操作者当面提交的文本本身就是可信输入来源（不是模型编的）
         refs.append({"kind": "operator_input", "ref": "job_input"})
+    elif text_source == "attachment_text" and attachment_id is not None:
+        # 文本来自附件提取层：引用要写成 attachment_text，才能对上服务端枚举的
+        # 来源目录（提取没成功时它根本不在目录里，引用它会被标为编造）。
+        refs.append({"kind": "attachment_text", "ref": str(attachment_id)})
     return refs
 
 
 def mock_content(context: dict[str, Any], job_input: dict[str, Any]) -> dict[str, Any]:
-    """确定性 fixture：解析 operator 提供的报价文本 + 可选候选清单。"""
+    """确定性 fixture：解析操作者提供的报价文本 + 可选候选清单。"""
     assignment = context.get("assignment") or {}
     assignment_id = assignment.get("assignment_id")
     base_revision = int(assignment.get("revision") or 0)
-    refs = _refs(context, job_input)
-
-    quote_text = str(job_input.get("quote_text") or "")
+    quote_text, text_source = _quote_source(context, job_input)
+    refs = _refs(context, job_input, text_source=text_source)
     parsed = _parse_quote_text(quote_text)
     proposals: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
@@ -274,15 +313,32 @@ def mock_content(context: dict[str, Any], job_input: dict[str, Any]) -> dict[str
 def build_user_prompt(context: dict[str, Any], job_input: dict[str, Any]) -> str:
     """把只读事实与操作者输入渲染成提示词（真实模式使用）。"""
     assignment = context.get("assignment") or {}
+    quote_text, text_source = _quote_source(context, job_input)
+    source_label = {
+        "operator_input": "操作者提交的文本",
+        "attachment_text": "附件提取文本",
+    }.get(text_source or "", "无")
     lines = [
         "【受理单】",
         f"ID：{assignment.get('assignment_id')}  版本：{assignment.get('revision')}",
         f"标题：{assignment.get('title')}",
         f"货类/货物：{assignment.get('cargo_summary') or '（未填写）'}",
         "",
-        "【待解析的报价文本】",
-        str(job_input.get("quote_text") or "（无）"),
+        f"【待解析的报价文本】来源：{source_label}",
+        quote_text or "（无）",
     ]
+
+    attachments = context.get("attachments") or []
+    if attachments:
+        lines += ["", "【附件】"]
+        for item in attachments:
+            state = item.get("extract_status")
+            detail = "已提取文本" if state == "done" else f"未提取（{state}）"
+            truncated = "；文本已截断，非全文" if item.get("text_truncated") else ""
+            lines.append(
+                f"- #{item.get('attachment_id')} {item.get('filename')}"
+                f"（{item.get('content_type')}）：{detail}{truncated}"
+            )
     candidates = job_input.get("candidates") or []
     if candidates:
         lines += ["", "【候选报价】"]

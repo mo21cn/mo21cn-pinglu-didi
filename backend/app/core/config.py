@@ -78,6 +78,14 @@ class Settings(BaseSettings):
         "application/vnd.ms-excel,image/jpeg,image/png,image/webp"
     )
 
+    # ---- 文档提取（S1 第 6 条 / ENT-013）----
+    # 单份附件提取文本的字符上限。**被截断的文本看起来是完整的**，所以超限时必须
+    # 落 `truncated=1`，不能只写日志。上限存在的意义是防止单份文件撑爆提示词与响应。
+    EXTRACTION_MAX_TEXT_CHARS: int = 200_000
+    # 附件文本进入 Agent 上下文时的字符上限（比落库上限更严：
+    # 提示词要给任务、成果、来源目录都留位置，不能一段报价文本独占）。
+    AGENT_ATTACHMENT_TEXT_CHARS: int = 8_000
+
     # ---- 认证（JWT） ----
     JWT_SECRET_KEY: str = "change-me-in-env"  # 生产由 CI/CD secrets 注入
     JWT_ALGORITHM: str = "HS256"

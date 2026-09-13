@@ -12,7 +12,9 @@
 3. **存储于公共静态路径之外**：文件落 `ATTACHMENT_STORAGE_DIR`，
    站内没有任何静态路由指向该目录，只能经授权下载端点取；
 4. **文件名安全化 + 禁止执行上传内容**：只保留 basename 并剥离控制字符；
-   服务端从不解释、不执行、不"渲染"上传内容（提取作业是独立增量 S1-6）。
+   服务端从不解释、不执行、不"渲染"上传内容。S1 第 6 条的**提取器**（`extraction.py`）
+   只是把字节读成文本，不做任何渲染或解释 —— 提取文本落 `ent_attachment_text`，
+   它是**证据材料，不是指令**。
 
 附件是**不可信数据**（AC-18）：本模块只把它当作字节流与元数据，
 附件里写了什么指令与本模块无关 —— 任何"从附件里读到的指示"都不能改变权限。
@@ -32,14 +34,17 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 
-# ── 提取状态取值域（S1 第 6 条实现提取器；本增量只建状态与流转口） ───────────
+# ── 提取状态取值域（S1 第 6 条提取器见 extraction.py；本模块负责状态与文本落库） ─
 
 EXTRACT_NOT_REQUESTED = "not_requested"
 EXTRACT_PENDING = "pending"
 EXTRACT_RUNNING = "running"
 EXTRACT_DONE = "done"
 EXTRACT_FAILED = "failed"
+#: 该格式**不在解析能力内**（老式 .xls/.doc、未知类型）—— 不是错误，是能力边界
 EXTRACT_UNSUPPORTED = "unsupported"
+#: 有内容但**没有机读文本层**（图片、扫描件 PDF、不可靠解码）→ 转人工转录
+EXTRACT_NEEDS_TRANSCRIPTION = "needs_transcription"
 
 EXTRACT_STATUSES = frozenset(
     {
@@ -49,8 +54,14 @@ EXTRACT_STATUSES = frozenset(
         EXTRACT_DONE,
         EXTRACT_FAILED,
         EXTRACT_UNSUPPORTED,
+        EXTRACT_NEEDS_TRANSCRIPTION,
     }
 )
+
+#: 提取文本的来源（可信度不同，UI 与 Agent 都必须能区分）
+TEXT_SOURCE_EXTRACTOR = "extractor"
+TEXT_SOURCE_MANUAL = "manual_transcription"
+TEXT_SOURCES = frozenset({TEXT_SOURCE_EXTRACTOR, TEXT_SOURCE_MANUAL})
 
 #: 单次读取上限 = 上限 + 1 字节 —— 多读 1 字节即可判定"超限"，不必读完整个文件
 _READ_CHUNK = 1024 * 1024
@@ -488,6 +499,170 @@ def set_extract_status(
     return updated
 
 
+# ── 提取文本（S1 第 6 条 / ENT-013） ────────────────────────────────────────
+# 文本单独一张表 `ent_attachment_text`（1:1）：体积与附件元数据差三个数量级，
+# 且它可被重抽/人工转录覆盖 —— 混在附件表里会让"列附件"这种高频读拖着正文。
+
+_TEXT_COLS = (
+    "attachment_id, content, char_count, truncated, source, sha256, "
+    "created_by, created_at, updated_at"
+)
+
+
+def _row_to_text(row: Any) -> dict[str, Any]:
+    return {
+        "attachment_id": int(row["attachment_id"]),
+        "content": str(row["content"]),
+        "char_count": int(row["char_count"]),
+        "truncated": bool(row["truncated"]),
+        "source": str(row["source"]),
+        "sha256": str(row["sha256"]),
+        "created_by": int(row["created_by"]) if row["created_by"] is not None else None,
+        "created_at": _text_ts(row["created_at"]),
+        "updated_at": _text_ts(row["updated_at"]),
+    }
+
+
+def get_text(session: Session, attachment_id: int) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            text(f"SELECT {_TEXT_COLS} FROM ent_attachment_text WHERE attachment_id = :aid"),
+            {"aid": attachment_id},
+        )
+        .mappings()
+        .first()
+    )
+    return _row_to_text(row) if row is not None else None
+
+
+def get_texts(
+    session: Session, attachment_ids: list[int], *, limit_chars: int
+) -> dict[int, dict[str, Any]]:
+    """批量取文本（供 Agent 上下文用），每条按 `limit_chars` 截断。
+
+    一次查完再在内存里截断，而不是逐条查：作业要读的附件数量不多，
+    但 N 次往返会在每次作业上叠加延迟。
+    """
+    if not attachment_ids:
+        return {}
+    placeholders = ", ".join(f":a{i}" for i in range(len(attachment_ids)))
+    params = {f"a{i}": aid for i, aid in enumerate(attachment_ids)}
+    rows = (
+        session.execute(
+            text(
+                f"SELECT {_TEXT_COLS} FROM ent_attachment_text "
+                f"WHERE attachment_id IN ({placeholders}) AND source IN ('extractor', 'manual_transcription')"
+            ),
+            params,
+        )
+        .mappings()
+        .all()
+    )
+    result: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        item = _row_to_text(row)
+        if limit_chars > 0 and len(item["content"]) > limit_chars:
+            item["content"] = item["content"][:limit_chars]
+            item["truncated"] = True
+        result[int(item["attachment_id"])] = item
+    return result
+
+
+def hash_text(content: str) -> str:
+    """提取文本的内容哈希。
+
+    单独暴露出来，是因为**幂等键的请求体快照**也要用它：如果 API 层自己写一份
+    `sha256(content.encode("utf-8"))`，将来这里改成"先归一空白再哈希"时，
+    幂等判断与落库哈希就会用两套口径 —— 同一次转录会被判成两次不同内容。
+    """
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def drop_text(session: Session, attachment_id: int) -> int:
+    """删除附件的提取文本（派生数据：随时可由原文件重抽或由人重建）。
+
+    用途：重抽后结论变成"没有文本"（扫描件/不支持/失败）时，旧文本必须一起撤掉，
+    否则会出现"状态说没有文本、接口却能读出文本"的矛盾。
+    **原始证据（附件文件本身）永远不动** —— 这里删的只是派生结果。
+    """
+    result = cast(
+        CursorResult[Any],
+        session.execute(
+            text("DELETE FROM ent_attachment_text WHERE attachment_id = :aid"),
+            {"aid": attachment_id},
+        ),
+    )
+    session.commit()
+    return int(result.rowcount or 0)
+
+
+def upsert_text(
+    session: Session,
+    *,
+    attachment_id: int,
+    content: str,
+    source: str,
+    truncated: bool = False,
+    created_by: int | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """写入/覆盖提取文本（**重抽就是覆盖同一行**，不留多份互相矛盾的历史）。
+
+    `source` 区分机读提取与人工转录 —— 两者的可信度不同，覆盖时必须改来源，
+    否则会出现"人工转录的内容被标成机器抽取"这种来源错标。
+    """
+    if source not in TEXT_SOURCES:
+        raise AttachmentValidationError(f"未知文本来源 {source!r}；取值域：{sorted(TEXT_SOURCES)}")
+    if not content.strip():
+        raise AttachmentValidationError("提取文本为空，不能入库")
+
+    current = now or utcnow_naive()
+    ts = _fmt(current)
+    digest = hash_text(content)
+    existing = get_text(session, attachment_id)
+    if existing is None:
+        session.execute(
+            text(
+                "INSERT INTO ent_attachment_text "
+                "(attachment_id, content, char_count, truncated, source, sha256, "
+                " created_by, created_at, updated_at) "
+                "VALUES (:aid, :content, :chars, :trunc, :source, :sha, :by, :ts, :ts)"
+            ),
+            {
+                "aid": attachment_id,
+                "content": content,
+                "chars": len(content),
+                "trunc": 1 if truncated else 0,
+                "source": source,
+                "sha": digest,
+                "by": created_by,
+                "ts": ts,
+            },
+        )
+    else:
+        session.execute(
+            text(
+                "UPDATE ent_attachment_text SET content = :content, char_count = :chars, "
+                "truncated = :trunc, source = :source, sha256 = :sha, created_by = :by, "
+                "updated_at = :ts WHERE attachment_id = :aid"
+            ),
+            {
+                "aid": attachment_id,
+                "content": content,
+                "chars": len(content),
+                "trunc": 1 if truncated else 0,
+                "source": source,
+                "sha": digest,
+                "by": created_by,
+                "ts": ts,
+            },
+        )
+    session.commit()
+    saved = get_text(session, attachment_id)
+    assert saved is not None
+    return saved
+
+
 def resolve_path(attachment: dict[str, Any]) -> Path:
     """附件在磁盘上的绝对路径；文件缺失即报存储错误（不返回空路径）。"""
     root = storage_root()
@@ -505,11 +680,15 @@ def resolve_path(attachment: dict[str, Any]) -> Path:
 __all__ = [
     "EXTRACT_DONE",
     "EXTRACT_FAILED",
+    "EXTRACT_NEEDS_TRANSCRIPTION",
     "EXTRACT_NOT_REQUESTED",
     "EXTRACT_PENDING",
     "EXTRACT_RUNNING",
     "EXTRACT_STATUSES",
     "EXTRACT_UNSUPPORTED",
+    "TEXT_SOURCE_EXTRACTOR",
+    "TEXT_SOURCE_MANUAL",
+    "TEXT_SOURCES",
     "AttachmentError",
     "AttachmentNotFoundError",
     "AttachmentStorageError",
@@ -517,7 +696,11 @@ __all__ = [
     "allowed_types",
     "assert_allowed_type",
     "bind_to_artifact",
+    "drop_text",
     "get_attachment",
+    "get_text",
+    "get_texts",
+    "hash_text",
     "list_attachments",
     "list_for_artifact",
     "max_bytes",
@@ -528,5 +711,6 @@ __all__ = [
     "storage_root",
     "store_bytes",
     "store_upload",
+    "upsert_text",
     "utcnow_naive",
 ]
