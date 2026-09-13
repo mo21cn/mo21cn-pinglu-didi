@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session
 # 命名规则 `域:对象:动作`，与幂等 scope 保持一致，便于日志与审计对齐。
 
 PERM_VIEW = "entrust:view"
+PERM_ASSIGN_CLAIM = "entrust:assignment:claim"
 PERM_QUOTE_CREATE = "entrust:quote:create"
 PERM_QUOTE_PUBLISH = "entrust:quote:publish"
 PERM_TASK_DISPATCH = "entrust:task:dispatch"
@@ -52,6 +53,7 @@ PERM_ENTRUSTMENT_MANAGE = "org:entrustment:manage"
 ALL_PERMISSIONS = frozenset(
     {
         PERM_VIEW,
+        PERM_ASSIGN_CLAIM,
         PERM_QUOTE_CREATE,
         PERM_QUOTE_PUBLISH,
         PERM_TASK_DISPATCH,
@@ -66,10 +68,11 @@ ORG_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "owner": ALL_PERMISSIONS,
     # 管理员：可管理成员与授权，但不能发布报价/派单/结算（业务动作需经理人角色）
     "admin": frozenset({PERM_VIEW, PERM_MEMBER_MANAGE, PERM_ENTRUSTMENT_MANAGE}),
-    # 经理人：一线执行，可制作并发布报价、派单、生成结算
+    # 经理人：一线执行，可认领委托、制作并发布报价、派单、生成结算
     "manager": frozenset(
         {
             PERM_VIEW,
+            PERM_ASSIGN_CLAIM,
             PERM_QUOTE_CREATE,
             PERM_QUOTE_PUBLISH,
             PERM_TASK_DISPATCH,

@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # 必须经 `python migrate.py` 创建（见 docs/06-database-migration.md）
     MIGRATION_MANAGED_TABLE_PREFIX: str = "ent_"
 
+    # ---- 委托发货支线（AC-22） ----
+    # 特性开关：关闭时 /api/v1/entrust 全部端点返回 404（隐藏入口，不删除已有数据）。
+    # 开关与服务端权限相互独立：开启后每个端点仍各自做叠加层权限校验。
+    ENTRUST_ENABLED: bool = False
+
     # ---- 认证（JWT） ----
     JWT_SECRET_KEY: str = "change-me-in-env"  # 生产由 CI/CD secrets 注入
     JWT_ALGORITHM: str = "HS256"

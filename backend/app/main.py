@@ -15,6 +15,7 @@ from app.models import Base
 from app.modules.agent import router as agent_router
 from app.modules.auth import router as auth_router
 from app.modules.cargo import router as cargo_router
+from app.modules.entrust import router as entrust_router
 from app.modules.match import router as match_router
 from app.modules.order import router as order_router
 from app.modules.payment import router as payment_router
@@ -57,3 +58,5 @@ app.include_router(port_router, prefix=f"{settings.API_PREFIX}/port", tags=["por
 app.include_router(match_router, prefix=f"{settings.API_PREFIX}/match", tags=["match"])
 app.include_router(order_router, prefix=f"{settings.API_PREFIX}/order", tags=["order"])
 app.include_router(payment_router, prefix=f"{settings.API_PREFIX}/payment", tags=["payment"])
+# 委托支线：ENTRUST_ENABLED=false 时端点自行返回 404（见 entrust.router.require_entrust_enabled）
+app.include_router(entrust_router, prefix=f"{settings.API_PREFIX}/entrust", tags=["entrust"])
