@@ -81,10 +81,10 @@ pinglu-didi/
 
 | 命令 | 说明 |
 |------|------|
-| `ruff check app` | 后端 lint |
-| `ruff format app` | 后端格式化 |
+| `ruff check app tests scripts` | 后端 lint（与 CI 同范围） |
+| `ruff format app tests scripts` | 后端格式化（与 CI 同范围） |
 | `pytest` | 运行测试 |
-| `mypy app` | 类型检查 |
+| `mypy app migrations migrate.py` | 类型检查（有意不含 `scripts`） |
 | `git flow` / 分支命令 | 见 `docs/02-git-flow.md` |
 
 ## 5. 故障排查
