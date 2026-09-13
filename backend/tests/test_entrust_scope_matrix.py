@@ -69,12 +69,14 @@ def test_matrix_keys_are_unique():
 
 
 def test_matrix_size_matches_baseline():
-    """条目数锁定为 48。
+    """条目数锁定为 49。
 
     数量变化本身不是错误，但**必须是有意的**：增删端点时同时改这里，
     强制在 PR 里显式说明"为什么端点集合变了"。
+
+    48 → 49（ENT-012 第二切片）：新增 `GET /my-orgs` —— 组织选择器的数据源。
     """
-    assert len(sm.SCOPE_MATRIX) == 48
+    assert len(sm.SCOPE_MATRIX) == 49
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

@@ -40,6 +40,38 @@
   color: rgba(255, 255, 255, 0.82);
 }
 
+/* ---- 组织选择器（ENT-012 第二切片）----
+   位于顶栏渐变之内，只在多组织时出现。沿用筛选条的 pill 语言，
+   但以半透明白底把「我在哪个组织」与「我在看哪个状态」分成视觉两层，
+   避免用户把两层切换混淆成同一个筛选条。 */
+.org-bar {
+  margin-top: 16rpx;
+}
+
+.org-scroll {
+  white-space: nowrap;
+}
+
+.org-scroll .org-pills {
+  display: inline-flex;
+  padding: 0 24rpx;
+}
+
+.org-pill {
+  margin-right: 12rpx;
+  padding: 8rpx 22rpx;
+  border-radius: 24rpx;
+  font-size: 25rpx;
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.org-pill-active {
+  background: #FFFFFF;
+  color: #3B5BDB;
+  font-weight: 600;
+}
+
 .filter-scroll {
   white-space: nowrap;
   padding-top: 20rpx;

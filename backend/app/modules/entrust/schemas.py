@@ -77,6 +77,27 @@ def assignment_out(data: dict[str, Any]) -> AssignmentOut:
     return AssignmentOut.model_validate(data)
 
 
+# ── 我的组织清单（ENT-012 组织选择器） ───────────────────────────────────────
+# 只投影「调用者自己的组织身份」。`permissions` 用**字符串列表**而不是布尔开关：
+# 界面要显示"我在这个组织能做什么"，直接把权限码交给前端，
+# 由前端按权限码映射中文（`utils/entrust.js` 的 ORG_PERMISSION_LABELS），
+# 这样新增权限时不必改接口 —— 但**前端的展示永远不是权限判定**。
+
+
+class MyOrgOut(BaseModel):
+    """一个组织身份：我在它是谁，以及我在它能做什么。"""
+
+    org_id: int
+    name: str
+    member_role: str
+    permissions: list[str]
+
+
+class MyOrgListOut(BaseModel):
+    total: int
+    items: list[MyOrgOut]
+
+
 # ── 任务（ENT-008） ──────────────────────────────────────────────────────────
 # 固定前置条件与循环检查在服务层（数据库约束表达不了传递闭包），
 # 因此这里只做字段级校验：类型/证据取值域的领域校验由服务层给出可读的 400。

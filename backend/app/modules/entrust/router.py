@@ -35,13 +35,20 @@ from app.core.idempotency import IdempotencyError, idempotent, require_idempoten
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.entrust import assignments as svc
-from app.modules.entrust.access import PERM_VIEW, AccessDeniedError, resolve_context
+from app.modules.entrust.access import (
+    PERM_VIEW,
+    AccessDeniedError,
+    list_my_orgs,
+    resolve_context,
+)
 from app.modules.entrust.schemas import (
     AssignmentCreate,
     AssignmentListOut,
     AssignmentOut,
     AssignmentSubmit,
     AssignmentUpdate,
+    MyOrgListOut,
+    MyOrgOut,
     assignment_out,
 )
 
@@ -350,3 +357,33 @@ def cancel_assignment(
             svc.cancel_assignment(db, assignment_id=assignment_id, actor_id=int(user.id))
         ).model_dump(mode="json"),
     )
+
+
+# ── 组织选择器（ENT-012 第二切片）─────────────────────────────────────────────
+
+
+@router.get(
+    "/my-orgs",
+    response_model=MyOrgListOut,
+    summary="我的组织清单（我所在的组织 + 我在每个组织内的权限）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def my_orgs(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """多组织身份下**选择服务经营主体**的依据。
+
+    `GET /assignments?view=org` 在「属于多个组织且未指定 org_id」时返回 400，
+    而前端**无法自行枚举候选**：`current_role` 存在本地 Storage（可篡改），
+    且它表达的从来不是"我属于哪些组织"。没有这个端点，多组织身份就是死局 ——
+    服务端说"请指定组织"，前端却无从获得可选项。详见 `access.list_my_orgs`。
+
+    只读、无副作用、且只含**调用者自己**的成员关系，因此：
+
+    * **不需要** `Idempotency-Key`（GET 本就不在写端点集合内）；
+    * **不额外要求业务权限** —— 见 `access.list_my_orgs` 里"为什么 guard 只需
+      authenticated"的说明（要求权限反而会让刚加入新组织的人看不到自己的组织）。
+    """
+    items = list_my_orgs(db, user_id=int(user.id))
+    return MyOrgListOut(total=len(items), items=[MyOrgOut(**item) for item in items])
