@@ -7,9 +7,21 @@ R1 最小接口集（计划 §3.3「成果」组）的底座部分：
 - GET    /api/v1/entrust/artifacts/{aid}                   成果详情（含生效版本 + 缺项）
 - GET    /api/v1/entrust/artifacts/{aid}/revisions         版本历史（append-only 审计视图）
 - GET    /api/v1/entrust/artifacts/{aid}/changes           字段变化清单（按注册表字段比对）
+- GET    /api/v1/entrust/assignments/{id}/artifacts        单委托成果清单（含精确版本，DR-0012）
 - POST   /api/v1/entrust/artifacts/{aid}/revisions         追加新版本（编辑，不改生效版本，幂等）
 - POST   /api/v1/entrust/artifacts/{aid}/confirm           确认绑定精确版本（幂等）
 - POST   /api/v1/entrust/artifacts/{aid}/void              作废（作废后不可确认/追加，幂等）
+
+成果归属（DR-0012）
+------------------
+创建成果时可带 `assignment_id` 声明**归属的委托单**，有效性由 `_resolve_attribution`
+校验：必须**同货主 + 同组织**，且委托单已选定服务经营主体。不满足一律 400
+（不存在则 404）—— 宁可拒绝，也不把归属写成"大概对"。
+
+* `assignment_id` 是**归属**，不是权限边界：权限仍然只走授权链（`authz.py`）；
+* 归属为空（`null`）表示"未归属"，**不等于**"不属于任何委托"—— 历史行一律为 `null`，
+  DR-0012 明确**不按 (货主, 组织) 猜测回填**；`GET /assignments/{id}/artifacts`
+  用 `unassigned_total` 把存量如实报出来，不静默隐藏。
 
 可见性与权限（AC-10，全部服务端校验，统一走 `authz.py` 这条唯一入口）：
 * 成果挂在**委托授权**（`ent_entrustment`）下：
@@ -43,7 +55,7 @@ from app.modules.entrust import artifacts as art
 from app.modules.entrust import registry as reg
 from app.modules.entrust._http import (
     guard_or_400,
-    map_access_denied,
+    map_artifact_error,
     require_entrust_enabled,
     run_write,
 )
@@ -52,10 +64,17 @@ from app.modules.entrust.access import (
     PERM_QUOTE_PUBLISH,
 )
 from app.modules.entrust.authz import (
+    assert_can_view_assignment,
     assert_can_view_entrustment,
     assert_can_write_entrustment,
+    load_assignment,
+    load_assignment_for_entrustment,
     load_entrustment,
     not_found,
+)
+from app.modules.entrust.schemas import (
+    AssignmentArtifactItem,
+    AssignmentArtifactListOut,
 )
 
 router = APIRouter()
@@ -70,6 +89,14 @@ class ArtifactCreate(BaseModel):
     artifact_type: str = Field(min_length=1, max_length=48)
     payload: dict[str, Any]
     note: str | None = Field(default=None, max_length=255)
+    assignment_id: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "归属委托单（DR-0012）。给出时必须与路径上的委托授权**同货主同组织**，"
+            "否则 400；不给出则归属为空（历史行与未绑定委托的产出都是这个形态）"
+        ),
+    )
 
 
 class ArtifactAppend(BaseModel):
@@ -85,18 +112,30 @@ class ArtifactVoid(BaseModel):
     reason: str | None = Field(default=None, max_length=255)
 
 
-def _map_artifact_error(exc: Exception) -> HTTPException | None:
-    """成果服务异常 → HTTP 语义；无法识别返回 None（不吞真实 bug）。"""
-    mapped = map_access_denied(exc)
-    if mapped is not None:
-        return mapped
-    if isinstance(exc, art.ArtifactNotFoundError):
-        return HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, (art.ArtifactVoidError, art.ManualTakeoverError)):
-        return HTTPException(status_code=409, detail=str(exc))
-    if isinstance(exc, art.ArtifactError):
-        return HTTPException(status_code=400, detail=str(exc))
-    return None
+def _resolve_attribution(
+    db: Session, *, entrustment: dict[str, Any], assignment_id: int | None
+) -> int | None:
+    """校验「归属委托单」是否有效；无效一律拒绝，**不猜测、不静默改判**。
+
+    有效 = 委托单存在（否则 404，不区分"不存在"与"无权知晓"）+ 与授权
+    **同货主同组织**且已选定服务经营主体（否则 400）。一致性规则只有一处实现
+    —— `authz.load_assignment_for_entrustment`，与会话绑定共用。
+
+    权限判定不在这里 —— 调用方已经过了 `assert_can_write_entrustment`。归属一致
+    之后，可见性规则（`assert_can_view_assignment`）对同一条 (货主, 组织) 给出相同
+    结论，因此不存在"能写却看不到所挂委托"的缺口。
+    """
+    if assignment_id is None:
+        return None
+    assignment = load_assignment_for_entrustment(
+        db,
+        entrustment=entrustment,
+        assignment_id=assignment_id,
+        detail="归属委托单与该委托授权不同货主或不同组织，不能建立归属",
+    )
+    if assignment is None:
+        raise not_found("委托单不存在")
+    return int(assignment["id"])
 
 
 def _artifact_with_entrustment(
@@ -106,7 +145,7 @@ def _artifact_with_entrustment(
     try:
         artifact = art.get_artifact(db, artifact_id)
     except art.ArtifactError as exc:
-        raise _map_artifact_error(exc) or exc from exc
+        raise map_artifact_error(exc) or exc from exc
     entrustment = load_entrustment(db, artifact["entrustment_id"])
     if entrustment is None:
         raise not_found("成果不存在")
@@ -125,6 +164,12 @@ def create_artifact(
     db: Session = Depends(get_db),
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> Any:
+    """创建成果（v1 即生效）。
+
+    这也是**把 Agent 提案变成成果的唯一写入口**（AC-09：作业层没有任何写成果的
+    代码路径）。两个入口 —— 直接创建、采纳作业提案（`POST /agent/jobs/{id}/adopt`）
+    —— 都落在这个服务函数上，因此归属规则只有一份。
+    """
     key = guard_or_400(idempotency_key)
     entrustment = load_entrustment(db, entrustment_id)
     if entrustment is None:
@@ -135,6 +180,9 @@ def create_artifact(
         permission=PERM_QUOTE_CREATE,
         entrustment=entrustment,
         detail="成果不存在",
+    )
+    assignment_id = _resolve_attribution(
+        db, entrustment=entrustment, assignment_id=data.assignment_id
     )
     payload = data.model_dump(mode="json")
     return run_write(
@@ -151,8 +199,52 @@ def create_artifact(
             created_by=int(user.id),
             source=art.SOURCE_MANUAL,
             note=data.note,
+            assignment_id=assignment_id,
         ),
-        map_domain_error=_map_artifact_error,
+        map_domain_error=map_artifact_error,
+    )
+
+
+@router.get(
+    "/assignments/{assignment_id}/artifacts",
+    response_model=AssignmentArtifactListOut,
+    summary="单委托成果清单（含精确版本；非参与方 404）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def list_assignment_artifacts(
+    assignment_id: int,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """单张委托的成果清单 —— UI-05 工作台与 UI-03 成果卡的共同取数入口（DR-0012）。
+
+    可见性复用 `authz.assert_can_view_assignment`：货主本人，或该委托所属组织的成员
+    （且具备 `entrust:view`）；非参与方一律 404，**不区分"不存在"与"无权查看"** ——
+    「跨单访问拒绝」就落在这里，另一个货主的委托单连 403 都不会给。
+
+    结果**只含归属恰好等于这张委托单的成果**；`unassigned_total` 单独报出"同一
+    (货主, 组织) 授权范围内还有多少份归属为空的历史成果"，让界面能如实说
+    "另有 N 份历史成果尚未归属"，而不是把它们静默藏起来。
+    """
+    assignment = load_assignment(db, assignment_id)
+    if assignment is None:
+        raise not_found("委托单不存在")
+    assert_can_view_assignment(db, user_id=int(user.id), assignment=assignment)
+
+    total, items = art.list_by_assignment(db, assignment_id=assignment_id, page=page, size=size)
+    return AssignmentArtifactListOut(
+        assignment_id=assignment_id,
+        total=total,
+        page=page,
+        size=size,
+        unassigned_total=art.count_unassigned(
+            db,
+            owner_user_id=int(assignment["owner_user_id"]),
+            org_id=int(assignment["org_id"]) if assignment["org_id"] is not None else None,
+        ),
+        items=[AssignmentArtifactItem.model_validate(item) for item in items],
     )
 
 
@@ -222,7 +314,7 @@ def append_revision(
             source=art.SOURCE_MANUAL,
             note=data.note,
         ),
-        map_domain_error=_map_artifact_error,
+        map_domain_error=map_artifact_error,
     )
 
 
@@ -261,7 +353,7 @@ def confirm_revision(
             actor_id=int(user.id),
             as_source=art.SOURCE_MANUAL,
         ),
-        map_domain_error=_map_artifact_error,
+        map_domain_error=map_artifact_error,
     )
 
 
@@ -296,7 +388,7 @@ def void_artifact(
         business=lambda: art.void_artifact(
             db, artifact_id=artifact_id, actor_id=int(user.id), reason=data.reason
         ),
-        map_domain_error=_map_artifact_error,
+        map_domain_error=map_artifact_error,
     )
 
 

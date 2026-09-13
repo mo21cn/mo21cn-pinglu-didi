@@ -15,6 +15,18 @@
 
 与幂等（ENT-002）、权限（ENT-003）的关系：本模块只做版本语义，不做权限判断、
 不做幂等去重 —— 那两者是 router 层的依赖组合，本模块被组合调用。
+
+归属（`assignment_id`，DR-0012 新增）
+------------------------------------
+成果原先只挂 `entrustment_id`（组织级授权），没有通向**单张委托**的关联键，
+同一货主同一组织的多张委托会互相串成果。本模块现在多一个**可空**的
+`assignment_id`：
+
+* 它是**归属**，不是权限边界 —— 权限判定仍然只有 `authz.py` 一条入口；
+* 历史行保持 NULL。NULL 表示"这份成果产生于归属机制之前"，**不表示它属于谁**；
+  读取侧必须把 NULL 与"属于某委托"分开呈现，不得猜测回填；
+* 归属的**有效性**（委托存在、与授权同货主同组织）由 HTTP 层在写入前校验；
+  本模块只保证"写进去的就是传进来的"，不替调用方编造归属。
 """
 
 from __future__ import annotations
@@ -100,6 +112,7 @@ def _row_to_artifact(row: Any) -> dict[str, Any]:
     return {
         "artifact_id": int(row["id"]),
         "entrustment_id": int(row["entrustment_id"]),
+        "assignment_id": (int(row["assignment_id"]) if row["assignment_id"] is not None else None),
         "artifact_type": str(row["artifact_type"]),
         "current_revision_id": (
             int(row["current_revision_id"]) if row["current_revision_id"] is not None else None
@@ -110,14 +123,16 @@ def _row_to_artifact(row: Any) -> dict[str, Any]:
     }
 
 
+_ARTIFACT_COLS = (
+    "id, entrustment_id, assignment_id, artifact_type, current_revision_id, "
+    "status, created_at, updated_at"
+)
+
+
 def _get_artifact_row(session: Session, artifact_id: int) -> Any:
     return (
         session.execute(
-            text(
-                "SELECT id, entrustment_id, artifact_type, current_revision_id, "
-                "status, created_at, updated_at "
-                "FROM ent_artifact WHERE id = :aid"
-            ),
+            text(f"SELECT {_ARTIFACT_COLS} FROM ent_artifact WHERE id = :aid"),
             {"aid": artifact_id},
         )
         .mappings()
@@ -185,6 +200,91 @@ def list_revisions(session: Session, artifact_id: int) -> list[dict[str, Any]]:
     return [_row_to_revision(r) for r in rows]
 
 
+_ASSIGNMENT_ITEM_COLS = (
+    "a.id, a.assignment_id, a.entrustment_id, a.artifact_type, a.status, "
+    "a.current_revision_id, r.revision_no AS current_revision_no, "
+    "a.created_at, a.updated_at"
+)
+
+
+def _row_to_assignment_item(row: Any) -> dict[str, Any]:
+    return {
+        "artifact_id": int(row["id"]),
+        "entrustment_id": int(row["entrustment_id"]),
+        "assignment_id": int(row["assignment_id"]) if row["assignment_id"] is not None else None,
+        "artifact_type": str(row["artifact_type"]),
+        "status": str(row["status"]),
+        "current_revision_id": (
+            int(row["current_revision_id"]) if row["current_revision_id"] is not None else None
+        ),
+        "current_revision_no": (
+            int(row["current_revision_no"]) if row["current_revision_no"] is not None else None
+        ),
+        "created_at": str(row["created_at"]),
+        "updated_at": str(row["updated_at"]),
+    }
+
+
+def list_by_assignment(
+    session: Session, *, assignment_id: int, page: int = 1, size: int = 20
+) -> tuple[int, list[dict[str, Any]]]:
+    """单委托成果列表（DR-0012）。
+
+    **精确匹配 `assignment_id`**，不做任何"回退到货主或组织"的放宽 —— 同一货主在同一
+    组织下可能有多张委托，放宽一步就是把别的委托的成果显示在这张委托的工作台上。
+    归属为 NULL 的历史成果**不在结果内**（它们还没有归属），由 `count_unassigned`
+    单独如实报数：界面能说"另有 N 份历史成果尚未归属"，而不是把它们静默隐藏。
+
+    `current_revision_id` 与 `current_revision_no` 成对返回，是"双入口同成果同版本"的
+    取数依据：工作台与聊天卡引用这一对精确值，而不是各自再取一次"最新"。
+    """
+    total_row = (
+        session.execute(
+            text("SELECT COUNT(*) AS c FROM ent_artifact WHERE assignment_id = :aid"),
+            {"aid": assignment_id},
+        )
+        .mappings()
+        .first()
+    )
+    total = int(total_row["c"]) if total_row is not None else 0
+    rows = session.execute(
+        text(
+            f"SELECT {_ASSIGNMENT_ITEM_COLS} FROM ent_artifact a "
+            "LEFT JOIN ent_artifact_revision r ON r.id = a.current_revision_id "
+            "WHERE a.assignment_id = :aid "
+            "ORDER BY a.updated_at DESC, a.id DESC LIMIT :limit OFFSET :offset"
+        ),
+        {"aid": assignment_id, "limit": size, "offset": (page - 1) * size},
+    ).mappings()
+    return total, [_row_to_assignment_item(r) for r in rows]
+
+
+def count_unassigned(session: Session, *, owner_user_id: int, org_id: int | None) -> int:
+    """同一 (货主, 组织) 授权范围内**归属为空**的成果数（历史存量）。
+
+    只报数、不改数据 —— 它是"归属机制上线前的存量"在界面上唯一的出口。
+    按 (货主, 组织) 统计而非全表：口径被限定在调用者本就可见的授权范围内；
+    用 `IN (子查询)` 而不是先挑一条 `ent_entrustment`：同一 (org, owner) 可能有多条
+    授权记录，挑一条就是猜测 —— 这里只要计数，不需要也不该选边。
+    """
+    if org_id is None:
+        return 0
+    row = (
+        session.execute(
+            text(
+                "SELECT COUNT(*) AS c FROM ent_artifact "
+                "WHERE assignment_id IS NULL AND entrustment_id IN "
+                "(SELECT id FROM ent_entrustment "
+                " WHERE org_id = :org AND entrust_user_id = :owner)"
+            ),
+            {"org": org_id, "owner": owner_user_id},
+        )
+        .mappings()
+        .first()
+    )
+    return int(row["c"]) if row is not None else 0
+
+
 def create_artifact(
     session: Session,
     *,
@@ -194,6 +294,7 @@ def create_artifact(
     created_by: int,
     source: str = SOURCE_MANUAL,
     note: str | None = None,
+    assignment_id: int | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """创建成果，首个版本 `revision_no = 1` 并立即绑定生效。
@@ -203,6 +304,10 @@ def create_artifact(
 
     Args:
         source: `agent`（模型产出）或 `manual`（人工产出）。
+        assignment_id: 归属的委托单。`None` 表示不归属任何委托单（历史行与
+            未绑定会话的产出）。**本函数不校验归属有效性** —— 那需要读委托单与
+            授权链，属 HTTP 层职责（见 `artifacts_api._resolve_attribution`）；
+            在这里悄悄"修正"一个不一致的归属，会让调用方永远发现不了自己的错误。
     """
     if not artifact_type or not artifact_type.strip():
         raise ArtifactError("artifact_type 不能为空")
@@ -221,11 +326,13 @@ def create_artifact(
         session.execute(
             text(
                 "INSERT INTO ent_artifact "
-                "(entrustment_id, artifact_type, current_revision_id, status, created_at, updated_at) "
-                "VALUES (:eid, :atype, NULL, :status, :ts, :ts)"
+                "(entrustment_id, assignment_id, artifact_type, current_revision_id, "
+                " status, created_at, updated_at) "
+                "VALUES (:eid, :aid, :atype, NULL, :status, :ts, :ts)"
             ),
             {
                 "eid": entrustment_id,
+                "aid": assignment_id,
                 "atype": artifact_type.strip(),
                 "status": STATUS_ACTIVE,
                 "ts": ts,

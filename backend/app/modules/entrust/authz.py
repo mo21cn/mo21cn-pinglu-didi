@@ -68,6 +68,37 @@ def load_assignment(session: Session, assignment_id: int) -> dict[str, Any] | No
     return dict(row) if row is not None else None
 
 
+def load_assignment_for_entrustment(
+    session: Session,
+    *,
+    entrustment: dict[str, Any],
+    assignment_id: int,
+    detail: str,
+) -> dict[str, Any] | None:
+    """取「归属委托单」并校验它与授权**同货主、同组织**；不存在返回 `None`。
+
+    「一张委托单能不能和某条委托授权建立归属」只有这一处实现：会话绑定
+    （`agent_api.create_session`）与成果归属（`artifacts_api`）用的是同一条规则，
+    各写一遍迟早会出现"一边同货主同组织、另一边只看货主"。
+
+    为什么组织也必须一致：授权是**组织级**的（`ent_entrustment` = (org_id,
+    entrust_user_id)）。只比货主不比组织，就会出现"用组织 A 的授权把成果挂到
+    组织 B 的委托单上"。委托单尚未选定服务经营主体（`org_id IS NULL`，仍是草稿）
+    同样不允许 —— 那等于归属一个还不存在的委托关系。
+
+    Raises:
+        HTTPException 400: 委托单存在，但不满足同货主同组织（`detail` 说明场景）。
+    """
+    assignment = load_assignment(session, assignment_id)
+    if assignment is None:
+        return None
+    if int(assignment["owner_user_id"]) != int(entrustment["entrust_user_id"]) or (
+        assignment["org_id"] is None or int(assignment["org_id"]) != int(entrustment["org_id"])
+    ):
+        raise HTTPException(status_code=400, detail=detail)
+    return assignment
+
+
 def not_found(detail: str = "对象不存在") -> HTTPException:
     """统一的 404 —— **不区分"不存在"与"无权知晓"**（不泄漏存在性）。"""
     return HTTPException(status_code=404, detail=detail)
@@ -172,6 +203,7 @@ __all__ = [
     "assert_can_write_entrustment",
     "assert_org_member",
     "load_assignment",
+    "load_assignment_for_entrustment",
     "load_entrustment",
     "map_access_denied",
     "not_found",

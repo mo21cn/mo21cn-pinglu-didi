@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（49 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（51 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -220,6 +220,15 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         owner_scope=True,
         idempotent=True,
         note="作废要求发布级权限（entrust:quote:publish）",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/artifacts",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="assert_can_view_assignment（货主本人或所属组织内 entrust:view）；"
+        "只返回归属恰好等于该委托单的成果，跨单一律 404（DR-0012）",
     ),
     # ── 附件上传与授权下载（attachments_api.py）──────────────────────────
     _r(
@@ -502,6 +511,16 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         owner_scope=True,
         idempotent=True,
         note="经 _visible_job；再叠加“会话内或创建者本人”判定",
+    ),
+    _r(
+        "POST",
+        "/agent/jobs/{job_id}/adopt",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:create",
+        owner_scope=True,
+        idempotent=True,
+        note="采纳 = 创建成果，故权限同创建（assert_can_write_entrustment + entrust:quote:create）；"
+        "归属取自作业行的 assignment_id，不由请求体声明（DR-0012）",
     ),
 )
 

@@ -486,3 +486,59 @@ class AgentJobListOut(BaseModel):
 def job_out(data: dict[str, Any]) -> AgentJobOut:
     """服务层 dict → 响应模型（白名单投影：未声明字段不会外泄）。"""
     return AgentJobOut.model_validate(data)
+
+
+# ── 成果归属（DR-0012）────────────────────────────────────────────────────────
+# 两个入口都用这套契约：单委托成果清单（`artifacts_api`）与作业提案采纳
+# （`agent_api`）。归属是**服务端派生**的，不由客户端声明 —— 采纳时归属取自作业行
+# 自己记录的 `assignment_id`，因此请求体里没有这个字段。
+
+
+class AssignmentArtifactItem(BaseModel):
+    """单委托成果清单里的一项。
+
+    `current_revision_id` 与 `current_revision_no` 成对返回：它们就是
+    「对话与工作台引用同一成果 ID 与版本」里的那一对值（PRD 第 187 行 / AC-05），
+    两端引用同一对精确值，而不是各自再查一次"最新"。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    artifact_id: int
+    entrustment_id: int
+    assignment_id: int | None
+    artifact_type: str
+    status: str
+    current_revision_id: int | None
+    current_revision_no: int | None
+    created_at: str
+    updated_at: str
+
+
+class AssignmentArtifactListOut(BaseModel):
+    """单委托成果清单。
+
+    `unassigned_total` = 同一 (货主, 组织) 授权范围内**归属为空**的成果数。
+    它不是"属于本委托的成果"，所以既不计入 `total`、也不进 `items` ——
+    但必须出现在响应里，否则"历史成果去哪了"这个问题在界面上无法回答。
+    """
+
+    assignment_id: int
+    total: int
+    page: int
+    size: int
+    unassigned_total: int
+    items: list[AssignmentArtifactItem]
+
+
+class ArtifactAdoptIn(BaseModel):
+    """采纳一份 Agent 提案为成果。
+
+    `payload` 是**人工确认过的内容**（R1 要求所有 Agent 产出都过人一遍），
+    服务端只校验"该作业确实提出过这个类型"（见 `agent_api.adopt_job_proposal`）——
+    它不假装能判断内容是否被改过：提案与采纳是两个动作，采纳者有权修正。
+    """
+
+    artifact_type: str = Field(min_length=1, max_length=48)
+    payload: dict[str, Any]
+    note: str | None = Field(default=None, max_length=255)
