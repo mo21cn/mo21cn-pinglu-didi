@@ -19,6 +19,7 @@
  *   F. 入口守卫      —— 冷启动缺参/deny/越权/不归属被拦；应用内导航放行
  *   G. 非小程序环境  —— go() 不抛异常（CI 里没有 wx）
  *   H. 非线性切换    —— 工作台↔会话循环 20 次，栈深保持受控（A3 的 Node 侧）
+ *   I. reset 与接入  —— 声明为 reset 的边必须真的重置栈（ENT-019 补的运行期缺口）
  *
  * 用法：node scripts/verify_routes_behavior.js
  * 退出码：0 通过 / 1 有条目失败
@@ -409,6 +410,149 @@ t('循环 20 次后栈深不增长，上下文不串单', () => {
   }
   assert.ok(maxDepth <= 3, '20 轮循环后最深栈 ' + maxDepth + ' 层（期望 ≤3）')
   assert.ok(stack.length <= 3, '结束时栈深 ' + stack.length)
+})
+
+// ─────────────────────────────────────────────────────────────
+group('I. reset 策略与页面接入（ENT-019：声明层与运行期必须真的接上）')
+
+const INDEX = 'pages/index/index'
+
+t('reset 边解析为 action=reset（不是 push）', () => {
+  const p = R.resolveNavigation('/' + INDEX, { from: WORKBENCH, stack: stackOf([WORKBENCH]) })
+  assert.strictEqual(p.ok, true, JSON.stringify(p))
+  assert.strictEqual(p.action, 'reset')
+  assert.strictEqual(p.strategy, 'reset')
+  assert.strictEqual(p.url, '/' + INDEX)
+})
+
+t('reset **优先于复用**：目标在栈底也不降级成 navigateBack', () => {
+  // 冷启动深链进工作台的真实栈形：index 在栈底（同组织、键相同，复用分支本该命中）
+  const stack = stackOf([
+    { route: INDEX, options: {} },
+    { route: MINE, options: {} },
+    { route: WORKBENCH, options: { org_id: 'A' } }
+  ])
+  const p = R.resolveNavigation('/' + INDEX, { from: WORKBENCH, stack, ctx: { orgId: 'A' } })
+  assert.strictEqual(p.action, 'reset', '被复用分支降级了：' + JSON.stringify(p))
+  assert.strictEqual(p.delta, undefined, 'reset 不该带 delta')
+})
+
+t('reset 优先于预算判定：栈已到预算仍要重置，而不是 blocked', () => {
+  const stack = stackOf([
+    { route: INDEX, options: {} },
+    MINE,
+    CARGO,
+    MATCH,
+    WORKBENCH,
+    ASSISTANT,
+    DETAIL,
+    WORKBENCH
+  ])
+  assert.strictEqual(stack.length, R.STACK_BUDGET, '前置条件：栈已达预算')
+  const p = R.resolveNavigation('/' + INDEX, { from: WORKBENCH, stack, ctx: { orgId: 'A' } })
+  assert.strictEqual(p.ok, true, JSON.stringify(p))
+  assert.strictEqual(p.action, 'reset')
+})
+
+t('两个委托页 → 首页 的边都声明为 reset，且走 go() 得到 reset', () => {
+  for (const from of [WORKBENCH, DETAIL]) {
+    const e = R.edgeOf(from, INDEX)
+    assert.ok(e, from + ' → index 缺少导航边声明')
+    assert.strictEqual(e.strategy, 'reset')
+    const p = R.go('/' + INDEX, { from, stack: stackOf([from]) })
+    assert.strictEqual(p.action, 'reset')
+    assert.strictEqual(p.performed, false, 'CI 里没有 wx，不该真的跳')
+  }
+})
+
+t('performPlan() 在无 wx 环境不抛异常，且对未通过的计划不动作', () => {
+  const bad = R.resolveNavigation('/' + MATCH + '?mode=cargo&refId=0')
+  assert.strictEqual(bad.ok, false)
+  const out = R.performPlan(bad, {})
+  assert.strictEqual(out.performed, false)
+  const good = R.resolveNavigation('/' + DETAIL + '?assignment_id=1', { stack: stackOf([WORKBENCH]) })
+  assert.strictEqual(R.performPlan(good, {}).performed, false)
+})
+
+t('工作台可被冷启动深链进入（deepLink=allow 之后**不能**被误拦）', () => {
+  const g1 = R.guardEntry('/' + WORKBENCH, { coldStart: true })
+  assert.strictEqual(g1.ok, true, JSON.stringify(g1))
+  assert.strictEqual(g1.action, 'continue')
+  const g2 = R.guardEntry('/' + WORKBENCH + '?org_id=ORG-A', { coldStart: true, orgId: 'ORG-A' })
+  assert.strictEqual(g2.ok, true)
+})
+
+t('工作台非法/空 org_id 深链被拦（格式先于取数）', () => {
+  const bad = R.guardEntry('/' + WORKBENCH + '?org_id=' + encodeURIComponent('../etc'), {
+    coldStart: true
+  })
+  assert.strictEqual(bad.ok, false)
+  assert.strictEqual(bad.code, 'bad-params')
+  const empty = R.guardEntry('/' + WORKBENCH + '?org_id=', { coldStart: true })
+  assert.strictEqual(empty.ok, false)
+  assert.strictEqual(empty.code, 'bad-params')
+})
+
+t('详情页非法 id 字符被拦（初版只查 `!id`，这类会被放过去）', () => {
+  for (const v of ['a b', '../etc', 'x?y', '1/2', '%2e%2e']) {
+    const g = R.guardEntry('/' + DETAIL + '?assignment_id=' + v, { coldStart: true })
+    assert.strictEqual(g.ok, false, '未拦住 assignment_id=' + v)
+    assert.strictEqual(g.code, 'bad-params')
+  }
+  assert.strictEqual(R.guardEntry('/' + DETAIL + '?assignment_id=A-1_b', { coldStart: true }).ok, true)
+})
+
+t('不传 coldStart 时按「页面栈 ≤1 层」推断（无运行时 ⇒ 视为冷启动）', () => {
+  assert.strictEqual(R.currentDepth(), 0)
+  const g = R.guardEntry('/' + MINE)
+  assert.strictEqual(g.code, 'deep-link-denied', '没按冷启动处理：' + JSON.stringify(g))
+})
+
+t('MIGRATED_PAGES 与 ROUTES 一致（名单不得指向未登记页面）', () => {
+  assert.ok(R.MIGRATED_PAGES.length > 0, '名单为空：运行期治理没有任何页面在管')
+  for (const p of R.MIGRATED_PAGES) {
+    assert.ok(R.ROUTES[p], p + ' 在 MIGRATED_PAGES 里但未登记进 ROUTES')
+  }
+})
+
+t('未保存编辑：**压栈不卸载当前页** ⇒ 不打扰用户（不该弹窗）', () => {
+  const p = R.resolveNavigation('/' + DETAIL + '?assignment_id=1', {
+    from: WORKBENCH,
+    stack: stackOf([WORKBENCH]),
+    hasUnsaved: true
+  })
+  assert.strictEqual(p.ok, true, '压栈被未保存编辑拦下了：' + JSON.stringify(p))
+  assert.strictEqual(p.action, 'push')
+})
+
+t('未保存编辑：replace 边的 afterConfirm 是**可执行**计划（放弃后能进）', () => {
+  const p = R.resolveNavigation('/' + MATCH + '?mode=cargo&refId=3', {
+    from: CARGO,
+    stack: stackOf([CARGO]),
+    hasUnsaved: true
+  })
+  assert.strictEqual(p.action, 'confirm-unsaved')
+  assert.strictEqual(p.strategy, 'replace')
+  assert.ok(p.afterConfirm, '缺 afterConfirm：页面确认放弃后无从执行')
+  assert.strictEqual(p.afterConfirm.ok, true)
+  assert.strictEqual(p.afterConfirm.action, 'replace')
+  assert.strictEqual(R.performPlan(p.afterConfirm, {}).performed, false, 'CI 里没有 wx，不该真的跳')
+})
+
+t('未保存编辑：预算耗尽时 afterConfirm 是 blocked（放弃编辑也进不去，必须如实说）', () => {
+  const stack = stackOf([
+    'pages/index/index', MINE, CARGO, MATCH, ASSISTANT,
+    'pages/preview/preview', MINE, WORKBENCH
+  ])
+  assert.strictEqual(stack.length, R.STACK_BUDGET)
+  const p = R.resolveNavigation('/' + DETAIL + '?assignment_id=1', {
+    from: WORKBENCH, stack, hasUnsaved: true
+  })
+  assert.strictEqual(p.action, 'confirm-unsaved')
+  assert.ok(p.afterConfirm, '缺 afterConfirm')
+  assert.strictEqual(p.afterConfirm.ok, false)
+  assert.strictEqual(p.afterConfirm.code, 'stack-budget')
+  assert.ok(p.afterConfirm.fallback, 'blocked 计划必须带兜底去处')
 })
 
 // ─────────────────────────────────────────────────────────────

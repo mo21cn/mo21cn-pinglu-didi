@@ -42,7 +42,10 @@ const read = (p) => fs.readFileSync(path.join(MP, p), 'utf8')
 
 // ---------------------------------------------------------------- 运行时桩
 function makeWx() {
-  const calls = { actionSheet: [], modal: [], toast: [], switchTab: [], reLaunch: [], navigateTo: [] }
+  const calls = {
+    actionSheet: [], modal: [], toast: [], switchTab: [], reLaunch: [], navigateTo: [],
+    redirectTo: [], navigateBack: []
+  }
   const wx = {
     __calls: calls,
     showActionSheet: (o) => { calls.actionSheet.push(o); if (o && o.success) o.success({ tapIndex: 0 }) },
@@ -55,7 +58,9 @@ function makeWx() {
     switchTab: (o) => calls.switchTab.push(o),
     reLaunch: (o) => calls.reLaunch.push(o),
     navigateTo: (o) => calls.navigateTo.push(o),
-    redirectTo() {}, setClipboardData() {}, pageScrollTo() {},
+    redirectTo: (o) => calls.redirectTo.push(o),
+    navigateBack: (o) => calls.navigateBack.push(o || {}),
+    setClipboardData() {}, pageScrollTo() {},
     getWindowInfo: () => ({ statusBarHeight: 44, windowWidth: 375, windowHeight: 812 }),
     getSystemInfoSync: () => ({ statusBarHeight: 44, windowWidth: 375 }),
     getStorageSync: () => '', setStorageSync() {}, removeStorageSync() {},
@@ -65,7 +70,7 @@ function makeWx() {
   return wx
 }
 
-function makeRequire(wx, reqLog, authState) {
+function makeRequire(wx, reqLog, authState, extra) {
   const realPorts = require(path.join(MP, 'utils', 'ports.js'))
   // 纯常量/纯函数模块直接加载真实实现（P3-4 收敛后页面从这两个文件取数）
   const realConstants = require(path.join(MP, 'utils', 'constants.js'))
@@ -73,6 +78,13 @@ function makeRequire(wx, reqLog, authState) {
   const AUTH = authState || { loggedIn: true, user: { user_id: 1, current_role: 'shipper', roles: ['shipper'] } }
   return (p) => {
     const s = String(p)
+    // 调用方可按需注入（ENT-019 用它接入 utils/routes 真实实现 + utils/entrust 桩）。
+    // **必须排在下面所有分支之前**：这些是按子串匹配的，顺序错了就被内置桩盖住。
+    if (extra) {
+      for (const key of Object.keys(extra)) {
+        if (s.indexOf(key) !== -1) return extra[key]
+      }
+    }
     if (s.indexOf('utils/ports') !== -1) return realPorts
     if (s.indexOf('utils/constants') !== -1) return realConstants
     if (s.indexOf('utils/dates') !== -1) return realDates
@@ -175,10 +187,10 @@ function makeRequire(wx, reqLog, authState) {
 }
 
 /** 加载页面/组件 JS，返回其配置对象 */
-function loadConfig(file, kind, wx, reqLog, authState) {
+function loadConfig(file, kind, wx, reqLog, authState, extra) {
   const src = fs.readFileSync(file, 'utf8')
   let cfg = null
-  const req = makeRequire(wx, reqLog, authState)
+  const req = makeRequire(wx, reqLog, authState, extra)
   const getApp = () => ({ globalData: {}, routeByRole: () => '/pages/index/index' })
   if (kind === 'component') {
     new Function('require', 'Component', 'wx', 'getApp', src)(req, (c) => { cfg = c }, wx, getApp)
@@ -1178,6 +1190,318 @@ section('⑤ 静态防线')
 
     // —— 版本号（当前发布版 v0.5.1；升版时同步此处与 pages/mine/mine.wxml）——
     check('版本号已升到 v0.5.1', /v0\.5\.1/.test(read('pages/mine/mine.wxml')))
+  }
+
+  // ---------------------------------------------------------------- ⑨ 运行期导航治理接入（ENT-019）
+  // 为什么放在这一节而不是 verify_routes*.js：那两个脚本只证明「注册表对不对」，
+  // 证明不了「页面有没有真的用它」。ENT-018 交付之后 `miniapp/` 内对 routes.js
+  // 仍是**零引用** —— 页面栈预算与深链契约在运行期一次都没生效。
+  section('⑨ 运行期导航治理接入（go() / guardEntry / 未保存编辑保护）')
+  {
+    const ROUTES = require(path.join(MP, 'utils', 'routes.js'))
+    const WB = path.join(MP, 'pages/entrust/workbench/workbench.js')
+    const DT = path.join(MP, 'pages/entrust/detail/detail.js')
+    const SELF_WB = 'pages/entrust/workbench/workbench'
+    const SELF_DT = 'pages/entrust/detail/detail'
+
+    /** utils/entrust 的最小同构桩：只为让页面跑到"该拦 / 该跳"那一刻 */
+    const entrustStub = (log) => ({
+      STATUS_META: { new: { label: '待受理' } },
+      STATUS_ORDER: ['new'],
+      VIEW: { LOADING: 'loading', ERROR: 'error', EXPIRED: 'expired', DENIED: 'denied', EMPTY: 'empty', READY: 'ready' },
+      decorateList: (x) => x || [],
+      decorateOrgs: (x) => x || [],
+      decorateDetail: (x) => x,
+      pageHint: () => '',
+      // 恒返回 none（= 没有组织身份）→ workbench 停在 denied 态，不会继续取队列；
+      // 本节断言的是"守卫与跳转"，取数链路由 verify_entrust_ui / frontend_e2e 覆盖。
+      pickOrg: () => ({ orgId: '', reason: 'none' }),
+      fetchMyOrgs: () => { log.push('fetchMyOrgs'); return Promise.resolve({ items: [] }) },
+      fetchQueue: () => { log.push('fetchQueue'); return Promise.resolve({ items: [], total: 0 }) },
+      fetchAssignment: (id) => { log.push('fetchAssignment:' + id); return Promise.resolve({ assignment_id: id }) },
+      viewState: () => ({ state: 'empty', title: '还没有委托', hint: '' })
+    })
+
+    const loadEntrustPage = (file, wx, log) =>
+      loadConfig(file, 'page', wx, log, undefined, {
+        'utils/routes': ROUTES,
+        'utils/entrust': entrustStub(log)
+      })
+
+    /**
+     * 让 `go()` 真的"发生"：routes.js 是**被 require 的真实模块**，它判断
+     * `typeof wx` 时看的是全局，而页面里的 wx 是 `new Function` 的形参 ——
+     * 不挂到 global 上，`go()` 会一路返回 performed=false，断言就全成了空转。
+     * 同时可注入 `getCurrentPages()` 控制"冷启动 / 热路径"与页面栈内容。
+     */
+    const withRuntime = (wx, stack, fn) => {
+      const prevWx = global.wx
+      const prevPages = global.getCurrentPages
+      global.wx = wx
+      if (stack) global.getCurrentPages = () => stack
+      try {
+        return fn()
+      } finally {
+        if (prevWx === undefined) delete global.wx
+        else global.wx = prevWx
+        if (prevPages === undefined) delete global.getCurrentPages
+        else global.getCurrentPages = prevPages
+      }
+    }
+
+    // —— 工作台：入口守卫先于取数 ——
+    const wxBad = makeWx()
+    const logBad = []
+    const wbBad = instantiate(loadEntrustPage(WB, wxBad, logBad))
+    wbBad.onLoad({ org_id: '../etc' })
+    check(
+      '工作台：非法 org_id 深链被守卫拦下，且**不发起取数**',
+      wbBad.data.view === 'error' && logBad.length === 0,
+      'view=' + wbBad.data.view + ' log=' + JSON.stringify(logBad)
+    )
+    check(
+      '工作台：被拦时的文案来自守卫的 reason（不是笼统"加载失败"）',
+      wbBad.data.viewTitle === '入口参数不合法' && /格式非法|缺少参数值/.test(wbBad.data.viewHint || ''),
+      wbBad.data.viewTitle + ' / ' + wbBad.data.viewHint
+    )
+
+    const wxOk = makeWx()
+    const logOk = []
+    const wbOk = instantiate(loadEntrustPage(WB, wxOk, logOk), { activeOrgId: 'ORG-A' })
+    wbOk.onLoad({ org_id: 'ORG-A' })
+    check(
+      '工作台：合法 org_id 深链放行并进入取数链路',
+      logOk[0] === 'fetchMyOrgs',
+      JSON.stringify(logOk)
+    )
+
+    const wxPlain = makeWx()
+    const logPlain = []
+    const wbPlain = instantiate(loadEntrustPage(WB, wxPlain, logPlain))
+    wbPlain.onLoad({})
+    check(
+      '工作台：不带参数也能进（deepLink=allow，本页自己承担组织选择）',
+      logPlain[0] === 'fetchMyOrgs',
+      JSON.stringify(logPlain)
+    )
+
+    // —— 工作台：卡片 → 详情走 go() 的 push ——
+    withRuntime(wxOk, null, () => wbOk.onOpen({ currentTarget: { dataset: { id: 'A-123' } } }))
+    check(
+      '工作台：点卡片经 go() 用 navigateTo 打开详情',
+      wxOk.__calls.navigateTo.length === 1 &&
+        wxOk.__calls.navigateTo[0].url === '/pages/entrust/detail/detail?assignment_id=A-123',
+      JSON.stringify(wxOk.__calls.navigateTo)
+    )
+
+    // —— 工作台：复用键含委托 id 与当前组织（A4：同路径不同委托**不得**复用）——
+    // 说明：下面两个栈是**合成的**（当前注册表里还没有能让"详情在栈中、工作台在其上"
+    // 的路径），目的是把"页面把上下文交给 go() 了吗"这件事钉住；
+    // 真实链路上的复用行为由走查侧（A3/A4）覆盖。
+    const wxDiff = makeWx()
+    const wbDiff = instantiate(loadEntrustPage(WB, wxDiff, []), { activeOrgId: 'ORG-A' })
+    withRuntime(
+      wxDiff,
+      [
+        { route: SELF_DT, options: { assignment_id: 'A-999' } },
+        { route: SELF_WB, options: { org_id: 'ORG-A' } }
+      ],
+      () => {
+        wbDiff.onOpen({ currentTarget: { dataset: { id: 'A-123' } } })
+      }
+    )
+    check(
+      '工作台：栈里那张详情是**另一张**委托 ⇒ 压栈，不复用',
+      wxDiff.__calls.navigateTo.length === 1 && wxDiff.__calls.navigateBack.length === 0,
+      JSON.stringify(wxDiff.__calls)
+    )
+
+    const wxSame = makeWx()
+    const wbSame = instantiate(loadEntrustPage(WB, wxSame, []), { activeOrgId: 'ORG-A' })
+    withRuntime(
+      wxSame,
+      [
+        { route: SELF_DT, options: { assignment_id: 'A-123' } },
+        { route: SELF_WB, options: { org_id: 'ORG-A' } }
+      ],
+      () => {
+        wbSame.onOpen({ currentTarget: { dataset: { id: 'A-123' } } })
+      }
+    )
+    check(
+      '工作台：栈里那张详情就是**同一张**委托 ⇒ 返回复用，不重复压栈',
+      wxSame.__calls.navigateBack.length === 1 &&
+        wxSame.__calls.navigateBack[0].delta === 1 &&
+        wxSame.__calls.navigateTo.length === 0,
+      JSON.stringify(wxSame.__calls)
+    )
+
+    // —— 工作台：未保存编辑保护 ——
+    // 触发条件只有两个（DR-0011 §3.4：压栈在"未保存编辑"之前，**push 不卸载当前页**，
+    // 编辑没丢，故不该弹窗）：① 声明为 replace 的边；② 预算耗尽。
+    check('工作台：hasUnsaved() 明确返回布尔（当前无编辑面 ⇒ false）', wbOk.hasUnsaved() === false)
+
+    const wxPush = makeWx()
+    const wbPush = instantiate(loadEntrustPage(WB, wxPush, []), { activeOrgId: 'ORG-A' })
+    wbPush.hasUnsaved = () => true
+    withRuntime(wxPush, [{ route: SELF_WB, options: {} }], () => {
+      wbPush.onOpen({ currentTarget: { dataset: { id: 'A-1' } } })
+    })
+    check(
+      '工作台：有未保存编辑但只是**压栈** ⇒ 不打扰用户（当前页仍在栈里，编辑没丢）',
+      wxPush.__calls.modal.length === 0 && wxPush.__calls.navigateTo.length === 1,
+      JSON.stringify(wxPush.__calls)
+    )
+
+    const FULL_STACK = [
+      { route: 'pages/index/index', options: {} },
+      { route: 'pages/mine/mine', options: {} },
+      { route: 'pages/publish/cargo/cargo', options: {} },
+      { route: 'pages/trade/match/match', options: {} },
+      { route: 'pages/assistant/assistant', options: {} },
+      { route: 'pages/preview/preview', options: {} },
+      { route: 'pages/mine/mine', options: {} },
+      { route: SELF_WB, options: { org_id: 'ORG-A' } }
+    ]
+
+    const wxFull = makeWx()
+    // 弹窗**不回调** success：用来证明"用户还没答复时不得跳转"
+    wxFull.showModal = (o) => { wxFull.__calls.modal.push(o) }
+    const wbFull = instantiate(loadEntrustPage(WB, wxFull, []), { activeOrgId: 'ORG-A' })
+    wbFull.hasUnsaved = () => true
+    withRuntime(wxFull, FULL_STACK, () => {
+      wbFull.onOpen({ currentTarget: { dataset: { id: 'A-1' } } })
+    })
+    check(
+      '工作台：栈到预算 + 有未保存编辑 ⇒ 拉确认弹窗，且**不静默跳转**',
+      wxFull.__calls.modal.length === 1 && wxFull.__calls.navigateTo.length === 0,
+      JSON.stringify(wxFull.__calls)
+    )
+
+    const wxFull2 = makeWx()
+    const wbFull2 = instantiate(loadEntrustPage(WB, wxFull2, []), { activeOrgId: 'ORG-A' })
+    wbFull2.hasUnsaved = () => true
+    withRuntime(wxFull2, FULL_STACK, () => {
+      wbFull2.onOpen({ currentTarget: { dataset: { id: 'A-1' } } })
+    })
+    check(
+      '工作台：确认放弃编辑后若仍然进不去（预算耗尽）⇒ 如实告知，不假装成功',
+      wxFull2.__calls.navigateTo.length === 0 &&
+        wxFull2.__calls.toast.length === 1 &&
+        /预算/.test(wxFull2.__calls.toast[0].title || ''),
+      JSON.stringify(wxFull2.__calls)
+    )
+
+    const wxRep = makeWx()
+    const wbRep = instantiate(loadEntrustPage(WB, wxRep, []), { activeOrgId: 'ORG-A' })
+    // replace 边的 confirm-unsaved 计划（本页没有 replace 边，故直接驱动处理函数）
+    withRuntime(wxRep, null, () =>
+      wbRep.confirmLeave({
+        ok: false,
+        action: 'confirm-unsaved',
+        code: 'unsaved-edit',
+        strategy: 'replace',
+        path: SELF_DT,
+        url: '/pages/entrust/detail/detail?assignment_id=A-7',
+        afterConfirm: {
+          ok: true,
+          action: 'replace',
+          strategy: 'replace',
+          path: SELF_DT,
+          url: '/pages/entrust/detail/detail?assignment_id=A-7'
+        }
+      })
+    )
+    check(
+      '工作台：确认放弃编辑后执行 afterConfirm（replace ⇒ redirectTo）',
+      wxRep.__calls.modal.length === 1 &&
+        wxRep.__calls.redirectTo.length === 1 &&
+        wxRep.__calls.redirectTo[0].url === '/pages/entrust/detail/detail?assignment_id=A-7',
+      JSON.stringify(wxRep.__calls)
+    )
+
+    // —— 工作台：返回键（冷启动不能"点了没反应"） ——
+    const wxCold = makeWx()
+    const wbCold = instantiate(loadEntrustPage(WB, wxCold, []))
+    withRuntime(wxCold, [{ route: SELF_WB, options: {} }], () => wbCold.onBack())
+    check(
+      '工作台：冷启动（栈里只有本页）返回键 → reLaunch 首页，而不是无效的 navigateBack',
+      wxCold.__calls.reLaunch.length === 1 &&
+        wxCold.__calls.reLaunch[0].url === '/pages/index/index' &&
+        wxCold.__calls.navigateBack.length === 0,
+      JSON.stringify(wxCold.__calls)
+    )
+
+    const wxWarm = makeWx()
+    const wbWarm = instantiate(loadEntrustPage(WB, wxWarm, []))
+    withRuntime(wxWarm, [{ route: 'pages/mine/mine', options: {} }, { route: SELF_WB, options: {} }], () =>
+      wbWarm.onBack()
+    )
+    check(
+      '工作台：热路径返回键 → navigateBack（返回上一页目标是动态的，不需要声明边）',
+      wxWarm.__calls.navigateBack.length === 1 && wxWarm.__calls.reLaunch.length === 0,
+      JSON.stringify(wxWarm.__calls)
+    )
+
+    // —— 工作台：登录过期回首页 ——
+    const wxRe = makeWx()
+    const wbRe = instantiate(loadEntrustPage(WB, wxRe, []))
+    withRuntime(wxRe, [{ route: SELF_WB, options: {} }], () => wbRe.onRelogin())
+    check(
+      '工作台：登录过期回首页走 reset 边 → reLaunch（不再裸调 wx.reLaunch）',
+      wxRe.__calls.reLaunch.length === 1 && wxRe.__calls.reLaunch[0].url === '/pages/index/index',
+      JSON.stringify(wxRe.__calls)
+    )
+
+    // —— 详情页：入口守卫 ——
+    const dtMiss = makeWx()
+    const logDtMiss = []
+    const dt1 = instantiate(loadEntrustPage(DT, dtMiss, logDtMiss))
+    dt1.onLoad({})
+    check(
+      '详情页：缺 assignment_id → error 态且不取数（错误优先于空）',
+      dt1.data.view === 'error' && dt1.data.viewTitle === '缺少委托编号' && logDtMiss.length === 0,
+      dt1.data.view + ' / ' + dt1.data.viewTitle + ' / ' + JSON.stringify(logDtMiss)
+    )
+
+    const dtBad = makeWx()
+    const logDtBad = []
+    const dt2 = instantiate(loadEntrustPage(DT, dtBad, logDtBad))
+    dt2.onLoad({ assignment_id: '../etc' })
+    check(
+      '详情页：非法 id 字符 → error 态且不取数（初版只查 `!id` 会放过去）',
+      dt2.data.view === 'error' && dt2.data.viewTitle === '委托编号不合法' && logDtBad.length === 0,
+      dt2.data.view + ' / ' + dt2.data.viewTitle + ' / ' + JSON.stringify(logDtBad)
+    )
+
+    const dtOk = makeWx()
+    const logDtOk = []
+    const dt3 = instantiate(loadEntrustPage(DT, dtOk, logDtOk))
+    dt3.onLoad({ assignment_id: 'A-1_2' })
+    check(
+      '详情页：合法 id 放行并取数',
+      logDtOk.length === 1 && logDtOk[0] === 'fetchAssignment:A-1_2',
+      JSON.stringify(logDtOk)
+    )
+
+    const dtCold = makeWx()
+    const dt4 = instantiate(loadEntrustPage(DT, dtCold, []))
+    withRuntime(dtCold, [{ route: SELF_DT, options: {} }], () => dt4.onBack())
+    check(
+      '详情页：冷启动返回键 → reLaunch 首页（不再是无效的 navigateBack）',
+      dtCold.__calls.reLaunch.length === 1 && dtCold.__calls.navigateBack.length === 0,
+      JSON.stringify(dtCold.__calls)
+    )
+
+    // —— 两页都不再裸调 wx 导航（运行期治理真的接上了） ——
+    for (const [file, label] of [[WB, '工作台'], [DT, '详情']]) {
+      const src = fs.readFileSync(file, 'utf8')
+      check(
+        `${label}页：不再出现裸 wx.navigateTo / redirectTo / reLaunch`,
+        !/wx\.(navigateTo|redirectTo|reLaunch)\s*\(/.test(src)
+      )
+      check(`${label}页：确实调用了 go( / guardEntry(`, /\bgo\(/.test(src) && /\bguardEntry\(/.test(src))
+    }
   }
 
   // ---------------------------------------------------------------- 汇总

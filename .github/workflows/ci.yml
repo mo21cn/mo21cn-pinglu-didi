@@ -230,6 +230,10 @@ jobs:
         run: node scripts/verify_miniapp.js
 
       - name: UI 交互契约校验
+        # ENT-019 起含第 ⑨ 节：加载两个委托页的真实 JS（桩掉 wx / utils），
+        # 断言入口守卫先于取数、卡片经 go() 打开详情、冷启动返回键走 reLaunch、
+        # 未保存编辑只在 replace / 预算耗尽时提示。verify_routes* 只能证明
+        # 「注册表对不对」，证明不了「页面有没有真的用它」。
         run: node scripts/verify_ui_interactions.js
 
       - name: 委托发货前端契约校验
@@ -242,6 +246,8 @@ jobs:
         # 注册表 ⇄ app.json 双向一致、声明链深 ≤ STACK_BUDGET、导航边契约（ENT-018：
         # 代码里的每条边都必须在 NAV_EDGES 声明过；push/replace 边无代码证据必须标 pending）。
         # 新增页面不在 miniapp/utils/routes.js 登记 → 本步红。
+        # ENT-019 起还核对 `MIGRATED_PAGES`：名单内的页面不得再出现裸
+        # wx.navigateTo / redirectTo / switchTab / reLaunch，必须经 go()。
         run: node scripts/verify_routes.js
 
       - name: 路由模块行为测试（参数契约 / 复用键 / 策略链 / 环）
