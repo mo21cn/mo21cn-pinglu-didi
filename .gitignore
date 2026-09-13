@@ -56,6 +56,9 @@ tmp/
 temp/
 *.tmp
 
+# ===== 真机走查产物（截图 / summary.json，只作过程证据，不入库）=====
+miniapp-device-artifacts/
+
 # ===== SQLite 本地库（开发/测试） =====
 *.db
 *.sqlite3
