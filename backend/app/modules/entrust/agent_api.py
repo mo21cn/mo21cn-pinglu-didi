@@ -16,6 +16,7 @@
 - POST   /api/v1/entrust/agent/jobs/{jid}/run               worker 单步推进（幂等）
 - POST   /api/v1/entrust/agent/jobs/{jid}/retry             显式重试（幂等）
 - POST   /api/v1/entrust/agent/jobs/{jid}/cancel            取消（幂等）
+- POST   /api/v1/entrust/agent/jobs/{jid}/adopt             采纳提案为成果（归属服务端派生，幂等）
 - GET    /api/v1/entrust/agent/specialties                  专业槽位与开放状态
 
 权限（AC-10，全部走 `authz.py` 这条唯一入口）
@@ -38,8 +39,9 @@
 --------------------
 * **没有常驻 worker**：`POST /agent/jobs/{jid}/run` 是"推进一次"的显式入口，
   也供 CI 驱动整条链路；生产应由定时任务调用 `agentjobs.tick()`；
-* 作业成功后只产出**信封（提案）**，不会自动写成果 —— 把提案变成成果必须再走
-  `POST /entrustments/{eid}/artifacts`（AC-09）；
+* 作业成功后只产出**信封（提案）**，不会自动写成果 —— 把提案变成成果有两条显式路径：
+  `POST /entrustments/{eid}/artifacts`（直接创建）与 `POST /agent/jobs/{jid}/adopt`
+  （采纳该作业的提案，归属由作业行派生）。两条路径都**必须由人工发起**（AC-09）；
 * 附件文本提取（S1 第 6 条）未实现，因此 AG-02 目前以**操作者粘贴的报价文本**
   为输入；附件只作为来源引用被登记。
 """
@@ -55,20 +57,23 @@ from app.core.database import get_db
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.entrust import agentjobs as jobs_svc
+from app.modules.entrust import artifacts as art
 from app.modules.entrust import sessions as sess_svc
 from app.modules.entrust._http import (
     guard_or_400,
     map_access_denied,
+    map_artifact_error,
     require_entrust_enabled,
     run_write,
 )
-from app.modules.entrust.access import PERM_AGENT_JOB, PERM_VIEW
+from app.modules.entrust.access import PERM_AGENT_JOB, PERM_QUOTE_CREATE, PERM_VIEW
 from app.modules.entrust.authz import (
     assert_can_view_entrustment,
     assert_can_view_scoped_object,
     assert_can_write_entrustment,
     assert_org_member,
     load_assignment,
+    load_assignment_for_entrustment,
     load_entrustment,
     not_found,
 )
@@ -80,6 +85,7 @@ from app.modules.entrust.schemas import (
     AgentJobDetailOut,
     AgentJobListOut,
     AgentJobOut,
+    ArtifactAdoptIn,
     JobAttemptOut,
     JobCreate,
     SessionCreate,
@@ -102,6 +108,7 @@ _SCOPE_JOB_SUBMIT = "entrust:agent:job:submit"
 _SCOPE_JOB_RUN = "entrust:agent:job:run"
 _SCOPE_JOB_RETRY = "entrust:agent:job:retry"
 _SCOPE_JOB_CANCEL = "entrust:agent:job:cancel"
+_SCOPE_JOB_ADOPT = "entrust:agent:job:adopt"
 
 
 def _map_errors(exc: Exception) -> HTTPException | None:
@@ -243,15 +250,18 @@ def create_session(
     org_id = int(entrustment["org_id"]) if entrustment.get("org_id") is not None else None
 
     assignment_id = data.assignment_id
-    if assignment_id is not None:
-        assignment = load_assignment(db, assignment_id)
-        # 委托单必须与授权**同属一个货主与组织**，否则会话会把两个上下文缝在一起
-        if (
-            assignment is None
-            or int(assignment["owner_user_id"]) != owner_user_id
-            or assignment.get("org_id") != org_id
-        ):
-            raise HTTPException(status_code=400, detail="委托单不属于该委托授权，不能创建会话")
+    if assignment_id is not None and (
+        # 委托单必须与授权**同属一个货主与组织**，否则会话会把两个上下文缝在一起。
+        # 规则实现在 authz.load_assignment_for_entrustment（与成果归属共用一份）。
+        load_assignment_for_entrustment(
+            db,
+            entrustment=entrustment,
+            assignment_id=assignment_id,
+            detail="委托单不属于该委托授权，不能创建会话",
+        )
+        is None
+    ):
+        raise HTTPException(status_code=400, detail="委托单不属于该委托授权，不能创建会话")
 
     payload = data.model_dump(mode="json")
     return run_write(
@@ -639,4 +649,108 @@ def cancel_job(
             jobs_svc.cancel_job(db, job_id=job_id, actor_id=int(user.id))
         ).model_dump(mode="json"),
         map_domain_error=_map_errors,
+    )
+
+
+# ── 提案采纳（DR-0012）──────────────────────────────────────────────────────
+
+
+def _proposed_artifact_types(job: dict[str, Any]) -> set[str]:
+    """作业信封里**实际提出过**的成果类型（提案 ≠ 成果，这里只读不写）。"""
+    envelope = job.get("envelope") or {}
+    proposals = envelope.get("artifact_proposals") or []
+    return {
+        str(item["artifact_type"])
+        for item in proposals
+        if isinstance(item, dict) and item.get("artifact_type")
+    }
+
+
+@router.post(
+    "/agent/jobs/{job_id}/adopt",
+    summary="采纳作业提案为成果（归属由服务端派生，source=agent，幂等）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def adopt_job_proposal(
+    job_id: int,
+    data: ArtifactAdoptIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    idempotency_key: Annotated[str | None, Header()] = None,
+) -> Any:
+    """把一份通过校验的 Agent 提案**变成成果**（DR-0012 的「Agent 采纳」入口）。
+
+    为什么归属必须由服务端派生
+    --------------------------
+    "具体委托内的新成果必须有有效归属"这句话只有在**服务端知道上下文**时才能被
+    强制：如果归属由请求体声明，调用方可以不声明，规则就退化成"自愿遵守"。
+    这里归属取自**作业行自己记录的 `assignment_id`**（提交作业时从会话继承），
+    请求体里根本没有这个字段 —— 调用方无从绕过。
+
+    权限与前置
+    ----------
+    * 可见性：`_visible_job`（随会话/委托/委托单走），不可见 404；
+    * 写权限：`entrust:quote:create`，按**该作业所属授权**的货主作用域判定
+      （采纳等于创建成果，权限也就等于创建成果的权限，不新造权限码）；
+    * 作业必须是 `succeeded` —— 只有成功作业才有通过校验的 `envelope_json`；
+    * `artifact_type` 必须是该作业**确实提出过**的类型，否则 400（防张冠李戴）。
+
+    已知限制（如实记录，不假装已解决）
+    ----------------------------------
+    * 没有 `entrustment_id` 的作业（只挂委托单或私有会话）**不能采纳**：成果表的
+      `entrustment_id` 仍为 NOT NULL，而从 (货主, 组织) 反推授权会猜错（同一
+      (org, owner) 可能有多条授权记录）。这类作业走 400 并被明确告知原因；
+    * **防重复采纳只靠幂等键**：同一提案用**不同**幂等键再次采纳会再产生一份成果。
+      要按 (job, artifact_type) 硬去重，需要在成果上记录"来自哪个作业哪份提案"的
+      来源列 —— 那是独立增量，本次不做，列在 DR-0012 的未完成项里。
+    """
+    key = guard_or_400(idempotency_key)
+    job = _visible_job(db, user_id=int(user.id), job_id=job_id)
+    entrustment_id = job.get("entrustment_id")
+    if entrustment_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="该作业没有关联委托授权，无法确定成果归属（成果必须挂在生效授权下）",
+        )
+    entrustment = load_entrustment(db, int(entrustment_id))
+    if entrustment is None:
+        raise not_found("成果不存在")
+    assert_can_write_entrustment(
+        db,
+        user_id=int(user.id),
+        permission=PERM_QUOTE_CREATE,
+        entrustment=entrustment,
+        detail="成果不存在",
+    )
+    if job.get("status") != jobs_svc.STATUS_SUCCEEDED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"作业状态为 {job.get('status')}，只有 succeeded 的作业有可采纳的提案",
+        )
+    artifact_type = data.artifact_type.strip()
+    proposed = _proposed_artifact_types(job)
+    if artifact_type not in proposed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"该作业没有提出 {artifact_type!r} 类型的提案（实际提案：{sorted(proposed)}）",
+        )
+    source_assignment_id = job.get("assignment_id")
+    payload = {"job_id": job_id, **data.model_dump(mode="json")}
+    return run_write(
+        db,
+        scope=_SCOPE_JOB_ADOPT,
+        key=key,
+        actor_user_id=int(user.id),
+        payload=payload,
+        business=lambda: art.create_artifact(
+            db,
+            entrustment_id=int(entrustment_id),
+            artifact_type=artifact_type,
+            payload=data.payload,
+            created_by=int(user.id),
+            source=art.SOURCE_AGENT,
+            note=data.note,
+            assignment_id=(int(source_assignment_id) if source_assignment_id is not None else None),
+        ),
+        map_domain_error=map_artifact_error,
     )

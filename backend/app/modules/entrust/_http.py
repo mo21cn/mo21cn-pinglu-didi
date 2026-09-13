@@ -50,6 +50,28 @@ def map_access_denied(exc: Exception) -> HTTPException | None:
     return None
 
 
+def map_artifact_error(exc: Exception) -> HTTPException | None:
+    """成果服务异常 → HTTP 语义（**两个入口共用一份口径**）。
+
+    成果创建有两条入口：直接创建（`artifacts_api`）与采纳 Agent 提案（`agent_api`）。
+    两处各写一遍映射，迟早会出现"同一个异常在一个入口是 409、在另一个是 400"；
+    而调用方看到的差异会被当成业务差异去适配。无法识别的异常返回 `None`，
+    由调用方原样抛出 —— 不吞真实 bug。
+    """
+    from app.modules.entrust import artifacts as art
+
+    mapped = map_access_denied(exc)
+    if mapped is not None:
+        return mapped
+    if isinstance(exc, art.ArtifactNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (art.ArtifactVoidError, art.ManualTakeoverError)):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, art.ArtifactError):
+        return HTTPException(status_code=400, detail=str(exc))
+    return None
+
+
 def run_write(
     db: Session,
     *,
@@ -89,6 +111,7 @@ def run_write(
 __all__ = [
     "guard_or_400",
     "map_access_denied",
+    "map_artifact_error",
     "require_entrust_enabled",
     "replay",
     "run_write",
