@@ -42,6 +42,12 @@ const CONTRACT_ERR = {} // orderId → 服务端拒答原文
 let refCargoId = 0
 let refShipId = 0
 
+// 委托支线（ENT-022）：这些载荷的可见性口径与前 13 页**不同** —— 它走
+// 「组织成员 + 委托授权」的叠加层，与 `current_role` 无关（DR-0008）。
+const entrustDetail = {}        // assignmentId → 委托详情
+const entrustWorkbench = {}     // assignmentId → 七槽位工作台摘要
+const entrustQueueByStatus = {} // status → 组织队列（同一筛选条件下的**真载荷**）
+
 const qs = (p) => (p ? '?' + new URLSearchParams(p).toString() : '')
 
 async function api(method, p, { token, body } = {}) {
@@ -148,10 +154,52 @@ async function bootstrap() {
   else note('S2 支付 · 库内无「已撮合且运费已定、尚未发起支付」的订单，正向发起入口用例由 seed 待支付锚点预建的支付单覆盖')
   if (noPayNo) D.payCases.push([noPayNo.id, '无支付单·不可支付', false])
 
+  // ── 委托支线载荷（ENT-022）──────────────────────────────────────────────
+  // 委托页面取数走**叠加层**身份（组织成员 / 委托授权），不是 `current_role`。
+  // 所以这里刻意复用两个**既有** token：
+  //   · seed-shipper —— 委托的创建人（详情页可见性来自"我是创建人"）；
+  //   · seed-owner   —— 演示组织的经理（队列页的组织视角）。
+  // 把两个账号放到正确成员位置上的是 `backend/scripts/seed_entrust_demo.py`；
+  // 本脚本不新增登录身份，也就不需要 `dev_login_code` 之外的任何约定。
+  D.entrustMine = await get('/entrust/assignments', 'shipper', { view: 'owner', size: 50 })
+  D.entrustOrgs = await get('/entrust/my-orgs', 'owner')
+  const entrustOrgId = (D.entrustOrgs.items || []).length ? D.entrustOrgs.items[0].org_id : null
+  if (entrustOrgId) {
+    D.entrustQueue = await get('/entrust/assignments', 'owner',
+      { view: 'org', org_id: entrustOrgId, size: 50 })
+    // 筛选条件下的真载荷：不给真载荷的话，"点筛选后列表变了没"只能证明
+    // 页面把数组换掉了，证明不了它换对了 —— 那正是筛选最容易错的地方。
+    for (const st of ['draft', 'submitted', 'claimed', 'cancelled']) {
+      entrustQueueByStatus[st] = await get('/entrust/assignments', 'owner',
+        { view: 'org', org_id: entrustOrgId, status: st, size: 50 })
+    }
+  } else {
+    D.entrustQueue = { total: 0, page: 1, size: 50, items: [] }
+  }
+
+  for (const a of D.entrustMine.items || []) {
+    const d = await api('GET', '/entrust/assignments/' + a.assignment_id, { token: tok.shipper })
+    if (d.status === 200) entrustDetail[a.assignment_id] = d.data
+    const w = await api('GET', '/entrust/assignments/' + a.assignment_id + '/workbench',
+      { token: tok.shipper })
+    if (w.status === 200) entrustWorkbench[a.assignment_id] = w.data
+  }
+  D.entrustCases = (D.entrustMine.items || []).map((a) => [
+    a.assignment_id,
+    '#' + a.assignment_id + ' ' + a.status,
+    a.status === 'submitted'
+  ])
+
   console.log('载荷就绪：货 %d · 船 %d · 泊位 %d · 预约 %d · 订单 %d · 支付单 %d · 合同 %d',
     (D.cargoList.items || []).length, (D.ships.items || []).length, (D.berths.items || []).length,
     (D.appts.items || []).length, (D.orders.items || []).length,
     Object.keys(payments).length, Object.keys(contracts).length)
+  console.log('委托载荷：我的委托 %d · 组织队列 %d · 组织 %d 个 · 工作台 %d 张',
+    (D.entrustMine.items || []).length, (D.entrustQueue.items || []).length,
+    (D.entrustOrgs.items || []).length, Object.keys(entrustWorkbench).length)
+  if (!(D.entrustMine.items || []).length) {
+    note('委托支线无载荷 —— 请确认已铺 backend/scripts/seed_entrust_demo.py')
+  }
 }
 
 /** url → 载荷（与页面真实请求一一对应） */
@@ -182,6 +230,35 @@ function route(url, body) {
   if (u.indexOf('/ship/registry') === 0) return { ok: D.ships }
   if (u.indexOf('/cargo/shipments') === 0) return { ok: D.cargoList }
   if (u.indexOf('/order/orders') === 0) return { ok: D.orders }
+
+  // ── 委托支线（ENT-022）──────────────────────────────────────────────
+  // 顺序要紧：`/workbench` 与 `/{id}` 都用**精确正则**，必须排在「列表」之前 ——
+  // 否则 `fetchWorkbench` 会被列表分支接走，页面把一个分页对象当成工作台用。
+  // 那种错不会抛异常，只会让七个槽位全部空掉（看起来像"这单还没数据"）。
+  if ((m = u.match(/^\/entrust\/assignments\/(\d+)\/workbench$/))) {
+    const w = entrustWorkbench[Number(m[1])]
+    return w ? { ok: w } : { err: '工作台不存在：' + m[1] }
+  }
+  if ((m = u.match(/^\/entrust\/assignments\/(\d+)$/))) {
+    const d = entrustDetail[Number(m[1])]
+    return d ? { ok: d } : { err: '委托不存在：' + m[1] }
+  }
+  if (u === '/entrust/my-orgs') return { ok: D.entrustOrgs }
+  if (u === '/entrust/assignments') {
+    const q = body || {}
+    if ((q.view || 'owner') === 'org') {
+      if (q.status) {
+        const r = entrustQueueByStatus[q.status]
+        return r ? { ok: r } : { err: '未拉取状态 ' + q.status + ' 的队列载荷' }
+      }
+      return { ok: D.entrustQueue }
+    }
+    return { ok: D.entrustMine }
+  }
+  // 写端点（记录任务 / 受理委托）**有意不登记**：本脚本只驱动取数链路，
+  // 页面若在取数时误发写请求，应在这里显式失败而不是被静默吞掉。
+  if (u.indexOf('/entrust/') === 0) return { err: '未登记的委托接口 ' + u }
+
   if (u === '/healthz') return { ok: { status: 'ok' } }   // 首页连通性预检
   return { err: '未登记的接口 ' + u }
 }
@@ -275,9 +352,34 @@ function loadPage(file, ctx) {
     // 的四种分支由 scripts/verify_entrust_ui.js 用真实输入逐一覆盖。
     // ⚠️ 新增 utils/*.js 时必须在此登记：未登记的模块会落到末尾的 `return {}`，
     // 表现为页面调用时 "xxx is not a function"（本模块首次接入时就这样红过一次）。
+    // 委托发货（ENT-022）：**常量与投影用真实实现** —— 槽位配置表、四态文案、
+    // 「未开放 ≠ 空」的分支全在 utils/entrust.js 里，桩掉它等于把被测对象换成
+    // 我自己写的假货。只把**取数**接到本脚本的 route() 上：载荷仍是 bootstrap
+    // 用真实接口拉回来的，页面拿到的形状与真机一致（这就是 route() 的意义）。
+    //
+    // ⚠️ 新增一个取数函数就必须在此登记 —— 漏登记的会落到真实 request.js，
+    //    在 Node 里（无 wx.request）直接抛错，表现为"页面取数失败"，
+    //    与真实的接口问题长得一样，很难一眼分辨。
     if (s.indexOf('utils/entrust') !== -1) {
-      return Object.assign({}, U('entrust.js'), {
+      const real = U('entrust.js')
+      const fetchVia = (url, data) => {
+        const r = route(url, data)
+        return r.err ? Promise.reject(new Error(r.err)) : Promise.resolve(r.ok)
+      }
+      return Object.assign({}, real, {
         probeEntry: () => Promise.resolve({ visible: false, reason: 'denied', hint: '' }),
+        fetchMyOrgs: () => fetchVia('/entrust/my-orgs'),
+        fetchQueue: (opts) => {
+          const o = opts || {}
+          const data = { view: 'org', page: o.page || 1, size: o.size || 20 }
+          if (o.orgId) data.org_id = o.orgId
+          if (o.status) data.status = o.status
+          return fetchVia('/entrust/assignments', data)
+        },
+        fetchAssignment: (id) => fetchVia('/entrust/assignments/' + id),
+        fetchWorkbench: (id) => fetchVia('/entrust/assignments/' + id + '/workbench'),
+        createTask: () => Promise.resolve({}),
+        claimAssignment: () => Promise.resolve({})
       })
     }
     if (s.indexOf('auth') !== -1) {
@@ -383,6 +485,12 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     console.error('\n[FATAL] 初始化失败：' + e.message)
     console.error('请确认：① 后端已启动（cd backend && LLM_MOCK=true WECHAT_MOCK=true uvicorn app.main:app）')
     console.error('        ② 演示数据已铺（backend/scripts/seed_demo.py）')
+    // 委托端点整组 500 的**首要**原因不是种子、而是缺表：`ent_` 前缀的表由
+    // `backend/migrations/` 管理，`app/main.py` 里的 create_all 明确排除了它们（DR-0001）。
+    // 少跑迁移时 /api/v1/entrust/* 会全部 500，而 500 在日志里读起来很像"委托没数据" ——
+    // 2026-09-14 CI 上「前端端到端」job 就是这么红的，故把迁移写进提示。
+    console.error('        ③ 迁移已应用（cd backend && python migrate.py）—— ent_ 表不在 create_all 范围内')
+    console.error('        ④ 委托开关已开、委托种子已铺（ENTRUST_ENABLED=true；backend/scripts/seed_entrust_demo.py）')
     process.exit(2)
   }
 
@@ -633,6 +741,209 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
   // ⑫ 发布货物 / 我的
   await walk('04 发布货物', 'pages/publish/cargo/cargo', null, { role: 'shipper' }, ['onLoad'])
   await walk('08 我的', 'pages/mine/mine', null, { role: 'shipper' }, ['onLoad', 'onShow'])
+
+  // ══════════════════ 委托支线（ENT-022）：两页真载荷走查 ══════════════════
+  //
+  // 为什么值得单独一段：委托支线此前**没有**任何真载荷走查 —— 前端投影只被
+  // 「同形 fixture + 静态交叉断言」覆盖，后端把 `state` 语义改掉时静态断言不会红，
+  // 界面会静默显示「不适用」「无未决问题」这类**错误的业务结论**。
+  // 这一段把载荷换成真接口返回的，专门盯「后端说什么 ↔ 界面显示什么」。
+  const E = require(path.join(ROOT, 'miniapp', 'utils', 'entrust.js'))
+
+  // ⑬ 委托队列（经理工作台 · 组织视角）
+  //
+  // 本页取数链是「先定位组织，再取队列」。两步都要断言：组织清单的失败**不能**
+  // 被当成"没有组织"（那是把网络故障说成"还没加入经营主体"这种业务事实）。
+  {
+    const eOrg = (D.entrustOrgs.items || [])[0]
+    const s = await walk('09 委托队列 · 经理工作台', 'pages/entrust/workbench/workbench',
+      null, { role: 'owner' }, ['onLoad'])
+    if (s && !eOrg) {
+      note('09 委托队列 · seed-owner 无组织身份，队列断言跳过（需先铺 seed_entrust_demo.py）')
+    } else if (s) {
+      const d = s._final()
+      // 只有一个组织 → 必须走 `only`：不该让用户为唯一选项做一次选择
+      if (String(d.activeOrgId) !== String(eOrg.org_id)) {
+        fail('09 队列 · 组织未定位到唯一组织', 'activeOrgId=' + d.activeOrgId + ' 期望=' + eOrg.org_id)
+      } else ok()
+      if (d.orgReason !== 'only') fail('09 队列 · 单组织未走 only 分支', String(d.orgReason))
+      else ok()
+      expectList('09 队列 · 委托列表', d.items, 'items', { nonEmpty: true })
+      if (d.total !== D.entrustQueue.total) {
+        fail('09 队列 · total 与载荷不符', d.total + ' vs ' + D.entrustQueue.total)
+      } else ok()
+      const wantIds = (D.entrustQueue.items || []).map((x) => String(x.assignment_id))
+      const gotIds = (d.items || []).map((x) => String(x.assignmentId))
+      if (gotIds.join(',') !== wantIds.join(',')) {
+        fail('09 队列 · 条目与载荷不一致', gotIds.join(',') + ' vs ' + wantIds.join(','))
+      } else ok()
+
+      // 筛选：只断言"数组换了"没有意义（换错了也一样通过），要与该筛选条件下的
+      // **真载荷**对照 —— 这正是筛选最容易错的地方。
+      for (const st of ['claimed', 'submitted']) {
+        const want = entrustQueueByStatus[st]
+        if (!want) continue
+        let thrown = null
+        try { s.onFilter({ currentTarget: { dataset: { key: st } } }) } catch (e) { thrown = e }
+        await tick(90)
+        if (thrown) { fail('09 队列 · 筛选 ' + st + ' 抛异常', thrown.message); continue }
+        const d2 = s._final()
+        const got = (d2.items || []).map((x) => String(x.assignmentId)).sort().join(',')
+        const exp = (want.items || []).map((x) => String(x.assignment_id)).sort().join(',')
+        if (got !== exp) fail('09 队列 · 筛选 ' + st + ' 条目与载荷不符', got + ' vs ' + exp)
+        else if (d2.total !== want.total) fail('09 队列 · 筛选 ' + st + ' total 不符', d2.total + ' vs ' + want.total)
+        else ok()
+        collect('pages/entrust/workbench/workbench',
+          path.join(ROOT, 'miniapp/pages/entrust/workbench/workbench.js'), d2)
+      }
+    }
+  }
+
+  // ⑭ 委托详情（单张委托工作台 · 七槽位）
+  //
+  // 三层断言，越往下越能抓到"看错地方"的错：
+  //   ① 结构：七个槽位都在、顺序与前端配置表一致；
+  //   ② 逐槽与**后端返回**对照：四态是后端定的，界面只是译成文案 —— 译错就是
+  //      「该去补数据」被说成「这一槽本来就没有内容」；
+  //   ③ 语义：未开放槽不得落进四态；历史成果计数如实。
+  for (const [aid, tag, wantClaim] of D.entrustCases) {
+    const s = await walk('09 委托详情 · ' + tag, 'pages/entrust/detail/detail', null,
+      { role: 'shipper', arg: { assignment_id: String(aid) } }, ['onLoad'])
+    if (!s) continue
+    const d = s._final()
+    const wb = entrustWorkbench[aid]
+    const slots = d.slots || []
+
+    if (String(d.assignmentId) !== String(aid)) {
+      fail('09 详情 #' + aid + ' · 页面持有的委托编号不对', String(d.assignmentId))
+    } else ok()
+    if (slots.length !== E.WORKBENCH_SLOTS.length) {
+      fail('09 详情 #' + aid + ' · 槽位数与配置表不符',
+        slots.length + ' vs ' + E.WORKBENCH_SLOTS.length)
+      continue
+    }
+    const gotKeys = slots.map((x) => x.key).join(',')
+    const wantKeys = E.WORKBENCH_SLOTS.map((x) => x.key).join(',')
+    if (gotKeys !== wantKeys) fail('09 详情 #' + aid + ' · 槽位顺序与配置表不符', gotKeys)
+    else ok()
+
+    if (!wb) { note('09 详情 #' + aid + ' · 无工作台载荷，逐槽核对跳过'); continue }
+
+    const raw = {}
+    ;(wb.slots || []).forEach((x) => { raw[x.key] = x })
+    let opened = 0
+    let closedKeys = []
+    for (const view of slots) {
+      const back = raw[view.key]
+      const pre = '09 详情 #' + aid + ' · ' + view.key + ' '
+      if (!back) { fail(pre + '在载荷里不存在'); continue }
+
+      // ① 未开放：走独立通道，**不得**套用四态（否则"能力没做"被说成"这单没有"）
+      if (back.available === false) {
+        closedKeys.push(view.key)
+        if (view.available !== false) fail(pre + '后端标未开放，前端按开放渲染')
+        else if ((view.fields || []).length) fail(pre + '未开放却给了字段行', String(view.fields.length))
+        else if (!view.note) fail(pre + '未开放却没给理由')
+        else if (view.tag !== E.SLOT_EMPTY_TEXT.notOpen) fail(pre + '未开放标签不对', String(view.tag))
+        else ok()
+        continue
+      }
+      opened += 1
+
+      // ② 四个派生字段一个都不能少（少一个就是"这一栏整块不见了"）
+      if ((view.fields || []).length !== 4) {
+        fail(pre + '派生字段不是 4 行', String((view.fields || []).length))
+        continue
+      }
+      const labels = view.fields.map((f) => f.label).join('/')
+      if (labels !== E.SLOT_FIELD_LABELS.join('/')) fail(pre + '字段标签或顺序不对', labels)
+      else ok()
+
+      const cur = back.current || {}
+      const iss = back.issues || {}
+      const own = back.next_owner || {}
+      const f0 = view.fields[0]
+      const f1 = view.fields[1]
+      const f2 = view.fields[2]
+
+      // 「当前成果」：present ⟺ 有内容。空态必须是「暂无记录」，不能是别的四态文案
+      if (cur.state === 'present') {
+        if (f0.empty) fail(pre + '后端 present，界面却显示空', String(f0.value))
+        else if (f0.value !== (cur.text || '')) fail(pre + '当前成果文案与载荷不符', f0.value + ' vs ' + cur.text)
+        else ok()
+      } else if (!f0.empty || f0.value !== E.SLOT_EMPTY_TEXT.noRecord) {
+        fail(pre + '当前成果应为「' + E.SLOT_EMPTY_TEXT.noRecord + '」', f0.value)
+      } else ok()
+
+      // 「未决问题」：信息缺失是**有内容的**状态，不是空
+      if (iss.state === 'missing_info') {
+        if (f1.empty || String(f1.value).indexOf(E.SLOT_EMPTY_TEXT.missingInfo) === -1) {
+          fail(pre + '信息缺失未如实显示', f1.value)
+        } else ok()
+      } else if (iss.state === 'present') {
+        if (f1.empty || String(f1.value).indexOf('未决') === -1) fail(pre + '未决问题未如实显示', f1.value)
+        else ok()
+      } else if (f1.empty !== true) {
+        fail(pre + '无未决问题时应为空态', String(f1.value))
+      } else ok()
+      if (f1.label !== E.SLOT_FIELD_LABELS[1]) fail(pre + '未决问题字段标签不对', f1.label)
+      else ok()
+
+      // 「下一责任方」：assigned / unassigned / not_applicable 三句必须分开
+      if (own.state === 'assigned') {
+        if (f2.empty || !f2.value) fail(pre + '已指派却显示空态', String(f2.value))
+        else ok()
+      } else if (own.state === 'unassigned') {
+        if (f2.value !== E.SLOT_EMPTY_TEXT.unassigned) fail(pre + '应显示「尚未分配」', String(f2.value))
+        else ok()
+      } else if (f2.value !== E.SLOT_EMPTY_TEXT.notApplicable) {
+        fail(pre + '应显示「不适用」', String(f2.value))
+      } else ok()
+
+      // 计数摘要：只写有内容的项，且数字要与载荷一致（写错数字比不写更糟）
+      const counts = back.counts || {}
+      const ct = String(view.countsText || '')
+      if (counts.tasks && ct.indexOf('任务 ' + counts.tasks) === -1) {
+        fail(pre + '计数未含任务数', ct + ' vs tasks=' + counts.tasks)
+      } else if (counts.artifacts && ct.indexOf('成果 ' + counts.artifacts) === -1) {
+        fail(pre + '计数未含成果数', ct + ' vs artifacts=' + counts.artifacts)
+      } else ok()
+    }
+
+    // 反向风险：七个槽位**全部**走未开放分支同样会通过上面每一条 ——
+    // 那种"全空且理由齐全"的界面其实什么都没显示。所以要有正向计数。
+    if (opened === 0) fail('09 详情 #' + aid + ' · 七个槽位全部未开放，页面等于什么都没显示')
+    else ok()
+    if (closedKeys.length && closedKeys.join(',') !== 'exceptions') {
+      fail('09 详情 #' + aid + ' · 未开放槽位不止 exceptions', closedKeys.join(','))
+    } else ok()
+
+    // ③ 历史成果（归属机制上线前的存量）必须如实报数
+    const wantUnassigned = Number(wb.unassigned_artifact_total || 0)
+    const hint = String(d.unassignedHint || '')
+    if (wantUnassigned) {
+      if (hint.indexOf(String(wantUnassigned)) === -1) {
+        fail('09 详情 #' + aid + ' · 历史成果未如实报数', 'hint=' + hint + ' 期望含 ' + wantUnassigned)
+      } else ok()
+    } else if (hint) {
+      fail('09 详情 #' + aid + ' · 无历史成果却给了提示', hint)
+    } else ok()
+
+    // 受理入口只看**委托状态**（有没有权限由服务端判定，前端不猜）
+    if (!!d.canClaim !== !!wantClaim) {
+      fail('09 详情 #' + aid + ' · 受理入口与委托状态不符',
+        'canClaim=' + d.canClaim + ' 状态=' + wb.status)
+    } else ok()
+  }
+
+  // 没有委托载荷时**显式失败**而不是静默：本 job 的 CI 定义里明确串了
+  // `seed_entrust_demo.py`，跑不到数据只有两种可能 —— 种子失效，或开关没打开。
+  // 两种情况都会让委托两页退化成"看 404 分支"（全绿且什么都没验），
+  // 静默通过比失败危险得多。
+  if (!D.entrustCases.length) {
+    fail('09 委托 · 无委托载荷（seed_entrust_demo.py 未生效 / ENTRUST_ENABLED 未开）',
+      '组织 ' + (D.entrustOrgs.items || []).length + ' 个 · 我的委托 0 张')
+  }
 
   auditTemplates()
 

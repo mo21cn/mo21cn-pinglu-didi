@@ -266,7 +266,8 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   # 前端端到端：真起后端 → 铺演示数据 → 真载荷驱动页面逻辑
   #   verify_login_flow     登录链路顺序 / 鉴权头 / token 角色
-  #   verify_frontend_e2e   13 个页面的取数与装饰逻辑（含模板字段产出、派生数值边界）
+  #   verify_frontend_e2e   15 个页面的取数与装饰逻辑（含模板字段产出、派生数值边界）
+  #                         第 ⑬⑭ 段为「委托队列 · 经理工作台」与「委托详情」，跑的是真载荷
   # 说明：后端与校验放在同一个 shell —— 跨 step 的后台进程会被 runner 回收。
   # ─────────────────────────────────────────────────────────────
   frontend-e2e:
@@ -293,9 +294,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: 应用数据库迁移
+        # 委托支线的表统一 `ent_` 前缀、由 `backend/migrations/` 管理，
+        # `app/main.py` 的 create_all **明确排除**该前缀（决策 DR-0001）。
+        # 少了这一步，起后端后 `/api/v1/entrust/*` 会整组 500
+        #   （sqlite3.OperationalError: no such table: ent_assignment），
+        # 而 e2e 的取数助手会把 500 记成"委托没数据"——看起来像业务问题。
+        # 与 `db-migration` job 同一命令、同一 CWD（DATABASE_URL 是相对路径）。
+        working-directory: backend
+        run: python migrate.py
+
       - name: 起后端 → 铺演示数据 → 跑端到端校验
         env:
           APP_ENV: development
+          # 委托支线默认关闭（`.env.development` 里没有这一项，config 默认 False）。
+          # 这里**显式**打开而不是去改配置文件：本 job 要验的正是委托页面，
+          # 把结论挂在"某个文件的默认值"上，那个值一改就会静默少验一半断言。
+          ENTRUST_ENABLED: "true"
         run: |
           set -e
           cd backend
@@ -316,6 +331,7 @@ jobs:
           done
 
           python scripts/seed_demo.py
+          python scripts/seed_entrust_demo.py
           cd ..
           node scripts/verify_login_flow.js
           node scripts/verify_frontend_e2e.js
