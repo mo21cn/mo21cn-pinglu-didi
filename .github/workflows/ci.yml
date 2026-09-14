@@ -296,6 +296,10 @@ jobs:
       - name: 起后端 → 铺演示数据 → 跑端到端校验
         env:
           APP_ENV: development
+          # 委托支线默认关闭（`.env.development` 里没有这一项，config 默认 False）。
+          # 这里**显式**打开而不是去改配置文件：本 job 要验的正是委托页面，
+          # 把结论挂在"某个文件的默认值"上，那个值一改就会静默少验一半断言。
+          ENTRUST_ENABLED: "true"
         run: |
           set -e
           cd backend
