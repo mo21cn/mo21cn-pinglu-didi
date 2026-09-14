@@ -1299,8 +1299,15 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     // 那种"全空且理由齐全"的界面其实什么都没显示。所以要有正向计数。
     if (opened === 0) fail('09 详情 #' + aid + ' · 七个槽位全部未开放，页面等于什么都没显示')
     else ok()
-    if (closedKeys.length && closedKeys.join(',') !== 'exceptions') {
-      fail('09 详情 #' + aid + ' · 未开放槽位不止 exceptions', closedKeys.join(','))
+    // `exceptions` 的「本期未开放」标记已于 2026-09-14 撤下（DR-0013 §7.3 五条满足），
+    // 于是这条从"未开放槽位只能是 exceptions"翻成"**一个都不能有**"。
+    // ⚠️ 不能只把它删掉或改成"不报错"：`closedKeys` 恒空时任何形状的断言都会绿，
+    //    那就是空转。这里**显式**要求为空 —— 有人再收回某块能力，这条要红。
+    if (closedKeys.length !== 0) {
+      fail(
+        '09 详情 #' + aid + ' · 出现未开放槽位（标记已撤下，多一个都说明能力被悄悄降级）',
+        closedKeys.join(',')
+      )
     } else ok()
 
     // ③ 历史成果（归属机制上线前的存量）必须如实报数

@@ -9,7 +9,8 @@
   责任人 / 待办任务 / 成果精确版本）。
 
 另覆盖本切片的业务口径：槽位 ↔ 数据落点映射、同客户多委托隔离、跨单访问拒绝、
-「本期未开放」不得退化成「暂无记录」、只读性。
+「本期未开放」不得退化成「暂无记录」（`exceptions` 的标记已于 2026-09-14 撤下后，
+这条机制改用**合成**的未开放槽位固定，见 `_close_slot`）、只读性。
 """
 
 from __future__ import annotations
@@ -416,25 +417,47 @@ def test_blocked_task_reports_precondition_as_issue(env):
 # ─────────────────────────────────────────── 3. 「本期未开放」≠「暂无记录」
 
 
-def test_exceptions_slot_is_marked_not_open(env):
-    """`exceptions` 必须显式标注「本期未开放」（DR-0010 §3.8），不得套用空值四态。"""
+def test_closed_slot_is_marked_not_open_not_empty(env, monkeypatch):
+    """「未开放 ≠ 空」：槽位里**有真实记录**时仍报未开放 —— 能力没做优先于「这单有内容」。
+
+    DR-0010 §3.8 的可测形式。`exceptions` 开放后线上没有未开放槽位，这条机制用
+    **合成**的未开放槽位覆盖：`settlement` 里明明有一个任务，标成关闭后必须走
+    `available=False` + 理由，而不是显示成"有 1 个任务"。
+    """
     db = env.make_session()
     manager, _, _, _, aid = _seed(env, db)
-    slot = _slot(_get(env, manager, aid).json(), "exceptions")
+    _task(db, assignment_id=aid, task_type="settlement", title="待结账")
 
+    slot = _slot(_get(env, manager, aid).json(), "settlement")
+    assert slot["available"] is True, "没被标注关闭的槽位必须是开放的"
+
+    _close_slot(monkeypatch)
+    slot = _slot(_get(env, manager, aid).json(), "settlement")
     assert slot["available"] is False
     assert slot["unavailable_reason"], "未开放槽位必须给理由，否则界面只能猜"
     assert "未开放" in slot["unavailable_reason"]
     assert slot["counts"]["tasks"] == 0
-    assert slot["current"]["state"] == "no_record"
 
 
-def test_only_exceptions_is_not_open(env):
-    """本期未开放的槽位**有且只有** `exceptions`（多一个都说明有人悄悄降级了能力）。"""
+def test_closed_slot_without_reason_is_config_error(monkeypatch):
+    """声明为「本期未开放」却**不给理由** = 配置漂移，必须在测试期就红（DR-0010 §3.8）。"""
+    from app.modules.entrust import workbench as wb
+
+    _close_slot(monkeypatch, reason="")
+    with pytest.raises(wb.WorkbenchConfigError):
+        wb.assert_slot_specs_consistent()
+
+
+def test_no_slot_is_marked_not_open(env):
+    """撤下后**没有任何**槽位是「本期未开放」（DR-0013 §7.3 五条已满足）。
+
+    这条以前断言的是 `closed == ["exceptions"]`。撤下后若只把它删掉或改成"不报错"，
+    它就退化成空转；现在反过来钉住另一头：多出一个未开放槽位同样是能力被悄悄降级。
+    """
     from app.modules.entrust import workbench as wb
 
     closed = [s.key for s in wb.SLOT_SPECS if not s.open]
-    assert closed == ["exceptions"]
+    assert closed == []
 
 
 # ─────────────────────────────────────────── 4. 槽位 ↔ 数据落点（DR-0010 §3.3）
@@ -594,13 +617,12 @@ def test_workbench_is_read_only(env):
 #                                                （DR-0013 A1 切片三之三）
 
 
-def _open_exceptions_slot(monkeypatch) -> None:
-    """**临时**把 `exceptions` 槽打开，只用来验证投影本身。
+def _close_slot(monkeypatch, key: str = "settlement", reason: str = "本期未开放：演示用") -> None:
+    """**临时**把某个槽位标成「本期未开放」，用来固定住这条**机制**本身。
 
-    线上默认仍是关闭：DR-0013 §7.3 撤下条件的第 4 条（人工落点须在**真载荷走查**中
-    走通）依赖 UI-08 与 UI-04，尚未满足。这不是绕过门禁，而是把两件事分开断言 ——
-    「投影已就绪」靠本函数与下面的用例；「标记可以撤下」靠
-    `test_exceptions_slot_marker_still_held`。
+    `exceptions` 的标记已于 2026-09-14 撤下（DR-0013 §7.3 五条满足），此后线上**没有**
+    未开放槽位 —— 于是「未开放 ≠ 空」只能靠合成场景覆盖。这不是为了保住旧用例：
+    「把某块能力整体收回去」这条路下次还会用，机制不该在最后一个使用者离开后就腐烂。
     """
     import dataclasses
 
@@ -610,8 +632,8 @@ def _open_exceptions_slot(monkeypatch) -> None:
         wb,
         "SLOT_SPECS",
         tuple(
-            dataclasses.replace(spec, open=True, not_open_reason="")
-            if spec.key == "exceptions"
+            dataclasses.replace(spec, open=False, not_open_reason=reason)
+            if spec.key == key
             else spec
             for spec in wb.SLOT_SPECS
         ),
@@ -634,30 +656,33 @@ def _case(db, *, aid: int, actor: int, **overrides) -> dict:
     return case_svc.raise_case(db, **params)
 
 
-def test_exceptions_slot_marker_still_held(env):
-    """标记与常量都仍是「未开放」，且理由指向**尚未满足的那一条**。
+def test_exceptions_slot_marker_removed(env):
+    """`exceptions` 的「本期未开放」标记**已撤下**，且槽位真的走真实投影。
 
-    这是撤下动作的**闸门**：谁翻转 `EXCEPTIONS_SLOT_OPEN`，这条就会红。撤下必须是
-    独立提交，并在**同一提交内**带上真载荷走查证据（DR-0013 §7.3）——
-    「能力还没做」与「这单没有异常」是两句不同的话。
+    撤下是**独立的一次提交**（常量 + 用例 + 走查证据），不是顺手改一个布尔值 ——
+    走查证据（登记案件 → 记录决定 → 关闭，真机点击走通，PASS 67 / FAIL 0）在
+    `docs/ENT-030-案件页真机走查交付说明.md`。
+
+    本用例反过来钉住两头：常量必须是 `True`（谁翻回去就红），**且**案件数据真的进得来。
+    只翻常量而投影没接好，会出现"标记没了、槽位却永远是空的"——那比留着标记更坏，
+    因为「能力还没做」至少是实话。
     """
     from app.modules.entrust import workbench as wb
 
-    assert wb.EXCEPTIONS_SLOT_OPEN is False, "撤下标记要先补走查证据，不能顺手翻常量"
+    assert wb.EXCEPTIONS_SLOT_OPEN is True, "DR-0013 §7.3 五条已满足，标记不应再被收回"
 
     db = env.make_session()
     manager, _, _, _, aid = _seed(env, db)
     _case(db, aid=aid, actor=int(manager["user_id"]), title="确有异常")
 
     slot = _slot(_get(env, manager, aid).json(), "exceptions")
-    # 案件确实存在，槽位仍报「未开放」——这正是「未开放 ≠ 空」的可测形式
-    assert slot["available"] is False
-    assert "§7.3" in slot["unavailable_reason"]
+    assert slot["available"] is True
+    assert slot["unavailable_reason"] == ""
+    assert slot["current"]["state"] == "present"
 
 
-def test_exceptions_projection_without_cases_is_no_record(env, monkeypatch):
+def test_exceptions_projection_without_cases_is_no_record(env):
     """无案件 → 四态里的「暂无记录」，四个字段各自给出对应的态，不是空数组糊过去。"""
-    _open_exceptions_slot(monkeypatch)
     db = env.make_session()
     manager, _, _, _, aid = _seed(env, db)
 
@@ -671,11 +696,10 @@ def test_exceptions_projection_without_cases_is_no_record(env, monkeypatch):
     assert slot["updated_at"] is None
 
 
-def test_exceptions_projection_reports_open_cases_and_blocking(env, monkeypatch):
+def test_exceptions_projection_reports_open_cases_and_blocking(env):
     """未关闭案件 → 摘要与数量；**只有阻断的**进未决问题；阻断的那张优先成为责任方。"""
     from app.modules.entrust import exceptions as case_svc
 
-    _open_exceptions_slot(monkeypatch)
     db = env.make_session()
     manager, _, _, _, aid = _seed(env, db)
     actor = int(manager["user_id"])
@@ -711,9 +735,8 @@ def test_exceptions_projection_reports_open_cases_and_blocking(env, monkeypatch)
     assert slot["next_owner"] == {"state": "assigned", "user_id": actor, "text": f"成员 #{actor}"}
 
 
-def test_exceptions_projection_without_owner_is_unassigned(env, monkeypatch):
+def test_exceptions_projection_without_owner_is_unassigned(env):
     """有未关闭案件但没定责任人 → 「尚未分配」，不是「不适用」（后者没有下一步动作）。"""
-    _open_exceptions_slot(monkeypatch)
     db = env.make_session()
     manager, _, _, _, aid = _seed(env, db)
     _case(db, aid=aid, actor=int(manager["user_id"]))
@@ -723,11 +746,10 @@ def test_exceptions_projection_without_owner_is_unassigned(env, monkeypatch):
     assert slot["next_owner"]["state"] == "unassigned"
 
 
-def test_exceptions_projection_closed_case_only_moves_updated_at(env, monkeypatch):
+def test_exceptions_projection_closed_case_only_moves_updated_at(env):
     """已关闭的案件不再是未决问题、也不再选责任方 —— 但它确实是一次业务更新。"""
     from app.modules.entrust import exceptions as case_svc
 
-    _open_exceptions_slot(monkeypatch)
     db = env.make_session()
     manager, _, _, _, aid = _seed(env, db)
     actor = int(manager["user_id"])
@@ -750,9 +772,8 @@ def test_exceptions_projection_closed_case_only_moves_updated_at(env, monkeypatc
     assert slot["updated_at"] == closed["updated_at"]
 
 
-def test_exceptions_projection_is_isolated_per_assignment(env, monkeypatch):
+def test_exceptions_projection_is_isolated_per_assignment(env):
     """A 单的案件不出现在 B 单的工作台（DR-0012 / 验证 11）。"""
-    _open_exceptions_slot(monkeypatch)
     db = env.make_session()
     manager, owner, org, _, aid_a = _seed(env, db)
     aid_b = _assignment(db, owner_id=owner["user_id"], org_id=org)
@@ -762,7 +783,7 @@ def test_exceptions_projection_is_isolated_per_assignment(env, monkeypatch):
     assert _slot(_get(env, manager, aid_b).json(), "exceptions")["current"]["state"] == "no_record"
 
 
-def test_exceptions_slot_refs_are_case_refs_blocking_first(env, monkeypatch):
+def test_exceptions_slot_refs_are_case_refs_blocking_first(env):
     """`current.refs` 逐条给出 `CaseRef`：**阻断优先**、形状与成果引用**不同**。
 
     形状独立是 DR-0014 §3.3 的硬要求，不是风格问题：若把案件伪造成
@@ -772,7 +793,6 @@ def test_exceptions_slot_refs_are_case_refs_blocking_first(env, monkeypatch):
     """
     from app.modules.entrust import exceptions as case_svc
 
-    _open_exceptions_slot(monkeypatch)
     db = env.make_session()
     manager, _, _, _, aid = _seed(env, db)
     actor = int(manager["user_id"])

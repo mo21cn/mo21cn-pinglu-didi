@@ -530,10 +530,9 @@ function sliceParenBlock(src, headRe) {
 
 const slotSpecBlock = sliceParenBlock(wbPy, /SLOT_SPECS[^=]*=\s*\(/)
 
-/** 撤下「本期未开放」标记的唯一开关（DR-0013 §7.3）。**必须读它的值**，
- *  不能只认 `open=False` 字面量：切片四把常量翻成 True 时，若这里仍按"匹配不到
- *  open=False 就算开放"处理，这条断言会继续绿着 —— 那时它就成了一个骗人的门禁。
- *  锚在行首并把 `[^=]` 限制在行内，避免跨行扫到别的 `=`。 */
+/** 「本期未开放」标记的开关（DR-0013 §7.3）。**必须读它的值**，不能按"匹配不到
+ *  `open=False` 就算开放"处理：常量翻成 `True` 的那天，那种写法会继续绿着 ——
+ *  那时它就成了一个骗人的门禁。锚在行首并把 `[^=]` 限制在行内，避免跨行扫到别的 `=`。 */
 const slotOpenMatch = /^EXCEPTIONS_SLOT_OPEN[^=\n]*=\s*(True|False)\s*$/m.exec(wbPy)
 const exceptionsSlotOpen = slotOpenMatch ? slotOpenMatch[1] === 'True' : null
 
@@ -582,12 +581,12 @@ check(
     ']'
 )
 check(
-  '[槽位] 只有 exceptions 是「本期未开放」（多一个都说明有人悄悄降级了能力）',
+  '[槽位] 撤下后**不再有**任何未开放槽位（多一个都说明有人悄悄降级了能力）',
   backendSlots
     .filter((s) => !s.open)
     .map((s) => s.key)
-    .join(',') === 'exceptions',
-  '实际 ' + backendSlots.filter((s) => !s.open).map((s) => s.key).join(',')
+    .join(',') === '',
+  '实际 [' + backendSlots.filter((s) => !s.open).map((s) => s.key).join(',') + ']'
 )
 
 // 任务类型取值域：前端标签表 / 顺序表都必须与后端同集合

@@ -38,16 +38,20 @@ DR-0010 §3.6 要求区分「暂无记录 / 尚未分配 / 不适用 / 信息缺
 
 「本期未开放」≠「暂无记录」
 ---------------------------
-`exceptions` 槽位的**真实投影**（DR-0013 A1 切片三之三）已就位，但按 DR-0010 §3.8 /
-DR-0013 §7.3 仍走独立的 `available=False` + `unavailable_reason` 通道，**不套用**
-空值四态 —— 五条撤下条件里的第 4 条（人工落点在**真载荷走查**中走通）依赖 UI-08 与
-UI-04，尚未满足。在它满足之前按四态呈现，用户会把"这个能力还没做"读成
-"这单没有异常"。
+槽位可以**声明为「本期未开放」**（`SlotSpec.open=False` + `not_open_reason`）：那时走
+独立的 `available=False` + `unavailable_reason` 通道，**不套用**空值四态 —— 按四态
+呈现，用户会把"这个能力还没做"读成"这单没有异常"。声明为未开放却**没给理由**
+是配置漂移，`assert_slot_specs_consistent` 会拦下（否则界面只能猜）。
 
-界线是 `EXCEPTIONS_SLOT_OPEN` **一个常量**：投影**先写好**、由它决定用不用。
-不先撤标记再补投影（中间态会对外撒谎），也不等前端做完再写投影
+`exceptions` 槽曾用它挡了整条支线：投影**先写好**、由 `EXCEPTIONS_SLOT_OPEN` **一个常量**
+决定用不用。不先撤标记再补投影（中间态会对外撒谎），也不等前端做完再写投影
 （那样"真实投影"无法先被用例固定住，撤下时就只剩"看起来差不多"）。
-DR-0013 §5 的回退口径同样依赖这个常量。
+
+**该标记已于 2026-09-14 撤下**：DR-0013 §7.3 的五条**同一提交内**同时满足，其中条件 4
+（人工落点〔登记案件 + 记录决定 + 关闭〕在**真载荷走查**中走通）的证据见
+`docs/ENT-030-案件页真机走查交付说明.md`（真机点击走通，PASS 67 / FAIL 0）。
+常量与机制都保留：DR-0013 §5 的回退口径依赖那个常量，而"把某块能力整体收回去"
+这条路**下次还会用**。
 """
 
 from __future__ import annotations
@@ -108,16 +112,21 @@ ISSUE_WAITING = "waiting"
 ISSUE_UNASSIGNED_TASK = "unassigned_task"
 ISSUE_INACTIVE_ARTIFACT = "inactive_artifact"
 
-#: `exceptions` 槽是否对用户开放（= 是否撤下「本期未开放」标记）。
+#: `exceptions` 槽是否对用户开放（= 曾用来挡「本期未开放」标记的那个开关）。
 #:
-#: **必须保持 `False`**，直到 DR-0010 §3.8.1 / DR-0013 §7.3 的五条**在同一提交内**
-#: 同时满足 —— 当前缺的是第 4 条（UI-08 / UI-04 的人工落点在真载荷走查中走通）。
-#: 撤下它是**独立的一次提交**（本常量 + 用例 + 走查证据），不是顺手改一个布尔值：
-#: 提前撤下等于把「能力还没做」说成「这单没有异常」。
+#: **`True`**：DR-0013 §7.3 的五条已于 2026-09-14 **同一提交内**同时满足 ——
+#: 三张表由版本化迁移建、两套状态机与阻断判据有服务端实现与用例、四字段走真实投影、
+#: **人工落点（登记案件 + 记录决定 + 关闭）在真载荷走查中走通**
+#: （`docs/ENT-030-案件页真机走查交付说明.md`，真机点击 PASS 67 / FAIL 0）、
+#: 客户投影白名单有用例。
+#:
+#: 收回去同样是**独立的一次提交**（本常量 + 用例 + 走查证据），不是顺手改一个布尔值：
+#: 提前撤下（或再次收回却不给理由）等于把「能力还没做」说成「这单没有异常」。
 #:
 #: 前端半边在 `scripts/verify_entrust_ui.js`：`available=false` 时前端必须按
-#: 「本期未开放」渲染，**不得**退化成空值四态。
-EXCEPTIONS_SLOT_OPEN: Final = False
+#: 「本期未开放」渲染，**不得**退化成空值四态 —— 机制仍在（见 `SlotSpec.open`），
+#: 只是当前七个槽位没有一个走这条路。
+EXCEPTIONS_SLOT_OPEN: Final = True
 
 
 class WorkbenchConfigError(RuntimeError):
@@ -167,9 +176,9 @@ SLOT_SPECS: tuple[SlotSpec, ...] = (
     SlotSpec(
         key="exceptions",
         title="异常与变更",
+        # 2026-09-14 起开放（DR-0013 §7.3 五条满足，证据见模块 docstring）。
+        # 开关仍是常量而不是字面量：再次收回要有据可依、有据可查。
         open=EXCEPTIONS_SLOT_OPEN,
-        not_open_reason="本期未开放：异常与变更的人工落点（UI-04 / UI-08）尚未在真载荷"
-        "走查中走通（DR-0013 §7.3 条件 4）",
     ),
     SlotSpec(
         key="settlement",
@@ -205,7 +214,10 @@ def assert_slot_specs_consistent() -> None:
     1. `artifact_types` / `task_types` 里的每个取值都在取值范围里 ——
        否则该槽位永远读不到记录，查不到就是"暂无记录"，把**配置错误伪装成正常业务态**；
     2. 同一个 `task_type` / `artifact_type` **只归属一个槽位** ——
-       否则同一份记录在两个槽位各显示一次，用户会以为是两份。
+       否则同一份记录在两个槽位各显示一次，用户会以为是两份；
+    3. `open=False` 的槽位**必须**给 `not_open_reason` —— 没理由时界面只能猜，
+       猜出来就是"暂无记录"。`exceptions` 开放后本支线已无未开放槽位，这条是
+       **机制自身的守卫**：下次谁再收回某块能力，忘了写理由就会在这里红。
 
     由测试调用（`tests/test_entrust_workbench.py`），不在导入期执行 ——
     导入期副作用会让"能不能 import"依赖配置正确性，反而更难定位。
@@ -213,6 +225,12 @@ def assert_slot_specs_consistent() -> None:
     seen_tasks: set[str] = set()
     seen_artifacts: set[str] = set()
     for spec in SLOT_SPECS:
+        if not spec.open and not spec.not_open_reason:
+            raise WorkbenchConfigError(
+                f"槽位 {spec.key} 声明为「本期未开放」却没给理由 —— 界面只能猜，"
+                "猜出来的就是「暂无记录」，等于把「能力还没做」说成「这单没有」"
+                "（DR-0010 §3.8）"
+            )
         for task_type in spec.task_types:
             if task_type not in TASK_TYPES:
                 raise WorkbenchConfigError(
