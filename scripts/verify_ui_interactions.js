@@ -1204,23 +1204,33 @@ section('⑤ 静态防线')
     const SELF_WB = 'pages/entrust/workbench/workbench'
     const SELF_DT = 'pages/entrust/detail/detail'
 
-    /** utils/entrust 的最小同构桩：只为让页面跑到"该拦 / 该跳"那一刻 */
-    const entrustStub = (log) => ({
-      STATUS_META: { new: { label: '待受理' } },
-      STATUS_ORDER: ['new'],
-      VIEW: { LOADING: 'loading', ERROR: 'error', EXPIRED: 'expired', DENIED: 'denied', EMPTY: 'empty', READY: 'ready' },
-      decorateList: (x) => x || [],
-      decorateOrgs: (x) => x || [],
-      decorateDetail: (x) => x,
-      pageHint: () => '',
-      // 恒返回 none（= 没有组织身份）→ workbench 停在 denied 态，不会继续取队列；
-      // 本节断言的是"守卫与跳转"，取数链路由 verify_entrust_ui / frontend_e2e 覆盖。
-      pickOrg: () => ({ orgId: '', reason: 'none' }),
-      fetchMyOrgs: () => { log.push('fetchMyOrgs'); return Promise.resolve({ items: [] }) },
-      fetchQueue: () => { log.push('fetchQueue'); return Promise.resolve({ items: [], total: 0 }) },
-      fetchAssignment: (id) => { log.push('fetchAssignment:' + id); return Promise.resolve({ assignment_id: id }) },
-      viewState: () => ({ state: 'empty', title: '还没有委托', hint: '' })
-    })
+    /**
+     * `utils/entrust` 的桩：**从真实模块派生**，只覆盖本节需要控制的那几项。
+     *
+     * 早先是手写一份最小导出表，问题是页面每加一个导入就要记得补桩 ——
+     * 忘了不是断言失败，而是页面在 `new Function` 里**直接崩**（ENT-021 加
+     * `TASK_TYPE_ORDER.map` 时就崩了）。从真实模块派生后，"页面用到的导出存在"
+     * 由 `verify_entrust_ui.js` 负责，这里只负责"取数可控"。
+     *
+     * 必须覆盖的是**所有会发请求的取数函数**：留着真实实现会让 `load()` 挂在
+     * 一个永不 resolve 的 Promise 上（页面停在 loading，断言全成空转）。
+     */
+    const REAL_ENTRUST = require(path.join(MP, 'utils', 'entrust.js'))
+    const entrustStub = (log) =>
+      Object.assign({}, REAL_ENTRUST, {
+        decorateDetail: (x) => x,
+        // 恒返回 none（= 没有组织身份）→ workbench 停在 denied 态，不会继续取队列；
+        // 本节断言的是"守卫与跳转"，取数链路由 verify_entrust_ui / frontend_e2e 覆盖。
+        pickOrg: () => ({ orgId: '', reason: 'none' }),
+        fetchMyOrgs: () => { log.push('fetchMyOrgs'); return Promise.resolve({ items: [] }) },
+        fetchQueue: () => { log.push('fetchQueue'); return Promise.resolve({ items: [], total: 0 }) },
+        fetchAssignment: (id) => { log.push('fetchAssignment:' + id); return Promise.resolve({ assignment_id: id }) },
+        fetchWorkbench: (id) => {
+          log.push('fetchWorkbench:' + id)
+          return Promise.resolve({ slots: [], unassigned_artifact_total: 0 })
+        },
+        viewState: () => ({ state: 'empty', title: '还没有委托', hint: '' })
+      })
 
     const loadEntrustPage = (file, wx, log) =>
       loadConfig(file, 'page', wx, log, undefined, {
@@ -1479,8 +1489,16 @@ section('⑤ 静态防线')
     const dt3 = instantiate(loadEntrustPage(DT, dtOk, logDtOk))
     dt3.onLoad({ assignment_id: 'A-1_2' })
     check(
-      '详情页：合法 id 放行并取数',
-      logDtOk.length === 1 && logDtOk[0] === 'fetchAssignment:A-1_2',
+      // 详情页 = 委托本体（头卡）+ 单委托工作台（七槽位，UI-05），合法 id 下**两路都取**。
+      // 断言锁定"取了什么"而不是"只取一样"：页面成为工作台后只调 fetchAssignment
+      // 反而是缺陷（槽位全空），若沿用"必须恰好一次"的写法，会让正确实现变红。
+      // 同时要求所有取数都落在同一个编号上 —— 取错单、或重复取数同样要被拦下。
+      '详情页：合法 id 放行并取数（委托本体 + 工作台，同一编号）',
+      logDtOk.indexOf('fetchAssignment:A-1_2') >= 0 &&
+        logDtOk.indexOf('fetchWorkbench:A-1_2') >= 0 &&
+        logDtOk.every(function (s) {
+          return /:A-1_2$/.test(s)
+        }),
       JSON.stringify(logDtOk)
     )
 

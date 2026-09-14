@@ -542,3 +542,95 @@ class ArtifactAdoptIn(BaseModel):
     artifact_type: str = Field(min_length=1, max_length=48)
     payload: dict[str, Any]
     note: str | None = Field(default=None, max_length=255)
+
+
+# ── 委托工作台（UI-05 / ENT-021）─────────────────────────────────────────────
+# 七槽位是**投影的呈现单位**：一条只读聚合查询返回每槽四字段 + 计数，详情按需
+# 加载（DR-0010 §3.2）。四个派生字段**各自带 `state`**，因为「暂无记录 / 尚未分配 /
+# 不适用 / 信息缺失」是四句不同的话（DR-0010 §3.6）—— 用一个 null 表示，
+# 界面就只能被迫说"待补充"，用户分不清该不该动。
+
+
+class WorkbenchArtifactRef(BaseModel):
+    """槽位里引用的一个成果：**精确版本**（PRD 第 187 行要求两端同 ID 同版本）。"""
+
+    artifact_id: int
+    artifact_type: str
+    label: str
+    revision_no: int | None
+
+
+class WorkbenchCurrentOut(BaseModel):
+    """「当前成果」：有效业务版本；多个成果时给摘要与数量。"""
+
+    state: str
+    text: str
+    refs: list[WorkbenchArtifactRef] = Field(default_factory=list)
+
+
+class WorkbenchIssueOut(BaseModel):
+    """一条未决问题。`kind` 是**类别**，界面据此选文案，不用字符串前缀猜。"""
+
+    kind: str
+    text: str
+
+
+class WorkbenchIssuesOut(BaseModel):
+    """「未决问题」：缺项、待确认、失效成果、阻断条件、未关闭异常。"""
+
+    state: str
+    count: int
+    items: list[WorkbenchIssueOut] = Field(default_factory=list)
+
+
+class WorkbenchOwnerOut(BaseModel):
+    """「下一责任方」。
+
+    `state=unassigned` 是"有活但还没派人"，`state=not_applicable` 是"该槽没有
+    待推进的任务" —— 两者的下一步动作完全不同，不能合成一句话。
+    """
+
+    state: str
+    user_id: int | None
+    text: str
+
+
+class WorkbenchCountsOut(BaseModel):
+    artifacts: int
+    tasks: int
+    open_tasks: int
+    unassigned_tasks: int
+
+
+class WorkbenchSlotOut(BaseModel):
+    """一个槽位。
+
+    `available=False` 表示该槽位的能力**本期未开放**（当前只有 `exceptions`），
+    此时 `unavailable_reason` 非空，界面显示"本期未开放"而**不是**"暂无记录"——
+    后者会把"能力还没做"说成"这单没有异常"（DR-0010 §3.8）。
+    """
+
+    key: str
+    title: str
+    available: bool
+    unavailable_reason: str
+    current: WorkbenchCurrentOut
+    issues: WorkbenchIssuesOut
+    next_owner: WorkbenchOwnerOut
+    updated_at: str | None
+    counts: WorkbenchCountsOut
+
+
+class WorkbenchOut(BaseModel):
+    """单委托工作台聚合投影（UI-05 的取数入口）。
+
+    `unassigned_artifact_total` 与 `AssignmentArtifactListOut.unassigned_total`
+    同一口径：归属机制上线前的历史成果不在任何槽位里，但必须如实报数，
+    否则界面会让人以为"本单只有这些成果"。
+    """
+
+    assignment_id: int
+    org_id: int | None
+    status: str
+    slots: list[WorkbenchSlotOut]
+    unassigned_artifact_total: int

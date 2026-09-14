@@ -69,7 +69,7 @@ def test_matrix_keys_are_unique():
 
 
 def test_matrix_size_matches_baseline():
-    """条目数锁定为 51。
+    """条目数锁定为 52。
 
     数量变化本身不是错误，但**必须是有意的**：增删端点时同时改这里，
     强制在 PR 里显式说明"为什么端点集合变了"。
@@ -78,8 +78,10 @@ def test_matrix_size_matches_baseline():
     49 → 51（ENT-020 成果归属切片 / DR-0012）：新增
     `GET /assignments/{assignment_id}/artifacts`（单委托成果清单）与
     `POST /agent/jobs/{job_id}/adopt`（采纳作业提案为成果）。
+    51 → 52（ENT-021 工作台首片 / DR-0010）：新增
+    `GET /assignments/{assignment_id}/workbench`（UI-05 七槽位摘要投影）。
     """
-    assert len(sm.SCOPE_MATRIX) == 51
+    assert len(sm.SCOPE_MATRIX) == 52
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

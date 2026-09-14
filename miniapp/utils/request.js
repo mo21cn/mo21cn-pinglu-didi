@@ -127,13 +127,19 @@ function clearToken() {
 
 /**
  * 通用请求
- * @param {object} opts {url, method, data, auth, silent} auth=true 时自动附带 Bearer token；
- *   silent=true 时不自动弹错误 toast（供调用方自行处理预期内失败，如 404 探测）
+ * @param {object} opts {url, method, data, auth, silent, headers} auth=true 时自动附带
+ *   Bearer token；silent=true 时不自动弹错误 toast（供调用方自行处理预期内失败，如 404 探测）；
+ *   headers 用于附加业务必需的请求头（如写端点要求的 `Idempotency-Key`）——
+ *   与鉴权头合并，**不允许覆盖 Authorization**（那是请求层的职责，业务不该改写它）。
  */
 function request(opts) {
-  const { url, method = 'GET', data = {}, auth = true, silent = false } = opts
+  const { url, method = 'GET', data = {}, auth = true, silent = false, headers = {} } = opts
   return new Promise((resolve, reject) => {
     const header = { 'Content-Type': 'application/json' }
+    Object.keys(headers || {}).forEach(function (k) {
+      if (k.toLowerCase() === 'authorization') return
+      header[k] = headers[k]
+    })
     if (auth && getToken()) {
       header['Authorization'] = 'Bearer ' + getToken()
     }

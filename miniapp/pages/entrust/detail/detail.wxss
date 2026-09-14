@@ -1,4 +1,4 @@
-/* 委托发货 · 委托详情（ENT-012）—— 只写本页特有排版，其余复用 app.wxss */
+/* 委托发货 · 单张委托工作台（UI-05 / ENT-021）—— 只写本页特有排版，其余复用 app.wxss */
 
 .head-bg {
   background: linear-gradient(135deg, #3B5BDB, #7048E8);
@@ -75,20 +75,128 @@
   text-align: right;
 }
 
-.status-note,
-.next-batch {
+/* ── 七槽位（UI-05 / ENT-021）─────────────────────────────────────────────
+   每槽一张卡：标题 + 四个派生字段 + 未决明细 + 精确版本 + 计数 + 人工落点。
+   空态与警示态用**不同颜色**而不是不同图标 —— 用哪个类由 `utils/entrust.js`
+   算好并写进 `cls`，模板不做判断（模板里拼类名会让"类是否存在"变成运行期才知道）。 */
+
+.slot-card {
   margin-top: 20rpx;
 }
 
-.status-note-title,
-.next-batch-title {
+.slot-head {
+  padding-bottom: 16rpx;
+  border-bottom: 1rpx solid #EEF1F6;
+}
+
+.slot-title {
+  flex: 1;
+  margin-right: 16rpx;
+  font-size: 29rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+/* 未开放 / 历史存量说明：说清发生了什么，而不是留一个看着像"没数据"的空槽位 */
+.slot-note {
+  padding-top: 16rpx;
+  font-size: 24rpx;
+  color: #98A6B8;
+  line-height: 1.6;
+}
+
+/* 空值四态的文字：与有值内容在视觉上分开（是"暂无记录"，不是空白、也不是 0） */
+.slot-empty {
+  color: #B4BECC;
+}
+
+/* 需要人看一眼的那类（未决问题 / 尚未分配） */
+.slot-warn {
+  color: #C77700;
+}
+
+.slot-issues {
+  padding-top: 12rpx;
+}
+
+.slot-issue {
+  font-size: 24rpx;
+  color: #C77700;
+  line-height: 1.7;
+}
+
+/* 未决问题的类别徽标：让"该去补数据"与"这条路走不通"一眼可分 */
+.slot-issue-kind {
+  display: inline-block;
+  margin-right: 10rpx;
+  padding: 0 10rpx;
+  border: 1rpx solid #E8B96A;
+  border-radius: 6rpx;
+  font-size: 20rpx;
+  color: #A66300;
+}
+
+.slot-issue-text {
+  font-size: 24rpx;
+}
+
+.slot-refs {
+  padding-top: 12rpx;
+}
+
+.slot-ref {
+  font-size: 23rpx;
+  color: #6B7A8C;
+  line-height: 1.7;
+}
+
+.slot-counts {
+  padding-top: 12rpx;
+  font-size: 23rpx;
+  color: #98A6B8;
+}
+
+.slot-actions {
+  padding-top: 18rpx;
+}
+
+/* 任务类型选择条：页内展开，避免弹层里 7 项在真机底部被切断 */
+.slot-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  padding-bottom: 16rpx;
+}
+
+.slot-pick {
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  color: #3D4C63;
+  background: #F2F5FA;
+}
+
+.slot-btn {
+  height: 64rpx;
+  line-height: 64rpx;
+  text-align: center;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  color: #3B5BDB;
+  background: #EEF2FF;
+}
+
+.status-note {
+  margin-top: 20rpx;
+}
+
+.status-note-title {
   font-size: 27rpx;
   font-weight: 600;
   color: #0F2540;
 }
 
-.status-note-body,
-.next-batch-body {
+.status-note-body {
   margin-top: 10rpx;
   font-size: 25rpx;
   color: #6B7A8C;
@@ -96,12 +204,8 @@
 }
 
 /* ---- 本页 hover 反馈 ----
-   `hover-dim` / `row-hover` 是页面级类（app.wxss 未定义），用到就自带一份；
+   `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */
 .hover-dim {
   opacity: .6;
-}
-
-.row-hover {
-  background: #F5F8FF;
 }
