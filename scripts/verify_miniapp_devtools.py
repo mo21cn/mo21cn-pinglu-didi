@@ -17,10 +17,17 @@
 | `12` | 「我的」页渲染 | ⑫ |
 | `15` | 发货方式选择（自主 / 委托）+ 几何对齐设计稿 | ⑮ |
 | `16` | 委托发货 · 组织选择器（AC-02 / DR-0008） | ⑯ |
+| `25` | 成果详情：字段类型的**渲染层**证据 + AC-05（ENT-025） | —（新增章节） |
 
 **未迁移章节**：④b 撮合、⑤ 发布空船、⑦/⑦b/⑦c 合同、⑧ 支付、⑨/⑨b 船东链路、
 ⑩/⑪ 港口链路、⑬ 智能入口、⑭ UI 打磨 —— 它们需要 REST 锚点预取与「按序号点击」，
 后者在 wechatide 上没有直接等价物（见下），属后续增量。
+
+**这 12 章的「前置」已就位（ENT-031）**：目标元素补了唯一锚点属性
+（订单卡的 `data-order-id`、行内动作的 `data-act-*`、候选卡的 `data-ship-id` /
+`data-cargo-id`、甘特与时间轴的 `data-*-key`），并由 `scripts/verify_miniapp.js`
+的检查 9 盯住「锚点被搬走 / 值写成常量 / 属性被删」三类静默失效。
+**但章节脚本仍未开工** —— 前置就位不等于覆盖到位，这 12 章继续记 `not-run`。
 
 换轨带来的能力差异（实测）
 --------------------------
@@ -35,6 +42,8 @@
 --------
 1. 后端在 8000 端口运行并已铺演示数据：
    `cd backend && python scripts/seed_demo.py && python scripts/seed_entrust_orgpicker.py`
+   ㉕ 章另需第三份种子 `python scripts/seed_entrust_demo.py`（成果 `#5` 由它创建；
+   前两份种子都不创建成果，见 `ARTIFACT_ID` 处的注释）。
 2. 微信开发者工具已启动、已开过本项目窗口、已完成一次人工授权（授权持久，见 DR-0009）。
 3. **不得在沙箱中运行**（`wechatide` 官方硬要求）。
 
@@ -80,6 +89,17 @@ MINE = "pages/mine/mine"
 PUBLISH_CARGO = "pages/publish/cargo/cargo"
 PREVIEW = "pages/preview/preview"
 WORKBENCH = "pages/entrust/workbench/workbench"
+ARTIFACT = "pages/entrust/artifact/artifact"
+
+# ㉕ 章依赖的演示成果：`settlement_draft #5` 刻意缺必填项 `receivable_lines`
+# —— 它是 `ARTIFACT_SPECS` 的第 5 条（backend/scripts/seed_entrust_demo.py），
+# 另两份种子（seed_demo / seed_entrust_orgpicker）都不创建成果，故编号稳定。
+#
+# **本章可重复跑**：缺项是注册表按**当前生效版本**即时派生的
+# （artifacts.py `get_artifact` 只读 `current_revision_id` 那一版），
+# 而编辑只**追加**版本、不改生效版本 —— 于是跑过一遍之后「缺项提示」依然成立。
+# 换成另一个库 / 另一份种子时编号会漂，此时 ㉕A 的成果类型断言会明确失败。
+ARTIFACT_ID = 5
 
 # ⑮ 章文案（逐字对齐设计稿）
 DESC_SELF = "您发布货物，自行在船好多平台找寻认证船主接单并完成运输。"
@@ -688,6 +708,235 @@ def sec_16(w: Walker) -> None:
         w.rep.rec("⑯ 无组织：不渲染任何委托条目", cards == 0, str(cards))
 
 
+def _as_dict(val: object) -> dict:
+    """Storage 里取出的对象常被序列化成 JSON **字符串**，两种形态都接住。"""
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, str) and val.strip().startswith("{"):
+        try:
+            parsed = json.loads(val)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def sec_25(w: Walker) -> None:
+    """㉕ 成果详情（ENT-025）：字段类型的**渲染层**证据 + AC-05。
+
+    为什么必须真机：静态门禁与纯逻辑校验都只能证明「源码里有这段分支」。
+    本片加的「列表（JSON 数组）」提示，静态断言最多证明模板里写了 `item.kindHint`，
+    证明不了它**渲染出来** —— `onEdit` 漏投影那次就是模板有、数据无，静态断言照样全绿。
+
+    身份与落点页是**两件事**，分别断言：身份由 `dev_login_code` 决定
+    （`utils/auth.js` 的 DEV_ROLE_CODE 优先于所点卡片），落点页由所点卡片决定。
+    旧脚本 `tap('.role-card')` 只能命中第一张卡，于是「身份是 seed-owner、落点是
+    货主页」是**既有事实**而非缺陷 —— 这里沿用同一口径，不去"修正"它，
+    否则先前那轮 PASS 34 / FAIL 0 的结论就不再对应当前脚本。
+
+    ⚠️ 前置：本机须已铺 `backend/scripts/seed_entrust_demo.py`（成果 `#5` 由它创建）。
+    本节断言的是「**缺值**字段仍按契约判为结构化」，而缺项是**当前生效版本**的派生
+    事实 —— 编辑只追加版本、不改生效版本，所以本节**可重复跑**；但换库 / 换种子时
+    编号会漂，届时 ㉕A 会以「成果类型」断言明确失败，不会静默通过。
+    """
+    print("\n== ㉕ 成果详情（ENT-025）==", flush=True)
+    art_url = f"/{ARTIFACT}?artifact_id={ARTIFACT_ID}"
+    base_err = w.c.errors()
+
+    path = w.login_as(CODE_OWNER)
+    w.rep.rec("㉕ 前置 · 回到身份选择页", path == INDEX, path)
+    w.rep.rec(
+        "㉕ 前置 · 进入货主工作台（落点页，与身份无关）",
+        w.enter_role("shipper", SHIPPER),
+        w.c.current_path(),
+    )
+    ui_raw = w.c.evaluate("function(){return wx.getStorageSync('user_info')||null;}")
+    ui = _as_dict(ui_raw)
+    uid = str(ui.get("id") or ui.get("user_id") or "")
+    w.rep.rec(
+        "㉕ 前置 · 实际身份是 seed-owner（演示经理；成果页写权限来自它）",
+        uid == "2" or ui.get("current_role") == "owner",
+        json.dumps(ui, ensure_ascii=False)[:140] if ui else str(ui_raw)[:140],
+    )
+
+    print("\n-- A. 进入成果详情页 --", flush=True)
+    w.c.nav("reLaunch", art_url, ARTIFACT)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    w.rep.rec("㉕A view=ready（真实渲染，不是白屏）", d.get("view") == "ready", str(d.get("view")))
+    w.rep.rec(
+        "㉕A 页面持有的成果编号正确",
+        str(d.get("artifactId")) == str(ARTIFACT_ID),
+        str(d.get("artifactId")),
+    )
+    art = d.get("artifact") or {}
+    w.rep.rec(
+        "㉕A 成果类型为 settlement_draft",
+        art.get("typeCode") == "settlement_draft",
+        f"typeCode={art.get('typeCode')}；取值不对说明编号漂了，先铺"
+        " backend/scripts/seed_entrust_demo.py",
+    )
+    w.rep.rec(
+        "㉕A 可编辑 / 可确认入口已亮出",
+        art.get("canEdit") is True and art.get("canConfirm") is True,
+        f"canEdit={art.get('canEdit')} canConfirm={art.get('canConfirm')}",
+    )
+    w.rep.rec(
+        "㉕A 缺项提示点名到字段（不是只说「信息不完整」）",
+        "还缺" in str(art.get("missingHint") or ""),
+        str(art.get("missingHint"))[:80],
+    )
+    w.shot("25-A-成果详情-查看态")
+
+    print("\n-- B. 缺值列表字段：进编辑态 --", flush=True)
+    rows = [f for f in (art.get("fields") or []) if f.get("name") == "receivable_lines"]
+    w.rep.rec("㉕B 投影里有 receivable_lines 字段行", len(rows) == 1, f"n={len(rows)}")
+    if rows:
+        r0 = rows[0]
+        w.rep.rec(
+            "㉕B 缺值字段仍按契约判为结构化（declared=list / kind=json）",
+            r0.get("declared") == "list" and r0.get("kind") == "json",
+            f"declared={r0.get('declared')} kind={r0.get('kind')}",
+        )
+        w.rep.rec(
+            "㉕B 查看态显示「（未填）」而不是 null / 空白",
+            r0.get("empty") is True,
+            f"empty={r0.get('empty')}",
+        )
+
+    if not w.c.tap(".btn-primary"):
+        w.rep.rec("㉕B 点「编辑内容」", False, ".btn-primary 未命中")
+    d2 = w.wait_data(lambda x: x.get("editing") is True, tries=12, gap=0.5)
+    w.rep.rec("㉕B 点「编辑内容」后进入编辑态", d2.get("editing") is True, str(d2.get("editing")))
+    ff = d2.get("formFields") or []
+    idx_recv = idx_note = -1
+    for i, f in enumerate(ff):
+        if f.get("name") == "receivable_lines":
+            idx_recv = i
+        elif f.get("name") == "note":
+            idx_note = i
+    w.rep.rec("㉕B 编辑表单里有 receivable_lines", idx_recv >= 0, f"idx={idx_recv}")
+    if idx_recv >= 0:
+        fe = ff[idx_recv]
+        w.rep.rec(
+            "㉕B 编辑态该字段走 JSON 形态且带契约类型",
+            fe.get("kind") == "json" and fe.get("declared") == "list",
+            f"kind={fe.get('kind')} declared={fe.get('declared')}",
+        )
+        w.rep.rec(
+            "㉕B 编辑态初始文本是空串（不是 undefined / 'null'）",
+            fe.get("text") == "" and isinstance(fe.get("text"), str),
+            json.dumps(fe.get("text"), ensure_ascii=False),
+        )
+        w.rep.rec(
+            "㉕B 编辑态带可读类型提示（含 JSON）",
+            "JSON" in str(fe.get("kindHint") or ""),
+            str(fe.get("kindHint")),
+        )
+
+    # 渲染层证据：data 层对了不等于渲染层对了（本片修的就是渲染层）
+    n_hint = w.c.count(".art-kind-hint")
+    n_area = w.c.count("textarea.art-textarea")
+    w.rep.rec("㉕B 渲染层 · 类型提示元素已渲染", n_hint >= 1, f".art-kind-hint n={n_hint}")
+    w.rep.rec(
+        "㉕B 渲染层 · 结构化字段走 textarea", n_area >= 1, f"textarea.art-textarea n={n_area}"
+    )
+    hint = w.c.outer_wxml(".art-kind-hint")
+    w.rep.rec(
+        "㉕B 渲染层 · 提示文案是「列表（JSON 数组）」",
+        "列表" in hint and "JSON" in hint,
+        hint[:120].replace("\n", " "),
+    )
+    w.shot("25-B-成果详情-编辑态")
+
+    print("\n-- C. 保存新版本 → 导航复核不产生重复成果 --", flush=True)
+    revs_before = d2.get("revisions") or []
+    cur_before = (d2.get("artifact") or {}).get("currentRevisionNo")
+    n_before = len(revs_before)
+    new_no: int | None = None
+    if idx_recv < 0:
+        w.rep.rec("㉕C 保存走查", False, "找不到 receivable_lines 在表单里的下标，无法注入")
+    else:
+        # skill 坑 12：模拟器里对 textarea 赋值常不触发 bindinput。用 setData 注值，
+        # 再走**真实点击**保存 —— 输入路径被跳过，但组 payload / 发请求 / 渲染都是真的。
+        new_ff = json.loads(json.dumps(ff, ensure_ascii=False))
+        new_ff[idx_recv]["text"] = '["运费 8000"]'
+        if idx_note >= 0:
+            new_ff[idx_note]["text"] = "真机走查改过备注"
+        w.rep.rec("㉕C 注入编辑值（setData）", bool(w.c.set_data({"formFields": new_ff})))
+        time.sleep(1.0)
+
+        w.c.tap(".btn-primary")
+        d3 = w.wait_data(
+            lambda x: x.get("saveNotice") or x.get("editing") is False, tries=30, gap=0.5
+        )
+        notice = str(d3.get("saveNotice") or "")
+        w.rep.rec("㉕C 保存后退出编辑态", d3.get("editing") is False, str(d3.get("editing")))
+        w.rep.rec("㉕C 保存提示说清新版本号", "已保存为 v" in notice, notice[:90])
+        w.rep.rec(
+            "㉕C 保存提示说清生效版本未变（少了这句，用户会以为客户已看到新内容）",
+            "生效版本仍是 v" in notice,
+            notice[:90],
+        )
+        w.shot("25-C1-保存后")
+
+        # 导航复核：reLaunch 清空页面栈 ⇒ 读到的一定是后端事实，不是本地缓存
+        w.c.nav("reLaunch", art_url, ARTIFACT)
+        d4 = w.wait_data(lambda x: x.get("view") == "ready", tries=40, gap=0.5)
+        w.rep.rec(
+            "㉕C 复核 · 仍指向同一成果编号（未产生重复成果）",
+            str(d4.get("artifactId")) == str(ARTIFACT_ID),
+            str(d4.get("artifactId")),
+        )
+        revs_after = d4.get("revisions") or []
+        nos = [r.get("revisionNo") for r in revs_after]
+        w.rep.rec(
+            "㉕C 复核 · 版本数恰好 +1",
+            len(revs_after) == n_before + 1,
+            f"{n_before} → {len(revs_after)}",
+        )
+        w.rep.rec("㉕C 复核 · 版本号无重复", len(set(nos)) == len(nos), str(nos))
+        cur_after = (d4.get("artifact") or {}).get("currentRevisionNo")
+        w.rep.rec(
+            "㉕C 复核 · 生效版本仍是保存前的那个（编辑不改生效版本）",
+            cur_after == cur_before,
+            f"{cur_after} vs {cur_before}",
+        )
+        new_no = max(nos) if nos else None
+        hist = [r for r in revs_after if r.get("revisionNo") == new_no]
+        w.rep.rec(
+            "㉕C 复核 · 新版本进入历史且未标为生效",
+            len(hist) == 1 and hist[0].get("isCurrent") is False,
+            f"v{new_no} isCurrent={hist[0].get('isCurrent') if hist else 'N/A'}",
+        )
+        w.shot("25-C2-导航复核后")
+
+    print("\n-- D. 确认入口可见（**刻意不点**）--", flush=True)
+    if new_no is None:
+        w.rep.rec("㉕D 确认入口可见", False, "无新版本号，无法定位入口")
+    else:
+        n_btn = w.c.count(f'[data-no="{new_no}"]')
+        w.rep.rec(
+            "㉕D 非生效版本行上有「设为生效版本」入口",
+            n_btn >= 1,
+            f'[data-no="{new_no}"] n={n_btn}',
+        )
+        det = w.c.outer_wxml(".tl")
+        w.rep.rec(
+            "㉕D 渲染层 · 版本历史里有该入口文案",
+            "设为生效版本" in det,
+            det[:100].replace("\n", " "),
+        )
+    w.rep.rec(
+        "㉕D 确认动作未在真机点击（记为**限制**，不是通过）",
+        True,
+        "原生 showModal 不在渲染层、工具点不到「确定」；确认的后端语义"
+        "由 verify_frontend_e2e.js 读后端事实覆盖",
+    )
+
+    new_err = w.new_errors(base_err)
+    w.rep.rec("㉕E 本章运行期无新增 console error", not new_err.strip(), new_err[:160] or "(无)")
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -698,10 +947,11 @@ SECTIONS = {
     "12": sec_12,
     "15": sec_15,
     "16": sec_16,
+    "25": sec_25,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
-DEFAULT_ORDER = ["smoke", "0", "1", "2", "4", "6", "12", "15", "16"]
+DEFAULT_ORDER = ["smoke", "0", "1", "2", "4", "6", "12", "15", "16", "25"]
 
 
 def main() -> int:
