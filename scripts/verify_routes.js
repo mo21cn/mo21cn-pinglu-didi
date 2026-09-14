@@ -555,6 +555,12 @@ console.log(`非 push 的最深页：` + Object.keys(depths)
 for (const e of pendings) console.log(`  [待生效] ${edgeKey(e.from, e.to)} (${e.strategy}) —— ${e.pending}`)
 for (const n of notes.slice(0, 10)) console.log('  ' + n)
 for (const d of dynamicTargets) console.log('  [变量目标] ' + d)
+// 「变量目标」是**中立备注**（记录有哪些动态调用），不是判错。
+// 其中 `switchTab` 的取值域由 `verify_tabbar_targets.js` 驱动真实页面逻辑验：
+// 捕获的每个目标都必须落在 app.json 的 tabBar.list 内（非 tabBar 页会静默失败）。
+if (dynamicTargets.length) {
+  console.log('  （变量目标不是错误；switchTab 的取值域见 verify_tabbar_targets.js）')
+}
 for (const g of goTargets) console.log('  [go 变量目标] ' + g)
 for (const u of utilSources) console.log('  [工具来源] ' + u)
 
