@@ -18,16 +18,27 @@
 | `15` | 发货方式选择（自主 / 委托）+ 几何对齐设计稿 | ⑮ |
 | `16` | 委托发货 · 组织选择器（AC-02 / DR-0008） | ⑯ |
 | `25` | 成果详情：字段类型的**渲染层**证据 + AC-05（ENT-025） | —（新增章节） |
+| `4b` | 撮合页（货主方向：为货源找船） | ④b |
+| `5` | 发布空船页渲染（船东视角） | ⑤ |
+| `7` | 合同三级页 + 长按弹层 + ⑦b 仿真案例 + ⑦c 已完成订单 | ⑦/⑦b/⑦c |
+| `8` | 支付详情三级页（真实点击「去支付」） | ⑧ |
+| `9` | 船东链路：工作台 → 船队 → 为船找货 + ⑨b 船东合同 | ⑨/⑨b |
+| `10` | 港口：服务网格 → 运营台 → 泊位档期（甘特 + 峰值并发） | ⑩ |
+| `11` | 预约审核详情 + 防超卖（与服务端 409 同口径） | ⑪ |
+| `13` | 智能入口：✨Ai 解析 → 一句话发货 → 草稿带回发布页 | ⑬ |
+| `14` | UI 打磨：顶栏身份 / 智能搜索页 / 订单页自绘导航 | ⑭ |
 
-**未迁移章节**：④b 撮合、⑤ 发布空船、⑦/⑦b/⑦c 合同、⑧ 支付、⑨/⑨b 船东链路、
-⑩/⑪ 港口链路、⑬ 智能入口、⑭ UI 打磨 —— 它们需要 REST 锚点预取与「按序号点击」，
-后者在 wechatide 上没有直接等价物（见下），属后续增量。
+**未迁移章节已清零（ENT-035，2026-09-15）**：上表 `4b` / `5` / `7` / `8` / `9` /
+`10` / `11` / `13` / `14` 即旧轨有、换轨后一直记 `not-run` 的 12 章，本轮补齐。
+DR-0009 记的阻塞点是「按序号点第 i 个同类元素」，解法走它给出的**出路 ①** ——
+属性选择器 + REST 锚点预取，因此**点击全部是真实点击**，没有退化成 `callMethod`。
+锚点由 `scripts/verify_miniapp.js` 的检查 9（`WALK_ANCHORS`）盯住三类静默失效。
 
-**这 12 章的「前置」已就位（ENT-031）**：目标元素补了唯一锚点属性
-（订单卡的 `data-order-id`、行内动作的 `data-act-*`、候选卡的 `data-ship-id` /
-`data-cargo-id`、甘特与时间轴的 `data-*-key`），并由 `scripts/verify_miniapp.js`
-的检查 9 盯住「锚点被搬走 / 值写成常量 / 属性被删」三类静默失效。
-**但章节脚本仍未开工** —— 前置就位不等于覆盖到位，这 12 章继续记 `not-run`。
+**仍有的覆盖缺口（不假装已覆盖）**：
+* ⑧b「模拟支付后转已支付」未做 —— 它会**消耗演示锚点**（支付单状态不可回退），
+  需 `WALK_PAY=1` 之类的显式开关才跑；
+* ⑬/⑭ 的「7 字段解析卡」依赖真实 LLM 解析结果，mock 与真模型的字段数可能不同；
+* 真机页面栈深度（DR-0011 的 `STACK_BUDGET = 8`）仍未做运行期验证。
 
 换轨带来的能力差异（实测）
 --------------------------
@@ -52,7 +63,11 @@
    `seed_entrust_orgpicker`＝⑯ 的多组织身份与甲乙两张委托。
 2. 后端必须**在跑章节之前**就绪：本脚本先 `backend_ready()` 探一次，不通直接 rc=2。
    后端没起来时所有页面都是 `view=error`，看起来像「页面全坏了」，其实一条业务缺陷都没有。
-3. 微信开发者工具已启动、已开过本项目窗口、已完成一次人工授权（授权持久，见 DR-0009）。
+3. 微信开发者工具**主界面**已启动（进程 `微信开发者工具.exe`）并打开过本项目，
+   且已完成一次人工授权（授权持久，见 DR-0009）。
+   ⚠️ 只起 CLI 服务**不够**：`check_wechatide_status` 与 `open_project_window`
+   在主进程没跑时也回 `ok`，但 `pageStack` 恒空 ⇒ 后续每次导航都等满超时，
+   整轮零输出地空转。本脚本用 `simulator_ready()` 拦这一条（rc=2）。
 4. **不得在沙箱中运行**（`wechatide` 官方硬要求）。
 
 用法
@@ -72,6 +87,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -93,6 +109,7 @@ CODE_OWNER = "seed-owner"
 #: 后端健康检查。端口写死 8000 不是偷懒 —— 前端 `utils/request.js` 的 BASE 与
 #: 两份种子脚本都指向 8000，换端口要三处一起改。
 HEALTHZ = "http://127.0.0.1:8000/healthz"
+API_BASE = "http://127.0.0.1:8000/api/v1"
 
 
 def backend_ready(timeout: float = 2.0) -> bool:
@@ -113,12 +130,220 @@ def backend_ready(timeout: float = 2.0) -> bool:
         return False
 
 
+# ---------------------------------------------------------------- REST 锚点预取
+# 为什么需要：待迁移的 12 章要「点第 N 张订单卡 / 第 N 个泊位」，而 wechatide
+# 的元素工具**没有 index 参数**。先向后端问清目标对象的真实 id，再用属性选择器
+# `[data-order-id="12"]` 精确命中 —— 与旧脚本 `apiLogin/apiGet/apiPost` 同义。
+#
+# ⚠️ 三条纪律：
+#   1. 一律走**空代理** opener（本机 http_proxy 会把 127.0.0.1 的请求也接管，
+#      表现为 502 Bad Gateway —— 那是环境问题，不是后端没起）。
+#   2. 预取失败**不致命**：返回 None，由章节自己以「前置锚点缺失」记一条失败，
+#      绝不静默跳过（静默跳过＝把 not-run 记成通过）。
+#   3. 锚点只在需要时现取，不缓存跨章（换库/重铺种子后编号会漂）。
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _http(req: urllib.request.Request, timeout: float = 15.0):
+    with _OPENER.open(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", "replace")
+        return int(resp.status), (json.loads(raw) if raw.strip() else None)
+
+
+def api_login(code: str) -> dict | None:
+    """用演示账号 code 换 token（联调期的固定身份，与 `utils/auth.js` 同源）。"""
+    body = json.dumps({"code": code}).encode("utf-8")
+    req = urllib.request.Request(
+        API_BASE + "/auth/login",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        status, data = _http(req)
+    except Exception:  # noqa: BLE001
+        return None
+    return data if status == 200 and isinstance(data, dict) else None
+
+
+def api_get(path: str, token: str) -> dict | None:
+    req = urllib.request.Request(
+        API_BASE + path, headers={"Authorization": "Bearer " + token}, method="GET"
+    )
+    try:
+        status, data = _http(req)
+    except Exception:  # noqa: BLE001
+        return None
+    return data if status == 200 else None
+
+
+def api_post(path: str, token: str, payload: dict) -> tuple[int, dict | None]:
+    body = json.dumps(payload or {}).encode("utf-8")
+    req = urllib.request.Request(
+        API_BASE + path,
+        data=body,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+        method="POST",
+    )
+    try:
+        return _http(req)
+    except urllib.error.HTTPError as exc:  # 409 之类要拿到状态码，不当成异常
+        try:
+            raw = exc.read().decode("utf-8", "replace")
+            return int(exc.code), (json.loads(raw) if raw.strip() else None)
+        except Exception:  # noqa: BLE001
+            return int(exc.code), None
+    except Exception:  # noqa: BLE001
+        return 0, None
+
+
+class Anchors:
+    """章节共享的演示数据锚点（现取现用）。
+
+    取不到时对应字段为 `None`，章节须**明确记一条失败**，不许当作通过。
+    """
+
+    def __init__(self) -> None:
+        self.token_shipper: str | None = None
+        self.token_owner: str | None = None
+        self.token_port: str | None = None
+        self.pay_order_id: int | None = None
+        self.match_cargo_id: int | None = None
+        self.ship_id: int | None = None
+        self.sim_cases: list[dict] = []  # [{key, order_id}]
+        self.completed_order_id: int | None = None
+        self.appt_id: int | None = None
+        self.berth_id: int | None = None
+        # 内部中间量：全部 completed 订单（等 sim_cases 定下来后排除掉仿真案例）
+        self._completed_all: list[int] = []
+
+    @classmethod
+    def fetch(cls) -> Anchors:
+        a = cls()
+        s = api_login("seed-shipper")
+        o = api_login("seed-owner")
+        p = api_login("seed-port")
+        a.token_shipper = (s or {}).get("access_token")
+        a.token_owner = (o or {}).get("access_token")
+        a.token_port = (p or {}).get("access_token")
+
+        if a.token_shipper:
+            orders = (api_get("/order/orders?size=100", a.token_shipper) or {}).get("items") or []
+            cargos = (api_get("/cargo/shipments?size=100", a.token_shipper) or {}).get(
+                "items"
+            ) or []
+            for x in orders:
+                if x.get("status") != "matched":
+                    continue
+                pm = api_get(f"/payment/payments/order/{x.get('id')}", a.token_shipper)
+                if pm and pm.get("status") == "pending":
+                    a.pay_order_id = x.get("id")
+                    break
+            # ⑦c 要的是「干净合同」：必须是 completed **且不带仿真风险**的订单。
+            # 仿真案例里也有 completed 的（R5 那宗），若撞上会得到「已完成却有风险」的假失败。
+            # ⇒ 先取全量订单，等 sim_cases 定下来后再挑（见本函数末尾）。
+            a._completed_all = [x.get("id") for x in orders if x.get("status") == "completed"]
+
+            # 智能合同仿真案例（seed_contract_cases 铺设，货源名里带 R3/R4/R5）
+            for key in ("R3", "R4", "R5"):
+                cargo = next(
+                    (c for c in cargos if "仿真案例 · " + key in str(c.get("cargo_name") or "")),
+                    None,
+                )
+                if not cargo:
+                    continue
+                order = next(
+                    (
+                        x
+                        for x in orders
+                        if x.get("cargo_id") == cargo.get("id") and x.get("status") != "cancelled"
+                    ),
+                    None,
+                )
+                if order:
+                    a.sim_cases.append({"key": key, "order_id": order.get("id")})
+
+            # 撮合货源：取候选最多的一票 published 货源
+            best_total = -1
+            for c in cargos:
+                if c.get("status") != "published":
+                    continue
+                st, data = api_post(f"/match/cargos/{c.get('id')}/ships", a.token_shipper, {})
+                total = (data or {}).get("total") or 0 if st == 200 else 0
+                if total > best_total:
+                    best_total, a.match_cargo_id = total, c.get("id")
+
+        if a.token_owner:
+            ships = (api_get("/ship/registry?size=50", a.token_owner) or {}).get("items") or []
+            verified = [x for x in ships if x.get("status") == "verified"]
+            verified.sort(key=lambda x: float(x.get("deadweight_t") or 0), reverse=True)
+            a.ship_id = verified[0].get("id") if verified else None
+
+        if a.token_port:
+            appts = (api_get("/port/appts-review?status=&size=100", a.token_port) or {}).get(
+                "items"
+            ) or []
+            # ⑪ 章验的是「待确认预约 + 防超卖被 409 拦下」，所以锚点必须挑 **pending**：
+            # 挑到 confirmed 的会走到「核销完成」分支，断言全部变成"没验成"。
+            pick = next((x for x in appts if x.get("status") == "pending"), None)
+            a.appt_id = (pick or (appts[0] if appts else {}) or {}).get("id")
+            berths = (api_get("/port/berths?size=50", a.token_port) or {}).get("items") or []
+            demo = next((b for b in berths if "DEMO-01" in str(b.get("berth_no") or "")), None)
+            a.berth_id = (demo or (berths[0] if berths else {}) or {}).get("id")
+
+        # ⑦c 的「干净合同」订单：completed 且**不在**仿真案例里
+        sim_ids = {c["order_id"] for c in a.sim_cases}
+        clean = [i for i in a._completed_all if i not in sim_ids]
+        a.completed_order_id = clean[0] if clean else None
+        return a
+
+
+def _pct(val: object) -> float:
+    """把 `"12.50%"` 这类 CSS 百分比字符串转 float；不可解析返回 -1（判为越界）。
+
+    甘特条的 `left` / `width` 是拼给 `style` 用的字符串，不是数字 ——
+    直接 `float()` 会让「几何校验」变成「解析校验」，失败原因被吞掉。
+    """
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        return float(str(val).strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return -1.0
+
+
+def simulator_ready(client: Client, tries: int = 6, gap: float = 2.0) -> bool:
+    """模拟器里是否真的有页面（`pageStack` 非空）。
+
+    为什么必须有这一句（2026-09-15 实测）：`check_wechatide_status` 与
+    `open_project_window` 在 **IDE 主进程没启动** 时照样回 `ok`（后者回
+    `type: "newopen"`），但 `pageStack` 恒为 `[]` —— 此后每次 `navigate` / `tap`
+    都等满 150s 超时再重试，整轮走查**零输出地空转二十几分钟**。
+
+    和 `backend_ready()` 同一条取向：**环境错要报成环境错**，不能让它在断言里
+    伪装成"页面全坏了"。
+    """
+    for _ in range(tries):
+        if client.page_stack():
+            return True
+        time.sleep(gap)
+    return False
+
+
 INDEX = "pages/index/index"
 SHIPPER = "pages/shipper/shipper"
 OWNER = "pages/owner/owner"
 ORDERS = "pages/trade/orders/orders"
 MINE = "pages/mine/mine"
 PUBLISH_CARGO = "pages/publish/cargo/cargo"
+PUBLISH_SHIP = "pages/publish/ship/ship"
+MATCH = "pages/trade/match/match"
+CONTRACT = "pages/trade/contract/contract"
+PAYMENT = "pages/trade/payment/payment"
+PORT = "pages/port/port"
+APPT = "pages/port/appt/appt"
+BERTH = "pages/port/berth/berth"
+ASSISTANT = "pages/assistant/assistant"
 PREVIEW = "pages/preview/preview"
 WORKBENCH = "pages/entrust/workbench/workbench"
 ARTIFACT = "pages/entrust/artifact/artifact"
@@ -188,12 +413,28 @@ class Walker:
         os.makedirs(shots_dir, exist_ok=True)
 
     # ---------------------------------------------------------------- 取证
-    def shot(self, name: str) -> str:
+    #: 小于这个字节数的 jpg 视为空图（实测正常页 20KB+，空转页 1–2KB）。
+    SHOT_MIN_BYTES = 5000
+
+    def shot(self, name: str, tries: int = 3) -> str:
+        """截图留证。
+
+        为什么要重试：截图是 **取证** 而不是断言对象，但抓取本身有偶发抖动 ——
+        2026-09-15 一轮 16 张里就有 1 张抓到 1.9KB 空图。一次性抓取会把「抓图抖了一下」
+        记成「页面没渲染」，属于把环境噪声写成业务结论。这里重试到拿到非空图为止，
+        但仍**只记一条**断言，不因为重试把断言数灌水。
+        """
         path = os.path.join(self.shots_dir, name + ".jpg")
-        ok = self.c.screenshot(path)
-        size = os.path.getsize(path) if os.path.exists(path) else 0
-        # 空截图（<5KB）等于没拿到证据，按失败计
-        self.rep.rec(f"截图 {name}", ok and size > 5000, f"{size}B")
+        ok = False
+        size = 0
+        for i in range(tries):
+            ok = self.c.screenshot(path)
+            size = os.path.getsize(path) if os.path.exists(path) else 0
+            if ok and size >= self.SHOT_MIN_BYTES:
+                break
+            if i + 1 < tries:
+                time.sleep(1.0)
+        self.rep.rec(f"截图 {name}", ok and size >= self.SHOT_MIN_BYTES, f"{size}B")
         return path
 
     def shot_on_fail(self, name: str, ok: bool) -> None:
@@ -236,6 +477,52 @@ class Walker:
                 return last
             time.sleep(gap)
         return last
+
+    # ------------------------------------------------- 未迁移章节需要的交互
+    def scroll_into(self, selector: str) -> None:
+        """把元素滚进视口（元素级 scrollTo；失败不阻断，tap 自带重试）。
+
+        长列表里第 N 张卡的按钮在折叠线外时 `tap` 会落空 —— 旧脚本为此手写
+        `scrollIntoView`；工具原生支持后不必自己算坐标。
+        """
+        self.c.scroll_into(selector)
+        time.sleep(0.4)
+
+    def tap_order_act(self, order_id: int, act: str, tries: int = 2) -> bool:
+        """点某张订单卡里的行内动作（`act` ∈ pay / contract / detail / …）。
+
+        这是「按序号点第 i 张卡」的等价替代：订单卡的每个动作都带
+        `data-act-<act>="<order_id>"`，用属性选择器即可**精确**命中，
+        且比序号更稳（列表排序变了也不会点错卡）。
+        """
+        sel = f'[data-act-{act}="{order_id}"]'
+        for i in range(tries):
+            if i:
+                self.scroll_into(f'[data-order-id="{order_id}"]')
+            if self.c.tap(sel):
+                return True
+            time.sleep(0.8)
+        return False
+
+    def tap_card_by_id(self, selector: str, obj_id: int, tries: int = 2) -> bool:
+        """点带 `data-id` 的卡片（运营台预约 / 泊位、船东船队卡）。"""
+        sel = f'{selector}[data-id="{obj_id}"]'
+        for i in range(tries):
+            if i:
+                self.scroll_into(sel)
+            if self.c.tap(sel):
+                return True
+            time.sleep(0.8)
+        return False
+
+    def back_to(self, want: str, tries: int = 3) -> bool:
+        """返回上一页直到到达 `want`（深栈下 navigateBack 回执偶发抖动）。"""
+        for _ in range(tries):
+            self.c.back()
+            if self.c.wait_path(want, 15):
+                return True
+            time.sleep(0.8)
+        return self.c.current_path() == want
 
     def new_errors(self, baseline: str) -> str:
         """相对基线的新增 console 错误（IDE 的 console 是累计日志）。"""
@@ -1728,6 +2015,731 @@ def sec_30(w: Walker) -> None:
     )
 
 
+# ============================== 未迁移章节（ENT-035） ==============================
+# 旧脚本有、换轨后一直记 `not-run` 的 12 章。DR-0009 记的阻塞点是「按序号点第 i 个
+# 同类元素」——wechatide 的元素工具没有 index 参数、忽略伪类、`--x/--y` 也落到第一个
+# 匹配项。这里走 DR-0009 给的**出路 ①**：页面已登记唯一锚点（`data-act-*` /
+# `data-order-id` / `data-id` / 新增的 `data-svc-key` 等），配合 REST 预取出来的真实
+# id 走属性选择器 ⇒ **本章的点击全部是真实点击**，没有退化成 `callMethod`。
+#
+# 唯一例外是端口会话：C 端「我是港口方」入口已下线，只能把 port 身份的 token 写进
+# Storage（键与 `utils/auth.js` / `utils/request.js` 一致）—— 页面渲染与后续点击
+# 仍然是真机的，只是绕过了已删除的入口。这一点在断言名里写明了。
+
+#: 智能合同仿真案例的预期风险（与 `seed_contract_cases` 铺设的三条规则一一对应）
+EXPECT_RISK = {
+    "R3": "装货日期临近",
+    "R4": "船舶证书临期",
+    "R5": "液货/危险品运输",
+}
+
+CODE_PORT = "seed-port"
+
+
+def _anchors(w: Walker) -> Anchors:
+    """取（并缓存）演示数据锚点。
+
+    ⚠️ 预取结果**本身记一条断言**：锚点缺失时后面各章会成片"跳过"，而"跳过"在
+    汇总里和"通过"长得一模一样 —— 这是本项目反复强调的「不把 not-run 记成通过」。
+    """
+    a = _STATE.get("anchors")
+    if a is None:
+        a = Anchors.fetch()
+        _STATE["anchors"] = a
+        missing = [
+            name
+            for name, val in (
+                ("shipper token", a.token_shipper),
+                ("owner token", a.token_owner),
+                ("port token", a.token_port),
+                ("待支付订单", a.pay_order_id),
+                ("撮合货源", a.match_cargo_id),
+                ("已认证船", a.ship_id),
+                ("港口预约", a.appt_id),
+                ("港口泊位", a.berth_id),
+            )
+            if val is None
+        ]
+        w.rep.rec(
+            "锚点预取：三身份 token + 订单/货源/船/预约/泊位",
+            not missing,
+            ("缺失=" + "、".join(missing))
+            if missing
+            else f"pay={a.pay_order_id} cargo={a.match_cargo_id} ship={a.ship_id} "
+            f"appt={a.appt_id} berth={a.berth_id} sim={len(a.sim_cases)}",
+        )
+    return a
+
+
+def _contract_ready(d: dict) -> bool:
+    """合同页就绪：不在 loading，且（有正文 或 已落到错误态）。
+
+    固定 sleep 不可靠 —— 真实生成慢于 sleep 时读到的是 loading 态空数据，
+    表现为 `raw=0 / risks=[]`，看起来像功能坏了，其实只是等太短。
+    """
+    return d.get("loading") is False and (
+        len(str(d.get("rawText") or "")) > 0 or bool(d.get("error"))
+    )
+
+
+def _goto_orders(w: Walker, code: str = CODE_SHIPPER, role: str = "shipper") -> dict:
+    """登录指定身份 → 点身份卡进工作台 → 切到「订单」tab，返回订单页 data。"""
+    w.login_as(code)
+    w.enter_role(role, SHIPPER if role == "shipper" else OWNER)
+    w.c.nav("switchTab", "/" + ORDERS, ORDERS)
+    time.sleep(1.8)
+    return w.c.page_data()
+
+
+def _port_session(w: Walker, a: Anchors) -> bool:
+    """把 port 身份会话写进 Storage（C 端「我是港口方」入口已下线）。
+
+    与旧脚本同义：`api_login` → 必要时 `switch-role` → `/auth/me` → 写
+    `access_token` + `user_info`。返回 False 表示前置就失败了。
+    """
+    if not a.token_port:
+        return False
+    me = api_get("/auth/me", a.token_port)
+    if not me:
+        return False
+    if me.get("current_role") != "port":
+        _st, data = api_post("/auth/switch-role", a.token_port, {"role": "port"})
+        tok = (data or {}).get("access_token")
+        if tok:
+            a.token_port = tok
+            me = api_get("/auth/me", a.token_port) or me
+    w.c.set_storage("access_token", a.token_port)
+    w.c.set_storage("user_info", json.dumps(me, ensure_ascii=False))
+    w.c.remove_storage("dev_login_code")
+    return True
+
+
+def sec_4b(w: Walker) -> None:
+    """④b 撮合页（货主方向：为货源找船）。"""
+    print("\n== ④b 撮合（货主方向） ==", flush=True)
+    a = _anchors(w)
+    if a.match_cargo_id is None:
+        w.rep.rec("④b 撮合页(货主方向)进入", False, "前置锚点缺失：没有可撮合的 published 货源")
+        return
+    w.login_as(CODE_SHIPPER)
+    w.enter_role("shipper", SHIPPER)
+    w.c.nav("navigateTo", f"/{MATCH}?mode=cargo&refId={a.match_cargo_id}", MATCH)
+    time.sleep(2.6)
+    w.shot("09-撮合-为货源找船")
+    md = w.c.page_data()
+    w.rep.rec("④ 撮合页(货主方向)进入", w.c.current_path() == MATCH, w.c.current_path())
+    w.rep.rec(
+        "④ 候选与未入局原因就绪",
+        (md.get("total") or 0) > 0 and bool(md.get("filterStats")),
+        f"total={md.get('total')} filter={json.dumps(md.get('filterStats'), ensure_ascii=False)[:120]}",
+    )
+    cand = (md.get("items") or [{}])[0]
+    dims = cand.get("dims") or []
+    if cand:
+        w.rep.rec(
+            "④ 评分四项拆解齐备",
+            len(dims) == 4,
+            " ".join(f"{d.get('name')}={d.get('value')}/{d.get('max')}" for d in dims),
+        )
+    # 「点第 1 张候选卡的下单按钮」：`data-act-pick-ship="<ship_id>"` 是唯一锚点
+    ship_id = cand.get("ship_id")
+    opened = False
+    if ship_id is not None:
+        w.c.tap(f'[data-act-pick-ship="{ship_id}"]')
+        opened = bool(
+            w.wait_data(lambda d: bool(d.get("orderModal")), tries=12, gap=0.4).get("orderModal")
+        )
+    w.shot("09b-撮合-下单确认弹窗")
+    w.rep.rec("④ 下单确认弹窗可打开", opened, f"ship #{ship_id}")
+    if opened:
+        w.c.tap(".btn-ghost")
+        time.sleep(0.9)
+        w.rep.rec(
+            "④ 弹窗取消后未产生订单",
+            not w.c.page_data().get("orderModal"),
+            str(w.c.page_data().get("orderModal")),
+        )
+    w.back_to(SHIPPER)
+
+
+def sec_05(w: Walker) -> None:
+    """⑤ 发布空船页渲染（船东视角）。"""
+    print("\n== ⑤ 发布空船 ==", flush=True)
+    w.login_as(CODE_OWNER)
+    ok = w.enter_role("owner", OWNER)
+    w.rep.rec("⑤ 船东工作台进入（真实点击身份卡）", ok, w.c.current_path())
+    if not ok:
+        return
+    time.sleep(1.6)
+    w.c.nav("navigateTo", "/" + PUBLISH_SHIP, PUBLISH_SHIP)
+    time.sleep(1.8)
+    w.shot("05-发布空船")
+    psd = w.c.page_data()
+    w.rep.rec(
+        "⑤ 发布空船页渲染（船东视角）",
+        (not psd.get("error")) and len(psd.get("ships") or []) > 0,
+        f"已认证船={len(psd.get('ships') or [])}",
+    )
+    w.back_to(OWNER)
+
+
+def sec_07(w: Walker) -> None:
+    """⑦ 合同三级页 + 长按弹层 + ⑦b 仿真案例 + ⑦c 已完成订单。"""
+    print("\n== ⑦ 合同（三级页 / 长按 / 仿真案例 / 已完成） ==", flush=True)
+    a = _anchors(w)
+    if a.pay_order_id is None:
+        w.rep.rec("⑦ 「查看合同」真实点击", False, "前置锚点缺失：无待支付订单")
+        return
+    oid = a.pay_order_id
+    _goto_orders(w)
+    w.rep.rec(
+        "⑦ 待支付订单在列表可见",
+        any(x.get("id") == oid for x in (w.c.page_data().get("list") or [])),
+        f"order #{oid}",
+    )
+
+    # （1）点「查看合同」→ 合同三级页
+    tapped = w.tap_order_act(oid, "contract")
+    w.rep.rec("⑦ 「查看合同」真实点击", tapped, f'[data-act-contract="{oid}"]')
+    w.c.wait_path(CONTRACT, 25)
+    cd = w.wait_data(_contract_ready, tries=60, gap=0.5)
+    w.shot("07-合同预览三级页")
+    w.rep.rec("⑦ 合同页进入", w.c.current_path() == CONTRACT, w.c.current_path())
+    w.rep.rec(
+        "⑦ 合同正文有内容",
+        len(cd.get("contractHtml") or "") > 200 or len(cd.get("rawText") or "") > 200,
+        f"html={len(cd.get('contractHtml') or '')} raw={len(cd.get('rawText') or '')}",
+    )
+    w.rep.rec(
+        "⑦ 风险卡渲染",
+        isinstance(cd.get("risks"), list),
+        f"risks={len(cd.get('risks') or [])} high={cd.get('highCount')}",
+    )
+    w.back_to(ORDERS)
+    time.sleep(1.2)
+
+    # （2）长按订单卡 → 合同弹层（长按只能靠元素工具的 longpress）
+    w.c.longpress(f'[data-order-id="{oid}"]')
+    c3 = w.wait_data(lambda d: bool((d.get("contract") or {}).get("show")), tries=24, gap=0.4)
+    w.shot("07b-订单页-长按合同弹层")
+    shown = bool((c3.get("contract") or {}).get("show"))
+    w.rep.rec("⑦ 长按订单卡弹出合同弹层", shown, f"contract.show={shown}")
+    if shown:
+        w.c.tap(".modal-mask")
+        time.sleep(0.7)
+
+    # （3）⑦b 智能合同仿真案例（R3/R4/R5 → 命中预期风险规则）
+    for sc in a.sim_cases:
+        key, soid = sc["key"], sc["order_id"]
+        if w.c.current_path() != ORDERS:
+            w.c.nav("switchTab", "/" + ORDERS, ORDERS)
+            time.sleep(1.5)
+        vis = any(x.get("id") == soid for x in (w.c.page_data().get("list") or []))
+        w.rep.rec(f"⑦b 仿真案例 {key} 在订单列表可见", vis, f"#{soid}")
+        if not vis:
+            continue
+        w.rep.rec(f"⑦b 「查看合同」可点（{key}）", w.tap_order_act(soid, "contract"))
+        w.c.wait_path(CONTRACT, 25)
+        cd = w.wait_data(_contract_ready, tries=60, gap=0.5)
+        w.shot(f"07c-合同-仿真案例-{key}")
+        titles = [r.get("title") for r in (cd.get("risks") or [])]
+        w.rep.rec(f"⑦b {key} 合同页进入", w.c.current_path() == CONTRACT, w.c.current_path())
+        w.rep.rec(
+            f"⑦b {key} 命中预期风险「{EXPECT_RISK.get(key)}」",
+            EXPECT_RISK.get(key) in titles,
+            "risks=" + "、".join(str(t) for t in titles),
+        )
+        w.rep.rec(
+            f"⑦b {key} 合同正文非空",
+            len(cd.get("rawText") or "") > 400,
+            f"raw={len(cd.get('rawText') or '')}",
+        )
+        w.back_to(ORDERS)
+        time.sleep(1.0)
+
+    # （4）⑦c 已完成订单也能查看合同（干净合同 / 无风险）
+    if a.completed_order_id is None:
+        w.rep.rec("⑦c 已完成订单可查看合同", False, "前置锚点缺失：库里没有 completed 订单")
+        return
+    if w.c.current_path() != ORDERS:
+        w.c.nav("switchTab", "/" + ORDERS, ORDERS)
+        time.sleep(1.5)
+    done = a.completed_order_id
+    w.rep.rec("⑦c 已完成订单可查看合同", w.tap_order_act(done, "contract"), f"#{done}")
+    w.c.wait_path(CONTRACT, 25)
+    cd2 = w.wait_data(_contract_ready, tries=60, gap=0.5)
+    w.shot("07d-合同-已完成订单-无风险")
+    w.rep.rec(
+        "⑦c 已完成合同无风险项",
+        len(cd2.get("risks") or []) == 0,
+        f"risks={len(cd2.get('risks') or [])}",
+    )
+    w.rep.rec(
+        "⑦c 已完成合同正文非空",
+        len(cd2.get("rawText") or "") > 400,
+        f"raw={len(cd2.get('rawText') or '')}",
+    )
+    w.back_to(ORDERS)
+
+
+def sec_08(w: Walker) -> None:
+    """⑧ 支付详情三级页（真实点击「去支付」）。"""
+    print("\n== ⑧ 支付详情三级页 ==", flush=True)
+    a = _anchors(w)
+    if a.pay_order_id is None:
+        w.rep.rec(
+            "⑧ 待支付订单在列表可见", False, "前置锚点缺失：无 matched 且支付单 pending 的订单"
+        )
+        return
+    oid = a.pay_order_id
+    _goto_orders(w)
+    w.rep.rec(
+        "⑧ 待支付订单在列表可见",
+        any(x.get("id") == oid for x in (w.c.page_data().get("list") or [])),
+        f"order #{oid}",
+    )
+    tapped = w.tap_order_act(oid, "pay")
+    ok = w.c.wait_path(PAYMENT, 25) if tapped else False
+    if not ok:
+        # 长列表里按钮可能在折叠线外：滚进视口再点一次（仍失败则如实记为失败）
+        w.scroll_into(f'[data-order-id="{oid}"]')
+        if w.tap_order_act(oid, "pay"):
+            ok = w.c.wait_path(PAYMENT, 25)
+    w.rep.rec("⑧ 「去支付」真实点击", ok, f'[data-act-pay="{oid}"]')
+    time.sleep(2.2)
+    w.shot("08-支付详情三级页")
+    pm = w.c.page_data()
+    w.rep.rec("⑧ 支付页进入", w.c.current_path() == PAYMENT, w.c.current_path())
+    w.rep.rec(
+        "⑧ 金额为锁定的订单运费",
+        bool(pm.get("amountText")) and pm.get("amountText") != "面议",
+        f"amountText={pm.get('amountText')}",
+    )
+    w.rep.rec(
+        "⑧ 资金留痕时间轴就绪",
+        len(pm.get("timeline") or []) >= 2,
+        f"segments={len(pm.get('timeline') or [])}",
+    )
+    w.rep.rec("⑧ 底栏可支付", pm.get("canPay") is True, f"canPay={pm.get('canPay')}")
+    w.back_to(ORDERS)
+
+
+def sec_09(w: Walker) -> None:
+    """⑨ 船东链路：工作台 → 船队 → 为船找货 + ⑨b 船东侧智能合同。"""
+    print("\n== ⑨ 船东链路 ==", flush=True)
+    a = _anchors(w)
+    w.login_as(CODE_OWNER)
+    ok = w.enter_role("owner", OWNER)
+    w.rep.rec("⑨ 船东工作台进入（真实点击身份卡）", ok, w.c.current_path())
+    if not ok:
+        return
+    time.sleep(1.8)
+    w.shot("10-船东找货")
+    owd = w.c.page_data()
+    w.rep.rec(
+        "⑨ 船东页渲染",
+        not owd.get("error"),
+        f"货源大厅={len(owd.get('list') or [])} 船队={len(owd.get('shipList') or [])} "
+        f"已认证={owd.get('verifiedCount')}",
+    )
+
+    # 船队区块仅在 view==='fleet' 渲染，必须先点「我的船队」
+    w.c.tap(".my-entry")
+    time.sleep(1.5)
+    w.shot("10b-船东-我的船队")
+    od2 = w.wait_data(lambda d: d.get("view") == "fleet", tries=15, gap=0.4)
+    w.rep.rec("⑨ 船队视图切换", od2.get("view") == "fleet", f"view={od2.get('view')}")
+    fleets = od2.get("shipList") or []
+    in_fleet = any(x.get("id") == a.ship_id for x in fleets)
+    w.rep.rec("⑨ 目标船在船队列表", in_fleet, f"ship #{a.ship_id} n={len(fleets)}")
+    if in_fleet and a.ship_id is not None:
+        w.tap_card_by_id(".btn-secondary", a.ship_id)
+        w.c.wait_path(MATCH, 25)
+        time.sleep(2.8)
+        w.shot("09c-撮合-为船找货")
+        md2 = w.c.page_data()
+        w.rep.rec("⑨ 撮合页(船东方向)进入", w.c.current_path() == MATCH, w.c.current_path())
+        w.rep.rec(
+            "⑨ 船东方向有候选可排序", (md2.get("total") or 0) > 0, f"total={md2.get('total')}"
+        )
+        scores = [x.get("score") for x in (md2.get("items") or [])]
+        w.rep.rec(
+            "⑨ 候选按评分降序",
+            bool(scores) and all(scores[i - 1] >= scores[i] for i in range(1, len(scores))),
+            "scores=" + json.dumps(scores),
+        )
+        w.back_to(OWNER)
+        time.sleep(1.0)
+
+    # ⑨b 船东 · 「订单」→ 智能合同（与货主同一批仿真案例，验两个角色都能检查）
+    w.c.nav("switchTab", "/" + ORDERS, ORDERS)
+    time.sleep(2.0)
+    w.shot("10c-船东-我的订单")
+    ood = w.c.page_data()
+    olist = ood.get("list") or []
+    w.rep.rec(
+        "⑨b 船东订单页无错误且非空",
+        (not ood.get("error")) and len(olist) > 0,
+        f"role={ood.get('role')} list={len(olist)}",
+    )
+    if not a.sim_cases:
+        w.rep.rec("⑨b 船东可见仿真案例", False, "前置锚点缺失：库里没有 R3/R4/R5 仿真案例")
+        return
+    sc = a.sim_cases[-1]
+    soid = sc["order_id"]
+    vis = any(x.get("id") == soid for x in olist)
+    w.rep.rec(f"⑨b 船东可见仿真案例 {sc['key']}", vis, f"#{soid}")
+    if not vis:
+        return
+    w.rep.rec("⑨b 船东「查看合同」可点", w.tap_order_act(soid, "contract"))
+    w.c.wait_path(CONTRACT, 25)
+    cd3 = w.wait_data(_contract_ready, tries=60, gap=0.5)
+    w.shot(f"10d-船东-合同-{sc['key']}")
+    titles3 = [r.get("title") for r in (cd3.get("risks") or [])]
+    w.rep.rec(
+        f"⑨b 船东侧命中预期风险「{EXPECT_RISK.get(sc['key'])}」",
+        EXPECT_RISK.get(sc["key"]) in titles3,
+        "risks=" + "、".join(str(t) for t in titles3),
+    )
+    w.rep.rec(
+        "⑨b 船东侧合同正文非空",
+        len(cd3.get("rawText") or "") > 400,
+        f"raw={len(cd3.get('rawText') or '')}",
+    )
+    w.back_to(ORDERS)
+
+
+def sec_10(w: Walker) -> None:
+    """⑩ 港口：服务网格 → 运营台 → 泊位档期（甘特 + 峰值并发）。"""
+    print("\n== ⑩ 港口工作台 ==", flush=True)
+    a = _anchors(w)
+    if not _port_session(w, a):
+        w.rep.rec(
+            "⑩ 港口工作台进入（port 身份会话 · C 端入口已下线）",
+            False,
+            "前置失败：拿不到 port token（api_login 失败或 /auth/me 不通）",
+        )
+        return
+    arrived = w.c.nav("switchTab", "/" + PORT, PORT)
+    time.sleep(1.6)
+    w.rep.rec("⑩ 港口工作台进入（port 身份会话 · C 端入口已下线）", arrived, w.c.current_path())
+    if not arrived:
+        return
+    w.shot("11-港口服务（占位网格）")
+    pd = w.c.page_data()
+    w.rep.rec(
+        "⑩ 港口服务页（4 组占位）",
+        pd.get("view") == "service" and len(pd.get("groups") or []) == 4,
+        f"view={pd.get('view')} groups={len(pd.get('groups') or [])}",
+    )
+
+    # 服务网格 → 业务办理（锚点 `data-svc-key="ops"`）
+    entered = w.c.tap('[data-svc-key="ops"]')
+    time.sleep(2.0)
+    pd = w.c.page_data()
+    w.shot("11b-港口-预约审核（运营台默认页）")
+    w.rep.rec(
+        "⑩ 真实点击「业务办理」进入运营台",
+        entered and pd.get("view") == "ops",
+        f"view={pd.get('view')} tab={pd.get('tab')}",
+    )
+
+    # 泊位管理 tab → DEMO-01 档期
+    if a.berth_id is None:
+        w.rep.rec("⑩ 演示泊位在列表", False, "前置锚点缺失：库里没有泊位")
+        return
+    w.c.tap('[data-tab="list"]')
+    time.sleep(2.0)
+    w.shot("11c-港口-泊位管理")
+    berths = w.c.page_data().get("berthList") or []
+    target = next((b for b in berths if b.get("id") == a.berth_id), None)
+    w.rep.rec(
+        "⑩ 演示泊位在列表",
+        target is not None,
+        (
+            f"#{a.berth_id} cap={target.get('concurrent_capacity')}"
+            if target
+            else f"#{a.berth_id} 未找到"
+        ),
+    )
+    if target is None:
+        return
+    w.c.tap(f'[data-berth-id="{a.berth_id}"]')
+    okb = w.c.wait_path(BERTH, 25)
+    time.sleep(2.2)
+    w.shot("12-泊位档期详情（满档+甘特）")
+    bd = w.c.page_data()
+    w.rep.rec("⑩ 泊位档期页进入", okb and w.c.current_path() == BERTH, w.c.current_path())
+    bars = bd.get("bars") or []
+    w.rep.rec(
+        "⑩ 档期甘特条渲染",
+        len(bars) >= 2,
+        f"bars={len(bars)} peak={bd.get('peak')}/{bd.get('capacity')}",
+    )
+    peak = float(bd.get("peak") or 0)
+    cap = float(bd.get("capacity") or 0)
+    w.rep.rec("⑩ 峰值并发达容量（满档演示）", peak >= cap and cap > 0, f"peak={peak} cap={cap}")
+    geo: list[list[float]] = []
+    for b in bars:
+        # ⚠️ `left` / `width` 是**带百分号的 CSS 字符串**（berth.js 用
+        # `toFixed(2) + '%'` 拼的），直接 `float()` 会抛 ValueError ——
+        # 2026-09-15 首跑三条全落到 except 分支，报成 `[[-1,-1]×3]`，
+        # 看起来像"甘特几何越界"，实际是取值口径不对。
+        geo.append([_pct(b.get("left")), _pct(b.get("width"))])
+    w.rep.rec(
+        "⑩ 甘特条几何在 [0,100]% 内",
+        bool(geo) and all(0 <= left <= 100.5 and wd > 0 and left + wd <= 100.6 for left, wd in geo),
+        json.dumps(geo),
+    )
+    w.back_to(PORT)
+
+
+def sec_11(w: Walker) -> None:
+    """⑪ 预约审核详情 + 防超卖（与服务端 409 同口径）+ 跳泊位档期。"""
+    print("\n== ⑪ 预约审核 ==", flush=True)
+    a = _anchors(w)
+    if a.appt_id is None:
+        w.rep.rec("⑪ 待确认预约列表就绪", False, "前置锚点缺失：库里没有预约")
+        return
+    if not _port_session(w, a):
+        w.rep.rec("⑪ 待确认预约列表就绪", False, "前置失败：拿不到 port 会话")
+        return
+    if not w.c.nav("switchTab", "/" + PORT, PORT):
+        w.rep.rec("⑪ 待确认预约列表就绪", False, f"未进入港口页（{w.c.current_path()}）")
+        return
+    time.sleep(1.8)
+    pd = w.c.page_data()
+    if pd.get("view") != "ops":
+        w.c.tap('[data-svc-key="ops"]')
+        time.sleep(2.0)
+        pd = w.c.page_data()
+    if pd.get("tab") != "appts":
+        w.c.tap('[data-tab="appts"]')
+        time.sleep(1.6)
+        pd = w.c.page_data()
+    appts = pd.get("apptList") or []
+    w.rep.rec("⑪ 待确认预约列表就绪", len(appts) > 0, f"pending={len(appts)}")
+
+    w.c.tap(f'[data-appt-id="{a.appt_id}"]')
+    oka = w.c.wait_path(APPT, 25)
+    time.sleep(2.0)
+    w.shot("13-预约审核详情")
+    ad = w.c.page_data()
+    w.rep.rec("⑪ 预约详情页进入", oka and w.c.current_path() == APPT, w.c.current_path())
+    w.rep.rec(
+        "⑪ 容量预检判冲突（与服务端 409 同口径）",
+        ad.get("conflict") is True,
+        f"重叠 {ad.get('overlapNow')} + 1 > 容量 {ad.get('capacity')}",
+    )
+    w.rep.rec(
+        "⑪ 留痕时间轴就绪",
+        len(ad.get("timeline") or []) >= 2,
+        f"segments={len(ad.get('timeline') or [])}",
+    )
+    before = json.dumps(ad.get("timeline") or [], ensure_ascii=False)
+    w.c.tap(".btn-primary")
+    time.sleep(3.0)
+    w.shot("13b-预约确认-服务端409拦截")
+    ad2 = w.c.page_data()
+    w.rep.rec(
+        "⑪ 「确认并锁定档期」被服务端拦下（状态未变）",
+        json.dumps(ad2.get("timeline") or [], ensure_ascii=False) == before,
+        f"status={ad2.get('status')}",
+    )
+
+    more = w.c.tap(".section-head-more")
+    to_berth = w.c.wait_path(BERTH, 20) if more else False
+    time.sleep(1.8)
+    w.shot("12b-泊位档期（由预约页跳入）")
+    w.rep.rec(
+        "⑪ 预约页 → 泊位档期跳转", to_berth and w.c.current_path() == BERTH, w.c.current_path()
+    )
+    w.back_to(APPT)
+    w.back_to(PORT)
+
+
+def sec_13(w: Walker) -> None:
+    """⑬ 智能入口：✨Ai 解析 → 一句话发货 → 草稿带回发布页。
+
+    历史缺陷：`assistant.js` 的 onLoad 曾写成无参，`?mode=parse` 被整体丢弃，
+    「✨Ai」与「客服」进的是同一页同一行为（后端做好了但前端从未接上）——
+    本章就是钉住这条路径的。
+    """
+    print("\n== ⑬ 智能入口 ==", flush=True)
+    w.login_as(CODE_SHIPPER)
+    # login_as 只注入 dev_login_code，**不完成登录**；真正的登录发生在首页点身份卡
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.rec("⑬ 前置：货主工作台未进入", False, w.c.current_path())
+        return
+    time.sleep(1.6)
+    n_box = w.c.count(".search-box")
+    w.rep.rec("⑬ 货主页有搜索框（统一入口位）", n_box > 0, str(n_box))
+
+    w.c.nav("navigateTo", f"/{ASSISTANT}?mode=parse", ASSISTANT)
+    ad = w.wait_data(lambda d: d.get("mode") == "parse", tries=40, gap=0.5)
+    w.shot("15-Ai解析态")
+    w.rep.rec(
+        "⑬ 「✨Ai」进入货源解析态（不再与客服同页）",
+        ad.get("mode") == "parse",
+        f"mode={ad.get('mode')}",
+    )
+    w.rep.rec(
+        "⑬ 货主进解析态无角色门控", ad.get("roleBlocked") is False, str(ad.get("roleBlocked"))
+    )
+
+    # 用 setData 注入输入框内容后点「解析」→ 走真实 onSend → 真实 HTTP
+    w.c.set_data({"input": "800吨散装水泥，下周三从南宁运到贵港，运费2万5"})
+    time.sleep(0.4)
+    w.c.tap(".btn-send")
+    ad2 = w.wait_data(
+        lambda d: any(
+            m.get("kind") == "parse" and not m.get("pending") for m in (d.get("messages") or [])
+        ),
+        tries=60,
+        gap=0.6,
+    )
+    parsed = [m for m in (ad2.get("messages") or []) if m.get("kind") == "parse"]
+    card = parsed[-1] if parsed else {}
+    w.shot("15-Ai解析结果卡片")
+    rows = card.get("rows") or []
+    w.rep.rec("⑬ 解析结果渲染为结构化卡片（7 字段）", len(rows) == 7, str(len(rows)))
+    w.rep.rec(
+        "⑬ 卡片含草稿（可带去发布页，Agent 未直写）",
+        bool(card.get("draft")),
+        "ok" if card.get("draft") else "无 draft",
+    )
+    if not card.get("draft"):
+        w.rep.rec("⑬ 草稿带入发布货源页并回填装货港", False, "前置：卡片无草稿")
+        w.back_to(SHIPPER)
+        return
+    if not (w.c.tap(".parse-card .parse-btn") or w.c.tap(".parse-btn")):
+        w.rep.rec("⑬ 草稿带入发布货源页并回填装货港", False, "未点到「带去发布页」")
+        w.back_to(SHIPPER)
+        return
+    w.c.wait_path(PUBLISH_CARGO, 30)
+    time.sleep(2.0)
+    w.shot("15-解析草稿带入发布页")
+    cd = w.c.page_data()
+    w.rep.rec(
+        "⑬ 草稿带入发布货源页并回填装货港",
+        bool((cd.get("form") or {}).get("origin_port")),
+        json.dumps((cd.get("form") or {}).get("origin_port"), ensure_ascii=False),
+    )
+    w.rep.rec(
+        "⑬ 回填后给出确认提示", "AI 已" in str(cd.get("smartTip") or ""), str(cd.get("smartTip"))
+    )
+    n_smart = w.c.count(".smart-btn")
+    w.rep.rec("⑬ 发布页有「一句话发货」与「合规预检」入口", n_smart >= 2, str(n_smart))
+    w.back_to(SHIPPER)
+
+
+def sec_14(w: Walker) -> None:
+    """⑭ UI 打磨：顶栏身份 / 智能搜索页 / 订单页自绘导航。"""
+    print("\n== ⑭ UI 打磨 ==", flush=True)
+    w.login_as(CODE_SHIPPER)
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.rec("⑭ 前置：货主工作台未进入", False, w.c.current_path())
+        return
+    time.sleep(1.6)
+    hd = w.c.page_data()
+    n_av = w.c.count(".avatar-vec")
+    w.rep.rec("⑭ 货主页顶栏有矢量人物头像", n_av > 0, str(n_av))
+    w.rep.rec(
+        "⑭ 货主页顶栏显示用户 ID",
+        bool(re.fullmatch(r"用户\d+", str(hd.get("userCode") or ""))),
+        str(hd.get("userCode")),
+    )
+    w.rep.rec(
+        "⑭ 货主页顶栏显示地理位置（常用港）",
+        bool(hd.get("defaultPortLabel")),
+        str(hd.get("defaultPortLabel")),
+    )
+    w.shot("16-货主页-顶栏身份")
+
+    # 搜索框 → 智能搜索页（客服同款外壳，不再是系统弹窗）
+    w.c.tap(".search-box")
+    if not w.c.wait_path(ASSISTANT, 30):
+        w.rep.rec("⑭ 搜索框进入「智能搜索」页（不再弹系统弹窗）", False, w.c.current_path())
+        return
+    sd = w.wait_data(lambda d: d.get("mode") == "search", tries=40, gap=0.5)
+    time.sleep(0.7)
+    w.shot("16-智能搜索页")
+    w.rep.rec(
+        "⑭ 搜索框进入「智能搜索」页（不再弹系统弹窗）",
+        sd.get("mode") == "search",
+        f"mode={sd.get('mode')}",
+    )
+    n_composer = w.c.count(".composer")
+    n_send = w.c.count(".btn-send")
+    w.rep.rec(
+        "⑭ 智能搜索复用客服外壳（含输入区与底部按钮）",
+        n_composer > 0 and n_send > 0,
+        f"composer={n_composer} send={n_send}",
+    )
+    chips = sd.get("chips") or []
+    w.rep.rec(
+        "⑭ 搜索态文案与示例齐备",
+        "智能搜索" in str(sd.get("bannerTitle") or "") and len(chips) >= 3,
+        f"banner={sd.get('bannerTitle')} chips={len(chips)}",
+    )
+
+    w.c.set_data({"input": "我要发800吨散装水泥，南宁到贵港"})
+    time.sleep(0.4)
+    w.c.tap(".btn-send")
+    sd2 = w.wait_data(
+        lambda d: any(
+            m.get("role") == "assistant" and not m.get("pending") for m in (d.get("messages") or [])
+        ),
+        tries=60,
+        gap=0.6,
+    )
+    replied = [
+        m
+        for m in (sd2.get("messages") or [])
+        if m.get("role") == "assistant" and not m.get("pending")
+    ]
+    last = replied[-1] if replied else {}
+    w.shot("16-智能搜索结果")
+    w.rep.rec(
+        "⑭ 智能搜索返回结果（卡片/气泡，且标注识别意图）",
+        bool(last.get("kind") or last.get("text")) and not last.get("error"),
+        f"kind={last.get('kind') or '-'} intent={last.get('intentLabel') or '-'} "
+        f"text={str(last.get('text') or '')[:20]}",
+    )
+    if last.get("kind") == "parse":
+        w.rep.rec(
+            "⑭ 货源类搜索出结构化解析卡（7 字段）",
+            len(last.get("rows") or []) == 7,
+            str(len(last.get("rows") or [])),
+        )
+    w.back_to(SHIPPER)
+
+    # 订单页自绘导航：`navigationStyle:custom` 却未自绘时统计行会顶到状态栏
+    w.c.nav("switchTab", "/" + ORDERS, ORDERS)
+    time.sleep(1.8)
+    w.shot("16-订单页-自绘导航")
+    n_nav = w.c.count(".nav")
+    n_title = w.c.count(".nav-title")
+    w.rep.rec("⑭ 订单页自绘导航存在", n_nav > 0, str(n_nav))
+    w.rep.rec("⑭ 订单页导航标题渲染", n_title > 0, str(n_title))
+    nav_r = w.c.rects(".nav")
+    stat_r = w.c.rects(".stat-row")
+    nav0 = nav_r[0] if nav_r else {}
+    stat0 = stat_r[0] if stat_r else {}
+    below = (
+        bool(nav0 and stat0)
+        and float(stat0.get("top") or 0)
+        >= float(nav0.get("top") or 0) + float(nav0.get("height") or 0) - 2
+    )
+    w.rep.rec(
+        "⑭ 统计行位于导航之下（不再顶出页面框架）",
+        bool(below),
+        json.dumps(
+            {"navTop": nav0.get("top"), "navH": nav0.get("height"), "statTop": stat0.get("top")}
+        ),
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -1744,6 +2756,15 @@ SECTIONS = {
     "28": sec_28,
     "29": sec_29,
     "30": sec_30,
+    "4b": sec_4b,
+    "5": sec_05,
+    "7": sec_07,
+    "8": sec_08,
+    "9": sec_09,
+    "10": sec_10,
+    "11": sec_11,
+    "13": sec_13,
+    "14": sec_14,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -1769,6 +2790,16 @@ DEFAULT_ORDER = [
     "28",
     "29",
     "30",
+    # ENT-035 补齐的未迁移章节（旧轨有、换轨后一直记 not-run 的 12 章）
+    "4b",
+    "5",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "13",
+    "14",
 ]
 
 
@@ -1810,11 +2841,20 @@ def main() -> int:
         print(f"\n[前置不通过]\n{exc}", file=sys.stderr)
         return 2
     meta = st.get("result", {}) if isinstance(st.get("result"), dict) else {}
-    print(
-        f"门禁    ：ok / versionRelation={meta.get('versionRelation')} / "
-        f"loginExpired={meta.get('loginExpired')} / tokenRequired={meta.get('tokenRequired')}",
-        flush=True,
-    )
+    if st.get("degraded"):
+        # 状态工具偶发 CONNECT_ERROR，但开窗/取页面栈是通的 —— 如实说，不要假装没事。
+        print(
+            "门禁    ：check_wechatide_status 未通过（"
+            + str((st.get("status") or {}).get("errorType"))
+            + "），已用「开窗 + 取页面栈」复检通过 ⇒ 降级放行",
+            flush=True,
+        )
+    else:
+        print(
+            f"门禁    ：ok / versionRelation={meta.get('versionRelation')} / "
+            f"loginExpired={meta.get('loginExpired')} / tokenRequired={meta.get('tokenRequired')}",
+            flush=True,
+        )
 
     if not backend_ready():
         print(
@@ -1830,6 +2870,18 @@ def main() -> int:
     w = Walker(client, shots, rep)
     print("\n== 开窗 ==", flush=True)
     client.open_window()
+    if not simulator_ready(client):
+        print(
+            "\n[前置不通过] 模拟器里没有页面（pageStack 为空）。\n"
+            "  这与「后端没起」是同一类环境错，但更隐蔽：门禁 status 与 open_project_window"
+            "  **在 IDE 主进程没跑时也回 ok**，而此后每一次 navigate / tap 都会等满超时，\n"
+            "  表现为「走查跑了二十几分钟一行输出都没有」，一条业务结论也产不出。\n"
+            "  处理：先把微信开发者工具**主界面**打开（进程 `微信开发者工具.exe`）并打开本项目，\n"
+            "  再重跑；判据是 pageStack 非空，不是 status().ok。",
+            file=sys.stderr,
+        )
+        return 2
+    print("模拟器  ：pageStack 非空", flush=True)
 
     for name in wanted:
         try:

@@ -34,6 +34,7 @@
               wx:key="label"
               class="grid-item"
               data-item="{{it}}"
+              data-svc-key="{{it.key}}"
               bindtap="onServiceTap"
               hover-class="grid-item-hover"
             >
@@ -88,7 +89,7 @@
         <view class="empty-icon">📅</view>
         <view>暂无{{apptFilter === 'pending' ? '待确认的' : ''}}泊位预约</view>
       </view>
-      <view wx:for="{{apptList}}" wx:key="id" class="section-card ops-card" data-id="{{item.id}}" bindtap="goApptDetail" hover-class="hover-dim">
+      <view wx:for="{{apptList}}" wx:key="id" class="section-card ops-card" data-id="{{item.id}}" data-appt-id="{{item.id}}" bindtap="goApptDetail" hover-class="hover-dim">
         <view class="ops-card-head">
           <text class="ops-card-title">船舶 #{{item.ship_id}} 申请泊位 #{{item.berth_id}}</text>
           <text class="badge badge-matched">{{statusLabels[item.status]}}</text>
@@ -118,7 +119,7 @@
         <view class="empty-icon">⚓</view>
         <view>暂无泊位，请先新建</view>
       </view>
-      <view wx:for="{{berthList}}" wx:key="id" class="section-card ops-card" data-id="{{item.id}}" bindtap="goBerthDetail" hover-class="hover-dim">
+      <view wx:for="{{berthList}}" wx:key="id" class="section-card ops-card" data-id="{{item.id}}" data-berth-id="{{item.id}}" bindtap="goBerthDetail" hover-class="hover-dim">
         <view class="ops-card-head">
           <text class="ops-card-title">{{item.port_code}} - {{item.berth_no}} {{item.berth_name}}</text>
           <text class="badge {{item.status === 'active' ? 'badge-verified' : 'badge-cancelled'}}">

@@ -213,17 +213,30 @@ class Client:
         return self.call_json("check_wechatide_status", *keys)
 
     def require_ready(self, skill_version: str | None = None) -> dict:
-        """前置自检：不可用即抛异常，并把「下一步该做什么」写进错误信息。"""
+        """前置自检：不可用即抛异常，并把「下一步该做什么」写进错误信息。
+
+        ⚠️ 2026-09-15 实测：`check_wechatide_status` 会**偶发**回
+        `{ok: False, errorType: "CONNECT_ERROR"}`，而**同一时刻** `open_project_window`
+        与 `page_stack` 都正常返回真实页面栈 —— 也就是说状态工具的 `ok` **不能**作为
+        「自动化通道是否可用」的判据，照它 abort 会把一轮二十多分钟的走查白废掉。
+
+        ⇒ 状态不 ok 时用**真实能力**复检（开窗 + 取页面栈）：能用就降级放行并返回
+        `degraded=True`，由调用方打印提示；两支都不通才报错。
+        """
         j = self.status(skill_version)
-        if not j.get("ok"):
-            raise RuntimeError(
-                "wechatide 不可用 —— 请依次确认：\n"
-                f'  1) IDE 已启动：`"{os.path.join(self.ide, "cli.bat")}" open '
-                f'--project "{self.project}"`\n'
-                f"  2) 已授权：`wechatide auth -c {self.client}` 并在 IDE 内点击批准\n"
-                f"  3) 助手工具不在沙箱中运行（官方硬要求）\n"
-                f"原始返回：{str(j)[:300]}"
-            )
+        if j.get("ok"):
+            return j
+        probe = self.open_window()
+        if probe.get("ok"):
+            return {"ok": True, "degraded": True, "status": j, "probe": probe}
+        raise RuntimeError(
+            "wechatide 不可用 —— 请依次确认：\n"
+            f'  1) IDE 已启动：`"{os.path.join(self.ide, "cli.bat")}" open '
+            f'--project "{self.project}"`\n'
+            f"  2) 已授权：`wechatide auth -c {self.client}` 并在 IDE 内点击批准\n"
+            f"  3) 助手工具不在沙箱中运行（官方硬要求）\n"
+            f"原始返回：{str(j)[:300]}"
+        )
         return j
 
     # -------------------------------------------------------------- 窗口/导航
@@ -398,6 +411,48 @@ class Client:
             self.tool("automation_element_action", "--action", "tap", "--selector", selector).get(
                 "ok"
             )
+        )
+
+    def longpress(self, selector: str) -> bool:
+        """长按元素（订单卡的「长按预览合同」这类交互只能这样触发）。
+
+        与 `tap` 同族：只认 selector 的第一个匹配项，需要「第 i 个」时依赖
+        属性选择器（如 `[data-order-id="12"]`）。
+        """
+        return bool(
+            self.tool(
+                "automation_element_action", "--action", "longpress", "--selector", selector
+            ).get("ok")
+        )
+
+    def scroll_into(self, selector: str) -> bool:
+        """把元素滚进视口（元素级 `scrollTo`，比整页 `pageScrollTo` 精确）。
+
+        为什么需要：长列表里第 N 张卡的按钮在折叠线外时，`tap` 会落空 ——
+        旧脚本为此手写了 `scrollIntoView`。工具原生支持则不必自己算坐标。
+        """
+        return bool(
+            self.tool(
+                "automation_element_action", "--action", "scrollTo", "--selector", selector
+            ).get("ok")
+        )
+
+    def input_text(self, selector: str, value: str) -> bool:
+        """向输入框键入文本（`--action input`，会真实触发 `bindinput`）。
+
+        退路：页面若用 `setData({input})` 注入更稳（不依赖输入框已聚焦），
+        走查里两者都保留 —— 前者验「输入真的接上了」，后者只是填值。
+        """
+        return bool(
+            self.tool(
+                "automation_element_action",
+                "--action",
+                "input",
+                "--selector",
+                selector,
+                "--value",
+                value,
+            ).get("ok")
         )
 
     def screenshot(self, path: str) -> bool:
