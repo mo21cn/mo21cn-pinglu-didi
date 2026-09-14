@@ -90,6 +90,23 @@ PUBLISH_CARGO = "pages/publish/cargo/cargo"
 PREVIEW = "pages/preview/preview"
 WORKBENCH = "pages/entrust/workbench/workbench"
 ARTIFACT = "pages/entrust/artifact/artifact"
+DETAIL = "pages/entrust/detail/detail"
+CASE = "pages/entrust/case/case"
+CASE_CREATE = "pages/entrust/case-create/case-create"
+
+# ㉖/㉗/㉘ 章（ENT-030 切四之六：登记案件 → 记录决定 → 关闭）依赖的演示数据。
+# 委托 `#1` 是 `seed_entrust_demo.py` 的 `ASSIGNMENT_MAIN`，状态 `claimed`
+# —— 案件登记要求委托**已受理**（否则服务端 409；另一张 `#2` 是 `submitted`）。
+ENTRUST_ASSIGNMENT_ID = 1
+ENTRUST_TASK_ID = 5  # `execution` 任务（阻断类案件挂的就是它）
+CASE_TITLE = "走查·主机故障（界面登记）"
+DECISION_NOTE = "走查：转复核（界面记录决定）"
+REJECT_NOTE = "走查：复核后驳回（证据不足以支持阻断）"
+CLOSE_EVIDENCE = "走查-证据引用-票号W4C001"
+CLOSE_NOTE = "走查：复核后撤销，恢复正常班期"
+
+#: ㉖ 登记出来的案件 id 在 ㉗/㉘ 之间传递（三章是同一条链，不能各写各的编号）
+_STATE: dict = {}
 
 # ㉕ 章依赖的演示成果：`settlement_draft #5` 刻意缺必填项 `receivable_lines`
 # —— 它是 `ARTIFACT_SPECS` 的第 5 条（backend/scripts/seed_entrust_demo.py），
@@ -937,6 +954,396 @@ def sec_25(w: Walker) -> None:
     w.rep.rec("㉕E 本章运行期无新增 console error", not new_err.strip(), new_err[:160] or "(无)")
 
 
+def sec_26(w: Walker) -> None:
+    """㉖ 登记案件（ENT-030 切四之六）：从**委托详情页**经界面登记一宗阻断类案件。
+
+    为什么必须真机（三条，都不是"顺手补一条"）：
+
+    1. **入口可见性由委托状态决定**（只有已受理 `claimed` 才给入口）——
+       判错就是让用户点进一个必然 409 的按钮，而 409 会被读成"系统随机失败"。
+    2. **「选受影响项」要点到候选里的某一条**：走查工具**没有 index 参数**，
+       而 `[data-id="5"]` 在候选里会同时命中「任务 #5」与「成果 #5」（本节实测 n=2），
+       只有复合选择器 `[data-kind="task"][data-id="5"]` 才唯一命中。这类歧义
+       在静态断言里完全看不见（它们只看源码文本）。
+    3. **C2 的前置拦截必须"拦得住且不写库"**：阻断类案件没有受影响项时，
+       界面要拦住、服务端也要拒；只验前者会得到"界面拦住了但库里多了一条"。
+
+    ⚠️ 前置：`backend/scripts/seed_entrust_demo.py` 已铺（委托 `#1` 为 `claimed`）。
+    换库/换种子后编号会漂，此时 ㉖A 会以「委托状态」断言明确失败，不会静默通过。
+    ⚠️ 文本输入用 `w.c.set_data` 注值（模拟器对 input/textarea 赋值常不触发 `bindinput`，
+    见 skill `miniapp-device-walkthrough` 坑 12）—— 因此本节**不覆盖**"键盘输入 →
+    bindinput"这一环，其余（选择条、候选、提交按钮）全是真点击。
+    """
+    print("\n== ㉖ 登记案件（ENT-030 切四之六）==", flush=True)
+    base_err = w.c.errors()
+    detail_url = f"/{DETAIL}?assignment_id={ENTRUST_ASSIGNMENT_ID}"
+
+    path = w.login_as(CODE_OWNER)
+    w.rep.rec("㉖ 前置 · 回到身份选择页", path == INDEX, path)
+    w.rep.rec(
+        "㉖ 前置 · 进入组织经理落点的某张工作台",
+        w.enter_role("shipper", SHIPPER),
+        w.c.current_path(),
+    )
+
+    print("\n-- A. 入口可见性 --", flush=True)
+    w.c.nav("reLaunch", detail_url, DETAIL)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    w.rep.rec(
+        "㉖A 委托详情页 ready（真实渲染，不是白屏）", d.get("view") == "ready", str(d.get("view"))
+    )
+    w.rep.rec(
+        "㉖A 已受理（claimed）委托才给「登记异常 / 变更」入口",
+        d.get("canCreateCase") is True,
+        f"canCreateCase={d.get('canCreateCase')}（False 多半是委托不是 claimed，先铺种子）",
+    )
+    w.rep.rec(
+        "㉖A 待受理委托**不**给该入口（受理前 raise_case 必 409）",
+        d.get("canClaim") is False,
+        f"canClaim={d.get('canClaim')}",
+    )
+    n_anchor = w.c.count('[data-act-create-case="create-case"]')
+    w.rep.rec(
+        "㉖A 登记入口锚点**唯一命中**（否则 tap 会点到 7 个「记录任务」里的第一个）",
+        n_anchor == 1,
+        f"n={n_anchor}",
+    )
+    w.shot("26-A-委托详情-登记入口")
+
+    print("\n-- B. 真点击进入登记页 --", flush=True)
+    w.c.tap('[data-act-create-case="create-case"]')
+    w.rep.rec("㉖B 真点击进入登记页", w.c.wait_path(CASE_CREATE), w.c.current_path())
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    w.rep.rec(
+        "㉖B 登记页 ready 且持有正确的委托编号",
+        d.get("view") == "ready" and str(d.get("assignmentId")) == str(ENTRUST_ASSIGNMENT_ID),
+        f"{d.get('view')} / {d.get('assignmentId')}",
+    )
+    w.rep.rec(
+        "㉖B 选择条取值域齐备（类型 2 / 严重度 4 / 影响 3）",
+        len(d.get("kinds") or []) == 2
+        and len(d.get("severities") or []) == 4
+        and len(d.get("impacts") or []) == 3,
+        f"{len(d.get('kinds') or [])}/{len(d.get('severities') or [])}/{len(d.get('impacts') or [])}",
+    )
+    w.rep.rec(
+        "㉖B 默认影响类型**不是**「阻断执行」（默认值不该带流程后果）",
+        (d.get("form") or {}).get("impact_kind") == "review-required",
+        str((d.get("form") or {}).get("impact_kind")),
+    )
+    w.shot("26-B-登记页-初始态")
+
+    print("\n-- C. 负例：阻断类不挂受影响项 → 拦住且不写库 --", flush=True)
+    sel_impact = '[data-field="impact_kind"][data-key="execution-blocking"]'
+    w.rep.rec(
+        "㉖C 影响类型锚点复合选择器唯一命中", w.c.count(sel_impact) == 1, w.c.count(sel_impact)
+    )
+    w.c.tap(sel_impact)
+    w.c.tap('[data-field="severity"][data-key="high"]')
+    w.c.set_data({"form.title": CASE_TITLE, "form.cause": "走查：主机第 3 缸异常"})
+    time.sleep(1.0)
+    d = w.c.page_data()
+    w.rep.rec(
+        "㉖C 选择条**真点击**改到了表单（影响类型 = 阻断执行）",
+        (d.get("form") or {}).get("impact_kind") == "execution-blocking",
+        str((d.get("form") or {}).get("impact_kind")),
+    )
+    w.rep.rec(
+        "㉖C 严重度真点击改到了表单（= 高）",
+        (d.get("form") or {}).get("severity") == "high",
+        str((d.get("form") or {}).get("severity")),
+    )
+    w.rep.rec("㉖C 提交按钮锚点唯一", w.c.count('[data-act-submit-case="1"]') == 1)
+    w.c.tap('[data-act-submit-case="1"]')
+    time.sleep(2.5)
+    w.rep.rec(
+        "㉖C 阻断类没挂受影响项 → 被前置检查拦下，**留在本页**",
+        w.c.current_path() == CASE_CREATE,
+        w.c.current_path(),
+    )
+    d = w.c.page_data()
+    w.rep.rec(
+        "㉖C 被拦下后表单内容仍在（不能让用户白填一遍）",
+        (d.get("form") or {}).get("title") == CASE_TITLE,
+        str((d.get("form") or {}).get("title")),
+    )
+    w.shot("26-C-登记页-C2拦截")
+
+    print("\n-- D. 选受影响项并提交 --", flush=True)
+    w.rep.rec("㉖D 候选开关锚点唯一", w.c.count('[data-act-toggle-links="1"]') == 1)
+    w.c.tap('[data-act-toggle-links="1"]')
+    time.sleep(4.0)
+    d = w.c.page_data()
+    cands = d.get("candidates") or []
+    w.rep.rec(
+        "㉖D 候选懒加载完成（本单任务 + 成果，来自真接口）",
+        d.get("candLoaded") is True and len(cands) >= 8,
+        f"candLoaded={d.get('candLoaded')} n={len(cands)}",
+    )
+    sel_cand = f'[data-kind="task"][data-id="{ENTRUST_TASK_ID}"]'
+    n_comp = w.c.count(sel_cand)
+    n_single = w.c.count(f'[data-id="{ENTRUST_TASK_ID}"]')
+    w.rep.rec(
+        "㉖D 复合选择器唯一命中目标候选；单属性选择器**不唯一**（这就是必须用复合的实证）",
+        n_comp == 1 and n_single > 1,
+        f"复合 n={n_comp} / 单属性 n={n_single}",
+    )
+    w.c.tap(sel_cand)
+    time.sleep(1.5)
+    links = w.c.page_data().get("links") or []
+    w.rep.rec(
+        "㉖D 受影响项真的进了列表（key 形如 task-N）",
+        len(links) == 1 and str(links[0].get("key")) == f"task-{ENTRUST_TASK_ID}",
+        json.dumps(links, ensure_ascii=False)[:120],
+    )
+    # 移除锚点：属性名是 `data-rm-key`（`data-key` 已被筛选 pill 占用，共用会歧义）
+    w.c.tap(f'[data-rm-key="task-{ENTRUST_TASK_ID}"]')
+    time.sleep(1.0)
+    w.rep.rec(
+        "㉖D 移除按钮锚点可用（data-rm-key，不与筛选 pill 的 data-key 冲突）",
+        len(w.c.page_data().get("links") or []) == 0,
+        f"n={len(w.c.page_data().get('links') or [])}",
+    )
+    w.c.tap(sel_cand)
+    time.sleep(1.2)
+    w.shot("26-D-登记页-已选受影响项")
+
+    w.c.tap('[data-act-submit-case="1"]')
+    w.rep.rec(
+        "㉖E 提交成功后**替换**到案件详情页（返回键不该回到已提交的表单）",
+        w.c.wait_path(CASE, tries=20),
+        w.c.current_path(),
+    )
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    det = d.get("detail") or {}
+    new_id = d.get("caseId")
+    w.rep.rec(
+        "㉖E 落到的是**刚登记的那一宗**，且标题来自界面输入（重取数＝后端事实）",
+        d.get("view") == "ready" and det.get("title") == CASE_TITLE,
+        f"view={d.get('view')} caseId={new_id} title={det.get('title')}",
+    )
+    w.rep.rec(
+        "㉖E 阻断标记由后端派生（execution-blocking → blocking=True）",
+        det.get("blocking") is True and det.get("impactLabel") == "阻断执行",
+        f"blocking={det.get('blocking')} impact={det.get('impactLabel')}",
+    )
+    blocks = det.get("blocks") or []
+    affected = ([b for b in blocks if b.get("key") == "affected"] or [{}])[0]
+    items = affected.get("items") or []
+    w.rep.rec(
+        "㉖E 受影响项**随案件同事务写入**（②受影响记录有 1 条，不是空）",
+        len(items) == 1 and str(items[0].get("text")) == f"任务 #{ENTRUST_TASK_ID}",
+        json.dumps(items, ensure_ascii=False)[:140],
+    )
+    w.shot("26-E-登记后落到案件详情")
+    w.rep.rec(
+        "㉖ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        w.new_errors(base_err)[:200],
+    )
+    print(f"    （本章新建案件 caseId={new_id}；后续章节用它继续）", flush=True)
+    _STATE["case_id"] = new_id
+
+
+def sec_27(w: Walker) -> None:
+    """㉗ 记录决定（ENT-030 切四之六）：`open → in_review`，并验"必填项缺了就拦住"。
+
+    ⚠️ 输入走**页内表单**而不是 `wx.showModal`：原生弹层**不在渲染树里**
+    （`weui-dialog*` 选择器全部 n=0、`page` 的 outerWXML 为空），走查工具点不到它的
+    确认键 ⇒ 弹层承担的关键输入**无法被验证**。该改动见 `case.js` 的
+    `onPickDecision` 注释（同一取向此前用过一次：7 项任务类型不用 showActionSheet）。
+    """
+    print("\n== ㉗ 记录决定（open → in_review）==", flush=True)
+    base_err = w.c.errors()
+    cid = _STATE.get("case_id")
+    if not cid:
+        w.rep.rec("㉗ 前置 · 有可用的 case_id（㉖ 已登记）", False, "㉖ 未产出 case_id")
+        return
+    w.c.nav("reLaunch", f"/{CASE}?case_id={cid}", CASE)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    w.rep.rec("㉗ 案件页 ready", d.get("view") == "ready", str(d.get("view")))
+    w.rep.rec(
+        "㉗ 处置区能力位：可决定 / 可关闭 / 可加受影响项（open 下都亮）",
+        d.get("canDecide") is True and d.get("canClose") is True and d.get("canAddLink") is True,
+        f"decide={d.get('canDecide')} close={d.get('canClose')} add={d.get('canAddLink')}",
+    )
+    w.rep.rec(
+        "㉗ 决定选项来自契约镜像（open 下 3 个，且**不含 closed** —— 关闭归 close 命令）",
+        [o.get("key") for o in (d.get("decisionOptions") or [])]
+        == ["in_review", "approved", "rejected"],
+        str([o.get("key") for o in (d.get("decisionOptions") or [])]),
+    )
+    w.rep.rec(
+        "㉗ 关闭处置来自契约镜像（阻断异常在 open 下拿不到 resolved）",
+        [o.get("key") for o in (d.get("closureOptions") or [])]
+        == ["cancelled", "duplicate", "superseded"],
+        str([o.get("key") for o in (d.get("closureOptions") or [])]),
+    )
+    w.rep.rec("㉗ 决定选择条锚点唯一", w.c.count('[data-status="in_review"]') == 1)
+
+    # 负例：选「已批准」但不填依据版本 → 页内拦住（批准必填依据版本，服务端 §3.1.1）
+    w.c.tap('[data-status="approved"]')
+    time.sleep(1.2)
+    d = w.c.page_data()
+    w.rep.rec(
+        "㉗ 选中「已批准」后才出现依据版本输入框（该栏只对批准有意义）",
+        (d.get("decideForm") or {}).get("to") == "approved" and w.c.count('[data-df="basis"]') == 1,
+        f"to={(d.get('decideForm') or {}).get('to')} n={w.c.count('[data-df="basis"]')}",
+    )
+    w.c.tap('[data-act-decide-submit="1"]')
+    time.sleep(2.5)
+    hint = str(w.c.page_data().get("decideHint") or "")
+    w.rep.rec(
+        "㉗ 缺依据版本 → 页内拦住并说明原因",
+        bool(hint),
+        hint or "(没有提示)",
+    )
+    w.shot("27-A-决定-缺依据版本拦截")
+
+    # 正路：改选「复核中」→ 填说明 → 真点击提交
+    w.c.tap('[data-status="in_review"]')
+    time.sleep(1.2)
+    w.c.set_data({"decideForm.note": DECISION_NOTE})
+    time.sleep(0.8)
+    w.rep.rec(
+        "㉗ 换目标状态后依据版本输入框消失（不留一个用不上的栏）",
+        w.c.count('[data-df="basis"]') == 0,
+    )
+    w.c.tap('[data-act-decide-submit="1"]')
+    time.sleep(5.0)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    det = d.get("detail") or {}
+    w.rep.rec(
+        "㉗ 后端事实：状态真的到了 in_review（页面重取数后显示「复核中」）",
+        (det.get("status") == "in_review") and det.get("statusLabel") == "复核中",
+        f"status={det.get('status')} label={det.get('statusLabel')}",
+    )
+    blk = {b.get("key"): b for b in (det.get("blocks") or [])}
+    rows = (blk.get("decision") or {}).get("rows") or []
+    w.rep.rec(
+        "㉗ 界面：④决定与审批 有了内容（不再空态），且说明就是刚填的那句",
+        any(str(r.get("value")) == DECISION_NOTE for r in rows),
+        json.dumps(rows, ensure_ascii=False)[:160],
+    )
+    w.rep.rec(
+        "㉗ 提交成功后表单清空（不把上一次的输入留在屏幕上）",
+        (d.get("decideForm") or {}).get("to") == "",
+        json.dumps(d.get("decideForm"), ensure_ascii=False),
+    )
+    w.shot("27-B-记录决定后")
+    w.rep.rec(
+        "㉗ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        w.new_errors(base_err)[:200],
+    )
+
+
+def sec_28(w: Walker) -> None:
+    """㉘ 关闭案件（ENT-030 切四之六）：先钉一条**状态机事实**，再走合法路径关闭。
+
+    ⚠️ 本节第一版把顺序写成「open → in_review → 关闭」，结果 6 条断言全红，
+    报出来是"关闭区没渲染"，**看起来像页面漏了一块**。实际是：
+
+        `exception` 从 `in_review` **没有到 `closed` 的边**，关闭处置表里也**没有**
+        `(exception, in_review)` 这一格 ⇒ 后端给 `can_close=false`、界面不渲染关闭条。
+
+    **产品是对的，是脚本排错了顺序。** 所以本节把这个"不给关闭入口"的行为
+    也写成一条 PASS 断言（它本身就是 §3.4 该有的形状），然后走合法路径：
+    `in_review → rejected`（复核驳回）→ 从 `rejected` 关闭。
+
+    这条教训按 skill 的口径处理：**断言失败先怀疑断言写错，再去怀疑代码**。
+    """
+    print("\n== ㉘ 关闭案件（必须给处置与证据）==", flush=True)
+    base_err = w.c.errors()
+    cid = _STATE.get("case_id")
+    if not cid:
+        w.rep.rec("㉘ 前置 · 有可用的 case_id", False, "㉖ 未产出 case_id")
+        return
+    w.c.nav("reLaunch", f"/{CASE}?case_id={cid}", CASE)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    n_close = w.c.count('[data-disp="cancelled"]')
+    w.rep.rec(
+        "㉘ in_review 下**不给**关闭入口"
+        "（状态机里 exception 从 in_review 没有到 closed 的边 —— 这是形状，不是缺陷）",
+        d.get("canClose") is False and n_close == 0 and not (d.get("closureOptions") or []),
+        f"canClose={d.get('canClose')} 关闭条 n={n_close}",
+    )
+
+    # 合法路径：in_review → rejected
+    w.c.tap('[data-status="rejected"]')
+    time.sleep(1.2)
+    w.c.set_data({"decideForm.note": REJECT_NOTE})
+    time.sleep(0.8)
+    w.c.tap('[data-act-decide-submit="1"]')
+    time.sleep(5.0)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    det = d.get("detail") or {}
+    w.rep.rec(
+        "㉘ 后端事实：状态到了 rejected（in_review → rejected 是合法边）",
+        det.get("status") == "rejected",
+        f"status={det.get('status')} label={det.get('statusLabel')}",
+    )
+    n_close2 = w.c.count('[data-disp="cancelled"]')
+    w.rep.rec(
+        "㉘ 从 rejected 起才出现关闭入口（与状态机一致，不是页面漏块）",
+        d.get("canClose") is True and n_close2 == 1,
+        f"canClose={d.get('canClose')} n={n_close2}",
+    )
+    w.shot("28-A-复核驳回后-关闭入口出现")
+
+    w.c.tap('[data-disp="cancelled"]')
+    time.sleep(1.5)
+    d = w.c.page_data()
+    n_ev = w.c.count('[data-df="evidence"]')
+    w.rep.rec(
+        "㉘ 选中处置后出现证据引用栏（没有一键关闭）",
+        (d.get("closeForm") or {}).get("disp") == "cancelled" and n_ev == 1,
+        f"disp={(d.get('closeForm') or {}).get('disp')} n={n_ev}",
+    )
+    # 负例：证据留空直接提交 → 页内拦住
+    w.c.tap('[data-act-close-submit="1"]')
+    time.sleep(2.5)
+    hint = str(w.c.page_data().get("closeHint") or "")
+    w.rep.rec("㉘ 证据留空 → 页内拦住并说明原因", bool(hint), hint or "(没有提示)")
+    w.shot("28-B-关闭-缺证据拦截")
+
+    w.c.set_data({"closeForm.evidence": CLOSE_EVIDENCE, "closeForm.resolution": CLOSE_NOTE})
+    time.sleep(1.0)
+    w.c.tap('[data-act-close-submit="1"]')
+    time.sleep(5.0)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    det = d.get("detail") or {}
+    w.rep.rec(
+        "㉘ 后端事实：案件已关闭（页面重取数后显示「已关闭」）",
+        det.get("status") == "closed",
+        f"status={det.get('status')} label={det.get('statusLabel')}",
+    )
+    blk = {b.get("key"): b for b in (det.get("blocks") or [])}
+    clo = (blk.get("closure") or {}).get("rows") or []
+    w.rep.rec(
+        "㉘ 界面：⑥结案 显示处置方式与说明（不再空态）",
+        any("撤销" in str(r.get("value")) for r in clo),
+        json.dumps(clo, ensure_ascii=False)[:180],
+    )
+    exi = (blk.get("evidence") or {}).get("items") or []
+    w.rep.rec(
+        "㉘ 界面：⑤执行证据 出现刚填的证据引用（关闭**必带证据**）",
+        any(CLOSE_EVIDENCE in str(i.get("text")) for i in exi),
+        json.dumps(exi, ensure_ascii=False)[:160],
+    )
+    w.rep.rec(
+        "㉘ 已关闭 → 处置区收回关闭/决定按钮（能力位随状态收回）",
+        d.get("canClose") is False and d.get("canDecide") is False,
+        f"close={d.get('canClose')} decide={d.get('canDecide')}",
+    )
+    w.shot("28-C-关闭后")
+    w.rep.rec(
+        "㉘ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        w.new_errors(base_err)[:200],
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -948,10 +1355,15 @@ SECTIONS = {
     "15": sec_15,
     "16": sec_16,
     "25": sec_25,
+    "26": sec_26,
+    "27": sec_27,
+    "28": sec_28,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
-DEFAULT_ORDER = ["smoke", "0", "1", "2", "4", "6", "12", "15", "16", "25"]
+# ⚠️ 26 → 27 → 28 是**一条链**（登记出来的案件被后两章接着处置），顺序不可打乱；
+#    单跑其中一章时后两章会以"㉖ 未产出 case_id"明确失败，而不是静默跳过。
+DEFAULT_ORDER = ["smoke", "0", "1", "2", "4", "6", "12", "15", "16", "25", "26", "27", "28"]
 
 
 def main() -> int:
