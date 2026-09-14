@@ -485,6 +485,12 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     console.error('\n[FATAL] 初始化失败：' + e.message)
     console.error('请确认：① 后端已启动（cd backend && LLM_MOCK=true WECHAT_MOCK=true uvicorn app.main:app）')
     console.error('        ② 演示数据已铺（backend/scripts/seed_demo.py）')
+    // 委托端点整组 500 的**首要**原因不是种子、而是缺表：`ent_` 前缀的表由
+    // `backend/migrations/` 管理，`app/main.py` 里的 create_all 明确排除了它们（DR-0001）。
+    // 少跑迁移时 /api/v1/entrust/* 会全部 500，而 500 在日志里读起来很像"委托没数据" ——
+    // 2026-09-14 CI 上「前端端到端」job 就是这么红的，故把迁移写进提示。
+    console.error('        ③ 迁移已应用（cd backend && python migrate.py）—— ent_ 表不在 create_all 范围内')
+    console.error('        ④ 委托开关已开、委托种子已铺（ENTRUST_ENABLED=true；backend/scripts/seed_entrust_demo.py）')
     process.exit(2)
   }
 
