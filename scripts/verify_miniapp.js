@@ -183,6 +183,15 @@ const WALK_ANCHORS = [
   { kind: 'row', file: 'pages/trade/match/match.wxml', class: 'cand-card', attr: 'data-ship-id', value: '{{item.ship_id}}' },
   { kind: 'row', file: 'pages/trade/match/match.wxml', class: 'cand-card', attr: 'data-cargo-id', value: '{{item.cargo_id}}' },
   { kind: 'act', file: 'pages/trade/match/match.wxml', attr: 'data-act-pick-ship', handler: 'onTapCandidate', value: '{{item.ship_id}}' },
+  // ⑤ 发布空船前序：船东船队卡的「为船找货」（ENT-035 登记，供第 ⑨ 章用）
+  { kind: 'act', file: 'pages/owner/owner.wxml', class: 'btn-secondary', attr: 'data-id', value: '{{item.id}}', handler: 'onShipMatch' },
+  // ⑩ 港口：服务网格 / 预约卡 / 泊位卡（三个锚点都**不能**复用 `data-id` ——
+  //    本文件里 `data-id` 已被 4 处占用（预约卡、驳回、确认、泊位卡），
+  //    而登记表按 (file, attr) 去重 ⇒ 复用会让校验把别人的标签也算进来。
+  //    这与 ENT-030 的 `data-rm-key` 同一取向：宁可新起一个属性名，也不要歧义。）
+  { kind: 'act', file: 'pages/port/port.wxml', class: 'grid-item', attr: 'data-svc-key', value: '{{it.key}}', handler: 'onServiceTap' },
+  { kind: 'row', file: 'pages/port/port.wxml', class: 'ops-card', attr: 'data-appt-id', value: '{{item.id}}' },
+  { kind: 'row', file: 'pages/port/port.wxml', class: 'ops-card', attr: 'data-berth-id', value: '{{item.id}}' },
   // ⑩ 泊位档期、⑪ 预约审核：列表行
   { kind: 'row', file: 'pages/port/berth/berth.wxml', class: 'gt-row', attr: 'data-bar-key', value: '{{item.key}}' },
   { kind: 'row', file: 'pages/port/berth/berth.wxml', class: 'rule', attr: 'data-rule-key', value: '{{item.key}}' },
