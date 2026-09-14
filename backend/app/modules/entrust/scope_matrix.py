@@ -484,6 +484,18 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
     ),
     _r(
         "POST",
+        "/exceptions/{exception_id}/apply",
+        GUARD_ORG_MEMBER,
+        "entrust:task:dispatch",
+        owner_scope=True,
+        idempotent=True,
+        note="A2 五之一：只认批准快照（不接受临时替换修改内容）、逐目标核对基础版本"
+        "（过期 ⇒ 409 + applied_rejected，不产生部分生效）、成果新版本与确认与 link 回写"
+        "与状态与事件**同一事务**；纯任务目标不虚构成果版本；"
+        "业务开放须等五之二传播闭环（APPLY_OPEN）",
+    ),
+    _r(
+        "POST",
         "/exceptions/{exception_id}/close",
         GUARD_ORG_MEMBER,
         "entrust:task:dispatch",

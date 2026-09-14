@@ -395,7 +395,7 @@ TARGET_TASK: Final = "task"
 TARGET_ARTIFACT: Final = "artifact"
 TARGET_KINDS: Final = frozenset({TARGET_TASK, TARGET_ARTIFACT})
 
-#: 事件类型（§3.1.3）。`applied` / `applied_rejected` 属 A2 期，本片不产生。
+#: 事件类型（§3.1.3）。`applied` / `applied_rejected` 由 **A2 五之一**产生（ENT-033）。
 EVENT_CREATED: Final = "created"
 EVENT_STATUS_CHANGED: Final = "status_changed"
 EVENT_DECIDED: Final = "decided"
@@ -403,6 +403,120 @@ EVENT_LINK_ADDED: Final = "link_added"
 EVENT_LINK_REMOVED: Final = "link_removed"
 EVENT_CLOSED: Final = "closed"
 EVENT_REOPENED: Final = "reopened"
+EVENT_APPLIED: Final = "applied"
+EVENT_APPLIED_REJECTED: Final = "applied_rejected"
+
+#: 「应用变更」是否对**正式业务**开放（HO 2026-09-15 裁决）。
+#:
+#: 五之一可以先合并，但业务开放必须等五之二（复核传播）接通：否则变更已经生效，
+#: 下游报价与合同却收不到失效提示 —— 那不是"少一个提示"，是**静默交付错误结果**。
+#: 写成一个具名常量（而不是散在代码里的 `False`），是为了让"何时开放"这件事
+#: 有**唯一一个**可翻的点，也能被用例直接钉住。
+APPLY_OPEN: Final = False
+
+#: **批准快照**（A2 五之一前提 P4，HO 2026-09-15 裁决）。
+#:
+#: 为什么必须有它：`case.basis_revision_id` 是**案件级单个**值，既覆盖不了
+#: 「同时修改采购确认和对客报价」这类**多目标**批准范围，也回答不了
+#: 「这个版本**现在**还是不是批准时的那个」。`_assert_basis_revision` 只校验
+#: 「版本存在且属于本委托」，**不做过期版本检查**（DR-0013 §3.1.4 的归属校验
+#: 与 A2 的版本新鲜度是两件事，不能互相替代）。
+#:
+#: 快照存在 `decided` 事件的 `payload_json` 里（不新增表）：事件**已经**与状态同事务、
+#: 已经 append-only、已经带 actor 与时间，是「批准那一瞬间」最天然的载体。
+APPROVAL_SNAPSHOT_KIND: Final = "approval_snapshot"
+APPROVAL_SNAPSHOT_VERSION: Final = 1
+
+
+#: 快照里 `changes` 的键格式：`"{target_kind}#{target_id}"`。
+def _change_key(target_kind: str, target_id: int) -> str:
+    return f"{target_kind}#{target_id}"
+
+
+def _artifact_current_revision(session: Session, artifact_id: int) -> int | None:
+    row = session.execute(
+        text("SELECT current_revision_id FROM ent_artifact WHERE id = :aid"),
+        {"aid": artifact_id},
+    ).first()
+    return None if row is None or row[0] is None else int(row[0])
+
+
+def _task_current_revision(session: Session, task_id: int) -> int | None:
+    """任务自己的**版本依据**（P4-A5）。
+
+    任务没有成果版本，**不得**为满足字段要求而虚构一份成果 —— 它的依据就是
+    任务行上的 `revision`（与 `complete_task` 的乐观锁同一个值）。
+    """
+    row = session.execute(
+        text("SELECT revision FROM ent_workflow_task WHERE id = :tid"), {"tid": task_id}
+    ).first()
+    return None if row is None or row[0] is None else int(row[0])
+
+
+def build_approval_snapshot(
+    session: Session,
+    *,
+    exception_id: int,
+    basis_revision_id: int | None,
+    approved_changes: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """构造批准瞬间的应用目标清单（P4-A1/A2/A5）。
+
+    每个目标记录三件事：`target_kind`、`target_id`、以及**它自己的基础版本**
+    （成果取 `current_revision_id`，任务取 `revision`）。
+    `approved_changes` 是**经过批准的结构化修改内容**，按 `_change_key` 索引；
+    应用时**只认它** —— 请求方不得在 apply 时临时替换（P4-A4）。
+    """
+    targets: list[dict[str, Any]] = []
+    for link in list_links(session, exception_id):
+        target_kind = str(link["target_kind"])
+        target_id = int(link["target_id"])
+        basis = (
+            _artifact_current_revision(session, target_id)
+            if target_kind == TARGET_ARTIFACT
+            else _task_current_revision(session, target_id)
+        )
+        targets.append(
+            {
+                "target_kind": target_kind,
+                "target_id": target_id,
+                "basis_revision_id": basis,
+                "has_changes": bool(
+                    approved_changes and _change_key(target_kind, target_id) in approved_changes
+                ),
+            }
+        )
+    return {
+        "kind": APPROVAL_SNAPSHOT_KIND,
+        "version": APPROVAL_SNAPSHOT_VERSION,
+        "case_basis_revision_id": basis_revision_id,
+        "targets": targets,
+        "changes": approved_changes or {},
+    }
+
+
+def _load_approval_snapshot(session: Session, exception_id: int) -> dict[str, Any] | None:
+    """取**最近一次** approved 决定的快照（事件倒序第一条携带快照的 `decided` 事件）。"""
+    rows = session.execute(
+        text(
+            "SELECT payload_json FROM ent_exception_event "
+            "WHERE exception_id = :cid AND event_kind = :k AND to_status = :st "
+            "ORDER BY seq DESC"
+        ),
+        {"cid": exception_id, "k": EVENT_DECIDED, "st": STATUS_APPROVED},
+    ).fetchall()
+    for row in rows:
+        raw = row[0]
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("kind") == APPROVAL_SNAPSHOT_KIND:
+            return cast("dict[str, Any]", data)
+    return None
+
 
 #: 对客投影**绝不允许**出现的字段（§3.2）。
 #: 写成常量是为了让用例能直接断言 —— 比人读一遍函数体确认「好像删干净了」可靠。
@@ -951,9 +1065,13 @@ def case_capabilities(
         "can_decide": can_write and open_case and bool(allowed_transitions(kind, status)),
         "can_close": can_write and bool(allowed_closure_dispositions(kind, status)),
         "can_reopen": can_write and status == STATUS_CLOSED,
-        # 「应用变更」属 A2，本片未实现 ⇒ **恒 false**。刻意不按状态机推算：
-        # 让它随状态变化，会让人以为「满足条件就能用」，而它根本没有实现。
-        "can_apply_change": False,
+        # 「应用变更」（A2 五之一）。仍遵守第 2 条纪律：状态维取状态机，不硬编码状态名。
+        # 但**开放开关** `APPLY_OPEN` 在五之二（复核传播）接通前**保持 False** ——
+        # HO 2026-09-15 裁决：变更已生效、下游报价与合同却收不到失效或复核提示，
+        # 是不可接受的；内部测试可先验证 17/18，**业务开放必须包含传播闭环**。
+        "can_apply_change": (
+            can_write and APPLY_OPEN and STATUS_APPLIED in allowed_transitions(kind, status)
+        ),
     }
 
 
@@ -1408,9 +1526,16 @@ def decide(
     expected_revision: int,
     decision_note: str | None = None,
     basis_revision_id: int | None = None,
+    approved_changes: dict[str, dict[str, Any]] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """记录决定（`approved` / `rejected`，以及退回补充类的状态变更）。
+
+    **A2 五之一新增**：`approved` 会顺带写入**批准快照**（P4）—— 它记下批准那一瞬间
+    每个受影响项的**基础版本**与**结构化修改内容**，供 `apply_case` 逐目标核对。
+    没有它，「旧批准不得直接应用到新内容」（验证 17）就无从判定：
+    `case.basis_revision_id` 是案件级单值，管不了多目标，也不做过期检查。
+
 
     * 转移合法性由**两套**状态机判定（`assert_transition`）—— 同一个 `rejected`
       在两种 kind 下语义相反，而**转移表本身不同**这件事在这里自动生效；
@@ -1449,6 +1574,14 @@ def decide(
         params["basis"] = basis_revision_id
 
     decided = to_status in (STATUS_APPROVED, STATUS_REJECTED)
+    snapshot_payload: dict[str, Any] | None = None
+    if to_status == STATUS_APPROVED:
+        snapshot_payload = build_approval_snapshot(
+            session,
+            exception_id=exception_id,
+            basis_revision_id=basis_revision_id,
+            approved_changes=approved_changes,
+        )
     try:
         _apply_case_update(
             session,
@@ -1468,10 +1601,189 @@ def decide(
             to_status=to_status,
             note=decision_note,
             basis_revision_id=basis_revision_id,
+            payload=snapshot_payload,
         )
         session.commit()
     except Exception:
         session.rollback()
+        raise
+    return _case_with_links(session, exception_id)
+
+
+def apply_case(
+    session: Session,
+    *,
+    exception_id: int,
+    actor_id: int,
+    expected_revision: int,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """应用**已批准**的变更（A2 五之一；验证 17 / 18）。
+
+    五条不能让的边界（HO 2026-09-15 裁决 P4 + DR-0013 §3.7）：
+
+    1. **只认批准快照**：修改内容来自 `decided` 事件的批准快照，请求方**不得**
+       在 apply 时临时替换（P4-A4）—— 本函数因此**不接受**任何"改成什么"的入参；
+    2. **逐目标核对版本**：每个目标各自比对基础版本，任一过期 ⇒ **整批拒绝**
+       （409）+ 事件 `applied_rejected`，**不产生部分生效**；
+    3. **纯任务目标不虚构成果版本**：任务用任务自己的 `revision` 作依据（P4-A5），
+       任务目标的"已处理"由任务状态机保证，不往 `applied_revision_id` 里塞语义不符的值；
+    4. **统一事务**：成果的新版本、确认、link 回写、案件状态与事件在**一个事务**里；
+       任一处失败整笔回滚 —— 不会留下"改了一半的委托"（验证 18）；
+    5. **拒绝事件不因回滚丢失**（P4-A8）：无论"版本过期"还是"应用失败"，
+       `applied_rejected` 事件都**独立提交**，它是审计事实，不是业务的一部分。
+
+    Raises:
+        ExceptionCaseError: 缺少快照 / 快照版本不认识 / 某目标没有批准的修改内容。
+        ExceptionCaseConflictError: 状态不允许、乐观锁过期、或依据版本已变化。
+    """
+    from app.modules.entrust import artifacts as artifacts_svc  # 局部导入：避免与 artifacts 成环
+    from app.modules.entrust.artifacts import SOURCE_MANUAL
+
+    case = _case_or_404(session, exception_id)
+    assignment = _assignment_or_404(session, int(case["assignment_id"]))
+    _assert_can_write(session, actor_id=actor_id, assignment=assignment)
+    kind = str(case["kind"])
+    from_status = str(case["status"])
+    assert_transition(kind=kind, from_status=from_status, to_status=STATUS_APPLIED)
+
+    current = now or utcnow_naive()
+
+    def _reject(reason: str, note: str, payload: dict[str, Any] | None = None) -> None:
+        """写拒绝事件并**独立提交**（业务已回滚或尚未开始，审计不能跟着没）。"""
+        try:
+            _append_event(
+                session,
+                exception_id=exception_id,
+                event_kind=EVENT_APPLIED_REJECTED,
+                actor_user_id=actor_id,
+                now=current,
+                from_status=from_status,
+                to_status=from_status,
+                note=note,
+                payload={"reason": reason, **(payload or {})},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+    snapshot = _load_approval_snapshot(session, exception_id)
+    if snapshot is None:
+        raise ExceptionCaseError("缺少批准快照：不能以『曾经批准过』为凭据应用变更，请重新记录批准")
+    if int(snapshot.get("version", 0)) != APPROVAL_SNAPSHOT_VERSION:
+        raise ExceptionCaseError(
+            f"批准快照版本 {snapshot.get('version')!r} 无法识别（当前 {APPROVAL_SNAPSHOT_VERSION}）"
+        )
+
+    # ── 逐目标核对基础版本（P4-A4）───────────────────────────────────────────
+    stale: list[dict[str, Any]] = []
+    for item in snapshot.get("targets", []):
+        target_kind = str(item["target_kind"])
+        target_id = int(item["target_id"])
+        expected_basis = item["basis_revision_id"]
+        current_basis = (
+            _artifact_current_revision(session, target_id)
+            if target_kind == TARGET_ARTIFACT
+            else _task_current_revision(session, target_id)
+        )
+        if current_basis != expected_basis:
+            stale.append(
+                {
+                    "target": _change_key(target_kind, target_id),
+                    "approved_basis": expected_basis,
+                    "current": current_basis,
+                }
+            )
+    if stale:
+        _reject(
+            "stale_basis",
+            "批准所依据的版本已变化，旧批准不能直接应用",
+            {"stale": stale},
+        )
+        detail = ", ".join(
+            f"{s['target']}（批准时 {s['approved_basis']} → 现在 {s['current']}）" for s in stale
+        )
+        raise ExceptionCaseConflictError(f"依据版本已变化：{detail}；请重新读取并再次批准")
+
+    # ── 应用（统一事务）─────────────────────────────────────────────────────
+    changes: dict[str, Any] = snapshot.get("changes") or {}
+    applied: list[dict[str, Any]] = []
+    try:
+        for item in snapshot.get("targets", []):
+            target_kind = str(item["target_kind"])
+            target_id = int(item["target_id"])
+            if target_kind != TARGET_ARTIFACT:
+                # 任务没有成果版本；它的"已处置"由任务状态机承担（P4-A5）。
+                continue
+            key = _change_key(target_kind, target_id)
+            if key not in changes:
+                raise ExceptionCaseError(
+                    f"受影响项 {key} 没有经过批准的修改内容，不能应用"
+                    "（应用只认批准快照，不接受临时替换）"
+                )
+            appended = artifacts_svc.append_revision(
+                session,
+                artifact_id=target_id,
+                payload=changes[key],
+                actor_id=actor_id,
+                source=SOURCE_MANUAL,
+                note=f"由案件 {exception_id} 的批准变更应用",
+                now=current,
+                commit=False,  # 由本函数统一提交（P4-A7）
+            )
+            artifacts_svc.confirm_revision(
+                session,
+                artifact_id=target_id,
+                revision_no=int(appended["revision_no"]),
+                actor_id=actor_id,
+                as_source=SOURCE_MANUAL,
+                now=current,
+                commit=False,
+            )
+            session.execute(
+                text(
+                    "UPDATE ent_exception_link SET applied_revision_id = :rid "
+                    "WHERE exception_id = :cid AND target_kind = :tk AND target_id = :tid"
+                ),
+                {
+                    "rid": int(appended["revision_id"]),
+                    "cid": exception_id,
+                    "tk": target_kind,
+                    "tid": target_id,
+                },
+            )
+            applied.append(
+                {
+                    "target": key,
+                    "revision_id": int(appended["revision_id"]),
+                    "revision_no": int(appended["revision_no"]),
+                }
+            )
+
+        _apply_case_update(
+            session,
+            exception_id=exception_id,
+            expected_revision=expected_revision,
+            sets=["status = :to"],
+            params={"to": STATUS_APPLIED},
+            now=current,
+        )
+        _append_event(
+            session,
+            exception_id=exception_id,
+            event_kind=EVENT_APPLIED,
+            actor_user_id=actor_id,
+            now=current,
+            from_status=from_status,
+            to_status=STATUS_APPLIED,
+            note="已按批准快照逐目标应用",
+            payload={"applied": applied, "snapshot_version": APPROVAL_SNAPSHOT_VERSION},
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        _reject("apply_failed", "应用失败，已整笔回滚（未产生任何业务更新）")
         raise
     return _case_with_links(session, exception_id)
 

@@ -9,6 +9,7 @@ R1 端点集合（DR-0013 §7.1「人工处置端点」）：
 - POST   /api/v1/entrust/exceptions/{exception_id}/links           登记受影响项（幂等）
 - DELETE /api/v1/entrust/exceptions/{exception_id}/links/{link_id} 移除受影响项（幂等）
 - POST   /api/v1/entrust/exceptions/{exception_id}/decision        记录决定（幂等）
+- POST   /api/v1/entrust/exceptions/{exception_id}/apply           应用已批准的变更（A2 五之一；幂等）
 - POST   /api/v1/entrust/exceptions/{exception_id}/close           关闭案件（幂等）
 - POST   /api/v1/entrust/exceptions/{exception_id}/reopen          重开案件（幂等）
 
@@ -54,6 +55,7 @@ from app.modules.entrust.authz import (
     load_assignment,
 )
 from app.modules.entrust.schemas import (
+    ExceptionCaseApplyIn,
     ExceptionCaseCloseIn,
     ExceptionCaseCreate,
     ExceptionCaseDecisionIn,
@@ -78,6 +80,7 @@ _SCOPE_CREATE = "entrust:exception:create"
 _SCOPE_LINK_ADD = "entrust:exception:link:add"
 _SCOPE_LINK_REMOVE = "entrust:exception:link:remove"
 _SCOPE_DECIDE = "entrust:exception:decide"
+_SCOPE_APPLY = "entrust:exception:apply"
 _SCOPE_CLOSE = "entrust:exception:close"
 _SCOPE_REOPEN = "entrust:exception:reopen"
 
@@ -489,6 +492,38 @@ def decide_exception(
                 expected_revision=data.expected_revision,
                 decision_note=data.decision_note,
                 basis_revision_id=data.basis_revision_id,
+                approved_changes=data.approved_changes,
+            )
+        ),
+    )
+
+
+@router.post(
+    "/exceptions/{exception_id}/apply",
+    response_model=ExceptionCaseOut,
+    summary="应用已批准的变更（只认批准快照，逐目标核对版本，单事务；幂等）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def apply_exception_change(
+    exception_id: int,
+    data: ExceptionCaseApplyIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    idempotency_key: Annotated[str | None, Header()] = None,
+) -> Any:
+    payload = {"exception_id": exception_id, **data.model_dump(mode="json")}
+    return _post(
+        db,
+        scope=_SCOPE_APPLY,
+        key=idempotency_key,
+        actor_user_id=int(user.id),
+        payload=payload,
+        business=lambda: _internal(
+            svc.apply_case(
+                db,
+                exception_id=exception_id,
+                actor_id=int(user.id),
+                expected_revision=data.expected_revision,
             )
         ),
     )

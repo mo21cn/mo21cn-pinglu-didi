@@ -83,8 +83,9 @@ def test_matrix_size_matches_baseline():
     52 → 60（ENT-030 异常与变更案件 / DR-0013 A1）：新增 8 条 ——
     登记案件、列案件、案件详情、登记/移除受影响项、记录决定、关闭、重开。
     `exceptions` 槽位此前是本支线**唯一**仍「本期未开放」的槽位，这 8 条是它开放的结构前提。
+    60 → 61（ENT-033 A2 五之一）：新增 `POST /exceptions/{exception_id}/apply`（应用已批准变更）。
     """
-    assert len(sm.SCOPE_MATRIX) == 60
+    assert len(sm.SCOPE_MATRIX) == 61
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────
