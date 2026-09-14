@@ -733,6 +733,20 @@ class ExceptionCaseDecisionIn(BaseModel):
     to_status: str = Field(min_length=1, max_length=16)
     decision_note: str | None = None
     basis_revision_id: int | None = Field(default=None, ge=1)
+    #: **经过批准的结构化修改内容**，按 `"{target_kind}#{target_id}"` 索引。
+    #: 只在 `to_status=approved` 时进入批准快照；apply 阶段**只认这份内容**，
+    #: 不接受临时替换（A2 五之一前提 P4-A2/A4）。
+    approved_changes: dict[str, dict[str, Any]] | None = None
+
+
+class ExceptionCaseApplyIn(BaseModel):
+    """应用已批准的变更（A2 五之一）。
+
+    **没有**「改成什么」这类字段 —— 修改内容只来自批准快照，请求方不能临时替换。
+    带 `expected_revision` 是乐观锁：应用会推进案件版本，过期快照不会被静默接受。
+    """
+
+    expected_revision: int = Field(ge=1)
 
 
 class ExceptionCaseCloseIn(BaseModel):

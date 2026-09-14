@@ -379,11 +379,17 @@ def append_revision(
     source: str,
     note: str | None = None,
     now: datetime | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     """追加新版本（编辑动作）。
 
     **不改变生效版本** —— 生效版本只能被显式确认改变。
     历史版本永不改写（append-only）。
+
+    Args:
+        commit: 是否在本函数内提交。**默认 `True`**（既有调用方行为不变）。
+            跨对象写路径（如 A2 的「应用变更」）传 `False`，由外层统一提交 ——
+            否则"第 1 个成果已提交、第 2 个失败"会留下**部分生效**（HO 裁决 P4-A7）。
 
     Raises:
         ArtifactNotFoundError: 成果不存在。
@@ -439,7 +445,8 @@ def append_revision(
         text("UPDATE ent_artifact SET updated_at = :ts WHERE id = :aid"),
         {"ts": ts, "aid": artifact_id},
     )
-    session.commit()
+    if commit:
+        session.commit()
     return {
         "revision_id": int(rev.lastrowid or 0),
         "artifact_id": artifact_id,
@@ -457,12 +464,14 @@ def confirm_revision(
     actor_id: int,
     as_source: str = SOURCE_MANUAL,
     now: datetime | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     """确认并把生效版本绑定到 `revision_no` 指向的**精确版本**。
 
     Args:
         as_source: 确认动作的发起侧。`agent` 表示由 Agent 流程驱动确认 ——
             当生效版本是人工产出时会被拒绝（人工接管优先）。
+        commit: 同 `append_revision`。跨对象写路径传 `False`，由外层统一提交。
 
     Raises:
         ArtifactNotFoundError: 成果或版本不存在。
@@ -515,7 +524,8 @@ def confirm_revision(
         ),
         {"rid": int(rev["id"]), "ts": _fmt(current), "aid": artifact_id},
     )
-    session.commit()
+    if commit:
+        session.commit()
     return get_artifact(session, artifact_id)
 
 
