@@ -69,7 +69,7 @@ def test_matrix_keys_are_unique():
 
 
 def test_matrix_size_matches_baseline():
-    """条目数锁定为 52。
+    """条目数锁定为 60。
 
     数量变化本身不是错误，但**必须是有意的**：增删端点时同时改这里，
     强制在 PR 里显式说明"为什么端点集合变了"。
@@ -80,8 +80,11 @@ def test_matrix_size_matches_baseline():
     `POST /agent/jobs/{job_id}/adopt`（采纳作业提案为成果）。
     51 → 52（ENT-021 工作台首片 / DR-0010）：新增
     `GET /assignments/{assignment_id}/workbench`（UI-05 七槽位摘要投影）。
+    52 → 60（ENT-030 异常与变更案件 / DR-0013 A1）：新增 8 条 ——
+    登记案件、列案件、案件详情、登记/移除受影响项、记录决定、关闭、重开。
+    `exceptions` 槽位此前是本支线**唯一**仍「本期未开放」的槽位，这 8 条是它开放的结构前提。
     """
-    assert len(sm.SCOPE_MATRIX) == 52
+    assert len(sm.SCOPE_MATRIX) == 60
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

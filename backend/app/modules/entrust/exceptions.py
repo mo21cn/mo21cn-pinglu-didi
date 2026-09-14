@@ -591,6 +591,34 @@ def list_events(session: Session, exception_id: int) -> list[dict[str, Any]]:
     return [_event_from_row(row) for row in rows]
 
 
+def list_links_for_cases(session: Session, case_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+    """一次取回多张案件的受影响项（列表端点用，避免逐条查询造成 N+1）。
+
+    列表接口一条一条 load_links 也能跑对，但会让「翻一页 20 张案件」变成 21 次查询 ——
+    这类 N+1 在数据少时看不出问题，等它变慢时已经很难归因。
+    """
+    if not case_ids:
+        return {}
+    placeholders = ", ".join(f":cid_{i}" for i in range(len(case_ids)))
+    params = {f"cid_{i}": case_id for i, case_id in enumerate(case_ids)}
+    rows = (
+        session.execute(
+            text(
+                f"SELECT {_LINK_COLS} FROM ent_exception_link "
+                f"WHERE exception_id IN ({placeholders}) ORDER BY id ASC"
+            ),
+            params,
+        )
+        .mappings()
+        .all()
+    )
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        link = _link_from_row(row)
+        grouped.setdefault(int(link["exception_id"]), []).append(link)
+    return grouped
+
+
 def list_cases(
     session: Session,
     *,
@@ -1634,6 +1662,7 @@ __all__ = [
     "list_cases",
     "list_events",
     "list_links",
+    "list_links_for_cases",
     "load_visible_case",
     "project_case_for_customer",
     "project_case_internal",

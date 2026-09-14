@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（52 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（60 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -419,6 +419,84 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         owner_scope=True,
         idempotent=True,
         note="reopen 保留历史（不删除已完成记录）",
+    ),
+    # ── 异常与变更案件（exceptions_api.py / ENT-030 / DR-0013）────────────
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/exceptions",
+        GUARD_ORG_MEMBER,
+        "entrust:task:dispatch",
+        owner_scope=True,
+        idempotent=True,
+        note="登记异常/变更案件取**管理动作**权限（entrust:task:dispatch）：DR-0013 没有新增"
+        "权限码，而新增权限码要动 ORG_ROLE_PERMISSIONS，等于顺带改变既有角色语义；"
+        "org_id 由服务端从 assignment.org_id 派生，请求带不一致的值 → 403",
+    ),
+    _r(
+        "GET",
+        "/exceptions",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="可见性前置复用 authz.assert_can_view_assignment（与工作台、成果清单同一判据）；"
+        "归属按 assignment_id **精确等值**，不放宽到货主或组织（DR-0012）",
+    ),
+    _r(
+        "GET",
+        "/exceptions/{exception_id}",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="svc.load_visible_case 经 authz 单一入口；非参与方 404，不区分「不存在」与「无权知晓」",
+    ),
+    _r(
+        "POST",
+        "/exceptions/{exception_id}/links",
+        GUARD_ORG_MEMBER,
+        "entrust:task:dispatch",
+        owner_scope=True,
+        idempotent=True,
+        note="受影响项须与案件同属本委托（跨委托 403）；乐观锁用**案件**的 revision_no，"
+        "案件已关闭时拒绝（需先 reopen）",
+    ),
+    _r(
+        "DELETE",
+        "/exceptions/{exception_id}/links/{link_id}",
+        GUARD_ORG_MEMBER,
+        "entrust:task:dispatch",
+        owner_scope=True,
+        idempotent=True,
+        note="移除后**重新校验 C2**：不能把 execution-blocking 案件移除成空转阻断；"
+        "保留「移除」是为了登记错了能更正，否则 resolved 永不可达",
+    ),
+    _r(
+        "POST",
+        "/exceptions/{exception_id}/decision",
+        GUARD_ORG_MEMBER,
+        "entrust:task:dispatch",
+        owner_scope=True,
+        idempotent=True,
+        note="两套状态机**分别**判定转移（同一个 rejected 在两种 kind 下语义相反）；"
+        "approved 必须给 basis_revision_id；接口层不含 severity/impact_kind（C3 的形态）",
+    ),
+    _r(
+        "POST",
+        "/exceptions/{exception_id}/close",
+        GUARD_ORG_MEMBER,
+        "entrust:task:dispatch",
+        owner_scope=True,
+        idempotent=True,
+        note="必须给 closure_disposition 与 evidence_ref（没有一键关闭）；exception 从 "
+        "rejected/approved 关闭**不允许** resolved/accepted_residual（驳回不解除真实异常）",
+    ),
+    _r(
+        "POST",
+        "/exceptions/{exception_id}/reopen",
+        GUARD_ORG_MEMBER,
+        "entrust:task:dispatch",
+        owner_scope=True,
+        idempotent=True,
+        note="重开的状态更新与审计追加**同事务**（DR-0013 §3.6 / HO 第 4 条）；reason 必填",
     ),
     # ── 会话与 Agent 作业（agent_api.py）────────────────────────────────
     _r(
