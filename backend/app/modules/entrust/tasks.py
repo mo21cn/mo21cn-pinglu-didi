@@ -425,8 +425,14 @@ def create_task(
     required_evidence: list[str] | None = None,
     precondition_task_id: int | None = None,
     now: datetime | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
-    """在**已受理**的委托下创建任务（管理动作，需派单权限）。"""
+    """在**已受理**的委托下创建任务（管理动作，需派单权限）。
+
+    `commit=False` 供**外层统一管理事务**的调用方使用（A2 五之二的变更传播要在
+    同一个事务里做「应用变更 + 写事件 + 生成复核任务」，P4-A7）。
+    默认 `True` 保持既有调用方行为不变。
+    """
     assignment = (
         session.execute(
             text("SELECT id, owner_user_id, org_id, status FROM ent_assignment WHERE id = :aid"),
@@ -497,7 +503,8 @@ def create_task(
         session.rollback()
         raise
 
-    session.commit()
+    if commit:
+        session.commit()
     created = get_task(session, new_id)
     assert created is not None
     return created

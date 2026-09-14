@@ -185,6 +185,7 @@ def raise_case(
                 due_at=data.due_at,
                 proposed_action=data.proposed_action,
                 links=([item.model_dump() for item in data.links] if data.links else None),
+                change_category=data.change_category,
                 request_org_id=data.org_id,
             )
         ),
@@ -493,6 +494,7 @@ def decide_exception(
                 decision_note=data.decision_note,
                 basis_revision_id=data.basis_revision_id,
                 approved_changes=data.approved_changes,
+                change_category=data.change_category,
             )
         ),
     )
