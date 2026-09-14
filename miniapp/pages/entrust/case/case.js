@@ -84,6 +84,20 @@ Page({
     canReopen: false,
     decisionOptions: [],
     closureOptions: [],
+    /**
+     * 处置区的**页内表单**状态。
+     *
+     * 用页内表单而不是 `wx.showModal`：原生弹层不在渲染树里 ⇒ 走查工具点不到它的
+     * 确认键 ⇒ 这两条人工落点在真机上无法验证（详见 `onPickDecision` 上方注释）。
+     * 每次取数（`applyState`）都把三份表单清空 —— 写成功后会 `load()`，
+     * 表单不该带着上一次的内容留在屏幕上。
+     */
+    decideForm: { to: '', note: '', basis: '' },
+    decideHint: '',
+    closeForm: { disp: '', evidence: '', resolution: '' },
+    closeHint: '',
+    reopenForm: { open: false, reason: '' },
+    reopenHint: '',
     /** 受影响项候选面板 */
     linkPickOpen: false,
     candLoaded: false,
@@ -183,6 +197,13 @@ Page({
       canReopen: !!caps.can_reopen,
       decisionOptions: decisionOptions,
       closureOptions: closureOptions,
+      // 取数即清空处置表单（见 data 里的说明）
+      decideForm: { to: '', note: '', basis: '' },
+      decideHint: '',
+      closeForm: { disp: '', evidence: '', resolution: '' },
+      closeHint: '',
+      reopenForm: { open: false, reason: '' },
+      reopenHint: '',
       // 处置区整体是否要出现。单独算一个布尔而不是在模板里写四段 `||`：
       // 模板里写布尔表达式，改一处漏一处不会有任何东西报错。
       canAnyAction: !!caps.can_add_link || canDecide || canClose || !!caps.can_reopen
@@ -329,135 +350,134 @@ Page({
     })
   },
 
-  onDecide(e) {
+  // ── 记录决定（页内表单）─────────────────────────────────────────────
+  //
+  // ⚠️ 从 `wx.showModal({editable:true})` 改成页内表单的依据（2026-09-14 真机实测）：
+  //    原生 modal 的弹层**不在渲染树里** —— `.weui-dialog*` 选择器全部命中 0 个元素、
+  //    `page` 的 outerWXML 读出来是空串、tap 确认键失败。于是「记录决定 / 关闭」
+  //    这两条人工落点**在真机上根本没法被验证**，而 DR-0013 §7.3 条件 4 要求的
+  //    恰恰是"人工落点经界面走通"。
+  //    同一取向此前用过一次：7 项的任务类型选择从 `showActionSheet` 改成页内展开条
+  //    （见 detail.js 的 TASK_TYPE_OPTIONS 注释）—— 弹层承担关键输入，既难走查也难操作。
+
+  onPickDecision(e) {
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
     const to = ds.status || ''
     if (!to) return
-    const label = this.optionLabel(this.data.decisionOptions, to)
-    const self = this
-    wx.showModal({
-      title: '记录决定 · ' + label,
-      editable: true,
-      placeholderText: '决定说明（可留空）',
-      success: function (res) {
-        if (!res.confirm) return
-        const note = (res.content || '').trim()
-        // `approved` 必须指向它所依据的**精确**成果版本（§3.1.1 服务端强制）。
-        // 界面上不先问、等 400 再补，等于让用户白填一次表单。
-        if (to === 'approved') {
-          self.promptBasis(to, note)
-          return
-        }
-        self.sendDecision(to, note, '')
-      }
+    // 换目标状态就清掉依据版本（它只对「已批准」有意义）与上一次的提示
+    this.setData({
+      decideForm: { to: to, note: (this.data.decideForm || {}).note || '', basis: '' },
+      decideHint: ''
     })
   },
 
-  promptBasis(to, note) {
-    const self = this
-    wx.showModal({
-      title: '依据版本',
-      editable: true,
-      placeholderText: '批准的成果版本号 rN（必填，数字）',
-      success: function (res) {
-        if (!res.confirm) return
-        const basis = (res.content || '').trim()
-        if (!/^\d+$/.test(basis)) {
-          wx.showToast({ title: '依据版本要填版本号数字（如 3）', icon: 'none' })
-          return
-        }
-        self.sendDecision(to, note, basis)
-      }
-    })
+  onDecideInput(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const field = ds.df || ''
+    if (field !== 'note' && field !== 'basis') return
+    const patch = { decideHint: '' }
+    patch['decideForm.' + field] = (e && e.detail && e.detail.value) || ''
+    this.setData(patch)
   },
 
-  sendDecision(to, note, basis) {
+  onSubmitDecision() {
+    const f = this.data.decideForm || {}
+    const to = f.to || ''
+    if (!to) {
+      this.setData({ decideHint: '请先选一个目标状态' })
+      return
+    }
+    // `approved` 必须指向它所依据的**精确**成果版本（§3.1.1 服务端强制）。
+    // 在页内就说清，别让用户填完提交后拿一个 400。
+    if (to === 'approved' && !/^\d+$/.test(String(f.basis || '').trim())) {
+      this.setData({ decideHint: '批准必须给出依据版本号（数字，例如 3）' })
+      return
+    }
     const self = this
     const body = { expected_revision: this.data.revisionNo, to_status: to }
+    const note = String(f.note || '').trim()
     if (note) body.decision_note = note
-    if (basis) body.basis_revision_id = Number(basis)
+    if (to === 'approved') body.basis_revision_id = Number(String(f.basis).trim())
     return this.submit('提交中', function () {
       return decideCase(self.data.caseId, body, newIdempotencyKey('case-decide'))
     })
   },
 
-  onClose(e) {
+  // ── 关闭（页内表单：处置 + 证据 + 结案说明）──────────────────────────
+  // 一并把"关一次要连点两个弹层"消掉：选处置 → 填证据（必填）→ 填结案说明 → 提交。
+
+  onPickDisposition(e) {
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
     const disp = ds.disp || ''
     if (!disp) return
-    const label = this.optionLabel(this.data.closureOptions, disp)
-    const self = this
-    wx.showModal({
-      title: '关闭 · ' + label,
-      editable: true,
-      placeholderText: '证据引用（必填：邮件编号 / 附件名 / 现场照片等）',
-      success: function (res) {
-        if (!res.confirm) return
-        const evidence = (res.content || '').trim()
-        if (!evidence) {
-          // 没有一键关闭（PRD 第 255 行 `not a generic skip`）：证据是关闭的**前置**，
-          // 不能靠"留空"绕过 —— 这里直接拦住，而不是让服务端报 400 再说一遍。
-          wx.showToast({ title: '证据引用不能为空', icon: 'none' })
-          return
-        }
-        self.promptResolution(disp, evidence)
-      }
-    })
+    this.setData({ 'closeForm.disp': disp, closeHint: '' })
   },
 
-  promptResolution(disp, evidence) {
-    const self = this
-    wx.showModal({
-      title: '结案说明',
-      editable: true,
-      placeholderText: '结案说明（可留空）',
-      success: function (res) {
-        if (!res.confirm) return
-        const note = (res.content || '').trim()
-        const body = {
-          expected_revision: self.data.revisionNo,
-          closure_disposition: disp,
-          evidence_ref: evidence
-        }
-        if (note) body.resolution_note = note
-        self.submit('关闭中', function () {
-          return closeCase(self.data.caseId, body, newIdempotencyKey('case-close'))
-        })
-      }
-    })
+  onCloseInput(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const field = ds.df || ''
+    if (field !== 'evidence' && field !== 'resolution') return
+    const patch = { closeHint: '' }
+    patch['closeForm.' + field] = (e && e.detail && e.detail.value) || ''
+    this.setData(patch)
   },
 
-  onReopen() {
-    const self = this
-    wx.showModal({
-      title: '重开案件',
-      editable: true,
-      placeholderText: '为什么要重开（必填）',
-      success: function (res) {
-        if (!res.confirm) return
-        const reason = (res.content || '').trim()
-        if (!reason) {
-          wx.showToast({ title: '重开必须说明原因', icon: 'none' })
-          return
-        }
-        self.submit('重开中', function () {
-          return reopenCase(
-            self.data.caseId,
-            { expected_revision: self.data.revisionNo, reason: reason },
-            newIdempotencyKey('case-reopen')
-          )
-        })
-      }
-    })
-  },
-
-  /** 选项的中文名（选项表本身就是投影层算好的，这里不重复维护一份标签映射） */
-  optionLabel(options, key) {
-    const list = options || []
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].key === key) return list[i].label || key
+  onSubmitClose() {
+    const f = this.data.closeForm || {}
+    const disp = f.disp || ''
+    const evidence = String(f.evidence || '').trim()
+    if (!disp) {
+      this.setData({ closeHint: '请先选一种处置方式' })
+      return
     }
-    return key
+    // 没有一键关闭（PRD 第 255 行 `not a generic skip`）：证据是关闭的**前置**，
+    // 不能靠"留空"绕过 —— 页内直接拦住，而不是让服务端报 400 再说一遍。
+    if (!evidence) {
+      this.setData({ closeHint: '证据引用不能为空' })
+      return
+    }
+    const self = this
+    const body = {
+      expected_revision: this.data.revisionNo,
+      closure_disposition: disp,
+      evidence_ref: evidence
+    }
+    const note = String(f.resolution || '').trim()
+    if (note) body.resolution_note = note
+    return this.submit('关闭中', function () {
+      return closeCase(self.data.caseId, body, newIdempotencyKey('case-close'))
+    })
+  },
+
+  // ── 重开（页内表单，理由同"记录决定"）──────────────────────────────
+
+  onOpenReopen() {
+    this.setData({ reopenForm: { open: true, reason: '' }, reopenHint: '' })
+  },
+
+  onReopenInput(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    if ((ds.df || '') !== 'reason') return
+    this.setData({
+      'reopenForm.reason': (e && e.detail && e.detail.value) || '',
+      reopenHint: ''
+    })
+  },
+
+  onSubmitReopen() {
+    const reason = String((this.data.reopenForm || {}).reason || '').trim()
+    if (!reason) {
+      this.setData({ reopenHint: '重开必须说明原因' })
+      return
+    }
+    const self = this
+    return this.submit('重开中', function () {
+      return reopenCase(
+        self.data.caseId,
+        { expected_revision: self.data.revisionNo, reason: reason },
+        newIdempotencyKey('case-reopen')
+      )
+    })
   },
 
   onRetry() {

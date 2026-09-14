@@ -267,7 +267,11 @@ Page({
 
   onRemoveLink(e) {
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
-    const key = ds.key || ''
+    // 属性名是 `data-rm-key`（不是 `data-key`）：本页的**筛选 pill 已经在用
+    // `data-key`**，而走查锚点要求「一个属性只出现在一类元素上、选择器唯一命中」
+    // —— 两处共用 `data-key` 会让 `[data-key="task-5"]` 的选择歧义，
+    // 也会让锚点契约表无法登记（同文件同一属性只能登记一项）。
+    const key = ds.rmKey || ''
     const links = this.data.links.filter(function (it) {
       return it.key !== key
     })

@@ -69,7 +69,12 @@
       <view wx:if="{{canCreateCase}}" class="card slot-card">
         <view class="slot-note">遇到异常或需要变更时，在这里登记一宗案件；阻断类案件需要同时登记受影响项</view>
         <view class="slot-actions">
-          <view class="slot-btn" bindtap="onCreateCase" hover-class="hover-dim">登记异常 / 变更</view>
+          <view
+            class="slot-btn"
+            data-act-create-case="create-case"
+            bindtap="onCreateCase"
+            hover-class="hover-dim"
+          >登记异常 / 变更</view>
         </view>
       </view>
 

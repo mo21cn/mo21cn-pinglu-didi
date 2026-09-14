@@ -189,6 +189,45 @@ const WALK_ANCHORS = [
   { kind: 'row', file: 'pages/port/appt/appt.wxml', class: 'tl-item', attr: 'data-tl-key', value: '{{item.key}}' },
   // ⑤ 发布空船：计价方式分段控件（既有锚点，一并纳管）
   { kind: 'static', file: 'pages/publish/ship/ship.wxml', class: 'seg-item', attr: 'data-mode' },
+  // ENT-030 切四之六：登记案件（第 ㉖ 章）与案件处置（第 ㉗ 章）依赖的锚点。
+  // ⚠️ 这些不是"顺手加个属性"：`detail.wxml` 的 `.slot-btn` 同时属于 7 个「记录任务」
+  //    按钮与 1 个「登记案件」按钮，而走查工具**没有 index 参数** ——
+  //    没有锚点时 `tap('.slot-btn')` 会点到第一个「记录任务」，把断言建立在巧合上。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-create-case',
+    value: 'create-case', handler: 'onCreateCase' },
+  { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-toggle-links',
+    value: '1', handler: 'onToggleLinks' },
+  { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-submit-case',
+    value: '1', handler: 'onSubmit' },
+  // 移除已选受影响项。属性名是 `data-rm-key` 而**不是** `data-key`：
+  // 本页的筛选 pill 已经占用了 `data-key`，共用会让选择器歧义（也登记不进这张表）。
+  { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', class: 'link-remove',
+    attr: 'data-rm-key', value: '{{item.key}}', handler: 'onRemoveLink' },
+  // 受影响项候选行（任务 / 成果共用一份候选表，靠 `target_kind` 区分）
+  { kind: 'row', file: 'pages/entrust/case-create/case-create.wxml', class: 'cand-row',
+    attr: 'data-id', value: '{{item.target_id}}' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-toggle-links',
+    value: '1', handler: 'onToggleLinkPick' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-reopen',
+    value: '1', handler: 'onOpenReopen' },
+  // 处置区的三个**页内表单提交**锚点。它们取代了原来的 `wx.showModal` 输入：
+  // 原生弹层不在渲染树里，走查点不到，条件 4 就永远只能记 not-run。
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-decide-submit',
+    value: '1', handler: 'onSubmitDecision' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-close-submit',
+    value: '1', handler: 'onSubmitClose' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-reopen-submit',
+    value: '1', handler: 'onSubmitReopen' },
+  // 页内表单的输入框（`data-df` 区分是哪一栏；文本靠 setData 注值，见走查脚本的声明）
+  { kind: 'static', file: 'pages/entrust/case/case.wxml', class: 'act-input', attr: 'data-df' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', class: 'act-chip-x',
+    attr: 'data-link', value: '{{item.linkId}}', handler: 'onRemoveLink' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', class: 'act-btn',
+    attr: 'data-status', value: '{{item.key}}', handler: 'onPickDecision' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', class: 'act-btn',
+    attr: 'data-disp', value: '{{item.key}}', handler: 'onPickDisposition' },
+  { kind: 'row', file: 'pages/entrust/case/case.wxml', class: 'cand-row',
+    attr: 'data-id', value: '{{item.target_id}}' },
 ]
 
 // 把 wxml 切成「标签」块：先剥掉注释（注释里的撇号会被当成引号，导致整个标签块

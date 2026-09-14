@@ -164,7 +164,12 @@
           <view wx:else class="act-hint">尚未登记受影响的任务或成果</view>
 
           <block wx:if="{{canAddLink}}">
-            <view class="act-btn-wide" bindtap="onToggleLinkPick" hover-class="hover-dim">
+            <view
+              class="act-btn-wide"
+              data-act-toggle-links="1"
+              bindtap="onToggleLinkPick"
+              hover-class="hover-dim"
+            >
               {{linkPickOpen ? '收起候选' : '添加受影响项'}}
             </view>
             <block wx:if="{{linkPickOpen}}">
@@ -190,20 +195,56 @@
           </block>
         </block>
 
-        <!-- 记录决定 -->
+        <!-- 记录决定。
+             ⚠️ 输入用**页内表单**而不是 `wx.showModal({editable:true})`（2026-09-14 真机实测改）：
+             ① 原生 modal 的弹层**不在渲染树里**（`.weui-dialog*` 全部 n=0、`page` 的
+                outerWXML 读出来是空），走查工具点不到它的确认键 ⇒ 这条人工落点
+                **在真机上无法被验证**，而 DR-0013 §7.3 条件 4 恰恰要求它"经界面走通"；
+             ② 一条动作连开两个弹层（问依据 → 问说明）本就比页内表单难用。
+             同一条理由此前已用过一次：7 项的任务类型选择从 `showActionSheet`
+             改成页内展开条（见 detail.js 的 TASK_TYPE_OPTIONS 注释）。 -->
         <block wx:if="{{canDecide}}">
           <view class="act-label">记录决定</view>
           <view class="pick-row">
             <view
               wx:for="{{decisionOptions}}"
               wx:key="key"
-              class="act-btn"
+              class="act-btn {{decideForm.to === item.key ? 'act-btn-on' : ''}}"
               data-status="{{item.key}}"
-              bindtap="onDecide"
+              bindtap="onPickDecision"
               hover-class="hover-dim"
             >{{item.label}}</view>
           </view>
-          <view class="act-hint">批准（已批准）必须给出依据版本 —— 做成决定时会再问一次。</view>
+          <block wx:if="{{decideForm.to}}">
+            <input
+              class="act-input"
+              data-df="note"
+              value="{{decideForm.note}}"
+              bindinput="onDecideInput"
+              maxlength="500"
+              placeholder="决定说明（可留空）"
+              placeholder-class="input-ph"
+            />
+            <input
+              wx:if="{{decideForm.to === 'approved'}}"
+              class="act-input"
+              data-df="basis"
+              value="{{decideForm.basis}}"
+              bindinput="onDecideInput"
+              maxlength="12"
+              type="number"
+              placeholder="依据版本号 rN（批准必填，数字）"
+              placeholder-class="input-ph"
+            />
+            <view
+              class="act-btn-wide"
+              data-act-decide-submit="1"
+              bindtap="onSubmitDecision"
+              hover-class="hover-dim"
+            >提交决定</view>
+            <view wx:if="{{decideHint}}" class="act-hint act-hint-warn">{{decideHint}}</view>
+          </block>
+          <view class="act-hint">批准（已批准）必须给出依据版本 —— 选中「已批准」会出现该输入框。</view>
         </block>
 
         <!-- 关闭（必须给处置与证据，没有一键关闭） -->
@@ -213,23 +254,71 @@
             <view
               wx:for="{{closureOptions}}"
               wx:key="key"
-              class="act-btn"
+              class="act-btn {{closeForm.disp === item.key ? 'act-btn-on' : ''}}"
               data-disp="{{item.key}}"
-              bindtap="onClose"
+              bindtap="onPickDisposition"
               hover-class="hover-dim"
             >以「{{item.label}}」关闭</view>
           </view>
+          <block wx:if="{{closeForm.disp}}">
+            <input
+              class="act-input"
+              data-df="evidence"
+              value="{{closeForm.evidence}}"
+              bindinput="onCloseInput"
+              maxlength="512"
+              placeholder="证据引用（必填：票号 / 附件名 / 现场照片）"
+              placeholder-class="input-ph"
+            />
+            <input
+              class="act-input"
+              data-df="resolution"
+              value="{{closeForm.resolution}}"
+              bindinput="onCloseInput"
+              maxlength="500"
+              placeholder="结案说明（可留空）"
+              placeholder-class="input-ph"
+            />
+            <view
+              class="act-btn-wide"
+              data-act-close-submit="1"
+              bindtap="onSubmitClose"
+              hover-class="hover-dim"
+            >提交关闭</view>
+            <view wx:if="{{closeHint}}" class="act-hint act-hint-warn">{{closeHint}}</view>
+          </block>
           <view class="act-hint">关闭必须给出证据引用 —— 没有一键关闭。</view>
         </block>
 
-        <!-- 重开（仅已关闭案件） -->
+        <!-- 重开（仅已关闭案件）：同样走页内表单，理由同上 -->
         <block wx:if="{{canReopen}}">
           <view class="act-label">重开案件</view>
-          <view
-            class="act-btn-wide"
-            bindtap="onReopen"
-            hover-class="hover-dim"
-          >重开并说明原因</view>
+          <block wx:if="{{!reopenForm.open}}">
+            <view
+              class="act-btn-wide"
+              data-act-reopen="1"
+              bindtap="onOpenReopen"
+              hover-class="hover-dim"
+            >重开并说明原因</view>
+          </block>
+          <block wx:else>
+            <input
+              class="act-input"
+              data-df="reason"
+              value="{{reopenForm.reason}}"
+              bindinput="onReopenInput"
+              maxlength="255"
+              placeholder="为什么要重开（必填）"
+              placeholder-class="input-ph"
+            />
+            <view
+              class="act-btn-wide"
+              data-act-reopen-submit="1"
+              bindtap="onSubmitReopen"
+              hover-class="hover-dim"
+            >提交重开</view>
+            <view wx:if="{{reopenHint}}" class="act-hint act-hint-warn">{{reopenHint}}</view>
+          </block>
         </block>
       </view>
 
