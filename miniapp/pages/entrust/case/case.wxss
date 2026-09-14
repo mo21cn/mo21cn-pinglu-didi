@@ -180,6 +180,106 @@
   line-height: 1.6;
 }
 
+/* ── 处置区（切片四之六）──────────────────────────────────────────────── */
+
+.act-label {
+  margin-top: 24rpx;
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.act-hint {
+  margin-top: 14rpx;
+  font-size: 23rpx;
+  color: #98A6B8;
+  line-height: 1.6;
+}
+
+/* 受影响项的**可移除**形态：与要素②的只读条目分开 —— 那边说"有哪些"，
+   这边说"能改哪个"。同一份数据、两种用途，混在一起会看不出哪个能点。 */
+.act-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-top: 16rpx;
+}
+
+.act-chip {
+  display: flex;
+  align-items: center;
+  padding: 10rpx 8rpx 10rpx 20rpx;
+  border-radius: 999rpx;
+  background: #F1F4F8;
+}
+
+.act-chip-text {
+  font-size: 24rpx;
+  color: #3D4C63;
+}
+
+.act-chip-x {
+  padding: 0 14rpx;
+  font-size: 24rpx;
+  color: #98A6B8;
+}
+
+.pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-top: 16rpx;
+}
+
+.act-btn {
+  padding: 14rpx 26rpx;
+  border-radius: 12rpx;
+  background: #F1F4F8;
+  font-size: 25rpx;
+  color: #3B5BDB;
+}
+
+.act-btn-wide {
+  margin-top: 20rpx;
+  padding: 20rpx 0;
+  text-align: center;
+  border-radius: 12rpx;
+  border: 1rpx dashed rgba(59, 91, 219, .35);
+  font-size: 26rpx;
+  color: #3B5BDB;
+}
+
+.cand-row {
+  display: flex;
+  align-items: center;
+  padding: 18rpx 0;
+  border-top: 1rpx solid #F4F6FB;
+}
+
+.link-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.link-text {
+  font-size: 27rpx;
+  color: #3D4C63;
+}
+
+.link-sub {
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  color: #98A6B8;
+}
+
+.cand-add {
+  flex-shrink: 0;
+  width: 52rpx;
+  text-align: center;
+  font-size: 34rpx;
+  color: #3B5BDB;
+}
+
 /* ---- 本页 hover 反馈 ----
    `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */

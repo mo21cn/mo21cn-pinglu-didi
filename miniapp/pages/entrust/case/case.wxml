@@ -76,31 +76,39 @@
 
         <!-- 键值形态 -->
         <block wx:elif="{{item.mode === 'rows'}}">
-          <view
-            wx:if="{{item.rows.length}}"
-            wx:for="{{item.rows}}"
-            wx:for-item="r"
-            wx:key="key"
-            class="field-row row-between"
-          >
-            <text class="field-label">{{r.label}}</text>
-            <text class="field-value">{{r.value}}</text>
-          </view>
+          <!-- ⚠️ `wx:if` 不得与 `wx:for` 写在同一元素上：微信编译器会把 `wx:if`
+               卷进循环作用域，紧随其后的兄弟 `wx:else` 于是绑不到任何 `wx:if`，
+               **整个 wxml 编译失败**（报 `Bad attr wx:elif … wx:if not found`），
+               页面被错误覆盖层替换 —— 看起来就像"页面白屏"。
+               外层 block 承担条件，循环留给内层元素，两层分开即可。 -->
+          <block wx:if="{{item.rows.length}}">
+            <view
+              wx:for="{{item.rows}}"
+              wx:for-item="r"
+              wx:key="key"
+              class="field-row row-between"
+            >
+              <text class="field-label">{{r.label}}</text>
+              <text class="field-value">{{r.value}}</text>
+            </view>
+          </block>
           <view wx:else class="element-empty">{{item.emptyText}}</view>
         </block>
 
         <!-- 条目形态 -->
         <block wx:else>
-          <view
-            wx:if="{{item.items.length}}"
-            wx:for="{{item.items}}"
-            wx:for-item="it"
-            wx:key="key"
-            class="{{it.cls}}"
-          >
-            <view class="element-item-text">{{it.text}}</view>
-            <view class="element-item-sub">{{it.sub}}</view>
-          </view>
+          <!-- 同上：条件与循环分两层，`wx:else` 才能绑到外层的 `wx:if` -->
+          <block wx:if="{{item.items.length}}">
+            <view
+              wx:for="{{item.items}}"
+              wx:for-item="it"
+              wx:key="key"
+              class="{{it.cls}}"
+            >
+              <view class="element-item-text">{{it.text}}</view>
+              <view class="element-item-sub">{{it.sub}}</view>
+            </view>
+          </block>
           <view wx:else class="element-empty">{{item.emptyText}}</view>
         </block>
       </view>
@@ -126,6 +134,103 @@
             </view>
           </view>
         </view>
+      </view>
+
+      <!-- ── 处置（切片四之六）────────────────────────────────────────────
+           按钮是否出现由**服务端 `capabilities`** + 取值域镜像共同决定（本页 data 里
+           已算好 `canAddLink` / `canDecide` / `canClose` / `canReopen`）。
+           ⚠️ 隐藏按钮**不是**权限控制：写端独立复核，两者不一致时以写端为准，
+           收到 403/409 会由 caseWriteError 翻成能照做的结论弹出来。 -->
+      <view wx:if="{{canAnyAction}}" class="card element-card">
+        <view class="element-head">
+          <text class="element-title">处置</text>
+        </view>
+
+        <!-- 受影响项：移除 + 补登记 -->
+        <block wx:if="{{canAddLink || canRemoveLink}}">
+          <view class="act-label">受影响项</view>
+          <view wx:if="{{affected.length}}" class="act-chip-row">
+            <view wx:for="{{affected}}" wx:key="key" class="act-chip">
+              <text class="act-chip-text">{{item.text}}</text>
+              <view
+                wx:if="{{canRemoveLink}}"
+                class="act-chip-x"
+                data-link="{{item.linkId}}"
+                bindtap="onRemoveLink"
+                hover-class="hover-dim"
+              >✕</view>
+            </view>
+          </view>
+          <view wx:else class="act-hint">尚未登记受影响的任务或成果</view>
+
+          <block wx:if="{{canAddLink}}">
+            <view class="act-btn-wide" bindtap="onToggleLinkPick" hover-class="hover-dim">
+              {{linkPickOpen ? '收起候选' : '添加受影响项'}}
+            </view>
+            <block wx:if="{{linkPickOpen}}">
+              <view wx:if="{{candHint}}" class="act-hint">{{candHint}}</view>
+              <block wx:else>
+                <view
+                  wx:for="{{candidates}}"
+                  wx:key="key"
+                  class="cand-row"
+                  data-kind="{{item.target_kind}}"
+                  data-id="{{item.target_id}}"
+                  bindtap="onAddLinkTarget"
+                  hover-class="hover-dim"
+                >
+                  <view class="link-main">
+                    <view class="link-text">{{item.text}}</view>
+                    <view class="link-sub">{{item.sub}}</view>
+                  </view>
+                  <view class="cand-add">＋</view>
+                </view>
+              </block>
+            </block>
+          </block>
+        </block>
+
+        <!-- 记录决定 -->
+        <block wx:if="{{canDecide}}">
+          <view class="act-label">记录决定</view>
+          <view class="pick-row">
+            <view
+              wx:for="{{decisionOptions}}"
+              wx:key="key"
+              class="act-btn"
+              data-status="{{item.key}}"
+              bindtap="onDecide"
+              hover-class="hover-dim"
+            >{{item.label}}</view>
+          </view>
+          <view class="act-hint">批准（已批准）必须给出依据版本 —— 做成决定时会再问一次。</view>
+        </block>
+
+        <!-- 关闭（必须给处置与证据，没有一键关闭） -->
+        <block wx:if="{{canClose}}">
+          <view class="act-label">关闭案件</view>
+          <view class="pick-row">
+            <view
+              wx:for="{{closureOptions}}"
+              wx:key="key"
+              class="act-btn"
+              data-disp="{{item.key}}"
+              bindtap="onClose"
+              hover-class="hover-dim"
+            >以「{{item.label}}」关闭</view>
+          </view>
+          <view class="act-hint">关闭必须给出证据引用 —— 没有一键关闭。</view>
+        </block>
+
+        <!-- 重开（仅已关闭案件） -->
+        <block wx:if="{{canReopen}}">
+          <view class="act-label">重开案件</view>
+          <view
+            class="act-btn-wide"
+            bindtap="onReopen"
+            hover-class="hover-dim"
+          >重开并说明原因</view>
+        </block>
       </view>
 
       <!-- 处置能力：只说"这里现在有没有可执行的动作"，**不断言原因** —— 六个能力位

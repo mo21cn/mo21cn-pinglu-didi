@@ -14,6 +14,8 @@
 // 切片四之五（ENT-030）把同一个落点扩到**案件页**：`exceptions` 槽下发的是
 // `CaseRef`（`case_id`，无版本），与成果引用**不同形状**，由投影层按槽位配置分流，
 // 本页只按 dataset 里的 `kind` 转交（见 `onOpenRef`）。
+// 切片四之六（ENT-030）再补一个人工落点：**登记案件**（`onCreateCase`）——
+// 入口只在已受理（`claimed`）时出现，因为受理前没有责任主体，`raise_case` 会 409。
 // 本页自己**不**做成果的编辑与确认：那需要版本历史与字段表单，
 // 塞进这张卡里会把七槽位总览变成半个编辑器；且成果页需要独立入口核对"生效版本是哪个"。
 //
@@ -66,6 +68,14 @@ Page({
     slots: [],
     /** 待受理（status=submitted）时给「受理委托」入口；是否有权限由服务端判定 */
     canClaim: false,
+    /**
+     * 已受理（status=claimed）时给「登记异常 / 变更」入口。
+     *
+     * 只看**委托状态**，不看权限 —— 与服务端同一条判据：`raise_case` 要求委托
+     * 已受理（否则 409），权限则由 `_assert_can_write` 单独判定。
+     * 前端在这里假装知道有没有权限，只会在无权限时给出一个必然 403 的按钮。
+     */
+    canCreateCase: false,
     /** 归属机制上线前的历史成果计数提示（0 时为空串） */
     unassignedHint: '',
     /** 已展开类型选择的槽位 key（空串＝都收起） */
@@ -154,6 +164,7 @@ Page({
       // 受理入口只看**委托状态**：有没有权限由服务端判定（前端不做权限判定，
       // 也不假装知道）。无权限时服务端给 403，请求层会把原因如实提示出来。
       canClaim: !!(board && board.status === 'submitted'),
+      canCreateCase: !!(board && board.status === 'claimed'),
       unassignedHint: board ? board.unassignedHint : ''
     })
   },
@@ -257,6 +268,20 @@ Page({
           })
       }
     })
+  },
+
+  // ── 人工落点：登记案件（已受理时）────────────────────────────────────
+
+  /**
+   * 进入登记案件页。**带的是本页的 `assignment_id`**（写端的路径参数），
+   * 而不是"到登记页再去猜是哪张委托" —— 猜出来的委托可能已不是当前这张。
+   */
+  onCreateCase() {
+    R.go(
+      '/pages/entrust/case-create/case-create?assignment_id=' +
+        encodeURIComponent(String(this.data.assignmentId)),
+      { from: SELF }
+    )
   },
 
   // ── 人工落点：进入成果页（编辑 / 确认）──────────────────────────────

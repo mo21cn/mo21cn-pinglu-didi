@@ -147,6 +147,11 @@ function entryDecision(res) {
  *
  * 把 `total` 而不是 `items.length` 作为"空"的依据：分页到第 3 页时
  * `items` 为空但 total 不为 0，那是"这一页没有数据"，不是"没有委托"。
+ *
+ * 为什么空态**文案**可以传进来、判定顺序不行：委托队列与案件队列要说的是两件事
+ * （"还没有委托" vs "还没有异常或变更"），但"错误优先于空"是同一条铁律。
+ * 于是只把措辞做成可选入参（`emptyTitle` / `emptyHint`），判定链**仍然只有这一条** ——
+ * 给案件队列另写一个 `caseListState` 就等于承认两套顺序，而两套顺序迟早分叉。
  */
 function viewState(input) {
   const state = input || {}
@@ -174,7 +179,11 @@ function viewState(input) {
     return { state: VIEW.ERROR, title: '加载失败', hint: '无法连接后端，请确认服务已启动' }
   }
   if (!state.total) {
-    return { state: VIEW.EMPTY, title: '还没有委托', hint: '货主提交委托后会出现在这里' }
+    return {
+      state: VIEW.EMPTY,
+      title: state.emptyTitle || '还没有委托',
+      hint: state.emptyHint || '货主提交委托后会出现在这里'
+    }
   }
   return { state: VIEW.READY, title: '', hint: '' }
 }
@@ -1269,6 +1278,107 @@ const CASE_EVENT_LABELS = {
   reopened: '重开案件'
 }
 
+// ── UI-04 组织级队列的筛选取值域（DR-0014 §3.1）──────────────────────────────
+
+/**
+ * 组织级清单的**开闭范围**（后端 `exceptions.ORG_SCOPES`）。
+ *
+ * 为什么不是「状态筛选」：案件状态有六个（open / in_review / approved /
+ * rejected / applied / closed），而组合工作台只关心一个问题 —— 「还有哪些没结」。
+ * 六个状态摊成筛选条，「未关闭」这一档就得靠用户多选才能表达，而**漏选就是漏看**。
+ * 后端因此也只认 `scope=unclosed|all`，并且明确拒绝 `status`（§3.1，混用一律 400）。
+ */
+const CASE_ORG_SCOPE_LABELS = { unclosed: '未关闭', all: '全部' }
+
+/** 范围顺序（断言用，勿随意增删）—— 第一项即后端默认值 `ORG_SCOPE_UNCLOSED` */
+const CASE_ORG_SCOPE_ORDER = ['unclosed', 'all']
+
+/**
+ * 案件类型筛选的**呈现顺序**（后端 `exceptions.KINDS` 只有两类）。
+ *
+ * 这个顺序只影响筛选条怎么排，不是取值域本身 —— 取值域由 `CASE_KIND_LABELS`
+ * 的键集合与后端逐字核对（`verify_entrust_ui.js`）；后端那边是 frozenset，本无顺序。
+ */
+const CASE_KIND_ORDER = ['exception', 'change_request']
+
+/**
+ * 严重度 / 影响类型的呈现顺序（后端 `exceptions.SEVERITIES` / `IMPACT_KINDS`）。
+ *
+ * 与 `CASE_KIND_ORDER` 同理：顺序只影响选择条怎么排，取值域由标签表的键集合
+ * 与后端逐字核对。`CASE_IMPACT_ORDER` 把 `execution-blocking` 放在**最后**不是
+ * 随手排的 —— C2 规定它必须至少挂一条受影响项，排在末尾让「选了它就得补受影响项」
+ * 在视觉上离受影响项区块最近（选择条下面紧跟着受影响项，而不是隔了三行）。
+ */
+const CASE_SEVERITY_ORDER = ['low', 'medium', 'high', 'critical']
+const CASE_IMPACT_ORDER = ['informational', 'review-required', 'execution-blocking']
+
+/**
+ * 状态机 —— 后端 `exceptions._STATUS_TRANSITIONS` 的**逐字镜像**。
+ *
+ * 为什么界面上要有一份：`decide` 必须提交 `to_status`，而详情接口只回
+ * `capabilities.can_decide` 这个布尔 —— 它说的是"现在能不能决定"，**没说什么能转**。
+ * 只给布尔的话，界面要么把六个状态全列出来让用户去撞 409，
+ * 要么自己另编一套「open 之后大概就是 in_review 吧」。
+ *
+ * ⚠️ 镜像 **不等于** 第二份真相：`scripts/verify_entrust_ui.js` 会把本表与后端
+ *    `_STATUS_TRANSITIONS` 的解析结果**逐格**比对，差一格即失败；
+ *    另有断言要求 `closed` 的出边只含 `open`（`reopen` 专用，`decide` 不得替代）。
+ *    写端仍独立复核（`assert_transition`），本表只用于**呈现可选值**。
+ */
+const CASE_TRANSITIONS = {
+  exception: {
+    open: ['in_review', 'approved', 'rejected', 'closed'],
+    in_review: ['approved', 'rejected', 'open'],
+    approved: ['applied', 'rejected', 'closed'],
+    rejected: ['in_review', 'open', 'closed'],
+    applied: ['closed'],
+    closed: ['open']
+  },
+  change_request: {
+    open: ['in_review', 'rejected', 'closed'],
+    in_review: ['approved', 'rejected', 'open'],
+    approved: ['applied', 'rejected', 'closed'],
+    rejected: ['closed'],
+    applied: ['closed'],
+    closed: ['open']
+  }
+}
+
+/**
+ * 关闭时的可选处置，按 `(kind, 关闭前状态)` 限定 —— 后端 `_CLOSURE_DISPOSITIONS` 镜像。
+ *
+ * 键拼成 `kind + '/' + from_status`：后端那边是**元组**键，JS 没有元组，
+ * 拼字符串是唯一不引入额外结构（不用嵌套两层对象）的办法。这个不对称写在注释里，
+ * 免得下一个人以为字符串是随手拼的。
+ *
+ * ⚠️ 两处**不是**「所有处置都能用」，且都是有意的：
+ *   · `exception` 的 `rejected` 关闭**不含** `resolved` / `accepted_residual`
+ *     —— §3.5「不允许通过驳回处置方案来解除真实异常」；
+ *   · `change_request` 的 `approved` 关闭不含 `duplicate`
+ *     —— 走到这一步已经确认「这是个真请求」，此时再说重复是自相矛盾。
+ * 另有断言要求本表的键集合与后端**逐键**（含"某键存在但集合为空"这一情形）一致。
+ */
+const CASE_CLOSURE_DISPOSITIONS = {
+  'exception/open': ['cancelled', 'duplicate', 'superseded'],
+  'exception/approved': ['cancelled', 'duplicate', 'superseded'],
+  'exception/rejected': ['cancelled', 'duplicate', 'superseded'],
+  'exception/applied': ['resolved', 'accepted_residual'],
+  'change_request/open': ['cancelled', 'duplicate', 'superseded'],
+  'change_request/approved': ['cancelled', 'superseded'],
+  'change_request/rejected': ['cancelled', 'duplicate', 'superseded'],
+  'change_request/applied': ['resolved', 'accepted_residual', 'superseded']
+}
+
+/**
+ * 「无需实际应用即可终结」的处置（后端 `_DISPOSITIONS_WITHOUT_APPLICATION`）。
+ *
+ * 单独列出来，是因为界面上要不要提示「关掉就再也不能改了」取决于它：
+ * 用 `cancelled` / `duplicate` / `superseded` 关，说的其实是「这单本身不该存在」；
+ * 用 `resolved` / `accepted_residual` 关，说的是「问题已解决」。
+ * 两者对用户的代价完全不同，不能共用一句提示。
+ */
+const CASE_DISPOSITIONS_WITHOUT_APPLICATION = ['cancelled', 'duplicate', 'superseded']
+
 /**
  * UI-08 的**六要素**（PRD 第 155 行）。这是本页内容的完整性依据：
  * `decorateCase` 按本表顺序产出 `blocks`，`verify_entrust_ui.js` 断言"产出与声明相等"
@@ -1374,6 +1484,9 @@ function decorateCase(payload) {
           const has = applied !== null && applied !== undefined
           return {
             key: 'lk-' + item.link_id,
+            // `linkId` 是**移除受影响项**要的参数（`DELETE .../links/{link_id}`）。
+            // 不放进 `text` 里让页面去截字符串 —— 那会把"显示什么"与"提交什么"绑死。
+            linkId: item.link_id,
             text:
               (CASE_TARGET_LABELS[item.target_kind] || item.target_kind || '目标') +
               ' #' +
@@ -1528,22 +1641,514 @@ function fetchCase(caseId) {
   return request({ url: BASE + '/exceptions/' + caseId, method: 'GET' })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// UI-04 组织级异常 / 变更队列（ENT-030 切片四之六 · DR-0014 §3.1–3.2）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 这一节补的是**跨委托**的组合队列：`GET /exceptions?view=org&org_id=…`。
+// 与单委托视图（`GET /exceptions?assignment_id=…`，给完整投影）不同，组织视图
+// 只给清单所需的最小行（`ExceptionCaseListItem`）—— 组合工作台没有"同时展开
+// N 宗案件详情"的用途，而每宗案件详情都带整条事件链。
+//
+// ⚠️ **行形状刻意不含 `severity`**（DR-0014 §3.2）。界面上「轻重」由两个字段表达：
+//    `blocking`（流程约束，会让 `complete_task` 直接 409）与 `impact_kind`（影响类型）。
+//    清单里给出 severity，界面迟早会拿它排序或加重 —— 那正是 C3 要堵住的联想。
+//    所以本节的投影里**没有任何 severity 字段**，不是漏了。
+
+/** 数值 ID → 可读文本；缺值给 `—`（摆 `#undefined` 是编造一个值，不是报告缺失） */
+function _caseIdText(value) {
+  return value === null || value === undefined ? '—' : '#' + value
+}
+
+/**
+ * 组织级清单的一行 → 模板直接可用的形状。
+ *
+ * `assignmentText` 是必须的：UI-04 是**跨委托**的组合队列，不写「是哪张单的」，
+ * 用户就只能点进去才知道 —— 而这张清单的全部价值就是"不进详情也能分诊"。
+ */
+function decorateCaseRow(row) {
+  const data = row || {}
+  const assignmentId = data.assignment_id
+  const count = data.affected_count
+  return {
+    // `caseId` 是**原值**（进路由参数），`caseNo` 才带 `#`（给人看）。
+    // 两者不能合成一个字段：带 `#` 的值直接拼进 `/exceptions/{case_id}` 就是一条错路径，
+    // 而这种错误在界面上只表现为"点进去报错"，看不出是拼串拼坏的。
+    caseId: data.case_id === null || data.case_id === undefined ? '' : String(data.case_id),
+    caseNo: _caseIdText(data.case_id),
+    title: data.title || '未命名案件',
+    kindLabel: CASE_KIND_LABELS[data.kind] || data.kind || '',
+    statusLabel: CASE_STATUS_LABELS[data.status] || data.status || '',
+    statusClass: CASE_STATUS_CLASS[data.status] || 'chip chip-muted',
+    impactLabel: CASE_IMPACT_LABELS[data.impact_kind] || data.impact_kind || '',
+    impactClass: CASE_IMPACT_CLASS[data.impact_kind] || 'chip chip-muted',
+    // 阻断是**流程后果**，与影响类型互为印证：两个都显示，用户不必自己推。
+    // 它在清单里比在详情里更要紧 —— 这一行就是"哪些单现在走不动"的答案。
+    blocking: !!data.blocking,
+    assignmentText:
+      assignmentId === null || assignmentId === undefined ? '未标注委托' : '委托 #' + assignmentId,
+    affectedText: count ? '受影响 ' + count + ' 项' : '未登记受影响项',
+    dueText: data.due_at ? '截止 ' + data.due_at : '未设置截止时间',
+    updatedAt: data.updated_at ? String(data.updated_at) : ''
+  }
+}
+
+function decorateCaseList(rows) {
+  return (rows || []).map(decorateCaseRow)
+}
+
+/**
+ * 组织级清单的查询参数（**纯函数**，`scripts/verify_entrust_ui.js` 直接驱动）。
+ *
+ * 为什么不把参数拼在 `fetchCaseOrgList` 里：这一节最容易错的地方不是"发没发请求"，
+ * 而是"带没带对范围" —— 缺 `org_id` 后端直接 422，带上别的组织的 `org_id` 会
+ * 403/404，两种都不会在界面上显出异常（一个有错的队列也是队列）。做成纯函数
+ * 才能在 CI 里把参数逐个钉住。
+ *
+ * `org_id` **恒在**，缺它就抛 —— 后端明确不提供「我所属全部组织」这种无范围查询
+ * （DR-0014 §3.1），那是 HO 禁止的跨组织拼接。宁可在这里就拒绝，也不要发出一次
+ * 注定失败的请求：那会把「界面还没定位到组织」渲染成「加载失败」。
+ */
+function caseOrgListQuery(options) {
+  const opts = options || {}
+  const orgId = opts.orgId === null || opts.orgId === undefined ? '' : String(opts.orgId)
+  if (!orgId) {
+    throw new Error('组织级案件清单必须给出 orgId（缺范围请求后端会 422）')
+  }
+  const data = {
+    view: 'org',
+    org_id: orgId,
+    scope: opts.scope || CASE_ORG_SCOPE_ORDER[0],
+    page: opts.page || 1,
+    size: opts.size || 20
+  }
+  // `kind` 只在真的选了类型时带上：传空串等于"筛了个空"，看起来筛了其实没筛。
+  if (opts.kind) data.kind = opts.kind
+  return data
+}
+
+/**
+ * 拉取组织级案件清单（UI-04 队列的数据源）。
+ *
+ * 可见性与范围都由服务端判定：非参与方 404（与「开关关闭」同码，服务端刻意不区分），
+ * 越权组织 403/404。所以界面拿到的 404 只能报「功能未开放」，**不能**替服务端
+ * 下「这个组织没有案件」的结论 —— 与案件详情页同一条口径。
+ */
+function fetchCaseOrgList(options) {
+  return request({ url: BASE + '/exceptions', method: 'GET', data: caseOrgListQuery(options) })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 案件的人工处置（写路径 · ENT-030 切片四之六 / DR-0013 §7.1 A1 出口）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── 六个写命令为什么集中在这里，而不是各页各写一份 ────────────────────
+// `Idempotency-Key` 的生成时机、409（版本过期 / 重复登记）与 403（无权限）的分流
+// 话术、以及「提交成功后重新取数」的口径 —— 六个命令**完全一致**。两个页面各写一遍
+// 就是把这个口径抄两份，将来某一页把 409 提示改成「请重试」，用户就会照着点，
+// 然后拿到第二个 409。所以写命令只此一份，页面只负责收集输入与展示结论。
+//
+// ── 幂等键的归属：由调用方传入，不在这里 new ─────────────────────────
+//   · 一次用户动作 = 一个键（在表单里改两处再点提交，仍然是一次动作）；
+//   · 提交失败后**重试同一件事**必须复用同一个键 —— 否则一次网络抖动会留下两条
+//     一模一样的记录，而重复登记在 A1 是 409，用户只会以为是"系统坏了"；
+//   · 用户改了内容再提交 = 新意图 = 新键。
+// 「这是重试还是新意图」只有页面知道（它拿着表单状态），所以键在页面生成，这里透传。
+//
+// ── 为什么这些写命令要 `silent` ──────────────────────────────────────
+// 请求层默认把服务端 `detail` 直接 toast 出来。对业务写操作这不够：
+// 409 的正确下一步是「刷新后按当前状态重来」，而用户看到一句
+// 「非法状态转移：exception 不能从 closed 转到 closed」只会再点一次。
+// 所以这里关掉自动提示，改由 `caseWriteError` 把状态码翻译成**可执行的结论**，
+// 页面负责呈现；网络层错误（没有 httpStatus）仍复用请求层的诊断文案。
+
+/**
+ * 已关闭状态（后端 `exceptions.STATUS_CLOSED`）。
+ *
+ * 单独提成一个常量，因为本文件有三处要判它（决定选项、关闭选项、写命令回读），
+ * 而 `'closed'` 这个字面量散在三处时，改一处漏两处不会有任何东西报错。
+ */
+const CASE_STATUS_CLOSED = 'closed'
+
+/**
+ * `decide` **不得**用来关案件 —— 后端 `decide` 对 `to_status='closed'` 直接 **409**
+ * （「关闭案件请走 close 命令（必须给出处置与证据），不能借 decide 关闭」）。
+ *
+ * 状态机里 `open → closed` 是合法转移，但它属于 **close** 命令那条路径。
+ * 于是「照状态机列决定选项」会列出一个必然 409 的选项 —— 这正是镜像比真相更细的地方，
+ * 单独列成常量并由 CI 钉住（断言这条排除项与后端 `decide` 的 409 分支一致）。
+ */
+const CASE_DECIDE_EXCLUDED = [CASE_STATUS_CLOSED]
+
+/** 一个选择条的选项数组（`key`+`label`）。页面**不要**自己 `Object.keys` 标签表。 */
+function caseOptionList(order, labels) {
+  return (order || []).map(function (key) {
+    return { key: key, label: labels[key] || key }
+  })
+}
+
+/** 案件类型选择条（登记时用） */
+function caseKindOptions() {
+  return caseOptionList(CASE_KIND_ORDER, CASE_KIND_LABELS)
+}
+
+/** 严重度选择条 */
+function caseSeverityOptions() {
+  return caseOptionList(CASE_SEVERITY_ORDER, CASE_SEVERITY_LABELS)
+}
+
+/** 影响类型选择条 */
+function caseImpactOptions() {
+  return caseOptionList(CASE_IMPACT_ORDER, CASE_IMPACT_LABELS)
+}
+
+/**
+ * 记录决定的**可选目标状态**（只取镜像状态机，不另做判断）。
+ *
+ * ⚠️ 这个函数**不判权限** —— `can_decide` 是服务端给的结论，页面凭它决定要不要
+ *    渲染这个区块。这里只回答"能转到哪"。
+ * ⚠️ 排除 `closed`：它虽然是一条合法转移，但只能由 `close` 走（见 `CASE_DECIDE_EXCLUDED`）。
+ * ⚠️ **已关闭案件一律返回空**：状态机里 `closed → open` 是合法转移，但那是 `reopen`
+ *    的命令地盘，`decide` 走它只会写成另一种审计事件、且被 `case_capabilities` 判为
+ *    不可用（`can_decide` 对已关闭恒 false）。返回 `[open]` 会给出一个"看起来能用、
+ *    实际必被拒"的选项 —— 这类空列表比错列表好，所以这里显式短路。
+ */
+function caseDecisionOptions(kind, status) {
+  if (status === CASE_STATUS_CLOSED) return []
+  const byKind = CASE_TRANSITIONS[kind] || {}
+  const list = byKind[status] || []
+  return list
+    .filter(function (key) {
+      return CASE_DECIDE_EXCLUDED.indexOf(key) === -1
+    })
+    .map(function (key) {
+      return { key: key, label: CASE_STATUS_LABELS[key] || key }
+    })
+}
+
+/**
+ * 该不该渲染「记录决定」区块 = `can_decide` **且** 至少有一个可选目标状态。
+ *
+ * 为什么要 `&&`（这是本轮实测出来的缺口，不是防患于未然）：
+ * 后端 `can_decide = can_write and open_case and bool(allowed_transitions(kind, status))`
+ * —— 它只问"状态机从当前状态**有没有出边**"。而
+ * `change_request/rejected` 与 `exception/applied` 的出边**只剩 `closed`**，
+ * 那一条归 `close` 所有（`decide` 走它会 409）。于是这两个状态下后端给
+ * `can_decide=true`、界面却**一个选项都列不出来** —— 光看 `can_decide` 就会渲染出
+ * 一个空的选择条，用户只会以为界面坏了。
+ *
+ * ⚠️ 这是**呈现层**的补位，不是第二个权限判据：它只会让按钮**少**出现，
+ *    绝不会让没权限的人多出一个按钮（`can_decide` 仍是必要条件）。
+ *    真正的判据仍在写端（`_assert_can_write` + `assert_transition`）。
+ */
+function caseDecideAvailable(capabilities, kind, status) {
+  const caps = capabilities || {}
+  return !!caps.can_decide && caseDecisionOptions(kind, status).length > 0
+}
+
+/** 关闭案件的**可选处置方式**（按 `kind` + 当前状态查镜像表；空数组＝当前不可关闭） */
+function caseClosureOptions(kind, status) {
+  const list = CASE_CLOSURE_DISPOSITIONS[kind + '/' + status] || []
+  return list.map(function (key) {
+    return { key: key, label: CASE_DISPOSITION_LABELS[key] || key }
+  })
+}
+
+/** 该处置是否属于「这单本身不该存在」（关掉即终结，不走实际应用） */
+function isDispositionWithoutApplication(disposition) {
+  return CASE_DISPOSITIONS_WITHOUT_APPLICATION.indexOf(String(disposition || '')) !== -1
+}
+
+/**
+ * 登记案件表单 → 请求体（`ExceptionCaseCreate`）。**只做前置检查，不替代服务端规则。**
+ *
+ * 三条纪律：
+ * 1. **前置检查不是替代**：C1/C2 在这里查一遍只是让用户在点提交**之前**就看到原因；
+ *    写端仍独立复核（`assert_severity_impact_consistent` / `assert_blocking_requires_link`），
+ *    界面这份松一点也不会放行任何东西，紧一点也只是少一次往返。
+ * 2. **空值不发键**：可选字段为空就**不带这个键**，而不是带 `""`。带空串会被 Pydantic
+ *    当成"你给了一个空的值"，报出来的错与用户刚才的操作对不上。
+ * 3. **未知值保持未知**：`due_at` 原样透传页面给的字符串（日期选择器给什么就是什么），
+ *    这里不补时分秒、不猜时区。
+ *
+ * @returns {{ok:boolean, errors:string[], body:object}}
+ */
+function caseCreateBody(form) {
+  const f = form || {}
+  const kind = String(f.kind || '')
+  const title = String(f.title || '').trim()
+  const severity = String(f.severity || '')
+  const impact = String(f.impact_kind || '')
+  const links = (f.links || []).map(function (it) {
+    return { target_kind: String((it && it.target_kind) || ''), target_id: Number((it && it.target_id) || 0) }
+  })
+
+  const errors = []
+  if (!CASE_KIND_LABELS[kind]) errors.push('请选择案件类型')
+  if (!title) errors.push('请填一句话摘要')
+  else if (title.length > 200) errors.push('一句话摘要超过 200 字')
+  if (!CASE_SEVERITY_LABELS[severity]) errors.push('请选择严重度')
+  if (!CASE_IMPACT_LABELS[impact]) errors.push('请选择影响类型')
+  // C1 的界面侧投影：与后端同向，只是提前说出来
+  if (severity === 'critical' && impact && impact !== 'execution-blocking') {
+    errors.push('严重度选「严重」时，影响类型必须是「阻断执行」')
+  }
+  // C2 的界面侧投影：阻断必须至少有一条受影响项
+  if (impact === 'execution-blocking' && links.length === 0) {
+    errors.push('影响类型为「阻断执行」时，必须至少登记一条受影响项')
+  }
+  if (
+    links.some(function (it) {
+      return !CASE_TARGET_LABELS[it.target_kind] || !(it.target_id > 0)
+    })
+  ) {
+    errors.push('受影响项的编号或类型不合法')
+  }
+
+  const body = { kind: kind, title: title, severity: severity, impact_kind: impact, source: 'manual' }
+  if (f.cause) body.cause = String(f.cause)
+  if (f.proposed_action) body.proposed_action = String(f.proposed_action)
+  if (f.due_at) body.due_at = String(f.due_at)
+  if (links.length) body.links = links
+  return { ok: errors.length === 0, errors: errors, body: body }
+}
+
+/**
+ * 案件写失败 → **可执行的结论**（页面据此提示）。
+ *
+ * 逐码分流，而不是把服务端 `detail` 转手抛给用户：
+ *   · **409** 状态冲突（非法转移 / 版本过期 / 重复登记）→ 唯一正确的下一步是**重新取数**，
+ *     所以话术必须包含"已刷新，请按当前状态重来"，而这句话只有页面能兑现；
+ *   · **403** 无权限 / 作用域不符 → 刷新不会改变结论，别让用户白点；
+ *   · **400** 规则违反（C1/C2、缺证据…）→ 服务端 `detail` 本身就是最准的说明，原样带上；
+ *   · **404** 与读路径同一口径：开关关闭 / 不存在 / 非参与方**刻意同码**，
+ *     所以只能说"功能未开放"，不能替服务端下"案件不存在"这个结论；
+ *   · **0**（无 httpStatus）→ 网络层，复用请求层的诊断文案（域名/代理/后端未启动）。
+ *
+ * @returns {{kind:string, title:string, hint:string, conflict:boolean}}
+ */
+function caseWriteError(err) {
+  const status = (err && err.httpStatus) || 0
+  const detail = (err && err.detail) ? String(err.detail) : ''
+  if (status === 409) {
+    return {
+      kind: 'conflict',
+      title: '状态或版本已变化',
+      conflict: true,
+      hint: detail || '有人在你之前改动了这宗案件。已按当前状态重新取数，请确认后重来。'
+    }
+  }
+  if (status === 403) {
+    return {
+      kind: 'denied',
+      title: '当前身份不能做这个操作',
+      conflict: false,
+      hint: detail || '这宗案件所属组织与你的授权不匹配。换一个身份或让管理员补充授权后再试。'
+    }
+  }
+  if (status === 400) {
+    return {
+      kind: 'invalid',
+      title: '按当前信息不能这么记',
+      conflict: false,
+      hint: detail || '服务端校验未通过，请按提示修改后重试。'
+    }
+  }
+  if (status === 404) {
+    return {
+      kind: 'notfound',
+      title: '功能未开放或无权查看',
+      conflict: false,
+      hint: detail || '委托发货功能可能未开放，或这宗案件不在你的可见范围内。'
+    }
+  }
+  return {
+    kind: 'network',
+    title: '提交失败',
+    conflict: false,
+    hint: '网络层异常：请确认后端已启动、且没有代理拦截请求。已保留你填的内容，可直接重试。'
+  }
+}
+
+/**
+ * 登记案件（`POST /assignments/{id}/exceptions`）。
+ *
+ * `links` 允许**随案件一起提交**，这不是便利，而是 C2 的必然：
+ * 阻断类案件必须先有受影响项才合法，若只能"先建案件、再补 link"，
+ * 那个中间态本身就违反 C2（后端 `raise_case` 也是同事务写入，见其注释）。
+ */
+function createCase(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/exceptions',
+    method: 'POST',
+    data: body,
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 给已有案件补登记一条受影响项（`expected_revision` 是**案件**的乐观锁） */
+function addCaseLink(caseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/exceptions/' + caseId + '/links',
+    method: 'POST',
+    data: body,
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 移除一条受影响项（登记错了要能更正，否则 `resolved` 永不可达） */
+function removeCaseLink(caseId, linkId, expectedRevision, idempotencyKey) {
+  return request({
+    url:
+      BASE +
+      '/exceptions/' +
+      caseId +
+      '/links/' +
+      linkId +
+      '?expected_revision=' +
+      encodeURIComponent(String(expectedRevision)),
+    method: 'DELETE',
+    data: {},
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 记录决定（`to_status` / `decision_note` / `basis_revision_id`；`approved` 必须给依据版本） */
+function decideCase(caseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/exceptions/' + caseId + '/decision',
+    method: 'POST',
+    data: body,
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 关闭案件（必须给处置与证据 —— 没有一键关闭） */
+function closeCase(caseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/exceptions/' + caseId + '/close',
+    method: 'POST',
+    data: body,
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 重开已关闭案件（原因必填，落审计事件的 `note`） */
+function reopenCase(caseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/exceptions/' + caseId + '/reopen',
+    method: 'POST',
+    data: body,
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 受影响项的**候选**（登记 link 时要选一个具体目标）。
+ *
+ * 为什么必须去取候选而不是让用户手填编号：`target_id` 必须与案件**同属一张委托单**
+ * （`_assert_link_target`，跨单一律 403）。手填编号等于让用户在盲猜，而猜错的反馈
+ * 是一句 403 —— 他会以为是权限问题，而不是"这个编号不属于本单"。
+ *
+ * 两个取数各自复用既有端点，不为本页新开一个"候选清单"接口：
+ *   · 任务 → `GET /entrust/tasks?assignment_id=`；
+ *   · 成果 → `GET /entrust/assignments/{id}/artifacts`。
+ * 两者都是**该委托的可见性**，与案件一致；不需要额外授权。
+ */
+function fetchTaskCandidates(assignmentId, size) {
+  return request({
+    url: BASE + '/tasks',
+    method: 'GET',
+    data: { assignment_id: assignmentId, page: 1, size: size || 50 }
+  })
+}
+
+function fetchArtifactCandidates(assignmentId, size) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/artifacts',
+    method: 'GET',
+    data: { page: 1, size: size || 50 }
+  })
+}
+
+/**
+ * 候选清单 → 选择条用的行（`{key, target_kind, target_id, text, sub}`）。
+ *
+ * 两个端点的行形状不同（`task_id`/`title` vs `artifact_id`/`artifact_type`），
+ * 但**选择条只要两列**：选谁、它是干什么的。归一化放在这里而不是页面里 ——
+ * 页面各归一一次就会有第二份字段名映射。
+ *
+ * 成果的类型名来自**类型注册表**（`types`，即 `fetchArtifactTypes()` 的结果），
+ * 本文件里**没有**能凭空翻译 `artifact_type` 的静态表 —— 所以取不到就显示原始代码，
+ * 而不是编一个像样的中文名（未知值保持未知）。
+ *
+ * @param {object} tasks     `GET /entrust/tasks` 的响应
+ * @param {object} artifacts `GET /entrust/assignments/{id}/artifacts` 的响应
+ * @param {Array}  [types]   成果类型注册表 `[{code, label}]`；缺省则不翻译类型名
+ */
+function decorateCaseLinkTargets(tasks, artifacts, types) {
+  const specs = types || []
+  const typeLabel = function (code) {
+    for (let i = 0; i < specs.length; i++) {
+      if (specs[i] && specs[i].code === code) return specs[i].label || code
+    }
+    return code
+  }
+  const taskRows = ((tasks && tasks.items) || []).map(function (t) {
+    const id = t.task_id === null || t.task_id === undefined ? '' : String(t.task_id)
+    return {
+      key: 'task-' + id,
+      target_kind: 'task',
+      target_id: id,
+      text: '任务 #' + id,
+      sub: (TASK_TYPE_LABELS[t.task_type] || t.task_type || '') + ' · ' + (t.title || '未命名')
+    }
+  })
+  const artRows = ((artifacts && artifacts.items) || []).map(function (a) {
+    const id = a.artifact_id === null || a.artifact_id === undefined ? '' : String(a.artifact_id)
+    return {
+      key: 'artifact-' + id,
+      target_kind: 'artifact',
+      target_id: id,
+      text: '成果 #' + id,
+      sub: typeLabel(a.artifact_type || '') || '未命名成果'
+    }
+  })
+  return taskRows.concat(artRows)
+}
+
 module.exports = {
   BASE,
   ARTIFACT_FIELD_KINDS,
   ARTIFACT_FIELD_LABELS,
   ARTIFACT_STATUS_LABELS,
+  CASE_CLOSURE_DISPOSITIONS,
+  CASE_DECIDE_EXCLUDED,
   CASE_DISPOSITION_LABELS,
+  CASE_DISPOSITIONS_WITHOUT_APPLICATION,
   CASE_ELEMENTS,
   CASE_EVENT_LABELS,
   CASE_IMPACT_CLASS,
   CASE_IMPACT_LABELS,
+  CASE_IMPACT_ORDER,
   CASE_KIND_LABELS,
+  CASE_KIND_ORDER,
+  CASE_ORG_SCOPE_LABELS,
+  CASE_ORG_SCOPE_ORDER,
   CASE_SEVERITY_LABELS,
+  CASE_SEVERITY_ORDER,
   CASE_SOURCE_LABELS,
   CASE_STATUS_CLASS,
+  CASE_STATUS_CLOSED,
   CASE_STATUS_LABELS,
   CASE_TARGET_LABELS,
+  CASE_TRANSITIONS,
   ISSUE_KIND_LABELS,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
@@ -1560,19 +2165,36 @@ module.exports = {
   TASK_TYPE_ORDER,
   VIEW,
   WORKBENCH_SLOTS,
+  addCaseLink,
   appendRevision,
   artifactFieldLabel,
   artifactStatusClass,
   artifactStatusLabel,
   buildPayload,
+  caseClosureOptions,
+  caseCreateBody,
+  caseDecideAvailable,
+  caseDecisionOptions,
+  caseImpactOptions,
+  caseKindOptions,
+  caseOptionList,
+  caseOrgListQuery,
+  caseSeverityOptions,
+  caseWriteError,
   claimAssignment,
+  closeCase,
   coerceLike,
   confirmArtifact,
   confirmCard,
+  createCase,
   createTask,
+  decideCase,
   decorateAssignment,
   decorateArtifact,
   decorateCase,
+  decorateCaseLinkTargets,
+  decorateCaseList,
+  decorateCaseRow,
   decorateDetail,
   decorateList,
   decorateOrg,
@@ -1582,20 +2204,26 @@ module.exports = {
   decorateWorkbench,
   entryDecision,
   fetchArtifact,
+  fetchArtifactCandidates,
   fetchArtifactTypes,
   fetchAssignment,
   fetchCase,
+  fetchCaseOrgList,
   fetchMyOrgs,
   fetchQueue,
   fetchRevisions,
+  fetchTaskCandidates,
   fetchWorkbench,
   fieldDrafts,
   fieldKindHint,
   isArtifactDirty,
+  isDispositionWithoutApplication,
   newIdempotencyKey,
   pageHint,
   pickOrg,
   probeEntry,
+  removeCaseLink,
+  reopenCase,
   revisionSourceLabel,
   statusClass,
   statusLabel,

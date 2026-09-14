@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "登记异常 / 变更",
+  "enablePullDownRefresh": false,
+  "backgroundTextStyle": "dark"
+}

@@ -63,6 +63,16 @@
         </view>
       </view>
 
+      <!-- 已受理：登记异常 / 变更案件（切片四之六）。入口只在 claimed 时出现 ——
+           受理前没有责任主体，`raise_case` 会以 409 拒绝，摆一个必然失败的按钮
+           等于把服务端规则说成"随机失败"。 -->
+      <view wx:if="{{canCreateCase}}" class="card slot-card">
+        <view class="slot-note">遇到异常或需要变更时，在这里登记一宗案件；阻断类案件需要同时登记受影响项</view>
+        <view class="slot-actions">
+          <view class="slot-btn" bindtap="onCreateCase" hover-class="hover-dim">登记异常 / 变更</view>
+        </view>
+      </view>
+
       <!-- 归属机制上线前的历史成果：如实报数，不静默藏起来 -->
       <view wx:if="{{unassignedHint}}" class="card slot-card">
         <view class="slot-note">{{unassignedHint}}</view>

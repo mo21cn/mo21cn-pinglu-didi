@@ -50,7 +50,24 @@ orgpicker 那三条分支的断言随工作台数据改动而变脆。
 一条**未指派**任务（`handover`）也是有意留的：它让「下一责任方」落在
 「尚未分配」而不是「不适用」—— 两句话的下一步动作完全不同。
 
-演示用途：组织名、委托标题一律带「演示」前缀，便于在共享库里辨认与清理。
+案件（ENT-030 切片四之六）
+-------------------------
+给 `演示委托·工作台样本` 登记**两宗**案件。组织级案件队列
+（`GET /entrust/exceptions?view=org`）必须有非空载荷，否则只能验证"空态渲染对不对"，
+验证不了"有数据时列对了没有" —— 行的字段名压根不会出现在页面数据里。
+
+* 一宗 `execution-blocking` 的**异常**，挂一条受影响任务：必须显示阻断标记，
+  且 `affected_count` 如实报 1（C2：没有受影响项就不许声明阻断）；
+* 一宗 `review-required` 的**变更请求**，**刻意不挂**受影响项：界面要显示
+  「未登记受影响项」，而不是把 0 藏起来。
+
+两宗都带 `due_at` —— 截止时间在列表行里是独立一列，缺了就只能验空态文案。
+
+案件走**真实服务层**（`exceptions.raise_case`），与线上同一套状态机与 C1/C2/C3 校验。
+登记人不另造身份：用组织经理 —— `_assert_can_write` 要的是 `entrust:task:dispatch`，
+它本来就在 `ORG_PERMISSIONS` 里，**没有**为案件新增权限码（DR-0013 §3.9）。
+
+演示用途：组织名、委托标题、案件标题一律带「演示」前缀，便于在共享库里辨认与清理。
 """
 
 from __future__ import annotations
@@ -58,6 +75,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import timedelta
 
 # 以 `python scripts/xxx.py`（cwd=backend）执行时 `app` 不在 sys.path 上，
 # 需显式补上 backend/。这是本文件唯一需要的 sys.path 操作。
@@ -72,6 +90,7 @@ from app.core.database import SessionLocal  # noqa: E402
 from app.modules.auth import service as auth_service  # noqa: E402
 from app.modules.entrust import artifacts as artifacts_svc  # noqa: E402
 from app.modules.entrust import assignments as svc  # noqa: E402
+from app.modules.entrust import exceptions as exceptions_svc  # noqa: E402
 from app.modules.entrust import tasks as tasks_svc  # noqa: E402
 from app.modules.entrust.access import utcnow_naive  # noqa: E402
 
@@ -156,9 +175,42 @@ ARTIFACT_SPECS: tuple[tuple[str, dict[str, object]], ...] = (
     ("settlement_draft", {"note": "待补应收明细（演示四态用）"}),
 )
 
+#: 案件清单：`(kind, title, severity, impact_kind, 受影响任务是否挂上, 起因)`。
+#:
+#: 两宗刻意覆盖两个**正交**维度的组合：阻断且有受影响项、不阻断且无受影响项。
+#: 「阻断但没挂受影响项」不是"没造"，而是 C2 **不允许存在**
+#: （`assert_blocking_requires_link` 直接拒绝）。
+CASE_SPECS: tuple[tuple[str, str, str, str, bool, str], ...] = (
+    (
+        exceptions_svc.KIND_EXCEPTION,
+        "演示异常·原船主机故障",
+        "high",
+        exceptions_svc.IMPACT_EXECUTION_BLOCKING,
+        True,
+        "主机第 3 缸异常，需就近靠泊检修（演示，非真实船期）",
+    ),
+    (
+        exceptions_svc.KIND_CHANGE_REQUEST,
+        "演示变更·收货港由贵港改为梧州",
+        "medium",
+        exceptions_svc.IMPACT_REVIEW_REQUIRED,
+        False,
+        "货主口头通知改港，待书面确认（演示）",
+    ),
+)
+
 
 def _stamp() -> str:
     return utcnow_naive().strftime(_TS)
+
+
+def _due_days(days: int) -> str:
+    """`due_at` 取「现在 + N 天」（`_TS` 格式）。
+
+    相对时间而不是写死日期：写死的日期会随演示库变旧，
+    界面上「截止 2026-09-20」在两个月后读起来像已逾期，而它其实只是个演示样本。
+    """
+    return (utcnow_naive() + timedelta(days=days)).strftime(_TS)
 
 
 def _user(db: Session, code: str, nickname: str) -> int:
@@ -354,6 +406,68 @@ def _ensure_artifact(
     return int(created["artifact_id"])
 
 
+def _ensure_case(
+    db: Session,
+    *,
+    assignment_id: int,
+    actor_id: int,
+    kind: str,
+    title: str,
+    severity: str,
+    impact_kind: str,
+    cause: str,
+    due_at: str | None,
+    link_task_id: int | None,
+) -> tuple[int, str, bool, int]:
+    """按 `(委托, 标题)` 复用案件；不存在则走服务层登记。
+
+    返回 `(case_id, status, blocking, affected_count)` —— **四个值都从库里重新读**，
+    而不是把 `raise_case` 的返回值直接当成读模型。理由：两个分支（新建 / 复用）
+    返回的形状不同（前者是原始行 + `links`，后者只有 id），
+    照各自的形状拼结果就是两份投影；`get_case` + `is_blocking` + `list_links`
+    是服务层唯一那份，**两分支共用它**。
+
+    `blocking` 一律**现算**，不读缓存列 —— 与清单、执行门禁同一次判定。
+    """
+    row = db.execute(
+        text("SELECT id FROM ent_exception WHERE assignment_id = :a AND title = :t"),
+        {"a": assignment_id, "t": title},
+    ).first()
+    if row is None:
+        created = exceptions_svc.raise_case(
+            db,
+            assignment_id=assignment_id,
+            actor_id=actor_id,
+            kind=kind,
+            title=title,
+            severity=severity,
+            impact_kind=impact_kind,
+            cause=cause,
+            due_at=due_at,
+            links=(
+                [{"target_kind": exceptions_svc.TARGET_TASK, "target_id": link_task_id}]
+                if link_task_id is not None
+                else None
+            ),
+        )
+        case_id = int(created["id"])
+    else:
+        case_id = int(row[0])
+
+    detail = exceptions_svc.get_case(db, case_id)
+    if detail is None:  # pragma: no cover - 刚建/刚查到就没了，属真异常
+        raise RuntimeError(f"案件 #{case_id} 登记后读不回来")
+    status = str(detail["status"])
+    return (
+        case_id,
+        status,
+        exceptions_svc.is_blocking(
+            kind=str(detail["kind"]), impact_kind=str(detail["impact_kind"]), status=status
+        ),
+        len(exceptions_svc.list_links(db, case_id)),
+    )
+
+
 def main() -> int:
     db = SessionLocal()
     try:
@@ -424,6 +538,32 @@ def main() -> int:
             assignment_id=None,
         )
 
+        # 案件全部挂在**已受理**的那张委托上：`raise_case` 要求 `claimed`
+        # —— 受理前没有责任主体，案件没有归属对象（这也是它的一场 409 用例）。
+        execution_task_id = next(
+            (tid for task_type, tid, _ in task_rows if task_type == "execution"), None
+        )
+        if execution_task_id is None:  # pragma: no cover - TASK_SPECS 里必然有
+            raise RuntimeError("任务清单里没有 execution，阻断案件没有受影响项可挂")
+
+        case_rows: list[tuple[str, int, str, bool, int]] = []
+        for kind, title, severity, impact_kind, with_link, cause in CASE_SPECS:
+            case_id, case_status, blocking, affected = _ensure_case(
+                db,
+                assignment_id=main_id,
+                actor_id=manager,
+                kind=kind,
+                title=title,
+                severity=severity,
+                impact_kind=impact_kind,
+                cause=cause,
+                due_at=_due_days(7),
+                # 阻断那宗挂 `execution`：「主机故障」阻断的正是
+                # "安排装船与在途跟踪"这件事，挂 `collect_documents` 就只是随便挂一条。
+                link_task_id=execution_task_id if with_link else None,
+            )
+            case_rows.append((kind, case_id, case_status, blocking, affected))
+
         print("委托工作台演示数据就绪：")
         print(f"  组织：{ORG_NAME} = id {org_id}")
         print(f"  授权：entrustment_id={entrustment_id}（{len(ORG_PERMISSIONS)} 项权限）")
@@ -441,6 +581,13 @@ def main() -> int:
         print(f"  委托 #{open_id} 「{ASSIGNMENT_OPEN}」 → {open_status}")
         print("      → 详情页应给出「受理委托」入口")
         print(f"  无归属历史成果 #{orphan_id} → unassigned_artifact_total 应 >= 1")
+        print(f"  案件 {len(case_rows)} 宗（组织级队列 view=org 的非空载荷）：")
+        for kind, case_id, case_status, blocking, affected in case_rows:
+            print(
+                f"      案件 #{case_id} [{kind}] → {case_status}"
+                f" · blocking={blocking} · 受影响 {affected} 项"
+            )
+        print("      （第 2 宗刻意不挂受影响项 → 期望「未登记受影响项」）")
         return 0
     finally:
         db.close()

@@ -1,16 +1,22 @@
-// 委托发货 · 案件详情（UI-08 首片：只读 / ENT-030 切片四之四）
+// 委托发货 · 案件详情（UI-08 / ENT-030 切片四之四「只读」+ 切片四之六「处置」）
 //
-// 本页是**异常 / 变更案件的只读详情**：PRD §4.1「UI-08」（第 155 行）要求的六要素
+// 本页是**异常 / 变更案件的详情与处置**：PRD §4.1「UI-08」（第 155 行）要求的六要素
 // —— 原因 / 受影响记录 / 拟解决方案 / 决定与审批 / 执行证据 / 结案 —— 外加一条
 // append-only 的处理记录。六要素的顺序与"为空时怎么说"来自 `utils/entrust.js` 的
 // `CASE_ELEMENTS`，本页**不自己判断"该不该显示某一块"**：少一块就是详情缺内容，
 // 而页面看起来只会像"这一块没数据"。
 //
-// ⛔ 本片**只读**：登记受影响项 / 决定 / 关闭 / 重开都不在这里。理由不是省事 ——
-//    它们是带幂等键与乐观锁的写端点，界面必须处理 409（版本过期）与"重开后再次关闭"
-//    的两轮历史；塞进首片会让"能不能看清这宗案件"这件正事被表单实现细节淹没。
-//    `capabilities` 因此也只用来给一句**对"没权限"与"当前没有可执行动作"都成立**
-//    的提示，不从它推断任何业务结论（理由见 `decorateCase`）。
+// ── 只读首片（四之四）与处置（四之六）的分界 ──────────────────────────
+// 四之四**有意**只读：那次要先把"能不能看清这宗案件"做对，四个带幂等键与乐观锁的
+// 写端点塞进来会让这件事被表单实现细节淹没（当时的判断写在旧注释里，保留在案）。
+// 四之六把处置补上，位置就选在本页 —— 四个写命令（登记受影响项 / 移除 / 记录决定 /
+// 关闭 / 重开）需要的 `revision_no`、`capabilities`、受影响项清单，本页**本来就都拿着**；
+// 搬到一个新页去反而要重新取一遍，还要处理"详情页刚看完、处置页状态已经变了"。
+// 登记案件仍然独立成页（`case-create`）—— 那是"新建"，与"改一宗已有案件"不是一件事。
+//
+// ⚠️ 界面按钮**不是**权限控制：`capabilities` 由服务端给出，据此显隐按钮只是体验层；
+//    写端独立复核权限、证据、幂等与版本，两者不一致时**以写端为准** ——
+//    收到 403/409 必须提示，不能静默（`caseWriteError` 负责把它翻成能照做的结论）。
 //
 // ENT-019 起新增委托页面必须从首个切片接入运行期导航治理（`utils/routes.js`）：
 //   · `onLoad` 的入口守卫与 `go()` 用**同一份** `paramSchema` 判定参数合法性；
@@ -24,7 +30,27 @@
 // ⚠️ 404 是**刻意含混**的：服务端对「开关关闭」「案件不存在」「非参与方」都返回 404
 //    （不泄漏存在性）。共享的 `viewState` 因此给的是「功能未开放」而不是「案件不存在」
 //    —— 后者在开关关闭时就是一句错误的业务结论。这条映射三个委托页面共用，要改一起改。
-const { VIEW, decorateCase, fetchCase, viewState } = require('../../../utils/entrust')
+const {
+  VIEW,
+  CASE_TARGET_LABELS,
+  addCaseLink,
+  caseClosureOptions,
+  caseDecideAvailable,
+  caseDecisionOptions,
+  caseWriteError,
+  closeCase,
+  decideCase,
+  decorateCase,
+  decorateCaseLinkTargets,
+  fetchArtifactCandidates,
+  fetchArtifactTypes,
+  fetchCase,
+  fetchTaskCandidates,
+  newIdempotencyKey,
+  removeCaseLink,
+  reopenCase,
+  viewState
+} = require('../../../utils/entrust')
 
 const R = require('../../../utils/routes')
 
@@ -42,7 +68,27 @@ Page({
     fields: [],
     blocks: [],
     events: [],
-    actionHint: ''
+    actionHint: '',
+    /** 候选面板用的案件字段（写命令的参数都取这一份，不从模板反推） */
+    assignmentId: '',
+    kind: '',
+    status: '',
+    revisionNo: 1,
+    /** 受影响项行的可点版本（比 `blocks` 里那份多一个 `linkId`） */
+    affected: [],
+    // ── 处置能力（服务端 `capabilities` + 取值域镜像的共同结论）──────────
+    canAddLink: false,
+    canRemoveLink: false,
+    canDecide: false,
+    canClose: false,
+    canReopen: false,
+    decisionOptions: [],
+    closureOptions: [],
+    /** 受影响项候选面板 */
+    linkPickOpen: false,
+    candLoaded: false,
+    candHint: '',
+    candidates: []
   },
 
   onLoad(query) {
@@ -105,6 +151,13 @@ Page({
   },
 
   applyState(state, detail) {
+    const caps = (detail && detail.capabilities) || {}
+    const kind = (detail && detail.kind) || ''
+    const status = (detail && detail.status) || ''
+    const closureOptions = detail ? caseClosureOptions(kind, status) : []
+    const decisionOptions = detail ? caseDecisionOptions(kind, status) : []
+    const canDecide = caseDecideAvailable(caps, kind, status)
+    const canClose = !!caps.can_close && closureOptions.length > 0
     this.setData({
       view: state.state,
       viewTitle: state.title,
@@ -113,8 +166,298 @@ Page({
       fields: detail ? detail.fields : [],
       blocks: detail ? detail.blocks : [],
       events: detail ? detail.events : [],
-      actionHint: detail ? detail.actionHint : ''
+      actionHint: detail ? detail.actionHint : '',
+      assignmentId: detail ? detail.assignmentId : '',
+      kind: kind,
+      status: status,
+      revisionNo: detail ? detail.revisionNo || 1 : 1,
+      affected: detail ? this.affectedRows(detail) : [],
+      // 渲染条件 = 服务端能力位 **且** 取值域镜像里真有可选项。
+      // 只看 `can_decide` 会渲染出一个空的选择条（后端对 `change_request/rejected`
+      // 与 `exception/applied` 给 `can_decide=true`，而它们唯一的出边 `closed`
+      // 归 close 所有）—— 理由写在 `caseDecideAvailable` 的注释里。
+      canAddLink: !!caps.can_add_link,
+      canRemoveLink: !!caps.can_remove_link,
+      canDecide: canDecide,
+      canClose: canClose,
+      canReopen: !!caps.can_reopen,
+      decisionOptions: decisionOptions,
+      closureOptions: closureOptions,
+      // 处置区整体是否要出现。单独算一个布尔而不是在模板里写四段 `||`：
+      // 模板里写布尔表达式，改一处漏一处不会有任何东西报错。
+      canAnyAction: !!caps.can_add_link || canDecide || canClose || !!caps.can_reopen
     })
+  },
+
+  /**
+   * 受影响项行（比 `blocks` 里那份多一个 `linkId` —— 移除时要它）。
+   *
+   * 从 `detail.blocks` 里取而不是另存一份 `affected` 投影：受影响记录是**六要素
+   * ②** 的同一份数据，另存一份就会出现"要素②说两条、处置区说一条"。
+   * 取不到一律返回空数组（六要素的顺序由 `CASE_ELEMENTS` 决定，本函数不假定位置）。
+   */
+  affectedRows(detail) {
+    const blocks = (detail && detail.blocks) || []
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i].key === 'affected') return blocks[i].items || []
+    }
+    return []
+  },
+
+  // ── 处置（切片四之六）────────────────────────────────────────────────
+
+  /**
+   * 一次处置提交的公共骨架：加载提示 → 写 → 成功刷新 / 失败翻译。
+   *
+   * 五个写命令的**失败处理完全一致**（`caseWriteError` 分流 + 409 必须重新取数），
+   * 所以走同一条路径；各自"怎么收集输入、发什么 body"留在 `on*` 里 ——
+   * 那是它们唯一不同的地方，也是唯一该由调用方决定的事。
+   */
+  submit(label, run) {
+    const self = this
+    wx.showLoading({ title: label, mask: true })
+    return run()
+      .then(function () {
+        wx.hideLoading()
+        wx.showToast({ title: '已记录', icon: 'success' })
+        // 写成功必须**重新取数**：状态、`revision_no`、事件链、受影响项都会变。
+        // 用返回值就地改本地状态等于在界面里维护第二份真相，漏一个字段就开始漂移。
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const w = caseWriteError(err)
+        wx.showModal({ title: w.title, content: w.hint, showCancel: false })
+        // 409 = 本地版本已过期。必须把最新状态取回来 —— 否则用户照提示重试
+        // 仍然拿 409（`expected_revision` 还是旧的那个），会以为"重试永远失败"。
+        if (w.conflict) self.load()
+      })
+  },
+
+  /** 展开 / 收起候选面板；第一次展开时懒加载本单的任务与成果 */
+  onToggleLinkPick() {
+    const open = !this.data.linkPickOpen
+    this.setData({ linkPickOpen: open })
+    if (open && !this.data.candLoaded) this.loadCandidates()
+  },
+
+  loadCandidates() {
+    const self = this
+    const id = this.data.assignmentId
+    if (!id) {
+      // 详情里连 `assignment_id` 都没有：这宗案件的数据本身不完整，
+      // 不能静默当成"本单没有候选" —— 那是两件不同的事。
+      this.setData({ candLoaded: true, candidates: [], candHint: '这宗案件没有关联到委托单，无法列出候选' })
+      return Promise.resolve()
+    }
+    this.setData({ candHint: '正在读取本单的任务与成果…' })
+    // 类型注册表失败只影响成果那一行的副标题，不让它拖垮整个候选面板
+    return Promise.all([
+      fetchTaskCandidates(id),
+      fetchArtifactCandidates(id),
+      fetchArtifactTypes().catch(function () {
+        return []
+      })
+    ])
+      .then(function (res) {
+        const rows = decorateCaseLinkTargets(res[0], res[1], res[2])
+        self.setData({
+          candLoaded: true,
+          candidates: rows,
+          candHint: rows.length ? '' : '这张委托还没有任务或成果可以关联'
+        })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        // 失败也置 `candLoaded`：否则每次展开都会重发一次注定失败的请求
+        self.setData({
+          candLoaded: true,
+          candidates: [],
+          candHint: status
+            ? '候选读取失败（接口返回 ' + status + '）'
+            : '候选读取失败：请确认后端已启动'
+        })
+      })
+  },
+
+  onAddLinkTarget(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const kind = ds.kind || ''
+    const id = ds.id != null ? String(ds.id) : ''
+    if (!CASE_TARGET_LABELS[kind] || !id) return
+    const self = this
+    wx.showModal({
+      title: '登记受影响项',
+      content: '把「' + CASE_TARGET_LABELS[kind] + ' #' + id + '」登记为这宗案件的受影响项？',
+      success: function (res) {
+        if (!res.confirm) return
+        self.submit('登记中', function () {
+          return addCaseLink(
+            self.data.caseId,
+            {
+              expected_revision: self.data.revisionNo,
+              target_kind: kind,
+              target_id: Number(id)
+            },
+            newIdempotencyKey('case-link')
+          )
+        })
+      }
+    })
+  },
+
+  onRemoveLink(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const linkId = Number(ds.link || 0)
+    if (!linkId) return
+    const self = this
+    wx.showModal({
+      title: '移除受影响项',
+      content: '移除后这宗案件不再关联它。若这是阻断类案件的最后一条，移除后必须补一条，否则案件不合法。',
+      confirmText: '移除',
+      success: function (res) {
+        if (!res.confirm) return
+        self.submit('移除中', function () {
+          return removeCaseLink(
+            self.data.caseId,
+            linkId,
+            self.data.revisionNo,
+            newIdempotencyKey('case-unlink')
+          )
+        })
+      }
+    })
+  },
+
+  onDecide(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const to = ds.status || ''
+    if (!to) return
+    const label = this.optionLabel(this.data.decisionOptions, to)
+    const self = this
+    wx.showModal({
+      title: '记录决定 · ' + label,
+      editable: true,
+      placeholderText: '决定说明（可留空）',
+      success: function (res) {
+        if (!res.confirm) return
+        const note = (res.content || '').trim()
+        // `approved` 必须指向它所依据的**精确**成果版本（§3.1.1 服务端强制）。
+        // 界面上不先问、等 400 再补，等于让用户白填一次表单。
+        if (to === 'approved') {
+          self.promptBasis(to, note)
+          return
+        }
+        self.sendDecision(to, note, '')
+      }
+    })
+  },
+
+  promptBasis(to, note) {
+    const self = this
+    wx.showModal({
+      title: '依据版本',
+      editable: true,
+      placeholderText: '批准的成果版本号 rN（必填，数字）',
+      success: function (res) {
+        if (!res.confirm) return
+        const basis = (res.content || '').trim()
+        if (!/^\d+$/.test(basis)) {
+          wx.showToast({ title: '依据版本要填版本号数字（如 3）', icon: 'none' })
+          return
+        }
+        self.sendDecision(to, note, basis)
+      }
+    })
+  },
+
+  sendDecision(to, note, basis) {
+    const self = this
+    const body = { expected_revision: this.data.revisionNo, to_status: to }
+    if (note) body.decision_note = note
+    if (basis) body.basis_revision_id = Number(basis)
+    return this.submit('提交中', function () {
+      return decideCase(self.data.caseId, body, newIdempotencyKey('case-decide'))
+    })
+  },
+
+  onClose(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const disp = ds.disp || ''
+    if (!disp) return
+    const label = this.optionLabel(this.data.closureOptions, disp)
+    const self = this
+    wx.showModal({
+      title: '关闭 · ' + label,
+      editable: true,
+      placeholderText: '证据引用（必填：邮件编号 / 附件名 / 现场照片等）',
+      success: function (res) {
+        if (!res.confirm) return
+        const evidence = (res.content || '').trim()
+        if (!evidence) {
+          // 没有一键关闭（PRD 第 255 行 `not a generic skip`）：证据是关闭的**前置**，
+          // 不能靠"留空"绕过 —— 这里直接拦住，而不是让服务端报 400 再说一遍。
+          wx.showToast({ title: '证据引用不能为空', icon: 'none' })
+          return
+        }
+        self.promptResolution(disp, evidence)
+      }
+    })
+  },
+
+  promptResolution(disp, evidence) {
+    const self = this
+    wx.showModal({
+      title: '结案说明',
+      editable: true,
+      placeholderText: '结案说明（可留空）',
+      success: function (res) {
+        if (!res.confirm) return
+        const note = (res.content || '').trim()
+        const body = {
+          expected_revision: self.data.revisionNo,
+          closure_disposition: disp,
+          evidence_ref: evidence
+        }
+        if (note) body.resolution_note = note
+        self.submit('关闭中', function () {
+          return closeCase(self.data.caseId, body, newIdempotencyKey('case-close'))
+        })
+      }
+    })
+  },
+
+  onReopen() {
+    const self = this
+    wx.showModal({
+      title: '重开案件',
+      editable: true,
+      placeholderText: '为什么要重开（必填）',
+      success: function (res) {
+        if (!res.confirm) return
+        const reason = (res.content || '').trim()
+        if (!reason) {
+          wx.showToast({ title: '重开必须说明原因', icon: 'none' })
+          return
+        }
+        self.submit('重开中', function () {
+          return reopenCase(
+            self.data.caseId,
+            { expected_revision: self.data.revisionNo, reason: reason },
+            newIdempotencyKey('case-reopen')
+          )
+        })
+      }
+    })
+  },
+
+  /** 选项的中文名（选项表本身就是投影层算好的，这里不重复维护一份标签映射） */
+  optionLabel(options, key) {
+    const list = options || []
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].key === key) return list[i].label || key
+    }
+    return key
   },
 
   onRetry() {
