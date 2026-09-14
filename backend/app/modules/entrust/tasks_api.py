@@ -329,7 +329,7 @@ def wait_task(
 @router.post(
     "/tasks/{task_id}/complete",
     response_model=TaskOut,
-    summary="完成任务（所需证据未齐则拒绝，幂等）",
+    summary="完成任务（证据未齐、或存在未终结的阻断案件则拒绝，幂等）",
     dependencies=[Depends(require_entrust_enabled)],
 )
 def complete_task(

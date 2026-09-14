@@ -681,6 +681,115 @@ def test_link_change_on_closed_case_409(env):
     assert resp.status_code == 409
 
 
+# ─────────────────────────────────────────── 6. 已有执行命令接门禁
+#                                                （DR-0013 §3.3 作用面 1 / 验证 9）
+
+
+def _task_url(task_id: int) -> str:
+    return f"/api/v1/entrust/tasks/{task_id}/complete"
+
+
+def _make_completable(s) -> int:
+    """造一条**证据齐备、可以直接完成**的任务（pending → start → in_progress）。"""
+    task_id = _task(s)
+    started = task_svc.start_task(s.db, task_id=task_id, actor_id=int(s.manager["user_id"]))
+    assert started["status"] == task_svc.STATUS_IN_PROGRESS
+    return task_id
+
+
+def _complete(env, s, task_id: int):
+    return env.client.post(
+        _task_url(task_id), json={}, headers=_headers(s.manager, uuid.uuid4().hex)
+    )
+
+
+def test_complete_task_not_blocked_when_no_case(env):
+    """基线：没有案件时行为不变（本片**不改**这条路径）。"""
+    s = _seed(env)
+    task_id = _make_completable(s)
+
+    resp = _complete(env, s, task_id)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == task_svc.STATUS_DONE
+
+
+def test_complete_task_blocked_by_open_case_409_names_the_case(env):
+    """**验证 9**：被阻断案件命中时 `complete` → 409，且**指出案件 id**。
+
+    只说"存在阻断项"等于让人来问我们；§3.3 作用面 1 明确要求指出是哪几条。
+    """
+    s = _seed(env)
+    case, task_id = _blocking_case(env, s)
+    started = task_svc.start_task(s.db, task_id=task_id, actor_id=int(s.manager["user_id"]))
+    assert started["status"] == task_svc.STATUS_IN_PROGRESS
+
+    resp = _complete(env, s, task_id)
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert f"#{case['case_id']}" in detail
+    assert case["title"] in detail
+    # 拒绝必须真的**没改状态**：门禁是在写之前判的
+    reloaded = task_svc.get_task(s.db, task_id)
+    assert reloaded is not None and reloaded["status"] == task_svc.STATUS_IN_PROGRESS
+
+
+def test_complete_task_unblocked_after_case_closed(env):
+    """门禁读的是**当前**状态：案件终结后同一条命令立刻放行。"""
+    s = _seed(env)
+    case, task_id = _blocking_case(env, s)
+    task_svc.start_task(s.db, task_id=task_id, actor_id=int(s.manager["user_id"]))
+    assert _complete(env, s, task_id).status_code == 409
+
+    closed = _close(
+        env,
+        s,
+        case,
+        disposition=exc.DISPOSITION_SUPERSEDED,
+        decision_note="该异常已被另一单取代",
+    )
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["blocking"] is False
+
+    again = _complete(env, s, task_id)
+    assert again.status_code == 200, again.text
+    assert again.json()["status"] == task_svc.STATUS_DONE
+
+
+def test_complete_task_unblocked_after_change_request_rejected(env):
+    """同一个 `rejected` 在两种 kind 下相反：变更被否 ⇒ 该变更不会发生 ⇒ 不再阻断。"""
+    s = _seed(env)
+    case, task_id = _blocking_case(env, s, kind=exc.KIND_CHANGE_REQUEST)
+    task_svc.start_task(s.db, task_id=task_id, actor_id=int(s.manager["user_id"]))
+    assert _complete(env, s, task_id).status_code == 409
+
+    rejected = _decide(env, s, case, to_status=exc.STATUS_REJECTED, decision_note="本轮不改")
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["blocking"] is False
+
+    assert _complete(env, s, task_id).status_code == 200
+
+
+def test_complete_task_not_blocked_by_informational_case(env):
+    """`informational` 案件只是记录：`severity` 调到最高也不阻断（C3 的另一半）。"""
+    s = _seed(env)
+    task_id = _make_completable(s)
+    case = _raise_req(env, s, title="仅供参考", severity="high").json()
+    linked = env.client.post(
+        _LINKS_URL.format(cid=case["case_id"]),
+        json={
+            "expected_revision": case["revision_no"],
+            "target_kind": exc.TARGET_TASK,
+            "target_id": task_id,
+        },
+        headers=_headers(s.manager, uuid.uuid4().hex),
+    )
+    assert linked.status_code == 200, linked.text
+
+    resp = _complete(env, s, task_id)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == task_svc.STATUS_DONE
+
+
 # ─────────────────────────────────────────── 5. 决定 / 关闭 / 重开
 
 
