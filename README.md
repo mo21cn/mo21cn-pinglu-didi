@@ -98,8 +98,9 @@ python scripts/verify_miniapp_devtools.py --section 16      # 只跑指定章节
 
 > ⚠️ `scripts/verify_miniapp_device.js`（旧轨，依赖 `miniprogram-automator`）**已退役** ——
 > 微信开发者工具 3.17.3 起不再服务它的 ws 协议。现行轨见上方 `verify_miniapp_devtools.py`；
-> **未迁移章节的覆盖缺口**登记在
-> [DR-0009「后续增量」](docs/entrust/decisions/0009-真机走查工具链换轨.md)，不假装已覆盖。
+> **旧轨的 12 章已全部迁移完毕（2026-09-15）**，剩下三个**子项**仍未覆盖（有副作用的
+> 支付流转、真模型解析卡字段数、ENT-025 成果详情），登记在
+> [DR-0009 §8.2](docs/entrust/decisions/0009-真机走查工具链换轨.md)，不假装已覆盖。
 > 旧脚本保留作章节对照（付费点击等副作用步骤原本默认关闭、用 `WALK_PAY=1` 开启）。
 
 ## 工程规范（务必先读）
