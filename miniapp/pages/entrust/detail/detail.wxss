@@ -150,6 +150,13 @@
   line-height: 1.7;
 }
 
+/* 成果引用是**可点的**（ENT-023）：给足点击区域并着色，让"能不能点"一眼看得出来。
+   只靠 hover 反馈不够 —— hover 在静态截图与走查里都看不见。 */
+.slot-ref-link {
+  padding: 12rpx 0;
+  color: #3B5BDB;
+}
+
 .slot-counts {
   padding-top: 12rpx;
   font-size: 23rpx;

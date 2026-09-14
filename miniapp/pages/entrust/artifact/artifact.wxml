@@ -1,0 +1,191 @@
+<!--
+  委托发货 · 成果详情（查看 / 编辑 / 确认）（UI-05 第二片 / ENT-023）
+
+  四个非正常态（loading / expired / denied / error）一个都不能少：少一个分支就少一种
+  表现，失败会被渲染成空白（verify_entrust_ui.js 有专门断言）。
+
+  两条**必须显示出来**的事实，不是装饰：
+  · 生效版本号（{{artifact.currentRevisionNo}}）与每条历史版本的「生效 / 历史」角色 ——
+    编辑产生新版本但**不**改变生效版本，用户要能自己核对这一点；
+  · 缺失必填项点名到字段（{{artifact.missingHint}}）—— 只说"信息不完整"，
+    用户不知道该去补哪一个。
+-->
+<view class="page">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">成果</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub" wx:if="{{artifact}}">
+      成果 #{{artifact.artifactId}} · {{artifact.typeLabel}}
+    </view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期 -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 无权限 / 不存在（服务端对非参与方统一 404，不泄漏存在性） -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <!-- 正常 -->
+    <block wx:else>
+      <!-- 保存 / 确认之后的**结论**。这里说的"生效版本仍是 vN"是重点：
+           EDIT 不改变生效版本，用户不看这句话就会以为客户已经看到新内容。 -->
+      <view wx:if="{{saveNotice}}" class="card art-notice">{{saveNotice}}</view>
+
+      <!-- 成果本体 -->
+      <view class="card">
+        <view class="row-between art-top">
+          <text class="art-title">{{artifact.typeLabel}}</text>
+          <text class="{{artifact.statusClass}}">{{artifact.statusLabel}}</text>
+        </view>
+        <view class="field-row row-between">
+          <text class="field-label">成果编号</text>
+          <text class="field-value">#{{artifact.artifactId}}</text>
+        </view>
+        <view class="field-row row-between">
+          <text class="field-label">生效版本</text>
+          <text class="field-value">
+            {{artifact.currentRevisionNo === null ? '尚未确认任何版本' : 'v' + artifact.currentRevisionNo}}
+          </text>
+        </view>
+        <view class="field-row row-between">
+          <text class="field-label">归属委托</text>
+          <text class="field-value">{{artifact.assignmentId ? '#' + artifact.assignmentId : '未归属'}}</text>
+        </view>
+        <view class="field-row row-between">
+          <text class="field-label">最后更新</text>
+          <text class="field-value">{{artifact.updatedAt || '—'}}</text>
+        </view>
+      </view>
+
+      <!-- 已作废：说清"为什么现在不能改"，而不是把按钮藏起来让人猜 -->
+      <view wx:if="{{artifact.statusHint}}" class="card art-note">{{artifact.statusHint}}</view>
+      <!-- 类型不在注册表里：字段契约无从校验，如实说明只读的理由 -->
+      <view wx:if="{{artifact.registryHint}}" class="card art-note">{{artifact.registryHint}}</view>
+      <!-- 缺失必填项：点名到字段 -->
+      <view wx:if="{{artifact.missingHint}}" class="card art-warn">{{artifact.missingHint}}</view>
+      <!-- 未声明的历史字段：只读且会原样保留（不静默丢弃） -->
+      <view wx:if="{{artifact.unknownHint}}" class="card art-note">{{artifact.unknownHint}}</view>
+
+      <!-- 字段清单：查看态 -->
+      <view wx:if="{{!editing}}" class="card">
+        <view class="art-section-title">内容（生效版本）</view>
+        <view wx:for="{{artifact.fields}}" wx:key="name" class="art-field">
+          <view class="row-between">
+            <text class="art-field-label">
+              {{item.label}}
+              <text wx:if="{{item.required}}" class="art-mark-required">必填</text>
+              <text wx:if="{{item.internal}}" class="art-mark-internal">内部</text>
+              <text wx:if="{{item.unknown}}" class="art-mark-unknown">未声明</text>
+            </text>
+          </view>
+          <text wx:if="{{item.empty}}" class="art-value art-value-empty">（未填）</text>
+          <text wx:elif="{{item.kind === 'json'}}" class="art-json">{{item.value}}</text>
+          <text wx:else class="art-value">{{item.value}}</text>
+        </view>
+      </view>
+
+      <!-- 字段清单：编辑态。结构化字段走 JSON 多行文本，解析失败就地报错、不提交。 -->
+      <view wx:else class="card">
+        <view class="art-section-title">编辑内容（保存后产生新版本，生效版本不变）</view>
+        <view wx:for="{{formFields}}" wx:key="name" class="art-field">
+          <view class="row-between">
+            <text class="art-field-label">
+              {{item.label}}
+              <text wx:if="{{item.required}}" class="art-mark-required">必填</text>
+              <text wx:if="{{item.internal}}" class="art-mark-internal">内部</text>
+              <text wx:if="{{item.unknown}}" class="art-mark-unknown">只读</text>
+            </text>
+          </view>
+          <textarea
+            wx:if="{{item.kind === 'json' && !item.unknown}}"
+            class="art-textarea"
+            value="{{item.text}}"
+            data-idx="{{index}}"
+            bindinput="onFieldInput"
+            auto-height
+            placeholder="列表 / 对象用 JSON 填写；留空表示未填"
+          ></textarea>
+          <input
+            wx:elif="{{!item.unknown}}"
+            class="art-input"
+            value="{{item.text}}"
+            data-idx="{{index}}"
+            bindinput="onFieldInput"
+            placeholder="留空表示未填"
+          />
+          <text wx:else class="art-value art-value-empty">未声明的字段不参与编辑（会原样保留）</text>
+        </view>
+        <view wx:if="{{saveError}}" class="art-error">{{saveError}}</view>
+      </view>
+
+      <!-- 版本历史（append-only）：每条的「生效 / 历史」由 current_revision_id 派生。
+           历史版本可以被重新确认为生效版本 —— 后端允许回退确认，界面不禁止。 -->
+      <view class="card">
+        <view class="art-section-title">版本历史（只增不改）</view>
+        <view class="tl">
+          <view wx:for="{{revisions}}" wx:key="revisionId" class="tl-item {{item.isCurrent ? 'tl-done' : ''}}">
+            <view class="tl-rail">
+              <view class="tl-dot"></view>
+              <view class="tl-line" wx:if="{{index < revisions.length - 1}}"></view>
+            </view>
+            <view class="tl-body">
+              <view class="row-between">
+                <text class="tl-title">{{item.title}}</text>
+                <text class="{{item.roleClass}}">{{item.roleLabel}}</text>
+              </view>
+              <view class="tl-time">{{item.createdAt}}</view>
+              <view class="tl-note">{{item.summary}}</view>
+              <view
+                wx:if="{{artifact.canConfirm && !item.isCurrent && !editing}}"
+                class="slot-btn"
+                data-no="{{item.revisionNo}}"
+                bindtap="onConfirm"
+                hover-class="hover-dim"
+              >设为生效版本</view>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{!revisions.length}}" class="art-note-inline">还没有任何版本</view>
+      </view>
+
+      <!-- 人工落点。无权限 / 已作废时服务端会如实拒绝；前端只按**状态**决定是否亮出入口
+           （与详情页的受理入口同一口径：前端不做权限判定，也不假装知道）。 -->
+      <view wx:if="{{artifact.canEdit}}" class="card">
+        <view wx:if="{{!editing}}" class="bar-actions">
+          <view class="btn-primary" bindtap="onEdit" hover-class="hover-dim">编辑内容</view>
+        </view>
+        <block wx:else>
+          <view class="bar-note">保存会追加一个新版本；生效版本要另行确认才会切换。</view>
+          <view class="bar-actions">
+            <view class="btn-ghost" bindtap="onCancelEdit" hover-class="hover-dim">取消</view>
+            <view class="btn-primary" bindtap="onSave" hover-class="hover-dim">保存新版本</view>
+          </view>
+        </block>
+      </view>
+    </block>
+  </view>
+</view>

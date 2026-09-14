@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "成果",
+  "enablePullDownRefresh": false,
+  "backgroundTextStyle": "dark"
+}

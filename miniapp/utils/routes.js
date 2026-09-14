@@ -150,11 +150,15 @@ const NAV_EDGES = [
 
   // ── 委托域 ────────────────────────────────────────────────────────
   { from: 'pages/entrust/workbench/workbench', to: 'pages/entrust/detail/detail', strategy: 'push' },
+  // ENT-023：从工作台槽位里的成果引用进入成果页。**push**（进入下一级）而不是 replace ——
+  // 用户看完成果还要回到这张工作台继续处理别的槽位，替换掉它等于把人踢出上下文。
+  { from: 'pages/entrust/detail/detail', to: 'pages/entrust/artifact/artifact', strategy: 'push' },
 
   // ── 重置栈（回首页重走身份链路）────────────────────────────────────
   { from: 'pages/mine/mine', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/workbench/workbench', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/detail/detail', to: 'pages/index/index', strategy: 'reset' },
+  { from: 'pages/entrust/artifact/artifact', to: 'pages/index/index', strategy: 'reset' },
 
   // ── 工作台 ↔ 会话：产品要求「经理人可在会话/工作台/成果之间反复切换」────
   //    HO 明确指出：有循环的业务导航不一定无限压栈，不能把所有循环判成错误。
@@ -316,6 +320,13 @@ const ROUTES = {
     kind: 'detail', deepLink: 'require-params', domain: 'entrust',
     paramSchema: { assignment_id: { type: 'id', required: true } },
     note: '委托详情'
+  },
+  'pages/entrust/artifact/artifact': {
+    kind: 'detail', deepLink: 'require-params', domain: 'entrust',
+    // `artifact_id` 必需：没有它页面无从知道该读哪份成果，而"读最新的那份"是
+    // 一种**会漂移**的推断（工作台引用的是精确 ID 与版本，见 PRD 第 187 行）。
+    paramSchema: { artifact_id: { type: 'id', required: true } },
+    note: '成果详情（查看 / 编辑 / 确认；从工作台槽位的成果引用进入）'
   }
 }
 
@@ -348,7 +359,9 @@ const TAB_BAR_PAGES = Object.keys(ROUTES).filter(function (p) {
 const MIGRATED_PAGES = [
   // ENT-019：委托支线第一个切片的两个页面
   'pages/entrust/workbench/workbench',
-  'pages/entrust/detail/detail'
+  'pages/entrust/detail/detail',
+  // ENT-023：成果页（查看 / 编辑 / 确认）从落地起就接入，避免"新增页面绕过预算"
+  'pages/entrust/artifact/artifact'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */
