@@ -105,7 +105,11 @@ const STRATEGY_TARGET_TAB_OR_ROOT = [STRATEGY.SWITCH_TAB, STRATEGY.RESET]
 const NAV_EDGES = [
   // ── 入口域 → tabBar 页 ─────────────────────────────────────────────
   // 注：`pages/index/index.js` 用 `ROLE_META[role].page` 变量跳转，目标不可静态解析，
-  //     故这些边无法在此登记（属已知盲区）。switchTab 会把栈归 1，不影响链深。
+  //     故这些边无法在此登记。**但它不再是无验证的盲区**：其取值域由
+  //     `scripts/verify_tabbar_targets.js` 驱动真实页面逻辑断言（捕获的每个目标都
+  //     必须落在 app.json 的 tabBar.list 内），并接入 CI frontend-static。
+  //     静态侧仍保留「[变量目标]」备注（见 verify_routes.js）——那是中立记录，不是判错。
+  //     switchTab 会把栈归 1，不影响链深。
 
   // ── 工作台（tabBar）之间的切换 ─────────────────────────────────────
   { from: 'pages/owner/owner', to: 'pages/mine/mine', strategy: 'switchTab' },

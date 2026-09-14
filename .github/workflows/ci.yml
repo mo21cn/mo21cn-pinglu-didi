@@ -239,6 +239,7 @@ jobs:
   #   verify_ui_interactions 组件 props 与事件 / 弹层闭环 / 长列表与日期等静态防线
   #   verify_entrust_ui    委托发货：入口隔离（AC-02）/ 五态判定（AC-21）/
   #                        跨端状态取值域 / 工作台用到的 CSS 类存在性
+  #   verify_tabbar_targets 动态 switchTab 目标取值域（驱动真实首页 / 自定义 tabBar 逻辑）
   # 真机走查依赖微信开发者工具，无法在 CI 运行，仍由本机执行：
   #   现行轨 → scripts/verify_miniapp_devtools.py（IDE 自带 wechatide 工具链，
   #            驱动层 scripts/wechatide_client.py）
@@ -287,6 +288,16 @@ jobs:
         # HO 实测的 4 个问题（空参通过、非法枚举通过、双向来路算成 Infinity、缺参仍
         # navigateTo）全是**语义**问题，它们能在静态门禁全绿时存在，所以必须有这一层。
         run: node scripts/verify_routes_behavior.js
+
+      - name: tabBar 目标行为校验（动态 switchTab 取值域）
+        # verify_routes 只能解析**字面量**目标；目标由变量算出的调用点
+        # （ROLE_META[role].page / map[role] / conf[role] || conf.all）它只记一条
+        # 「[变量目标]」备注就放行。此处驱动真实页面与自定义 tabBar 逻辑，把捕获到的
+        # 目标与 app.json 的 tabBar.list 比对 —— switchTab 打到非 tabBar 页是
+        # **静默失败**（用户只看到"点了没反应"），静态门禁全绿也照样发生。
+        # verify_routes 的「[变量目标]」备注**保留**：它是对所有动态调用的中立记录，
+        # 不是判错；本步只钉住能算出取值域的那几处。
+        run: node scripts/verify_tabbar_targets.js
 
       - name: 小程序 require 相对路径校验
         # 2026-09-13 真机走查发现：三层目录的页面把 utils 写成 '../../utils/entrust'，
