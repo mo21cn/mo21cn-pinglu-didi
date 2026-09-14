@@ -167,7 +167,15 @@ Page({
           shipper: '/pages/shipper/shipper',
           owner: '/pages/owner/owner'
         }
-        wx.switchTab({ url: map[role] || '/pages/index/index' })
+        const target = map[role]
+        if (!target) {
+          // 兜底：ROLE_LIST 里若加了新角色而这里漏了映射，绝不能把非 tabBar 页交给
+          // wx.switchTab —— 它打不到时会**静默失败**，用户只看到"点了没反应"。
+          // 用 reLaunch 回首页（index 是 root 页）让人重新选身份，失败也是可见的。
+          wx.reLaunch({ url: '/pages/index/index' })
+          return
+        }
+        wx.switchTab({ url: target })
       })
       .catch(() => {
         wx.hideLoading()
