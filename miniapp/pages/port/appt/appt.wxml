@@ -96,7 +96,7 @@
           <text class="chip chip-purple">确定性状态机</text>
         </view>
         <view class="tl">
-          <view wx:for="{{timeline}}" wx:key="key" class="tl-item {{item.done ? 'tl-done' : ''}}">
+          <view wx:for="{{timeline}}" wx:key="key" class="tl-item {{item.done ? 'tl-done' : ''}}" data-tl-key="{{item.key}}">
             <view class="tl-rail">
               <view class="tl-dot"></view>
               <view wx:if="{{index < timeline.length - 1}}" class="tl-line"></view>

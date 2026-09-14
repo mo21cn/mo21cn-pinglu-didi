@@ -79,7 +79,7 @@
 
       <!-- ④ 候选列表 · 货主视角（可选船下单） -->
       <view wx:if="{{mode === 'cargo' && items.length}}" class="cand-list">
-        <view wx:for="{{items}}" wx:key="ship_id" class="cand-card">
+        <view wx:for="{{items}}" wx:key="ship_id" class="cand-card" data-ship-id="{{item.ship_id}}">
           <view class="cand-head">
             <view class="cand-title-wrap">
               <text class="cand-title">{{item.ship_name}}</text>
@@ -114,6 +114,7 @@
               class="btn-primary btn-mini"
               size="mini"
               data-index="{{index}}"
+              data-act-pick-ship="{{item.ship_id}}"
               catchtap="onTapCandidate"
             >选船下单</button>
           </view>
@@ -122,7 +123,7 @@
 
       <!-- ④' 候选列表 · 船东视角（只读，出单由货主发起） -->
       <view wx:if="{{mode === 'ship' && items.length}}" class="cand-list">
-        <view wx:for="{{items}}" wx:key="cargo_id" class="cand-card">
+        <view wx:for="{{items}}" wx:key="cargo_id" class="cand-card" data-cargo-id="{{item.cargo_id}}">
           <view class="cand-head">
             <view class="cand-title-wrap">
               <text class="cand-title">{{item.cargo_name}}</text>
