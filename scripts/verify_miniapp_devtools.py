@@ -40,12 +40,20 @@
 
 前置条件
 --------
-1. 后端在 8000 端口运行并已铺演示数据：
-   `cd backend && python scripts/seed_demo.py && python scripts/seed_entrust_orgpicker.py`
-   ㉕ 章另需第三份种子 `python scripts/seed_entrust_demo.py`（成果 `#5` 由它创建；
-   前两份种子都不创建成果，见 `ARTIFACT_ID` 处的注释）。
-2. 微信开发者工具已启动、已开过本项目窗口、已完成一次人工授权（授权持久，见 DR-0009）。
-3. **不得在沙箱中运行**（`wechatide` 官方硬要求）。
+1. 后端在 8000 端口运行，并已按**这个顺序**铺三份种子：
+   `cd backend && python scripts/seed_demo.py && python scripts/seed_entrust_demo.py
+    && python scripts/seed_entrust_orgpicker.py`
+   ⚠️ **顺序有意义**：`seed_entrust_demo.py` 必须在 `seed_entrust_orgpicker.py`
+   **之前** —— 本文件多处按 `ENTRUST_ASSIGNMENT_ID` 取号（那是
+   `seed_entrust_demo` 的 `ASSIGNMENT_MAIN`），而 orgpicker 会先占掉两个委托号；
+   顺序反了 ㉖ 就会打到另一张单上（它会以「委托状态」断言明确失败，不会静默）。
+   （此前这里把两份写成「orgpicker 在前」，是错的 —— 2026-09-14 修正。）
+   三份各自不可省：`seed_demo`＝基础域数据；`seed_entrust_demo`＝委托/任务/成果/两宗案件；
+   `seed_entrust_orgpicker`＝⑯ 的多组织身份与甲乙两张委托。
+2. 后端必须**在跑章节之前**就绪：本脚本先 `backend_ready()` 探一次，不通直接 rc=2。
+   后端没起来时所有页面都是 `view=error`，看起来像「页面全坏了」，其实一条业务缺陷都没有。
+3. 微信开发者工具已启动、已开过本项目窗口、已完成一次人工授权（授权持久，见 DR-0009）。
+4. **不得在沙箱中运行**（`wechatide` 官方硬要求）。
 
 用法
 ----
@@ -64,6 +72,7 @@ import os
 import re
 import sys
 import time
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wechatide_client import DEFAULT_CLIENT, Client  # noqa: E402
@@ -80,6 +89,29 @@ TITLE_B = "演示委托·乙组织队列样本"
 
 CODE_SHIPPER = "seed-shipper"
 CODE_OWNER = "seed-owner"
+
+#: 后端健康检查。端口写死 8000 不是偷懒 —— 前端 `utils/request.js` 的 BASE 与
+#: 两份种子脚本都指向 8000，换端口要三处一起改。
+HEALTHZ = "http://127.0.0.1:8000/healthz"
+
+
+def backend_ready(timeout: float = 2.0) -> bool:
+    """后端是否在 8000 上应答。
+
+    **为什么必须在跑章节之前问这一句**（2026-09-14 实测的教训）：后端没起来时，
+    所有页面都会落到 `view=error`，于是登录进不去、锚点全 `n=0`、断言成片变红 ——
+    看起来像"页面全坏了"，其实**一条业务缺陷都没有**。那一轮 44 条级联假失败
+    只差这一句就能在 3 秒内被说清楚：**环境错要报成环境错**。
+
+    绕代理：本机环境变量里可能有 http_proxy，健康检查走本机直连。
+    """
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(HEALTHZ, timeout=timeout) as resp:
+            return int(resp.status) == 200
+    except Exception:  # noqa: BLE001
+        return False
+
 
 INDEX = "pages/index/index"
 SHIPPER = "pages/shipper/shipper"
@@ -104,6 +136,12 @@ DECISION_NOTE = "走查：转复核（界面记录决定）"
 REJECT_NOTE = "走查：复核后驳回（证据不足以支持阻断）"
 CLOSE_EVIDENCE = "走查-证据引用-票号W4C001"
 CLOSE_NOTE = "走查：复核后撤销，恢复正常班期"
+
+# ㉙/㉚ 章（ENT-032：UI-04 队列 + 「批准」正例）
+APPROVE_NOTE = "走查：依据现行版本批准（界面记录决定）"
+#: 一个**不存在**的成果版本 id：用来验「填错不会被当成填对」。
+#: 用大数而不是 `1` —— 后者很可能是某个真实版本，负例就变成了正例。
+BOGUS_REVISION_ID = 999999
 
 #: ㉖ 登记出来的案件 id 在 ㉗/㉘ 之间传递（三章是同一条链，不能各写各的编号）
 _STATE: dict = {}
@@ -617,8 +655,23 @@ def sec_16(w: Walker) -> None:
         w.rep.rec("⑯ 多组织未选：真机渲染出 2 个组织 pill", pill_count == 2, str(pill_count))
         w.rep.rec("⑯ 多组织未选：初始无 active pill", active0 == 0, str(active0))
 
-        # 点「甲」—— 工具无 index 参数，用属性选择器精确定位第 1 个 pill
-        w.rep.rec("⑯ 点「甲」：tap 成功", w.c.tap('[data-org="1"]'), 'selector=[data-org="1"]')
+        # 点「甲」—— 工具无 index 参数，只能靠属性选择器；但**编号不能写死**：
+        # 组织 id 取决于种子插入顺序（三份种子各建自己的组织），写死 `1`/`2`
+        # 会在换顺序/换库时静默点到别的组织上。2026-09-14 就这么踩了一次 ——
+        # 把三份种子的顺序改成 `entrust_demo` 在前之后，甲/乙 的 id 从 1/2 变成 2/3，
+        # 于是 `[data-org="1"]` 直接点空，后面 7 条断言全部级联失败。
+        org_ids = {o.get("name"): o.get("orgId") for o in (d.get("orgs") or [])}
+        id_a = str(org_ids.get(ORG_A, ""))
+        id_b = str(org_ids.get(ORG_B, ""))
+        _STATE["org_id_b"] = id_b
+        w.rep.rec(
+            "⑯ 从页面清单里读出甲/乙的组织编号（不写死）",
+            bool(id_a) and bool(id_b),
+            f"甲={id_a} 乙={id_b}",
+        )
+        w.rep.rec(
+            "⑯ 点「甲」：tap 成功", w.c.tap(f'[data-org="{id_a}"]'), f'selector=[data-org="{id_a}"]'
+        )
         d = w.wait_data(lambda x: (x.get("items") or [{}])[0].get("title") == TITLE_A)
         w.shot("16-组织选择器-选中甲")
         w.rep.rec(
@@ -638,7 +691,9 @@ def sec_16(w: Walker) -> None:
         )
 
         # 点「乙」（第二个 pill）
-        w.rep.rec("⑯ 点「乙」：tap 成功", w.c.tap('[data-org="2"]'), 'selector=[data-org="2"]')
+        w.rep.rec(
+            "⑯ 点「乙」：tap 成功", w.c.tap(f'[data-org="{id_b}"]'), f'selector=[data-org="{id_b}"]'
+        )
         d = w.wait_data(lambda x: (x.get("items") or [{}])[0].get("title") == TITLE_B)
         w.shot("16-组织选择器-选中乙")
         first_title = ((d.get("items") or [{}])[0] or {}).get("title")
@@ -673,11 +728,17 @@ def sec_16(w: Walker) -> None:
 
     # ---------- 段二：单组织 ----------
     print("\n-- 段二：单组织（only） --", flush=True)
+    # 先清掉段一留下的选择：本段验的是 **only** 分支（唯一选项自动选中），
+    # 而残留值若恰好等于甲的组织 id，页面会走 **saved** 分支 —— 那是另一件事。
+    # （2026-09-14：id 不再固定为 1/2，残留值真的会撞上，所以必须显式清。
+    #   这不是"为了好过"而放宽断言：saved 分支随后用**反向用例**单独覆盖。）
+    w.c.remove_storage(ORG_STORAGE_KEY)
     if w.open_workbench("seed-mgr-single"):
         d = w.wait_data(lambda x: bool(x.get("orgReason")))
         w.shot("16-组织选择器-单组织不出现")
         orgs = d.get("orgs") or []
         names = [o.get("name") for o in orgs]
+        single_id = str(((orgs[0] if orgs else {}) or {}).get("orgId"))
         w.rep.rec("⑯ 单组织：清单只有 1 个组织", len(orgs) == 1, f"orgs={len(orgs)}")
         w.rep.rec("⑯ 单组织：组织为甲", names[:1] == [ORG_A], str(names))
         w.rep.rec(
@@ -685,11 +746,10 @@ def sec_16(w: Walker) -> None:
             d.get("orgReason") == "only",
             f"reason={d.get('orgReason')}",
         )
-        stored_now = w.c.get_storage(ORG_STORAGE_KEY)
         w.rep.rec(
-            "⑯ 单组织：旧选择（乙）已失效则不放行 → 仍落到甲",
-            str(d.get("activeOrgId")) == "1",
-            f"active={d.get('activeOrgId')!r}（上一段的乙未被沿用）残留 storage={stored_now!r}",
+            "⑯ 单组织：自动选中的就是甲（编号从清单读，不写死）",
+            str(d.get("activeOrgId")) == single_id and bool(single_id),
+            f"active={d.get('activeOrgId')!r} 期望={single_id}",
         )
         pills = w.c.count(".org-pill")
         w.rep.rec("⑯ 单组织：不出现组织选择器（唯一选项是噪音）", pills == 0, str(pills))
@@ -699,6 +759,24 @@ def sec_16(w: Walker) -> None:
             d.get("view") == "ready" and first_title == TITLE_A,
             f"view={d.get('view')} title={first_title}",
         )
+
+        # 反向用例：把**别的组织**的 id 塞进 Storage（就是段一存下的乙），
+        # 不得被沿用 —— 否则「沿用上次选择」会变成"沿用别人的组织"。
+        stale_b = str(_STATE.get("org_id_b") or "")
+        if stale_b:
+            w.c.set_storage(ORG_STORAGE_KEY, stale_b)
+            if w.reenter_workbench() == WORKBENCH:
+                d2 = w.wait_data(lambda x: bool(x.get("orgReason")))
+                w.rep.rec(
+                    "⑯ 单组织：**别人组织**的残留选择不得被沿用（仍落到甲、且走 only）",
+                    str(d2.get("activeOrgId")) == single_id and d2.get("orgReason") == "only",
+                    f"active={d2.get('activeOrgId')!r} reason={d2.get('orgReason')} "
+                    f"（塞进去的乙={stale_b}）",
+                )
+            else:
+                w.rep.rec("⑯ 单组织反向用例：重进工作台", False, "未跳转")
+        else:
+            w.rep.rec("⑯ 单组织反向用例", False, "段一没拿到乙的组织编号，跳过")
 
     # ---------- 段三：无组织 ----------
     print("\n-- 段三：无组织（none） --", flush=True)
@@ -1344,6 +1422,312 @@ def sec_28(w: Walker) -> None:
     )
 
 
+def sec_29(w: Walker) -> None:
+    """㉙ UI-04 组织级队列（ENT-032）：队列切换 / 两行筛选 / 点行进案件详情。
+
+    本章的存在理由 = **每一行都要能点进那一宗**。走查工具没有 index 参数，
+    「点第 N 行」只能靠属性选择器；而这一页上同时有**四组**可点元素
+    （两个队列 pill、两行筛选、案件卡），属性名两两不同是**前提**而非风格 ——
+    都是 `data-key` 时 `[data-key="all"]` 会落到另一个筛选条上，选到谁看引擎实现。
+
+    前置：走查库须已铺 `backend/scripts/seed_entrust_demo.py`（自带两宗案件），
+    且默认顺序里 ㉖㉗㉘ 已跑过 —— 那一章登记的案件在 ㉘ 被关闭，于是
+    「关闭的那宗在 `unclosed` 里不出现、在 `all` 里出现」成为筛选生效的硬证据。
+    """
+    print("\n== ㉙ UI-04 组织级队列（切换 / 筛选 / 点行进详情）==", flush=True)
+    base_err = w.c.errors()
+
+    path = w.reenter_workbench()
+    w.rep.rec("㉙ 前置 · 从「我的」页进入经理工作台", path == WORKBENCH, path)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+
+    print("\n-- A. 默认队列与锚点唯一 --", flush=True)
+    n_asg = w.c.count('[data-queue="assignment"]')
+    n_case = w.c.count('[data-queue="case"]')
+    w.rep.rec(
+        "㉙A 默认落在「委托队列」，两个队列 pill 各唯一命中",
+        d.get("queue") == "assignment" and n_asg == 1 and n_case == 1,
+        f"queue={d.get('queue')} n_assignment={n_asg} n_case={n_case}",
+    )
+    w.shot("29-A-工作台-委托队列")
+
+    print("\n-- B. 真点击切到案件队列 --", flush=True)
+    w.c.tap('[data-queue="case"]')
+    d = w.wait_data(
+        lambda x: x.get("queue") == "case" and x.get("view") not in (None, "", "loading"),
+        tries=40,
+        gap=0.5,
+    )
+    items = d.get("items") or []
+    w.rep.rec(
+        "㉙B 真点击切到案件队列；行形状是**案件**（每行有 caseId，没有委托行的字段残留）",
+        d.get("queue") == "case"
+        and bool(items)
+        and all(("caseId" in it) and ("assignmentId" not in it) for it in items),
+        f"total={d.get('total')} 首行={json.dumps(items[0], ensure_ascii=False)[:110] if items else '(空)'}",
+    )
+    w.shot("29-B-案件队列")
+
+    print("\n-- C. 案件卡锚点唯一 → 点哪一宗进哪一宗 --", flush=True)
+    # 挑**最后一行**而不是第一行：第一行用「总是选第一个」的坏选择器也会对，
+    # 最后一行的位置本身就是对锚点的考验（ENT-031 修的就是这类歧义）。
+    target = items[-1] if items else {}
+    tid = str(target.get("caseId") or "")
+    n_card = w.c.count(f'[data-case-id="{tid}"]') if tid else 0
+    w.rep.rec(
+        "㉙C 案件卡锚点唯一命中（`data-case-id`，不与筛选 pill 的属性撞名）",
+        bool(tid) and n_card == 1,
+        f"caseId={tid} n={n_card}",
+    )
+    if tid and n_card == 1:
+        w.c.tap(f'[data-case-id="{tid}"]')
+        opened = w.c.wait_path(CASE, tries=25)
+        w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+        d2 = w.c.page_data()
+        w.rep.rec(
+            "㉙C 点**最后一行**进的是**那一宗**（不是恰好第一宗）",
+            bool(opened) and str(d2.get("caseId")) == tid,
+            f"当前路径={w.c.current_path()} caseId={d2.get('caseId')} 期望={tid}",
+        )
+        w.shot("29-C-点行进案件详情")
+    else:
+        w.rep.rec("㉙C 点**最后一行**进的是**那一宗**（不是恰好第一宗）", False, "锚点不唯一，跳过")
+
+    print("\n-- D. 开闭范围筛选 --", flush=True)
+    w.reenter_workbench()
+    w.c.tap('[data-queue="case"]')
+    d = w.wait_data(
+        lambda x: x.get("queue") == "case" and x.get("view") not in (None, "", "loading"),
+        tries=40,
+        gap=0.5,
+    )
+    closed_id = str(_STATE.get("case_id") or "")
+    unclosed_ids = [str(x.get("caseId")) for x in (d.get("items") or [])]
+    unclosed_total = int(d.get("total") or 0)
+    w.rep.rec(
+        "㉙D 默认范围是「未关闭」，且 ㉘ 关闭掉的那宗不在未关闭清单里",
+        d.get("activeCaseScope") == "unclosed" and (not closed_id or closed_id not in unclosed_ids),
+        f"scope={d.get('activeCaseScope')} total={unclosed_total} ㉖案件={closed_id}",
+    )
+    w.c.tap('[data-case-scope="all"]')
+    d = w.wait_data(
+        lambda x: x.get("activeCaseScope") == "all" and x.get("view") not in (None, "", "loading"),
+        tries=40,
+        gap=0.5,
+    )
+    all_ids = [str(x.get("caseId")) for x in (d.get("items") or [])]
+    all_total = int(d.get("total") or 0)
+    w.rep.rec(
+        "㉙D 切「全部」后总数**严格更多**，且已关闭那宗出现了（筛选真的生效）",
+        d.get("activeCaseScope") == "all"
+        and all_total > unclosed_total
+        and (not closed_id or closed_id in all_ids),
+        f"all={all_total} unclosed={unclosed_total} 已关闭在全部里={closed_id in all_ids}",
+    )
+    w.shot("29-D-范围-全部")
+    w.c.tap('[data-case-scope="unclosed"]')
+    d = w.wait_data(
+        lambda x: (
+            x.get("activeCaseScope") == "unclosed" and x.get("view") not in (None, "", "loading")
+        ),
+        tries=40,
+        gap=0.5,
+    )
+    w.rep.rec(
+        "㉙D 切回「未关闭」后总数回到较少的那一侧（两个方向都能点）",
+        d.get("activeCaseScope") == "unclosed" and int(d.get("total") or 0) == unclosed_total,
+        f"total={d.get('total')} 期望={unclosed_total}",
+    )
+
+    print("\n-- E. 案件类型筛选 --", flush=True)
+    n_ck = w.c.count('[data-case-kind="change_request"]')
+    w.rep.rec("㉙E 类型筛选 pill 锚点唯一命中", n_ck == 1, f"n={n_ck}")
+    w.c.tap('[data-case-kind="change_request"]')
+    d = w.wait_data(
+        lambda x: (
+            x.get("activeCaseKind") == "change_request"
+            and x.get("view") not in (None, "", "loading")
+        ),
+        tries=40,
+        gap=0.5,
+    )
+    rows = d.get("items") or []
+    w.rep.rec(
+        "㉙E 选「变更请求」后**每一行**都是变更请求（不是只有第一行对）",
+        d.get("activeCaseKind") == "change_request"
+        and bool(rows)
+        and all(x.get("kindLabel") == "变更请求" for x in rows),
+        f"n={len(rows)} kinds={[x.get('kindLabel') for x in rows][:6]}",
+    )
+    w.shot("29-E-类型-变更请求")
+    n_all = w.c.count('[data-case-kind=""]')
+    w.rep.rec("㉙E 「全部类型」pill 取值为空串，锚点仍唯一命中", n_all == 1, f"n={n_all}")
+    if n_all == 1:
+        w.c.tap('[data-case-kind=""]')
+        d = w.wait_data(
+            lambda x: x.get("activeCaseKind") == "" and x.get("view") not in (None, "", "loading"),
+            tries=40,
+            gap=0.5,
+        )
+        kinds = sorted({str(x.get("kindLabel")) for x in (d.get("items") or [])})
+        w.rep.rec(
+            "㉙E 切回「全部类型」后两种案件都回来了（否则筛选会变成单向开关）",
+            len(kinds) >= 2,
+            f"kinds={kinds}",
+        )
+    else:
+        w.rep.rec(
+            "㉙E 切回「全部类型」后两种案件都回来了（否则筛选会变成单向开关）",
+            False,
+            "空串锚点没命中，跳过",
+        )
+
+    w.rep.rec(
+        "㉙ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        w.new_errors(base_err)[:200],
+    )
+
+
+def sec_30(w: Walker) -> None:
+    """㉚ 「批准」的完整正例（ENT-032）：依据版本 id 从界面取到 → 填对能过。
+
+    ㉗ 只验了「缺依据版本被拦」这半边 —— **半个负例不能证明这条路走得通**：
+    若 `basis_revision_id` 被当成 `revision_no` 收（两者是不同的数），界面上
+    **永远批准不了**，而「被拦」那半边照样绿。本章补另外半边。
+
+    依据版本 id 从哪来？本章**故意走界面**取：案件页的候选面板给出本单的成果 →
+    进成果页读「版本历史」那行 id。为此本轮顺带修了一个真缺陷：成果页原先
+    **只显示 `vN`（revision_no）**，而案件页要填的是 revision **id** ——
+    界面上根本取不到那个值（走查发现）。现在成果页每条都标「版本 id N」。
+
+    ⚠️ 写失败的提示走 `wx.showModal`，**不在渲染树里**（工具读不到，见技能里的
+    「原生弹层」那条）。所以负例只断言**没写进去**（后端事实），不断言提示文案 ——
+    「看不见」与「没有」是两件事，不能拿后者当结论。
+    """
+    print("\n== ㉚ 「批准」正例（依据版本 id 从界面取到 → 填对能过）==", flush=True)
+    base_err = w.c.errors()
+
+    print("\n-- A. 从队列里挑一宗「待处理」的案件（不写死编号）--", flush=True)
+    path = w.reenter_workbench()
+    w.rep.rec("㉚ 前置 · 进入经理工作台", path == WORKBENCH, path)
+    w.c.tap('[data-queue="case"]')
+    d = w.wait_data(
+        lambda x: x.get("queue") == "case" and x.get("view") not in (None, "", "loading"),
+        tries=40,
+        gap=0.5,
+    )
+    # 必须挑 **异常** 而不是变更请求：`change_request` 在 `open` 下的出边只有
+    # in_review / rejected —— **没有 approved**（它的批准要等复核之后，见
+    # `_STATUS_TRANSITIONS`）。挑错类型会让整章以 `[data-status="approved"] n=0` 失败，
+    # 看起来像"界面少了个按钮"，其实是脚本挑错了对象（2026-09-14 实测踩到）。
+    open_rows = [
+        x
+        for x in (d.get("items") or [])
+        if x.get("statusLabel") == "待处理" and x.get("kindLabel") == "异常"
+    ]
+    cid = str(open_rows[0].get("caseId") or "") if open_rows else ""
+    w.rep.rec(
+        "㉚A 队列里能找到一宗「待处理」的**异常**案件（编号来自界面）",
+        bool(cid),
+        f"待处理异常 {len(open_rows)} 宗 → caseId={cid}",
+    )
+    if not cid:
+        w.rep.rec("㉚ 本章后续断言", False, "没有待处理案件，跳过")
+        return
+    case_url = f"/{CASE}?case_id={cid}"
+    w.c.nav("reLaunch", case_url, CASE)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+
+    print("\n-- B. 选「已批准」→ 出现依据版本输入框 --", flush=True)
+    w.rep.rec(
+        "㉚B 案件页 ready 且持有正确的案件编号",
+        d.get("view") == "ready" and str(d.get("caseId")) == cid,
+        f"view={d.get('view')} caseId={d.get('caseId')}",
+    )
+    n_ok = w.c.count('[data-status="approved"]')
+    w.rep.rec("㉚B 「已批准」选项锚点唯一命中", n_ok == 1, f"n={n_ok}")
+    w.c.tap('[data-status="approved"]')
+    time.sleep(1.2)
+    d = w.c.page_data()
+    n_basis = w.c.count('[data-df="basis"]')
+    w.rep.rec(
+        "㉚B 真点击选中「已批准」后出现依据版本输入框",
+        (d.get("decideForm") or {}).get("to") == "approved" and n_basis == 1,
+        f"to={(d.get('decideForm') or {}).get('to')} n={n_basis}",
+    )
+
+    print("\n-- C. 负例：一个**不存在**的版本 id 不能被当成填对 --", flush=True)
+    w.c.set_data({"decideForm.basis": str(BOGUS_REVISION_ID), "decideForm.note": APPROVE_NOTE})
+    time.sleep(0.8)
+    w.c.tap('[data-act-decide-submit="1"]')
+    time.sleep(4.0)
+    d = w.c.page_data()
+    w.rep.rec(
+        "㉚C 不存在的版本 id 被服务端拒掉：案件**仍是待处理**（没写进去）",
+        (d.get("detail") or {}).get("status") == "open",
+        f"status={(d.get('detail') or {}).get('status')}；"
+        f"提示走 wx.showModal（渲染树外，工具读不到，故不断言文案）",
+    )
+
+    print("\n-- D. 从界面取一份**真实**的成果版本 id --", flush=True)
+    w.c.tap('[data-act-toggle-links="1"]')
+    d = w.wait_data(lambda x: x.get("candLoaded"), tries=40, gap=0.5)
+    art_rows = [x for x in (d.get("candidates") or []) if x.get("target_kind") == "artifact"]
+    art_id = str(art_rows[0].get("target_id") or "") if art_rows else ""
+    w.rep.rec(
+        "㉚D 候选面板列出本单的成果（该面板是「本单有什么成果」的权威来源）",
+        bool(art_id),
+        f"成果候选 {len(art_rows)} 项 → artifact_id={art_id}",
+    )
+    if not art_id:
+        w.rep.rec("㉚ 本章后续断言", False, "没有成果候选，跳过")
+        return
+    w.c.nav("reLaunch", f"/{ARTIFACT}?artifact_id={art_id}", ARTIFACT)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    revs = d.get("revisions") or []
+    rid = str(revs[0].get("revisionId") or "") if revs else ""
+    tl = str(w.c.text(".tl-time") or "")
+    w.rep.rec(
+        "㉚D 成果页「版本历史」**显示出**版本 id（原先只显示 vN，界面上取不到这个值）",
+        bool(rid) and "版本 id" in tl,
+        f"revisionId={rid} 首行文案={tl[:60]}",
+    )
+    w.shot("30-D-成果页-版本id")
+
+    print("\n-- E. 正例：填对 → 状态真的到 approved --", flush=True)
+    w.c.nav("reLaunch", case_url, CASE)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    w.c.tap('[data-status="approved"]')
+    time.sleep(1.2)
+    w.c.set_data({"decideForm.basis": rid, "decideForm.note": APPROVE_NOTE})
+    time.sleep(0.8)
+    w.c.tap('[data-act-decide-submit="1"]')
+    d = w.wait_data(
+        lambda x: ((x.get("detail") or {}).get("status")) == "approved", tries=40, gap=0.5
+    )
+    det = d.get("detail") or {}
+    w.rep.rec(
+        "㉚E 填**真实**的版本 id → 状态真的到了 approved（批准这条路走得通）",
+        det.get("status") == "approved",
+        f"status={det.get('status')} label={det.get('statusLabel')}",
+    )
+    blk = {b.get("key"): b for b in (det.get("blocks") or [])}
+    dec_rows = (blk.get("decision") or {}).get("rows") or []
+    basis_row = [r for r in dec_rows if r.get("label") == "依据版本"]
+    w.rep.rec(
+        "㉚E ④决定与审批 的「依据版本」显示的就是刚填的那个 id（与输入框口径一致）",
+        bool(basis_row) and str(basis_row[0].get("value")) == "版本 id " + rid,
+        json.dumps(basis_row, ensure_ascii=False)[:140],
+    )
+    w.shot("30-E-批准后")
+    w.rep.rec(
+        "㉚ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        w.new_errors(base_err)[:200],
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -1358,12 +1742,34 @@ SECTIONS = {
     "26": sec_26,
     "27": sec_27,
     "28": sec_28,
+    "29": sec_29,
+    "30": sec_30,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
 # ⚠️ 26 → 27 → 28 是**一条链**（登记出来的案件被后两章接着处置），顺序不可打乱；
-#    单跑其中一章时后两章会以"㉖ 未产出 case_id"明确失败，而不是静默跳过。
-DEFAULT_ORDER = ["smoke", "0", "1", "2", "4", "6", "12", "15", "16", "25", "26", "27", "28"]
+#    单跑其中一章时后两章会以「㉖ 未产出 case_id」明确失败，而不是静默跳过。
+# ⚠️ 29 依赖 26～28 已跑：它断言「㉘ 关闭的那宗不在 `unclosed` 清单里」——
+#    没有已关闭案件时那条断言会红（**故意**如此：它是在验筛选真的生效，
+#    数据不满足就该说"没验成"，而不是退化成一个恒真的空断言）。
+# ⚠️ 30 独立：它只要求队列里有一宗「待处理」的案件。
+DEFAULT_ORDER = [
+    "smoke",
+    "0",
+    "1",
+    "2",
+    "4",
+    "6",
+    "12",
+    "15",
+    "16",
+    "25",
+    "26",
+    "27",
+    "28",
+    "29",
+    "30",
+]
 
 
 def main() -> int:
@@ -1409,6 +1815,17 @@ def main() -> int:
         f"loginExpired={meta.get('loginExpired')} / tokenRequired={meta.get('tokenRequired')}",
         flush=True,
     )
+
+    if not backend_ready():
+        print(
+            "\n[前置不通过] 后端 8000 无应答（" + HEALTHZ + "）。\n"
+            "  这种情况下所有章节都会落到 view=error，看起来像「页面全坏了」，"
+            "其实一条业务缺陷都没有。\n"
+            "  先起后端再重跑 —— 见本文件顶部「前置条件」第 1 条（含三份种子）。",
+            file=sys.stderr,
+        )
+        return 2
+    print("后端    ：8000 应答正常", flush=True)
 
     w = Walker(client, shots, rep)
     print("\n== 开窗 ==", flush=True)

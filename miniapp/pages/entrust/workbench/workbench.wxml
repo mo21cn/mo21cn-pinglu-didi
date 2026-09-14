@@ -81,7 +81,7 @@
           wx:for="{{caseScopes}}"
           wx:key="key"
           class="filter-pill {{activeCaseScope === item.key ? 'filter-pill-active' : ''}}"
-          data-key="{{item.key}}"
+          data-case-scope="{{item.key}}"
           bindtap="onCaseScope"
           hover-class="hover-dim"
         >{{item.label}}</view>
@@ -93,7 +93,7 @@
           wx:for="{{caseKinds}}"
           wx:key="key"
           class="filter-pill {{activeCaseKind === item.key ? 'filter-pill-active' : ''}}"
-          data-key="{{item.key}}"
+          data-case-kind="{{item.key}}"
           bindtap="onCaseKind"
           hover-class="hover-dim"
         >{{item.label}}</view>
@@ -173,7 +173,7 @@
           wx:for="{{items}}"
           wx:key="caseId"
           class="card list-card"
-          data-id="{{item.caseId}}"
+          data-case-id="{{item.caseId}}"
           bindtap="onOpenCase"
           hover-class="row-hover"
         >
