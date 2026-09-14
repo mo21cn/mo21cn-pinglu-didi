@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from app.modules.entrust.access import (
     PERM_TASK_DISPATCH,
     AccessContext,
+    AccessDeniedError,
     assert_can,
     resolve_context,
     utcnow_naive,
@@ -895,6 +896,67 @@ def _assert_can_write(
     )
 
 
+def can_write_case(session: Session, *, actor_id: int, assignment: dict[str, Any]) -> bool:
+    """能否**改动**这张委托下的案件 —— 与 `_assert_can_write` **同一份判据**。
+
+    折叠成布尔只是为了给 `case_capabilities` 一个不抛异常的入口。
+    方向是「这里包它」而不是「它包这里」：`_assert_can_write` 还要保留
+    404（非组织成员）与 403（无权限）的**原因区分**，而布尔会把原因丢掉 ——
+    若由它反向调用本函数，就得再判一次成员资格才能决定抛哪一种，那才是第二份实现。
+    """
+    try:
+        _assert_can_write(session, actor_id=actor_id, assignment=assignment)
+    except (ExceptionCaseNotFoundError, AccessDeniedError):
+        return False
+    return True
+
+
+def case_capabilities(
+    session: Session,
+    *,
+    actor_id: int,
+    case: dict[str, Any],
+    affected_count: int,
+) -> dict[str, bool]:
+    """该用户对**这一宗**案件的可执行动作（UI-08 的按钮可用性，DR-0014 §3.4）。
+
+    三条纪律：
+
+    1. **不自建第二份权限判据**：能力位的「写权限」这一维统一由 `can_write_case`
+       给出，而它包的就是 `_assert_can_write`；
+    2. **不硬编码状态名**：「状态维」一律取 `allowed_transitions` 与
+       `allowed_closure_dispositions` 的结果 —— DR-0013 §3.4 的状态机改了就跟着变；
+    3. **服务端只是如实投影**：界面据 `can_*` 隐藏按钮**不是**权限控制。写端仍独立
+       复核权限、证据、幂等与版本；两者不一致时**以写端为准**，界面收到 403/409
+       必须提示，不能静默。
+
+    `affected_count` 由调用方传入：详情端点已经取过受影响项，在服务层再查一次是浪费。
+
+    Note:
+        `can_decide` 对**已关闭**案件恒 `false`，即便状态机允许 `closed → open`。
+        那条转移归 `reopen` 专用命令所有，它写的是 `reopened` 事件；
+        走 `decide` 会写成 `status_changed`，审计形态不同。界面同时亮出
+        「记录决定」与「重开」只会把人引到审计不一致的那条路上。
+    """
+    assignment = load_assignment(session, int(case["assignment_id"]))
+    can_write = assignment is not None and can_write_case(
+        session, actor_id=actor_id, assignment=assignment
+    )
+    kind = str(case["kind"])
+    status = str(case["status"])
+    open_case = status != STATUS_CLOSED
+    return {
+        "can_add_link": can_write and open_case,
+        "can_remove_link": can_write and open_case and affected_count > 0,
+        "can_decide": can_write and open_case and bool(allowed_transitions(kind, status)),
+        "can_close": can_write and bool(allowed_closure_dispositions(kind, status)),
+        "can_reopen": can_write and status == STATUS_CLOSED,
+        # 「应用变更」属 A2，本片未实现 ⇒ **恒 false**。刻意不按状态机推算：
+        # 让它随状态变化，会让人以为「满足条件就能用」，而它根本没有实现。
+        "can_apply_change": False,
+    }
+
+
 # ── 归属与证据校验（§3.1.4） ─────────────────────────────────────────────────
 
 
@@ -1682,6 +1744,38 @@ def project_case_list_item(case: dict[str, Any], *, affected_count: int) -> dict
     }
 
 
+def project_case_ref(
+    *, case_id: int, kind: str, title: str, status: str, impact_kind: str
+) -> dict[str, Any]:
+    """UI-05 `exceptions` 槽里的一条案件引用（DR-0014 §3.3 的 `CaseRef`）。
+
+    与 `project_case_list_item` 的差别是**刻意的**，不是漏投影：
+
+    | | 清单行（UI-04） | 槽引用（UI-05） |
+    | --- | --- | --- |
+    | 作用域 | 跨委托，所以要 `assignment_id` | 已在某一委托内，带了是冗余 |
+    | 数量 | 要 `affected_count` 供列表展示 | 点进详情就有，列表不必先算 |
+    | 版本位 | —— | **无**：`revision_no` 是乐观锁号，不是「看哪一版」 |
+
+    `blocking` 由 `is_blocking` 当场算出，**不读缓存列** ——
+    槽位里的"阻断"标记与执行门禁必须是同一次判定的结果。
+
+    Note:
+        本函数收**显式字段**而不是 dict，与另两个投影不同。原因是它有两个调用面：
+        案件**行形状**（主键 `id`）与工作台 `_load_cases` 的本地形状（主键 `case_id`）。
+        让函数按 `case.get("id") or case.get("case_id")` 去猜键名，正是
+        `_case_from_row` 上方那段形状注释要防的事 —— 猜错时不会报错，
+        只会把别的案件的 id 当成本案件的 id 写进引用里。
+    """
+    return {
+        "case_id": int(case_id),
+        "kind": str(kind),
+        "title": str(title),
+        "status": str(status),
+        "blocking": is_blocking(kind=str(kind), impact_kind=str(impact_kind), status=str(status)),
+    }
+
+
 def project_case_for_customer(
     case: dict[str, Any], *, links: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
@@ -1771,6 +1865,8 @@ __all__ = [
     "assert_severity_impact_consistent",
     "assert_transition",
     "blocking_cases_for_task",
+    "can_write_case",
+    "case_capabilities",
     "close_case",
     "count_open_cases",
     "decide",
@@ -1786,6 +1882,7 @@ __all__ = [
     "project_case_for_customer",
     "project_case_internal",
     "project_case_list_item",
+    "project_case_ref",
     "raise_case",
     "remove_link",
     "reopen_case",

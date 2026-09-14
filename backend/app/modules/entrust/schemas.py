@@ -560,12 +560,40 @@ class WorkbenchArtifactRef(BaseModel):
     revision_no: int | None
 
 
+class CaseRef(BaseModel):
+    """UI-05 的 `exceptions` 槽里引用的一宗案件（DR-0014 §3.3）。
+
+    **与 `WorkbenchArtifactRef` 平行但独立** —— 这不是「风格统一」问题：
+
+    | | `WorkbenchArtifactRef` | `CaseRef` |
+    | --- | --- | --- |
+    | 键 | artifact_id / artifact_type / label / revision_no | case_id / kind / title / status / blocking |
+    | 「版本」 | **精确版本**，两端引用同一对 (artifact_id, revision_no) | **无** —— 案件的 revision_no 是乐观锁版本号，不是「看哪一版」 |
+    | 消费者 | 成果页（`artifact_id` 进深链） | 案件页（`case_id` 进深链） |
+
+    字段名不同是**刻意的防线**：一旦共用键名，前端就会用一个渲染分支吃两种数据，
+    而两边「有版本 / 无版本」的语义差异会在某次改动里静默错位。
+    前端按**槽位 `key`** 选渲染分支，不靠猜字段。
+    """
+
+    case_id: int
+    kind: str
+    title: str
+    status: str
+    blocking: bool
+
+
 class WorkbenchCurrentOut(BaseModel):
-    """「当前成果」：有效业务版本；多个成果时给摘要与数量。"""
+    """「当前成果」：有效业务版本；多个成果时给摘要与数量。
+
+    `refs` 按**槽位**承载不同形状，且**不混装**：普通槽位是 `WorkbenchArtifactRef`，
+    `exceptions` 槽是 `CaseRef`。用联合而不是另开一个字段，是为了让「这一槽位里
+    可点的引用」对前端保持**一个**入口 —— 渲染分支按槽位 `key` 选。
+    """
 
     state: str
     text: str
-    refs: list[WorkbenchArtifactRef] = Field(default_factory=list)
+    refs: list[WorkbenchArtifactRef | CaseRef] = Field(default_factory=list)
 
 
 class WorkbenchIssueOut(BaseModel):
@@ -837,10 +865,35 @@ class ExceptionCaseOrgListOut(BaseModel):
     items: list[ExceptionCaseListItem]
 
 
+class ExceptionCaseCapabilities(BaseModel):
+    """UI-08 的按钮可用性（DR-0014 §3.4）。
+
+    **挂在详情而不挂共享模型上**：它描述的是**调用者**，不是案件数据。
+    挂进 `ExceptionCaseOut` 会污染白名单投影，并让清单的每一行都带一份
+    「我能做什么」；写端点也仍返回纯数据的 `ExceptionCaseOut` ——
+    界面写完重新拉详情刷新能力。
+
+    字段的判定一律来自服务层 `case_capabilities`（与写命令同源），
+    这里**不重算、不给默认值**：任何本地推算都是第二份实现。
+    """
+
+    can_add_link: bool
+    can_remove_link: bool
+    can_decide: bool
+    can_close: bool
+    can_reopen: bool
+    can_apply_change: bool
+
+
 class ExceptionCaseDetailOut(BaseModel):
-    """案件详情：投影 + 完整事件链（重开再关闭的两轮历史在此可判定）。"""
+    """案件详情：投影 + 完整事件链（重开再关闭的两轮历史在此可判定）。
+
+    `capabilities` **必填**（不给默认值）：它缺席时界面只能靠猜按钮可用性，
+    而「猜」正是 DR-0014 §3.4 要消除的东西。
+    """
 
     case: ExceptionCaseOut
+    capabilities: ExceptionCaseCapabilities
     events: list[ExceptionCaseEventOut] = Field(default_factory=list)
 
 
@@ -852,6 +905,11 @@ def exception_case_out(data: dict[str, Any]) -> ExceptionCaseOut:
 def exception_case_list_item(data: dict[str, Any]) -> ExceptionCaseListItem:
     """服务层「清单行」投影 dict → 响应模型。"""
     return ExceptionCaseListItem.model_validate(data)
+
+
+def exception_case_capabilities(data: dict[str, Any]) -> ExceptionCaseCapabilities:
+    """服务层能力投影 dict → 响应模型。"""
+    return ExceptionCaseCapabilities.model_validate(data)
 
 
 def exception_event_out(data: dict[str, Any]) -> ExceptionCaseEventOut:

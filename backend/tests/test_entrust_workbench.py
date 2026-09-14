@@ -665,6 +665,7 @@ def test_exceptions_projection_without_cases_is_no_record(env, monkeypatch):
     assert slot["available"] is True
     assert slot["unavailable_reason"] == ""
     assert slot["current"]["state"] == "no_record"
+    assert slot["current"]["refs"] == [], "没有可点的引用就不该造空壳引用"
     assert slot["issues"]["state"] == "none"
     assert slot["next_owner"]["state"] == "not_applicable"
     assert slot["updated_at"] is None
@@ -743,6 +744,7 @@ def test_exceptions_projection_closed_case_only_moves_updated_at(env, monkeypatc
 
     slot = _slot(_get(env, manager, aid).json(), "exceptions")
     assert slot["current"]["state"] == "no_record"
+    assert slot["current"]["refs"] == [], "已关闭的案件不该留在可点引用里"
     assert slot["issues"]["state"] == "none"
     assert slot["next_owner"]["state"] == "not_applicable"
     assert slot["updated_at"] == closed["updated_at"]
@@ -758,3 +760,39 @@ def test_exceptions_projection_is_isolated_per_assignment(env, monkeypatch):
 
     assert _slot(_get(env, manager, aid_a).json(), "exceptions")["current"]["state"] == "present"
     assert _slot(_get(env, manager, aid_b).json(), "exceptions")["current"]["state"] == "no_record"
+
+
+def test_exceptions_slot_refs_are_case_refs_blocking_first(env, monkeypatch):
+    """`current.refs` 逐条给出 `CaseRef`：**阻断优先**、形状与成果引用**不同**。
+
+    形状独立是 DR-0014 §3.3 的硬要求，不是风格问题：若把案件伪造成
+    `artifact_refs`（如 `{artifact_id: case_id}`），前端就会用一个渲染分支吃两种数据，
+    而两边「有版本 / 无版本」的差异会在某次改动里静默错位 ——
+    所以这里直接断言**键集合**，多一个 `artifact_id` 就会红。
+    """
+    from app.modules.entrust import exceptions as case_svc
+
+    _open_exceptions_slot(monkeypatch)
+    db = env.make_session()
+    manager, _, _, _, aid = _seed(env, db)
+    actor = int(manager["user_id"])
+    task_id = _task(db, assignment_id=aid, task_type="execution", title="执行任务")
+
+    plain = _case(db, aid=aid, actor=actor, title="信息补充")
+    blocking = _case(
+        db,
+        aid=aid,
+        actor=actor,
+        title="船期延误",
+        severity="high",
+        impact_kind=case_svc.IMPACT_EXECUTION_BLOCKING,
+        links=[{"target_kind": case_svc.TARGET_TASK, "target_id": task_id}],
+    )
+
+    refs = _slot(_get(env, manager, aid).json(), "exceptions")["current"]["refs"]
+    # 阻断优先，其余按案件号 —— 与 `next_owner` 的排序口径一致
+    assert [r["title"] for r in refs] == ["船期延误", "信息补充"]
+    assert [r["case_id"] for r in refs] == [int(blocking["id"]), int(plain["id"])]
+    assert [r["blocking"] for r in refs] == [True, False]
+    assert [r["status"] for r in refs] == [case_svc.STATUS_OPEN, case_svc.STATUS_OPEN]
+    assert set(refs[0]) == {"case_id", "kind", "title", "status", "blocking"}

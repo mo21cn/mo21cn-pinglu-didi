@@ -62,6 +62,7 @@ from app.modules.entrust.schemas import (
     ExceptionCaseOrgListOut,
     ExceptionCaseOut,
     ExceptionCaseReopenIn,
+    exception_case_capabilities,
     exception_case_list_item,
     exception_case_out,
     exception_event_out,
@@ -370,9 +371,13 @@ def get_exception(
         raise mapped from exc
 
     events = svc.list_events(db, exception_id)
+    links = svc.list_links(db, exception_id)
     return ExceptionCaseDetailOut(
-        case=exception_case_out(
-            svc.project_case_internal(case, links=svc.list_links(db, exception_id))
+        case=exception_case_out(svc.project_case_internal(case, links=links)),
+        # 能力与写命令**同源**（都过 `_assert_can_write` 的判据）。
+        # 界面据它隐藏按钮只是体验，权限判定始终在写端；两者不一致时以写端为准。
+        capabilities=exception_case_capabilities(
+            svc.case_capabilities(db, actor_id=int(user.id), case=case, affected_count=len(links))
         ),
         events=[exception_event_out(item) for item in events],
     )

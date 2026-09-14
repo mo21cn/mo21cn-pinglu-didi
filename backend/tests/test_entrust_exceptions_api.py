@@ -17,6 +17,10 @@
    （含 `total`）、只读成员可见而**能力**另论、`blocking` 与 `is_blocking` 逐条一致
    （含 `rejected` 的相反语义）、开闭范围与 `scope=all`、分页/筛选/`id DESC`、
    清单字段集合被冻结且**不含** `severity`、两视图参数分别校验（混用 400 / 缺范围 422）。
+8. **能力字段**（DR-0014 §3.4）：有写权限时随状态机与受影响项变化、
+   `closed` 案件的 `can_decide` 为 false（重开归 `reopen` 专有命令，审计形态不同）、
+   只读成员与「组织角色有权限但货主授权没有」两种情形**全 false 且写请求 403**
+   （反向断言）、能力位字段集合被冻结、两个视图的清单都不带 `capabilities`。
 
 本文件**只断言端点口径**（状态码、幂等重放、可见性、投影形状与字段取舍）；
 业务不变量在 `test_entrust_exceptions_service.py`，纯规则在 `test_entrust_exceptions.py`。
@@ -1367,3 +1371,234 @@ def test_default_assignment_view_shape_unchanged(env):
     # 而组织级清单只给最小集合 —— 两者形状不同是刻意的，不是漏投影
     org_item = _org_list(env, s.manager, org_id=s.org).json()["items"][0]
     assert "severity" not in org_item and "affected" not in org_item
+
+
+# ─────────────────────────────────────────── 8. 能力字段（DR-0014 §3.4）
+
+_CAPS_ALL_FALSE = {
+    "can_add_link": False,
+    "can_remove_link": False,
+    "can_decide": False,
+    "can_close": False,
+    "can_reopen": False,
+    "can_apply_change": False,
+}
+
+
+def _caps(env, who: dict, cid: int) -> tuple[dict, dict]:
+    """取详情，返回 (案件投影, 能力)。两部分都要用，所以一次取回。
+
+    `capabilities` 只在**详情**上（DR-0014 §3.4）：它是调用者相关的，
+    挂进列表会让每一行都带一份「我能做什么」，也会污染白名单投影。
+    """
+    resp = env.client.get(_DETAIL_URL.format(cid=cid), headers=_headers(who))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    return body["case"], body["capabilities"]
+
+
+def _service_case(env, s, *, title: str = "服务层登记的案件") -> int:
+    """**绕过端点权限**直接经服务层登记一宗案件。
+
+    用于「当前用户本来就不该能写」的场景 —— 那种场景下走端点根本造不出数据，
+    而我们要断言的是**读**到的能力与写请求被拒。
+    """
+    created = exc.raise_case(
+        s.db,
+        assignment_id=s.assignment_id,
+        actor_id=int(s.manager["user_id"]),
+        kind=exc.KIND_EXCEPTION,
+        title=title,
+        severity="medium",
+        impact_kind=exc.IMPACT_INFORMATIONAL,
+    )
+    return int(created["id"])
+
+
+def _set_entrustment_permissions(db, entrustment_id: int, permissions: str) -> None:
+    """改货主授权的权限集。
+
+    用来构造「**组织角色有**处置权限、但**货主授权没有**」这一维度的差异 ——
+    这正是 DR-0008 要求不可混用的那对维度，光靠造不同的角色是造不出来的。
+    """
+    db.execute(
+        text("UPDATE ent_entrustment SET permissions = :p WHERE id = :i"),
+        {"p": permissions, "i": entrustment_id},
+    )
+    db.commit()
+
+
+def _write_attempts(env, who: dict, cid: int, revision: int, task_id: int) -> dict[str, int]:
+    """对同一宗案件发一遍写请求 → {动作: 状态码}。
+
+    用于「能力说 false，写端也必须拒绝」的**反向**断言。少了这一半，
+    capabilities 就只是一句安慰话：界面变灰，而接口照收。
+    """
+
+    def post(url: str, body: dict) -> int:
+        return env.client.post(url, json=body, headers=_headers(who, uuid.uuid4().hex)).status_code
+
+    return {
+        "add_link": post(
+            _LINKS_URL.format(cid=cid),
+            {
+                "target_kind": exc.TARGET_TASK,
+                "target_id": task_id,
+                "expected_revision": revision,
+            },
+        ),
+        "decide": post(
+            _DECISION_URL.format(cid=cid),
+            {"expected_revision": revision, "to_status": exc.STATUS_IN_REVIEW},
+        ),
+        "close": post(
+            _CLOSE_URL.format(cid=cid),
+            {
+                "expected_revision": revision,
+                "closure_disposition": exc.DISPOSITION_DUPLICATE,
+                "evidence_ref": "evidence://x",
+            },
+        ),
+        "reopen": post(
+            _REOPEN_URL.format(cid=cid),
+            {"expected_revision": revision, "reason": "试着重开"},
+        ),
+    }
+
+
+def test_capabilities_for_writer_follow_the_state_machine(env):
+    """有写权限时，能力位随**状态机与受影响项**走，且与写端一致。
+
+    `can_decide` / `can_close` 的结果取 `allowed_transitions` /
+    `allowed_closure_dispositions`，因此状态机改了它们就跟着变 ——
+    这里不硬编码状态名，正是为了让本用例在状态机演进后仍然有效。
+    """
+    s = _seed(env)
+    case = _raise_req(env, s).json()
+    cid = case["case_id"]
+
+    # 开放态、无受影响项
+    view, caps = _caps(env, s.manager, cid)
+    assert caps == {
+        "can_add_link": True,
+        "can_remove_link": False,  # 没有受影响项可移除
+        "can_decide": True,
+        "can_close": True,
+        "can_reopen": False,
+        "can_apply_change": False,  # A2 未实现 ⇒ 恒 false
+    }
+    # 能力说 true，写请求就必须真能成（否则能力位是在骗界面）
+    added = env.client.post(
+        _LINKS_URL.format(cid=cid),
+        json={
+            "target_kind": exc.TARGET_TASK,
+            "target_id": _task(s),
+            "expected_revision": int(view["revision_no"]),
+        },
+        headers=_headers(s.manager, uuid.uuid4().hex),
+    )
+    assert added.status_code == 200, added.text
+
+    # 有受影响项后 can_remove_link 打开
+    _, caps = _caps(env, s.manager, cid)
+    assert caps["can_remove_link"] is True
+
+    closed = _close(
+        env, s, added.json(), disposition=exc.DISPOSITION_DUPLICATE, decision_note="重复登记"
+    )
+    assert closed.status_code == 200, closed.text
+
+    # 关闭态：只剩重开；can_decide **必须**是 false（见下一条用例）
+    _, caps = _caps(env, s.manager, cid)
+    assert caps == {
+        "can_add_link": False,
+        "can_remove_link": False,
+        "can_decide": False,
+        "can_close": False,
+        "can_reopen": True,
+        "can_apply_change": False,
+    }
+
+
+def test_can_decide_is_false_on_closed_case_even_though_transition_exists(env):
+    """`closed → open` 虽然合法，但不是「决定」这条路 —— 它归 `reopen` 专有命令。
+
+    走 `decide` 会把这次重开写成 `status_changed` 事件，而 `reopen` 写的是
+    `reopened`：审计形态不同。界面同时亮出「记录决定」与「重开」，
+    只会把人引到审计不一致的那条路上。
+
+    本用例把这条收窄**钉住**：它是 `case_capabilities` 对 DR-0014 §3.4 的有意细化，
+    不是漏判 —— 只要状态机里 `closed` 还有出边，这条断言就有意义。
+    """
+    s = _seed(env)
+    case = _raise_req(env, s).json()
+    assert exc.allowed_transitions(exc.KIND_EXCEPTION, exc.STATUS_CLOSED), (
+        "前提变了：closed 已无出边，本用例的收窄就不再是收窄"
+    )
+    closed = _close(env, s, case, disposition=exc.DISPOSITION_DUPLICATE, decision_note="重复登记")
+    assert closed.status_code == 200, closed.text
+
+    _, caps = _caps(env, s.manager, case["case_id"])
+    assert caps["can_decide"] is False
+    assert caps["can_reopen"] is True
+
+
+def test_capabilities_false_when_the_grant_lacks_dispatch(env):
+    """验收 3 + 4：只被授予 view 时，**无论组织角色是什么**都只能看、不能处置。
+
+    - 只读成员（`member` 角色）；
+    - 组织里的 `manager` —— 角色**自带** `entrust:task:dispatch`。
+
+    两者都必须全 false。第二种情形就是「甲组织的角色权限不能与乙货主的授权拼接」：
+    写权限必须由**该货主**的生效授权提供（`owner_user_id` 维度），
+    组织角色权限顶不上来（DR-0008 两个维度不可混用）。
+
+    每个写请求的 403 是这条用例的重点 —— 只断言 `can_*` 全 false，
+    等于只验了界面变灰，而接口照收。
+
+    Note:
+        「只读成员」这里指的是**授权内容**，不是组织角色。角色为 `member`
+        并不等于只读：如果货主在授权里给了 dispatch，该成员照样能处置。
+        写权限的判据只有一条 —— 落在货主授权上。
+    """
+    s = _seed(env)
+    cid = _service_case(env, s)  # 先在有权限时把数据造出来（此后不再动写权限）
+    task_id = _task(s)
+    _set_entrustment_permissions(s.db, s.entrustment_id, VIEW_CLAIM_PERMS)
+
+    reader = _login(env.client, "viewer")
+    _member(s.db, s.org, user_id=int(reader["user_id"]), role="member")
+
+    for who, who_role in ((reader, "member"), (s.manager, "manager")):
+        view, caps = _caps(env, who, cid)
+        assert view["case_id"] == cid, who_role
+        assert caps == _CAPS_ALL_FALSE, who_role
+        codes = _write_attempts(env, who, cid, int(view["revision_no"]), task_id)
+        assert codes == dict.fromkeys(codes, 403), (who_role, codes)
+
+
+def test_capabilities_shape_is_frozen(env):
+    """能力位的字段集合被**冻结**：多一个少一个都是改了契约。
+
+    `can_apply_change` 恒 `false` 是刻意的：它属 A2，本片未实现。
+    不按状态机推算它，否则会让人以为「满足条件就能用」。
+    """
+    s = _seed(env)
+    cid = _service_case(env, s)
+    _, caps = _caps(env, s.manager, cid)
+    assert set(caps) == set(_CAPS_ALL_FALSE)
+    assert caps["can_apply_change"] is False
+
+
+def test_capabilities_are_absent_from_the_list_views(env):
+    """清单（两个视图都不）不带 `capabilities` —— 它挂详情，不挂共享模型。"""
+    s = _seed(env)
+    _raise_req(env, s)
+
+    single = env.client.get(
+        _LIST_URL, params={"assignment_id": s.assignment_id}, headers=_headers(s.manager)
+    ).json()
+    assert "capabilities" not in single["items"][0]
+
+    org_view = _org_list(env, s.manager, org_id=s.org).json()
+    assert "capabilities" not in org_view["items"][0]

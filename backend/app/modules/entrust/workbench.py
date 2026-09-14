@@ -571,9 +571,13 @@ def _build_exceptions_slot(spec: SlotSpec, *, cases: list[dict[str, Any]]) -> di
     * **排序不用 `severity`**：先阻断、再按登记顺序。严重度是业务判断，阻断是流程
       约束；用它排序会让人以为它影响流程（C3 要堵的正是这个联想）。
 
-    `current.refs` 此刻**为空**，这是有意的：可点击的案件清单（UI-04 → UI-08）在
-    切片四落地，而 refs 的载荷形状由**消费者**决定。现在先定一个没人读的 ref 形状，
-    等于猜；猜错的代价是前端按错的键取值后静默显示成"没有案件"。
+    `current.refs` 现在**有内容了**（DR-0014 §3.3）：未关闭案件各产出一条 `CaseRef`。
+    形状是在消费者确定之后才写的 —— 在没人读的时候先定形状等于猜，猜错的代价是
+    前端按错的键取值后静默显示成"没有案件"。
+
+    引用顺序沿用本槽位的既定口径（`next_owner` 也用它）：**阻断优先，再按案件号**。
+    与 UI-04 清单的 `id DESC` 不同是有意的 —— 槽位要的是"最该动的排前面"，
+    清单要的是"最新的排前面"。
     """
     open_cases = [c for c in cases if str(c["status"]) != case_svc.STATUS_CLOSED]
     blocking = [c for c in open_cases if _is_blocking_case(c)]
@@ -585,10 +589,22 @@ def _build_exceptions_slot(spec: SlotSpec, *, cases: list[dict[str, Any]]) -> di
             parts.append(f"阻断 {len(blocking)} 项")
         if changes:
             parts.append(f"变更请求 {len(changes)} 项")
+        refs = [
+            case_svc.project_case_ref(
+                case_id=c["case_id"],
+                kind=c["kind"],
+                title=c["title"],
+                status=c["status"],
+                impact_kind=c["impact_kind"],
+            )
+            for c in sorted(
+                open_cases, key=lambda c: (0 if _is_blocking_case(c) else 1, c["case_id"])
+            )
+        ]
         current: dict[str, Any] = {
             "state": CURRENT_PRESENT,
             "text": " · ".join(parts),
-            "refs": [],
+            "refs": refs,
         }
     else:
         current = {"state": CURRENT_NO_RECORD, "text": "", "refs": []}
