@@ -1,0 +1,136 @@
+<!--
+  委托发货 · 案件详情（UI-08 首片 / ENT-030 切片四之四）
+  六要素（原因 / 受影响记录 / 拟解决方案 / 决定与审批 / 执行证据 / 结案）+ 处理记录。
+  四态分支（loading / expired / denied / error）一个都不能少：少一个分支就少一种表现，
+  失败会被渲染成空白（verify_entrust_ui.js 有专门断言）。
+-->
+<view class="page-sub">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">异常 / 变更</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub" wx:if="{{detail}}">{{detail.title}}</view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期 -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 无权限 / 不存在（服务端对非参与方统一 404，不泄漏存在性） -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <block wx:else>
+      <!-- 案件头卡：标题 + 影响类型 / 状态徽标 + 骨架字段。
+           影响类型与阻断后果**都显示**（后者是前者的流程后果），用户不必自己推。 -->
+      <view class="card">
+        <view class="row-between case-top">
+          <text class="case-title">{{detail.title}}</text>
+          <view class="case-chips">
+            <text class="{{detail.impactClass}}">{{detail.impactLabel}}</text>
+            <text class="{{detail.statusClass}}">{{detail.statusLabel}}</text>
+          </view>
+        </view>
+        <view wx:if="{{detail.blocking}}" class="case-blocking">
+          该案件正在阻断执行：相关任务无法完成，直到它被关闭
+        </view>
+        <view wx:for="{{fields}}" wx:key="key" class="field-row row-between">
+          <text class="field-label">{{item.label}}</text>
+          <text class="field-value">{{item.value}}</text>
+        </view>
+      </view>
+
+      <!-- 六要素（顺序与"为空时怎么说"来自 utils/entrust.js 的 CASE_ELEMENTS） -->
+      <view wx:for="{{blocks}}" wx:key="key" class="card element-card">
+        <view class="element-head">
+          <text class="element-no">{{item.no}}</text>
+          <text class="element-title">{{item.title}}</text>
+        </view>
+
+        <!-- 长文本形态 -->
+        <block wx:if="{{item.mode === 'text'}}">
+          <view wx:if="{{item.text}}" class="element-text">{{item.text}}</view>
+          <view wx:else class="element-empty">{{item.emptyText}}</view>
+        </block>
+
+        <!-- 键值形态 -->
+        <block wx:elif="{{item.mode === 'rows'}}">
+          <view
+            wx:if="{{item.rows.length}}"
+            wx:for="{{item.rows}}"
+            wx:for-item="r"
+            wx:key="key"
+            class="field-row row-between"
+          >
+            <text class="field-label">{{r.label}}</text>
+            <text class="field-value">{{r.value}}</text>
+          </view>
+          <view wx:else class="element-empty">{{item.emptyText}}</view>
+        </block>
+
+        <!-- 条目形态 -->
+        <block wx:else>
+          <view
+            wx:if="{{item.items.length}}"
+            wx:for="{{item.items}}"
+            wx:for-item="it"
+            wx:key="key"
+            class="{{it.cls}}"
+          >
+            <view class="element-item-text">{{it.text}}</view>
+            <view class="element-item-sub">{{it.sub}}</view>
+          </view>
+          <view wx:else class="element-empty">{{item.emptyText}}</view>
+        </block>
+      </view>
+
+      <!-- 处理记录：append-only。当前状态只说最后一步，只看状态会以为这宗案件
+           从没被关过 ——"重开后再次关闭"的两轮历史只能从这条链上看出来。 -->
+      <view wx:if="{{events.length}}" class="card element-card">
+        <view class="element-head">
+          <text class="element-title">处理记录</text>
+          <text class="element-count">共 {{events.length}} 条</text>
+        </view>
+        <view class="tl">
+          <view wx:for="{{events}}" wx:key="seq" class="tl-item tl-done">
+            <view class="tl-rail">
+              <view class="tl-dot"></view>
+              <view wx:if="{{index < events.length - 1}}" class="tl-line"></view>
+            </view>
+            <view class="tl-body">
+              <view class="tl-title">{{item.title}}</view>
+              <view class="tl-time">{{item.meta}}</view>
+              <view wx:if="{{item.note}}" class="tl-note">{{item.note}}</view>
+              <view wx:if="{{item.evidence}}" class="tl-note">证据：{{item.evidence}}</view>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 处置能力：只说"这里现在有没有可执行的动作"，**不断言原因** —— 六个能力位
+           分不出"没授权"与"当前没有可执行动作"（见 decorateCase 的注释）。 -->
+      <view class="card case-note">{{actionHint}}</view>
+    </block>
+  </view>
+</view>

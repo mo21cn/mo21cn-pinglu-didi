@@ -1229,6 +1229,7 @@ section('⑤ 静态防线')
           log.push('fetchWorkbench:' + id)
           return Promise.resolve({ slots: [], unassigned_artifact_total: 0 })
         },
+        fetchCase: (id) => { log.push('fetchCase:' + id); return Promise.resolve({}) },
         viewState: () => ({ state: 'empty', title: '还没有委托', hint: '' })
       })
 
@@ -1511,8 +1512,68 @@ section('⑤ 静态防线')
       JSON.stringify(dtCold.__calls)
     )
 
-    // —— 两页都不再裸调 wx 导航（运行期治理真的接上了） ——
-    for (const [file, label] of [[WB, '工作台'], [DT, '详情']]) {
+    // —— 案件详情（UI-08 只读片 / ENT-030 切片四之四）——
+    // 这一页的"接线"有两个容易漏的点，都在这里钉住：
+    //   ① 它是 `require-params` 深链页，守卫必须在**取数之前**拦下缺参/非法参数；
+    //   ② 路由参数名是 `case_id`，而接口路径参数名是 `exception_id`（DR-0014 §7）——
+    //      页面把哪个值交给取数，只有真跑一遍才看得出来。
+    const CS = path.join(MP, 'pages/entrust/case/case.js')
+    const SELF_CS = 'pages/entrust/case/case'
+
+    const csMiss = makeWx()
+    const logCsMiss = []
+    const cs1 = instantiate(loadEntrustPage(CS, csMiss, logCsMiss))
+    cs1.onLoad({})
+    check(
+      '案件页：缺 case_id → error 态且不取数（错误优先于空）',
+      cs1.data.view === 'error' && cs1.data.viewTitle === '缺少案件编号' && logCsMiss.length === 0,
+      cs1.data.view + ' / ' + cs1.data.viewTitle + ' / ' + JSON.stringify(logCsMiss)
+    )
+
+    const csBad = makeWx()
+    const logCsBad = []
+    const cs2 = instantiate(loadEntrustPage(CS, csBad, logCsBad))
+    cs2.onLoad({ case_id: '../etc' })
+    check(
+      '案件页：非法编号字符 → error 态且不取数（只查 `!id` 会把它放过去）',
+      cs2.data.view === 'error' && cs2.data.viewTitle === '案件编号不合法' && logCsBad.length === 0,
+      cs2.data.view + ' / ' + cs2.data.viewTitle + ' / ' + JSON.stringify(logCsBad)
+    )
+
+    const csOk = makeWx()
+    const logCsOk = []
+    const cs3 = instantiate(loadEntrustPage(CS, csOk, logCsOk))
+    cs3.onLoad({ case_id: '12' })
+    check(
+      '案件页：合法 case_id 放行，且只按这一个编号取一次（取错单要被拦下）',
+      logCsOk.length === 1 && logCsOk[0] === 'fetchCase:12',
+      JSON.stringify(logCsOk)
+    )
+
+    const csCold = makeWx()
+    const cs4 = instantiate(loadEntrustPage(CS, csCold, []))
+    withRuntime(csCold, [{ route: SELF_CS, options: {} }], () => cs4.onBack())
+    check(
+      '案件页：冷启动返回键 → reLaunch 首页（不再是无效的 navigateBack）',
+      csCold.__calls.reLaunch.length === 1 &&
+        csCold.__calls.reLaunch[0].url === '/pages/index/index' &&
+        csCold.__calls.navigateBack.length === 0,
+      JSON.stringify(csCold.__calls)
+    )
+
+    const csWarm = makeWx()
+    const cs5 = instantiate(loadEntrustPage(CS, csWarm, []))
+    withRuntime(csWarm, [{ route: SELF_DT, options: {} }, { route: SELF_CS, options: {} }], () =>
+      cs5.onBack()
+    )
+    check(
+      '案件页：热路径返回键 → navigateBack（回到"谁把我推进来的"那一页）',
+      csWarm.__calls.navigateBack.length === 1 && csWarm.__calls.reLaunch.length === 0,
+      JSON.stringify(csWarm.__calls)
+    )
+
+    // —— 三页都不再裸调 wx 导航（运行期治理真的接上了） ——
+    for (const [file, label] of [[WB, '工作台'], [DT, '详情'], [CS, '案件']]) {
       const src = fs.readFileSync(file, 'utf8')
       check(
         `${label}页：不再出现裸 wx.navigateTo / redirectTo / reLaunch`,

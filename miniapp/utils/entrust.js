@@ -1085,11 +1085,385 @@ function confirmArtifact(artifactId, revisionNo, idempotencyKey) {
   })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// UI-08 案件详情（异常 / 变更）—— ENT-030 切片四之四 · DR-0014
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 本段是**只读投影**：拉 `GET /exceptions/{exception_id}`，把 PRD §4.1「UI-08」
+// （第 155 行）要求的六要素摊平成模板直接可用的形状 —— 原因 / 受影响记录 /
+// 拟解决方案 / 决定与审批 / 执行证据 / 结案。处置命令（links / decision / close /
+// reopen）不在本片，`capabilities` 也**不**用来推断任何业务结论（理由见
+// `decorateCase` 的注释）。
+//
+// ⚠️ 路径参数名与接口路径不一致是**有意的**：路由与深链用 `case_id`，接口路径沿用
+//    既有的 `{exception_id}`（DR-0014 §7）。同一个值、两个名字 —— 不要「顺手统一」，
+//    那会牵动一条已发布的接口路径。
+//
+// ⚠️ 取值域一律照抄后端 `exceptions.py` 的常量，**不在这里另立一套**：
+//    `KINDS` / `IMPACT_KINDS` / `STATUSES` / `SEVERITIES` / `SOURCES` /
+//    `TARGET_KINDS` / `DISPOSITIONS` / `EVENT_*` 与下表**逐字相等**，
+//    `verify_entrust_ui.js` 做跨语言核对。少一个键，那一行就只剩原始英文值，
+//    而界面看起来完全正常 —— 这正是最该被拦住的静默失效。
+
+/** 案件类型（后端 `exceptions.KINDS`） */
+const CASE_KIND_LABELS = { exception: '异常', change_request: '变更请求' }
+
+/**
+ * 影响类型（后端 `exceptions.IMPACT_KINDS`）—— 「轻重」看它，**不看 severity**。
+ *
+ * DR-0013 C3：严重度永不参与阻断判定，也同样不该在界面上决定排序或加重。
+ * 影响类型才是**流程约束**：`execution-blocking` 会让 `complete_task` 直接 409。
+ */
+const CASE_IMPACT_LABELS = {
+  informational: '仅供参考',
+  'review-required': '需要复核',
+  'execution-blocking': '阻断执行'
+}
+
+/**
+ * 影响类型的徽标类。
+ *
+ * 阻断用红：它表达的是「这条路现在走不通」（流程约束），不是「这件事比较严重」——
+ * 用同一个红去表达严重度，会让「严重但只是仅供参考」看起来和阻断一样，
+ * 那正是 C3 要避免的联想。
+ */
+const CASE_IMPACT_CLASS = {
+  informational: 'chip chip-muted',
+  'review-required': 'chip chip-warn',
+  'execution-blocking': 'chip chip-danger'
+}
+
+/**
+ * 严重度（后端 `exceptions.SEVERITIES`）—— **只在详情页出现**（清单刻意不带它，
+ * DR-0014 §3.2），且**不着色**：做成警示色等于把「按严重度决定流程」的联想请回来。
+ */
+const CASE_SEVERITY_LABELS = { low: '低', medium: '中', high: '高', critical: '严重' }
+
+/** 案件状态（后端 `exceptions.STATUSES`）—— 两套状态机共用同一取值域 */
+const CASE_STATUS_LABELS = {
+  open: '待处理',
+  in_review: '复核中',
+  approved: '已批准',
+  rejected: '已驳回',
+  applied: '已应用',
+  closed: '已关闭'
+}
+
+const CASE_STATUS_CLASS = {
+  open: 'chip chip-warn',
+  in_review: 'chip chip',
+  approved: 'chip chip-success',
+  rejected: 'chip chip-danger',
+  applied: 'chip chip-purple',
+  closed: 'chip chip-muted'
+}
+
+/** 案件来源（后端 `exceptions.SOURCES`）—— 谁提出的，影响"下一步找谁" */
+const CASE_SOURCE_LABELS = {
+  manual: '人工登记',
+  chat: '会话中登记',
+  customer: '客户提出',
+  agent_proposal: 'Agent 建议'
+}
+
+/** 受影响项目标类型（后端 `exceptions.TARGET_KINDS`）—— 只有这两类，不放任任意目标 */
+const CASE_TARGET_LABELS = { task: '任务', artifact: '成果' }
+
+/** 处置方式（后端 `exceptions.DISPOSITIONS`） */
+const CASE_DISPOSITION_LABELS = {
+  resolved: '已解决',
+  accepted_residual: '接受遗留',
+  cancelled: '撤销',
+  duplicate: '重复登记',
+  superseded: '被取代'
+}
+
+/** 事件类型（后端 `exceptions.EVENT_*`）—— 事件链的每一个点都要有个说法 */
+const CASE_EVENT_LABELS = {
+  created: '登记案件',
+  status_changed: '状态变更',
+  decided: '记录决定',
+  link_added: '登记受影响项',
+  link_removed: '移除受影响项',
+  closed: '关闭案件',
+  reopened: '重开案件'
+}
+
+/**
+ * UI-08 的**六要素**（PRD 第 155 行）。这是本页内容的完整性依据：
+ * `decorateCase` 按本表顺序产出 `blocks`，`verify_entrust_ui.js` 断言"产出与声明相等"
+ * —— 少一个要素就是案件详情缺一块，而页面看起来只是"这一块没数据"。
+ *
+ * `mode` 是渲染形态：`text` 长文本 / `rows` 键值行 / `list` 条目列表。
+ * `emptyText` 是**该要素为空时**的说法 —— 六句各不相同，且都不是"暂无数据"：
+ * 用户要能分清「还没到那一步」与「这一块页面没做」。
+ */
+const CASE_ELEMENTS = [
+  { key: 'cause', no: '①', title: '原因', mode: 'text', emptyText: '登记时没有填写原因' },
+  {
+    key: 'affected',
+    no: '②',
+    title: '受影响记录',
+    mode: 'list',
+    emptyText: '尚未登记受影响的任务或成果'
+  },
+  {
+    key: 'proposed_action',
+    no: '③',
+    title: '拟解决方案',
+    mode: 'text',
+    emptyText: '还没有提出处理方案'
+  },
+  { key: 'decision', no: '④', title: '决定与审批', mode: 'rows', emptyText: '尚未作出决定' },
+  { key: 'evidence', no: '⑤', title: '执行证据', mode: 'list', emptyText: '还没有执行证据引用' },
+  { key: 'closure', no: '⑥', title: '结案', mode: 'rows', emptyText: '案件尚未关闭' }
+]
+
+/**
+ * 用户 id → 可读文本。
+ *
+ * A1 的内部投影里只有 `actor_user_id`，**没有显示名**。这里如实显示编号，
+ * 不编一个名字、也不留空白 —— 空白会让「谁做的」看起来像"没人做过"。
+ * 显示名属独立的对客/内部投影决策，不在这条支线里顺手补。
+ */
+function _caseUser(id) {
+  return id === null || id === undefined ? '' : '用户 #' + id
+}
+
+/** 时间原样透出；缺值给空串（模板据此不渲染那一行，而不是渲染一个假时间） */
+function _caseTime(value) {
+  return value ? String(value) : ''
+}
+
+/** 状态转移的一句话（`待处理 → 复核中`）；两端缺一就不编 */
+function _caseMove(ev) {
+  const from = CASE_STATUS_LABELS[ev.from_status]
+  const to = CASE_STATUS_LABELS[ev.to_status]
+  if (from && to) return from + ' → ' + to
+  if (to) return '→ ' + to
+  return ''
+}
+
+/**
+ * 案件详情投影（UI-08 只读片）。
+ *
+ * 为什么本函数**不**从 `capabilities` 推出任何结论：
+ *   ① `can_apply_change` 在 A1 **恒为 false**（应用变更属 A2）。据它说「你没有权限」
+ *      就是把「功能还没做」说成「你不被允许」—— 同一句话在两种情况下含义不同，
+ *      而用户无从分辨；
+ *   ② 其余五个是 `can_write AND 当前状态允许` 的**合取**。全为 false 时既可能是
+ *      「没授权」也可能是「当前确实没有可执行动作」，**从六个布尔值里分不出来**。
+ * 所以本片只给一句对两种读法都成立的话（`actionHint`）；按钮可见性由下一片按
+ * 各自的 `can_*` 决定 —— 那是不会判错的用法（有则显示、无则隐藏），
+ * 且**权限判定始终在写端**，界面隐藏按钮从来不是权限控制。
+ */
+function decorateCase(payload) {
+  const res = payload || {}
+  const data = res.case || {}
+  const caps = res.capabilities || {}
+  const events = res.events || []
+  const decision = data.decision || {}
+  const closure = data.closure || {}
+  const resolution = data.resolution || {}
+  const affected = data.affected || []
+
+  // ⑤ 执行证据**只**取事件链的 `evidence_ref`（§3.1.3 要求 `closed` 事件携带它）。
+  //    受影响项的 `applied_revision_id` 说的是「应用过哪个版本」，那是另一件事 ——
+  //    混进来会把"有证据"变得含糊，而证据是否充分恰恰是结案时最容易起争议的一点。
+  const evidence = events
+    .filter(function (ev) {
+      return !!ev.evidence_ref
+    })
+    .map(function (ev) {
+      return {
+        key: 'ev-' + ev.seq,
+        text: ev.evidence_ref,
+        sub: (CASE_EVENT_LABELS[ev.event_kind] || ev.event_kind || '事件') + ' · 第 ' + ev.seq + ' 条',
+        meta: _caseTime(ev.created_at)
+      }
+    })
+
+  const fill = {
+    cause: function () {
+      return { text: data.cause || '' }
+    },
+    affected: function () {
+      return {
+        items: affected.map(function (item) {
+          const applied = item.applied_revision_id
+          const has = applied !== null && applied !== undefined
+          return {
+            key: 'lk-' + item.link_id,
+            text:
+              (CASE_TARGET_LABELS[item.target_kind] || item.target_kind || '目标') +
+              ' #' +
+              item.target_id,
+            sub: has ? '已应用版本 r' + applied : '未应用任何版本',
+            // 「已应用」是**有据可查**的事实（close 对 resolved 要求每条都写过它），
+            // 用颜色标出来；反之不标 —— 没应用不代表出错，只是还没走到那一步。
+            // 类名在投影层算好、模板不拼：模板里拼类名会让"类是否存在"变成运行期才知道
+            // （与本文件既有的 `statusClass` / 槽位 `cls` 同一口径）。
+            cls: has ? 'element-item element-item-done' : 'element-item'
+          }
+        })
+      }
+    },
+    proposed_action: function () {
+      return { text: data.proposed_action || '' }
+    },
+    decision: function () {
+      const rows = []
+      if (decision.note) rows.push({ key: 'note', label: '决定说明', value: decision.note })
+      if (decision.by !== null && decision.by !== undefined) {
+        rows.push({ key: 'by', label: '决定人', value: _caseUser(decision.by) })
+      }
+      if (decision.at) rows.push({ key: 'at', label: '决定时间', value: decision.at })
+      if (decision.basis_revision_id !== null && decision.basis_revision_id !== undefined) {
+        rows.push({ key: 'basis', label: '依据版本', value: 'r' + decision.basis_revision_id })
+      }
+      return { rows: rows }
+    },
+    evidence: function () {
+      return { items: evidence }
+    },
+    closure: function () {
+      const rows = []
+      if (closure.disposition) {
+        rows.push({
+          key: 'disp',
+          label: '处置方式',
+          value: CASE_DISPOSITION_LABELS[closure.disposition] || closure.disposition
+        })
+      }
+      // 结案说明放在**处置方式之后**：先说怎么处置的，再说为什么这么处置。
+      if (resolution.note) rows.push({ key: 'res', label: '结案说明', value: resolution.note })
+      if (closure.by !== null && closure.by !== undefined) {
+        rows.push({ key: 'by', label: '关闭人', value: _caseUser(closure.by) })
+      }
+      if (closure.at) rows.push({ key: 'at', label: '关闭时间', value: closure.at })
+      return { rows: rows }
+    }
+  }
+
+  const blocks = CASE_ELEMENTS.map(function (el) {
+    const extra = fill[el.key] ? fill[el.key]() : {}
+    return Object.assign(
+      {
+        key: el.key,
+        no: el.no,
+        title: el.title,
+        mode: el.mode,
+        emptyText: el.emptyText,
+        text: '',
+        rows: [],
+        items: []
+      },
+      extra
+    )
+  })
+
+  // 只取 A1 的**五个写能力**，且**排除 `can_apply_change`**（恒 false，见函数头 ①）。
+  const writeCaps = ['can_add_link', 'can_remove_link', 'can_decide', 'can_close', 'can_reopen']
+  const hasAction = writeCaps.some(function (k) {
+    return !!caps[k]
+  })
+
+  const owner = data.owner_user_id
+  // `case_id` / `assignment_id` 是接口的必填字段，正常不会缺。但缺了就把 `#undefined`
+  // 摆到界面上，是**编造了一个值**而不是报告缺失 —— 用同一口径转成「—」。
+  const caseIdText = data.case_id === null || data.case_id === undefined ? '—' : '#' + data.case_id
+  const assignmentIdText =
+    data.assignment_id === null || data.assignment_id === undefined ? '—' : '#' + data.assignment_id
+  return {
+    caseId: data.case_id,
+    assignmentId: data.assignment_id === null || data.assignment_id === undefined
+      ? ''
+      : String(data.assignment_id),
+    orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id),
+    kind: data.kind || '',
+    kindLabel: CASE_KIND_LABELS[data.kind] || data.kind || '',
+    title: data.title || '未命名案件',
+    status: data.status || '',
+    statusLabel: CASE_STATUS_LABELS[data.status] || data.status || '',
+    statusClass: CASE_STATUS_CLASS[data.status] || 'chip chip-muted',
+    // 阻断是**流程后果**，与影响类型互为印证：两个都显示，用户不必自己去推
+    blocking: !!data.blocking,
+    impactLabel: CASE_IMPACT_LABELS[data.impact_kind] || data.impact_kind || '',
+    impactClass: CASE_IMPACT_CLASS[data.impact_kind] || 'chip chip-muted',
+    severityLabel: CASE_SEVERITY_LABELS[data.severity] || data.severity || '',
+    sourceLabel: CASE_SOURCE_LABELS[data.source] || data.source || '',
+    revisionNo: data.revision_no,
+    fields: [
+      { key: 'no', label: '案件号', value: caseIdText },
+      { key: 'as', label: '所属委托', value: assignmentIdText },
+      { key: 'imp', label: '影响类型', value: CASE_IMPACT_LABELS[data.impact_kind] || data.impact_kind || '' },
+      { key: 'sev', label: '严重度', value: CASE_SEVERITY_LABELS[data.severity] || data.severity || '' },
+      { key: 'src', label: '来源', value: CASE_SOURCE_LABELS[data.source] || data.source || '' },
+      { key: 'own', label: '责任人', value: owner === null || owner === undefined ? '未指定' : _caseUser(owner) },
+      { key: 'due', label: '截止时间', value: data.due_at || '未设置' },
+      { key: 'upd', label: '最后更新', value: _caseTime(data.updated_at) },
+      { key: 'rev', label: '数据版本', value: 'r' + (data.revision_no || 1) }
+    ],
+    blocks: blocks,
+    events: events.map(function (ev) {
+      // 逐项拼接、缺项不留悬空分隔符：`… + ' · ' + …` 在缺值时会渲染出开头的
+      // 「 · 操作人 …」，看起来像排版坏了 —— 而这页最容易缺的恰恰是时间与操作人。
+      const parts = []
+      const time = _caseTime(ev.created_at)
+      if (time) parts.push(time)
+      const actor = _caseUser(ev.actor_user_id)
+      if (actor) parts.push('操作人 ' + actor)
+      const move = _caseMove(ev)
+      if (move) parts.push(move)
+      return {
+        seq: ev.seq,
+        title: CASE_EVENT_LABELS[ev.event_kind] || ev.event_kind || '事件',
+        meta: parts.join(' · '),
+        note: ev.note || '',
+        evidence: ev.evidence_ref || ''
+      }
+    }),
+    capabilities: {
+      can_add_link: !!caps.can_add_link,
+      can_remove_link: !!caps.can_remove_link,
+      can_decide: !!caps.can_decide,
+      can_close: !!caps.can_close,
+      can_reopen: !!caps.can_reopen,
+      can_apply_change: !!caps.can_apply_change
+    },
+    actionHint: hasAction
+      ? '你有处置这宗案件的权限'
+      : '按当前状态与你的授权，这里没有可执行的处置动作'
+  }
+}
+
+/**
+ * 拉取案件详情。
+ *
+ * 路径参数用 `case_id` 的值、走 `{exception_id}` 的路径（DR-0014 §7）。
+ * 可见性由服务端判定：非参与方 **404**，且与「开关关闭」同码 —— 服务端刻意不区分
+ * 「不存在」与「无权知晓」，界面因此也不能替它下结论（见 `case.js` 的 404 说明）。
+ */
+function fetchCase(caseId) {
+  return request({ url: BASE + '/exceptions/' + caseId, method: 'GET' })
+}
+
 module.exports = {
   BASE,
   ARTIFACT_FIELD_KINDS,
   ARTIFACT_FIELD_LABELS,
   ARTIFACT_STATUS_LABELS,
+  CASE_DISPOSITION_LABELS,
+  CASE_ELEMENTS,
+  CASE_EVENT_LABELS,
+  CASE_IMPACT_CLASS,
+  CASE_IMPACT_LABELS,
+  CASE_KIND_LABELS,
+  CASE_SEVERITY_LABELS,
+  CASE_SOURCE_LABELS,
+  CASE_STATUS_CLASS,
+  CASE_STATUS_LABELS,
+  CASE_TARGET_LABELS,
   ISSUE_KIND_LABELS,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
@@ -1117,6 +1491,7 @@ module.exports = {
   createTask,
   decorateAssignment,
   decorateArtifact,
+  decorateCase,
   decorateDetail,
   decorateList,
   decorateOrg,
@@ -1128,6 +1503,7 @@ module.exports = {
   fetchArtifact,
   fetchArtifactTypes,
   fetchAssignment,
+  fetchCase,
   fetchMyOrgs,
   fetchQueue,
   fetchRevisions,

@@ -1,0 +1,188 @@
+/* 委托发货 · 案件详情（UI-08 / ENT-030 切片四之四）—— 只写本页特有排版，其余复用 app.wxss */
+
+.head-bg {
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  padding-bottom: 24rpx;
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  height: 88rpx;
+  padding: 0 24rpx;
+}
+
+.nav-back {
+  width: 64rpx;
+  font-size: 48rpx;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.nav-spacer {
+  width: 64rpx;
+}
+
+.head-sub {
+  padding: 0 28rpx;
+  font-size: 25rpx;
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── 案件头卡 ─────────────────────────────────────────────────────────── */
+
+.case-top {
+  padding-bottom: 20rpx;
+  border-bottom: 1rpx solid #EEF1F6;
+}
+
+.case-title {
+  flex: 1;
+  margin-right: 16rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.case-chips {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
+
+/* 阻断后果单独一行：它是"相关任务现在完成不了"这个**流程事实**，
+   混在徽标里会被当成又一个标签（徽标说"是什么"，这句说"会怎样"）。 */
+.case-blocking {
+  margin-top: 16rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 12rpx;
+  background: rgba(250, 82, 82, .08);
+  font-size: 24rpx;
+  color: #C92A2A;
+  line-height: 1.6;
+}
+
+/* 头卡与要素卡里的字段行：`.card` 已有 28rpx 内边距，
+   沿用 app.wxss 的 min-height/padding 会在卡内再缩进一层（同 detail.wxss 的口径）。 */
+.field-row {
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #F4F6FB;
+}
+
+.field-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.field-label {
+  font-size: 25rpx;
+  color: #98A6B8;
+}
+
+.field-value {
+  max-width: 420rpx;
+  font-size: 26rpx;
+  color: #3D4C63;
+  text-align: right;
+}
+
+/* ── 六要素 ───────────────────────────────────────────────────────────── */
+
+.element-card {
+  margin-top: 20rpx;
+}
+
+.element-head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding-bottom: 16rpx;
+  border-bottom: 1rpx solid #EEF1F6;
+}
+
+/* 序号让"六要素齐不齐"在一屏里看得出来（不是装饰：缺一块时序号会跳号） */
+.element-no {
+  font-size: 22rpx;
+  color: #FFFFFF;
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  border-radius: 8rpx;
+  padding: 2rpx 12rpx;
+}
+
+.element-title {
+  flex: 1;
+  font-size: 29rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.element-count {
+  font-size: 23rpx;
+  color: #98A6B8;
+}
+
+.element-text {
+  padding-top: 16rpx;
+  font-size: 27rpx;
+  color: #3D4C63;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+/* 要素为空的说法：与有值内容在视觉上分开，且六句各不相同（是"还没到那一步"，
+   不是空白、也不是"暂无数据"） */
+.element-empty {
+  padding-top: 16rpx;
+  font-size: 25rpx;
+  color: #B4BECC;
+  line-height: 1.6;
+}
+
+.element-item {
+  padding-top: 16rpx;
+}
+
+.element-item-text {
+  font-size: 27rpx;
+  color: #3D4C63;
+  word-break: break-all;
+}
+
+.element-item-sub {
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  color: #98A6B8;
+}
+
+/* 受影响项里**已写入应用版本**的那条：有据可查的事实才着色 */
+.element-item-done .element-item-sub {
+  color: #12B886;
+}
+
+/* ── 处置能力提示 ─────────────────────────────────────────────────────── */
+
+.case-note {
+  margin-top: 20rpx;
+  font-size: 24rpx;
+  color: #6B7A8C;
+  line-height: 1.6;
+}
+
+/* ---- 本页 hover 反馈 ----
+   `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
+   漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */
+.hover-dim {
+  opacity: .6;
+}

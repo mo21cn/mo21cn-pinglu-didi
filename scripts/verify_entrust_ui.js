@@ -233,11 +233,12 @@ const appClasses = cssClasses(read(path.join(MINI, 'app.wxss')))
     })
 })
 
-/** 本切片新增/改动的三个页面：不允许任何未定义类名 */
+/** 本切片新增/改动的页面：不允许任何未定义类名 */
 const ENTRUST_PAGES = [
   'pages/entrust/workbench/workbench',
   'pages/entrust/detail/detail',
-  'pages/entrust/artifact/artifact'
+  'pages/entrust/artifact/artifact',
+  'pages/entrust/case/case'
 ]
 
 /**
@@ -253,6 +254,7 @@ const PAGE_CSS_CHECKS = [
   { path: 'pages/entrust/workbench/workbench', knownEmpty: [] },
   { path: 'pages/entrust/detail/detail', knownEmpty: [] },
   { path: 'pages/entrust/artifact/artifact', knownEmpty: [] },
+  { path: 'pages/entrust/case/case', knownEmpty: [] },
   { path: 'pages/mine/mine', knownEmpty: ['nav', 'bell-icon', 'role-chip-label'] }
 ]
 
@@ -291,6 +293,12 @@ const artWxml = read(path.join(MINI, 'pages/entrust/artifact/artifact.wxml'))
   check(`[模板] 成果页有 ${st} 分支`, new RegExp("view === '" + st + "'").test(artWxml))
 })
 check('[模板] 成果页有 ready（兜底）分支', /wx:else/.test(artWxml))
+
+const caseWxmlTop = read(path.join(MINI, 'pages/entrust/case/case.wxml'))
+;['loading', 'expired', 'denied', 'error'].forEach(function (st) {
+  check(`[模板] 案件页有 ${st} 分支`, new RegExp("view === '" + st + "'").test(caseWxmlTop))
+})
+check('[模板] 案件页有 ready（兜底）分支', /wx:else/.test(caseWxmlTop))
 
 // ─────────────────────────────────────────────────────────────
 // 7. 契约接线：谁都没权限"自己判断一遍"
@@ -1416,6 +1424,357 @@ check(
 check(
   '[模板] 必填 / 内部 / 未声明三种标记彼此可分（各带独立文字与样式）',
   /必填/.test(artWxml) && /内部/.test(artWxml) && /未声明|只读/.test(artWxml)
+)
+
+// ─────────────────────────────────────────────────────────────
+// 10. 案件详情（UI-08 只读片 / ENT-030 切片四之四 · DR-0014）
+// ─────────────────────────────────────────────────────────────
+// 本片最容易静默失效的三件事，逐条钉住：
+//   a. 案件取值域与后端 `exceptions.py` 脱节 —— 那一行只会显示原始英文值，
+//      而界面看起来完全正常（和"槽位字段名对不上"是同一类失效）；
+//   b. 六要素少一块 —— 页面看起来只是"这一块没数据"，没人会报这种 bug；
+//   c. 拿能力位替用户下结论 —— 六个布尔值**分不出**「没授权」与「当前没有可执行
+//      动作」，而说错这一句会让用户去找一个并不存在的问题。
+const casePageJs = read(path.join(MINI, 'pages/entrust/case/case.js'))
+const casePageWxml = read(path.join(MINI, 'pages/entrust/case/case.wxml'))
+const excPy = read(path.join(REPO, 'backend/app/modules/entrust/exceptions.py'))
+
+/**
+ * 取 `PREFIX_X[: Final] = "value"` 的取值。
+ *
+ * 比第 9 节的 `pyConstKeys` 宽一点：案件常量带 PEP-484 标注（`X: Final = "…"`），
+ * 且取值里带连字符（`review-required` / `execution-blocking`），
+ * 用原函数会**一个都匹配不到** —— 那种情况下断言会拿空数组与前端比对，
+ * 于是"两侧相等"在两侧都空时也成立。所以下面额外要求后端侧非空。
+ */
+function pyValueConsts(src, prefix) {
+  const out = []
+  const re = new RegExp('^' + prefix + '[A-Z0-9_]*\\s*(?::[^=\\n]+)?=\\s*"([a-z0-9_-]+)"', 'gm')
+  let m = re.exec(src)
+  while (m !== null) {
+    if (out.indexOf(m[1]) === -1) out.push(m[1])
+    m = re.exec(src)
+  }
+  return out.sort()
+}
+
+/** 取 `NAME [: Final] = frozenset({ "a", "b" })` 里的全部字面量 */
+function pyFrozenSet(src, name) {
+  const re = new RegExp('^' + name + '\\s*(?::[^=\\n]+)?=\\s*frozenset\\(([\\s\\S]*?)\\)', 'm')
+  const m = re.exec(src)
+  if (!m) return []
+  return (m[1].match(/"([a-z0-9_-]+)"/g) || [])
+    .map(function (s) {
+      return s.slice(1, -1)
+    })
+    .sort()
+}
+
+// `KINDS` / `IMPACT_KINDS` / `STATUSES` 在后端是引用常量的 frozenset，取不到字面量，
+// 故一律按**常量名前缀**取；`SEVERITIES` / `SOURCES` 是裸字面量 frozenset，只能按集合取。
+const CASE_DOMAINS = [
+  { note: '案件类型', front: 'CASE_KIND_LABELS', back: pyValueConsts(excPy, 'KIND_') },
+  { note: '影响类型', front: 'CASE_IMPACT_LABELS', back: pyValueConsts(excPy, 'IMPACT_') },
+  { note: '案件状态', front: 'CASE_STATUS_LABELS', back: pyValueConsts(excPy, 'STATUS_') },
+  { note: '严重度', front: 'CASE_SEVERITY_LABELS', back: pyFrozenSet(excPy, 'SEVERITIES') },
+  { note: '案件来源', front: 'CASE_SOURCE_LABELS', back: pyFrozenSet(excPy, 'SOURCES') },
+  { note: '受影响项类型', front: 'CASE_TARGET_LABELS', back: pyValueConsts(excPy, 'TARGET_') },
+  { note: '处置方式', front: 'CASE_DISPOSITION_LABELS', back: pyValueConsts(excPy, 'DISPOSITION_') },
+  { note: '事件类型', front: 'CASE_EVENT_LABELS', back: pyValueConsts(excPy, 'EVENT_') }
+]
+
+CASE_DOMAINS.forEach(function (d) {
+  const front = Object.keys(E[d.front] || {}).sort()
+  check(
+    `[案件] ${d.note}标签与后端取值域逐字相等（少一个键那一行就只剩原始英文值）`,
+    d.back.length > 0 && front.join(',') === d.back.join(','),
+    `${d.front} 前端 [${front.join('/')}] / 后端 [${d.back.join('/')}]`
+  )
+})
+
+// 徽标类必须真实存在：类名在契约层算好、模板不拼 —— 拼错只表现为"标签没颜色"，
+// 静态扫描抓不到（与第 9 节成果状态同一口径）。
+;[E.CASE_STATUS_LABELS, E.CASE_IMPACT_LABELS].forEach(function (labels, i) {
+  const classes = i === 0 ? E.CASE_STATUS_CLASS : E.CASE_IMPACT_CLASS
+  Object.keys(labels).forEach(function (key) {
+    const cls = classes[key]
+    check(
+      `[案件] ${i === 0 ? '状态' : '影响类型'} ${key} 有配好的徽标类`,
+      typeof cls === 'string' && cls.length > 0
+    )
+    ;(cls || '').split(/\s+/).forEach(function (c) {
+      if (c) check(`[案件] 徽标类 .${c} 存在于 app.wxss`, appClasses.has(c))
+    })
+  })
+})
+
+// ── 六要素：一份声明、一处产出
+check(
+  '[案件] 六要素的声明与产出逐项相等（少一块就是案件详情缺内容）',
+  E.CASE_ELEMENTS.length === 6 &&
+    E.decorateCase({})
+      .blocks.map(function (b) {
+        return b.key + ':' + b.mode
+      })
+      .join(',') ===
+      E.CASE_ELEMENTS.map(function (el) {
+        return el.key + ':' + el.mode
+      }).join(','),
+  '产出 ' +
+    E.decorateCase({})
+      .blocks.map(function (b) {
+        return b.key
+      })
+      .join('/')
+)
+
+const emptyTexts = E.CASE_ELEMENTS.map(function (el) {
+  return el.emptyText
+})
+check(
+  '[案件] 六要素的"为空时怎么说"互不相同（禁止一律「暂无数据」—— 那等于没说）',
+  new Set(emptyTexts).size === emptyTexts.length && emptyTexts.every(function (t) {
+    return t && t.length > 4
+  }),
+  JSON.stringify(emptyTexts)
+)
+
+// ── 投影行为：真实载荷驱动
+const CASE_FULL = {
+  case: {
+    case_id: 9,
+    assignment_id: 3,
+    org_id: 1,
+    kind: 'change_request',
+    title: '换船',
+    cause: '原船主机故障',
+    severity: 'high',
+    impact_kind: 'execution-blocking',
+    status: 'closed',
+    owner_user_id: 7,
+    raised_by_user_id: 5,
+    source: 'customer',
+    raised_at: '2026-09-01 10:00',
+    due_at: '2026-09-05 18:00',
+    proposed_action: '换用备选船舶',
+    decision: { note: '同意换船', by: 2, at: '2026-09-02 09:00', basis_revision_id: 4 },
+    resolution: { note: '已完成换船' },
+    closure: { disposition: 'resolved', by: 2, at: '2026-09-03 12:00' },
+    blocking: false,
+    affected: [
+      { link_id: 11, target_kind: 'task', target_id: 21, applied_revision_id: 4 },
+      { link_id: 12, target_kind: 'artifact', target_id: 8, applied_revision_id: null }
+    ],
+    revision_no: 5,
+    created_at: '2026-09-01 10:00',
+    updated_at: '2026-09-03 12:00'
+  },
+  capabilities: {
+    can_add_link: false,
+    can_remove_link: false,
+    can_decide: false,
+    can_close: false,
+    can_reopen: true,
+    can_apply_change: false
+  },
+  events: [
+    {
+      seq: 1,
+      event_kind: 'created',
+      from_status: null,
+      to_status: 'open',
+      actor_user_id: 5,
+      note: null,
+      evidence_ref: null,
+      basis_revision_id: null,
+      payload: null,
+      created_at: '2026-09-01 10:00'
+    },
+    {
+      seq: 2,
+      event_kind: 'closed',
+      from_status: 'approved',
+      to_status: 'closed',
+      actor_user_id: 2,
+      note: '已完成换船',
+      evidence_ref: 'evid://signed-handover',
+      basis_revision_id: null,
+      payload: null,
+      created_at: '2026-09-03 12:00'
+    }
+  ]
+}
+
+function caseBlock(detail, key) {
+  return (detail.blocks || []).filter(function (b) {
+    return b.key === key
+  })[0]
+}
+
+const caseFull = E.decorateCase(CASE_FULL)
+check('[案件] ① 原因取 `cause`', caseBlock(caseFull, 'cause').text === '原船主机故障')
+check('[案件] ③ 拟解决方案取 `proposed_action`', caseBlock(caseFull, 'proposed_action').text === '换用备选船舶')
+check(
+  '[案件] ② 受影响记录逐条给出目标与"是否应用过版本"',
+  caseBlock(caseFull, 'affected').items.length === 2 &&
+    caseBlock(caseFull, 'affected').items[0].sub === '已应用版本 r4' &&
+    caseBlock(caseFull, 'affected').items[1].sub === '未应用任何版本'
+)
+check(
+  '[案件] ② 受影响项的目标类型译成中文（不把 task/artifact 原样交给界面）',
+  caseBlock(caseFull, 'affected').items[0].text === '任务 #21' &&
+    caseBlock(caseFull, 'affected').items[1].text === '成果 #8'
+)
+check('[案件] ④ 决定与审批给出说明/决定人/时间/依据版本', caseBlock(caseFull, 'decision').rows.length === 4)
+check(
+  '[案件] ④ 依据版本以 rN 呈现（与工作台的版本口径一致）',
+  caseBlock(caseFull, 'decision').rows[3].value === 'r4'
+)
+check(
+  '[案件] ⑤ 执行证据只取事件链的 evidence_ref（"应用过哪个版本"是另一件事）',
+  caseBlock(caseFull, 'evidence').items.length === 1 &&
+    caseBlock(caseFull, 'evidence').items[0].text === 'evid://signed-handover'
+)
+check(
+  '[案件] ⑥ 结案给出处置方式的中文说法（不显示 resolved 这类原始值）',
+  caseBlock(caseFull, 'closure').rows[0].value === '已解决'
+)
+check(
+  '[案件] 处理记录逐条带时间 / 操作人 / 状态转移（缺项**不留悬空分隔符**）',
+  caseFull.events[1].meta === '2026-09-03 12:00 · 操作人 用户 #2 · 已批准 → 已关闭' &&
+    E.decorateCase({
+      case: { case_id: 1 },
+      events: [{ seq: 1, event_kind: 'created' }]
+    }).events[0].meta === '',
+  JSON.stringify(caseFull.events[1].meta)
+)
+check(
+  '[案件] 缺案件号 / 委托号时给「—」而不是 `#undefined`（缺值不编造成一个值）',
+  E.decorateCase({ case: {} })
+    .fields.filter(function (f) {
+      return f.key === 'no' || f.key === 'as'
+    })
+    .every(function (f) {
+      return f.value === '—'
+    })
+)
+const caseUnknown = E.decorateCase({
+  case: { case_id: 1, assignment_id: 1, status: 'brand_new', kind: 'zzz', severity: 'zzz' }
+})
+check(
+  '[案件] 未知取值保持未知（原样显示，不臆造成一个具体业务结论）',
+  caseUnknown.statusLabel === 'brand_new' &&
+    caseUnknown.kindLabel === 'zzz' &&
+    caseUnknown.severityLabel === 'zzz' &&
+    caseUnknown.statusClass === 'chip chip-muted',
+  `实际 ${caseUnknown.statusLabel} / ${caseUnknown.kindLabel} / ${caseUnknown.statusClass}`
+)
+
+// 空载荷：六要素都要**说清"还没到那一步"**，而不是留白
+const caseEmpty = E.decorateCase({ case: { case_id: 1, assignment_id: 1 } })
+check(
+  '[案件] 空载荷下六个要素都给出各自的"为空"说法（不是留白、也不是统一一句）',
+  caseEmpty.blocks.every(function (b) {
+    return b.emptyText && b.text === '' && b.rows.length === 0 && b.items.length === 0
+  })
+)
+check(
+  '[案件] 未指定责任人与未设置截止时间如实说"未指定/未设置"（不显示空）',
+  caseEmpty.fields.filter(function (f) {
+    return f.key === 'own'
+  })[0].value === '未指定' &&
+    caseEmpty.fields.filter(function (f) {
+      return f.key === 'due'
+    })[0].value === '未设置'
+)
+
+// 能力位：**不说原因**
+const capsAllFalse = E.decorateCase({
+  case: { case_id: 1, assignment_id: 1 },
+  capabilities: {
+    can_add_link: false,
+    can_remove_link: false,
+    can_decide: false,
+    can_close: false,
+    can_reopen: false,
+    can_apply_change: false
+  }
+})
+check(
+  '[案件] 能力位全 false 时**不**断言"没有权限"（分不出"没授权"与"当前没有可执行动作"）',
+  capsAllFalse.actionHint.indexOf('没有权限') === -1 &&
+    capsAllFalse.actionHint.indexOf('无法处置') === -1,
+  '实际：' + capsAllFalse.actionHint
+)
+check(
+  '[案件] 有任一 A1 写能力时如实说"你有权限"（不是一句笼统的"按钮将出现"）',
+  E.decorateCase({
+    case: { case_id: 1, assignment_id: 1 },
+    capabilities: { can_decide: true }
+  }).actionHint === '你有处置这宗案件的权限'
+)
+check(
+  '[案件] `can_apply_change`（A1 恒 false、属 A2）不参与任何界面结论 —— ' +
+    '据它说"你没权限"就是把「功能还没做」说成「你不被允许」',
+  E.decorateCase({
+    case: { case_id: 1, assignment_id: 1 },
+    capabilities: { can_apply_change: true }
+  }).actionHint === capsAllFalse.actionHint
+)
+
+// ── 样式：投影层算出的类必须真的有定义（模板里 `class="{{it.cls}}"` 静态扫不到）
+const caseClasses = new Set([
+  ...appClasses,
+  ...cssClasses(read(path.join(MINI, 'pages/entrust/case/case.wxss')))
+])
+caseFull.blocks.forEach(function (b) {
+  ;(b.items || []).forEach(function (it) {
+    ;(it.cls || '').split(/\s+/).forEach(function (c) {
+      if (c) check(`[样式] 案件页投影产出的类 .${c} 有定义`, caseClasses.has(c))
+    })
+  })
+})
+
+// ── 页面接线
+check('[接线] 案件页用 fetchCase 取详情（不在页面里拼 URL）', /fetchCase\(/.test(casePageJs))
+check(
+  '[接线] 案件页用 decorateCase 投影（六要素顺序与空态说法只有一份）',
+  /decorateCase\(/.test(casePageJs)
+)
+check('[接线] 案件页入口守卫（深链/冷启动在本页自检）', /R\.guardEntry\(/.test(casePageJs))
+check(
+  '[接线] 案件页跳转统一走 go()（MIGRATED_PAGES 名单内页面不得裸调 wx 导航）',
+  /R\.go\(/.test(casePageJs)
+)
+check(
+  '[接线] 取详情走 `/exceptions/{id}`，参数名 `case_id` 与路径参数名不同名同值（DR-0014 §7）',
+  /BASE \+ '\/exceptions\/'/.test(entrustJs) && /case_id/.test(casePageJs)
+)
+check(
+  '[接线] 严重度只作为文本出现，**没有**配套的警示类名（着色会把"按严重度决定流程"请回来）',
+  Object.keys(caseFull).indexOf('severityClass') === -1
+)
+
+check(
+  '[模板] 案件页按 mode 三支渲染（text / rows / list），不按要素分叉',
+  /item\.mode === 'text'/.test(casePageWxml) && /item\.mode === 'rows'/.test(casePageWxml)
+)
+check(
+  '[模板] 案件页渲染顺序来自投影层（页面不自建六要素清单、只遍历 blocks）',
+  // 判据是"页面自己没有那份清单"，不是"页面源码里不出现这个词" ——
+  // 注释里说明"顺序来自 CASE_ELEMENTS"是**应该**出现的（初版断言正是被它误伤）。
+  !/CASE_ELEMENTS\s*=\s*\[/.test(casePageJs) &&
+    !/blocks\s*=\s*\[/.test(casePageJs) &&
+    /wx:for="\{\{blocks\}\}"/.test(casePageWxml)
+)
+check('[模板] 空要素渲染 emptyText（不是留白）', /item\.emptyText/.test(casePageWxml))
+check(
+  '[模板] 处理记录（append-only）渲染在页面上 —— 只看当前状态会以为这宗案件从没被关过',
+  /wx:for="\{\{events\}\}"/.test(casePageWxml)
+)
+check(
+  '[模板] 阻断后果单独成行（徽标说"是什么"，这句说"会怎样"）',
+  /detail\.blocking/.test(casePageWxml)
 )
 
 // ---- 输出 ----
