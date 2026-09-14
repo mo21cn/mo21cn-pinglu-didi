@@ -1793,8 +1793,8 @@ check(
 )
 check('[案件] ④ 决定与审批给出说明/决定人/时间/依据版本', caseBlock(caseFull, 'decision').rows.length === 4)
 check(
-  '[案件] ④ 依据版本以 rN 呈现（与工作台的版本口径一致）',
-  caseBlock(caseFull, 'decision').rows[3].value === 'r4'
+  '[案件] ④ 依据版本显示为**成果版本的 id**，不得写成 rN（那是另一个号）',
+  caseBlock(caseFull, 'decision').rows[3].value === '版本 id 4'
 )
 check(
   '[案件] ⑤ 执行证据只取事件链的 evidence_ref（"应用过哪个版本"是另一件事）',

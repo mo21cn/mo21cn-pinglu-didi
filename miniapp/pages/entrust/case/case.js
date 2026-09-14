@@ -390,7 +390,9 @@ Page({
     // `approved` 必须指向它所依据的**精确**成果版本（§3.1.1 服务端强制）。
     // 在页内就说清，别让用户填完提交后拿一个 400。
     if (to === 'approved' && !/^\d+$/.test(String(f.basis || '').trim())) {
-      this.setData({ decideHint: '批准必须给出依据版本号（数字，例如 3）' })
+      this.setData({
+        decideHint: '批准必须给出依据成果版本 id（数字；成果页「版本历史」每条都标着「版本 id」）'
+      })
       return
     }
     const self = this
