@@ -1,0 +1,169 @@
+/* 委托发货 · 专业会话屏（DR-0015 / ENT-033）
+ *
+ * 类**全部在本页定义**，不依赖全局样式兜底 —— `verify_entrust_ui.js` 会逐页核对
+ * 模板里出现的类名是否有定义，`hover-dim` 这类 `hover-class` 漏定义只会静默无反馈。
+ */
+
+.page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding-bottom: 40rpx;
+  background: #f5f6f8;
+}
+
+.nav {
+  background: #ffffff;
+  border-bottom: 1rpx solid #ececf0;
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  height: 88rpx;
+  padding: 0 24rpx;
+}
+
+.nav-back {
+  width: 120rpx;
+  font-size: 28rpx;
+  color: #576b95;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.nav-slot {
+  width: 120rpx;
+}
+
+.session-head {
+  padding: 28rpx 32rpx 8rpx;
+}
+
+.session-title {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.session-sub {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #8a8a8a;
+}
+
+/* ── 五态（错误优先于空，与其它委托页同口径） ───────────────────── */
+
+.state {
+  padding: 80rpx 48rpx;
+  text-align: center;
+}
+
+.state-title {
+  display: block;
+  font-size: 30rpx;
+  color: #333333;
+}
+
+.state-hint {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: #8a8a8a;
+}
+
+/* ── 成果卡 ──────────────────────────────────────────────────────── */
+
+.section {
+  padding: 16rpx 32rpx 0;
+}
+
+.section-title {
+  display: block;
+  margin: 12rpx 0 16rpx;
+  font-size: 26rpx;
+  color: #8a8a8a;
+}
+
+.card {
+  margin-bottom: 20rpx;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  background: #ffffff;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);
+}
+
+.hover-dim {
+  background: #f0f1f3;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.chip {
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+  background: #eef2ff;
+  font-size: 22rpx;
+  color: #3b5bdb;
+}
+
+.card-sub {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  color: #8a8a8a;
+}
+
+.card-rows {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #f0f0f3;
+}
+
+.card-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+
+.card-row-label {
+  flex: 0 0 200rpx;
+  font-size: 26rpx;
+  color: #8a8a8a;
+}
+
+.card-row-value {
+  flex: 1;
+  text-align: right;
+  font-size: 26rpx;
+  color: #333333;
+  word-break: break-all;
+}
+
+.card-actions {
+  margin-top: 14rpx;
+  text-align: right;
+}
+
+.link {
+  font-size: 26rpx;
+  color: #576b95;
+}

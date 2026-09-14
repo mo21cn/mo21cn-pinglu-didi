@@ -179,10 +179,16 @@ const NAV_EDGES = [
     reason: '从组合工作台（UI-04）的异常 / 变更队列进入案件详情'
   },
   {
-    from: 'pages/assistant/assistant',
+    // DR-0015 §4.3：本边原指向 `pages/assistant/assistant`（公共域的会话壳），
+    // 现**改指向**委托支线自己的会话屏 `pages/entrust/session/session` ——
+    // 「chat 可进案件」（PRD 第 155 行）由委托支线的会话页承担，而不是把
+    // 两个业务域塞进一个壳（R4「界面齐了但业务空转」的入口）。
+    // ⚠️ **仍保留 `pending`**：本页尚未产生这条调用（会话里的案件引用卡未建），
+    //    改指向**不等于**接线 —— pending 的判据是代码证据，不是决策已批准。
+    from: 'pages/entrust/session/session',
     to: 'pages/entrust/case/case',
     strategy: 'push',
-    pending: '会话侧的案件引用尚未接入（PRD 第 155 行要求可从 chat 进入）',
+    pending: '会话里的案件引用卡尚未接入（PRD 第 155 行要求可从 chat 进入）',
     reason: '会话里引用的案件直接打开详情；进入后返回走 navigateBack / reset，不声明回边'
   },
 
@@ -219,20 +225,33 @@ const NAV_EDGES = [
   //    这里 push 一次进会话，从会话回工作台走 reuse（复用栈中已有的工作台），
   //    于是 push 图仍然无环，双向切换合法。
   {
+    // DR-0015 §4.3：改指向委托支线自己的会话屏。**仍保留 `pending`** ——
+    // 工作台的「打开会话」入口尚未接线（本轮不改工作台）。
     from: 'pages/entrust/workbench/workbench',
-    to: 'pages/assistant/assistant',
+    to: 'pages/entrust/session/session',
     strategy: 'push',
-    pending: 'ENT-020（UI-05）接入「打开会话」入口后产生真实调用；当前无代码证据',
+    pending: '工作台「打开会话」入口尚未接入；当前无代码证据',
     reason: '工作台内发起会话'
   },
   {
-    from: 'pages/assistant/assistant',
+    // DR-0015 §4.3：改指向。⚠️ **`pending` 已移除** —— `session.js` 的 `onBack()`
+    // 就是这条边的真实调用（`R.go('/pages/entrust/workbench/workbench', {from: SELF})`），
+    // 代码证据成立；有证据还留着 pending，verify_routes.js 会报"过期 pending"。
+    from: 'pages/entrust/session/session',
     to: 'pages/entrust/workbench/workbench',
     strategy: 'reuse',
-    pending: 'ENT-020（UI-05）接入后由 go() 的复用分支命中；当前无代码证据',
     reason:
-      '从工作台进入会话后返回工作台，应复用栈里那一个工作台（同一组织上下文），' +
+      '从会话返回工作台，应复用栈里那一个工作台（同一组织上下文），' +
       '而不是再压一层——这正是 HO 指出的「双向切换不应被判为非法循环」'
+  },
+  {
+    // DR-0015 §4.2「link to exact workbench artifact」（PRD 第 150 行）：
+    // 会话里的成果卡落到**精确**那一份成果。已接线（`session.js` 的
+    // `onOpenArtifact`），故**不**标 pending。
+    from: 'pages/entrust/session/session',
+    to: 'pages/entrust/artifact/artifact',
+    strategy: 'push',
+    reason: '点成果卡进入该成果的详情 / 编辑（卡上带的是精确 artifact_id 与版本）'
   }
 ]
 
@@ -394,6 +413,20 @@ const ROUTES = {
     //    两个页面，白压一层栈 —— 这正是 keyContext 用在 workbench 上的反面。
     note: '案件详情（异常 / 变更；从委托工作台异常槽、UI-04 队列或会话进入）'
   },
+  'pages/entrust/session/session': {
+    kind: 'detail', deepLink: 'require-params', domain: 'entrust',
+    // `assignment_id` 必需：会话屏的全部内容（成果卡）都挂在一张委托下，
+    // 而"读当前那张委托"是一种**会漂移**的推断（与 `case_id` / `artifact_id` 同理）。
+    // `artifact_id` 可选：带它只是把某一份成果**高亮/定位**，不是页面存在的前提。
+    paramSchema: {
+      assignment_id: { type: 'id', required: true },
+      artifact_id: { type: 'id', required: false, note: '外部深链定位到某一份成果' }
+    },
+    // ⚠️ 与案件页同理，**不**声明 `keyContext: ['org']`：会话所属组织由
+    //    `assignment_id` 唯一决定，算进复用键会让同一会话在不同组织上下文下
+    //    被当成两个页面，白压一层栈。
+    note: '专业会话屏（UI-03 的成果卡一半；与工作台/成果页同源同版本，DR-0015）'
+  },
   'pages/entrust/case-create/case-create': {
     kind: 'detail', deepLink: 'require-params', domain: 'entrust',
     // `assignment_id` 必需：登记案件必须先知道登记到**哪张委托**上 ——
@@ -445,7 +478,10 @@ const MIGRATED_PAGES = [
   // ENT-030 切片四之六：登记案件页。它是**带未保存状态的表单页**，
   // 正是"未保存编辑"那条策略（`hasUnsaved`）唯一真正起作用的地方 ——
   // 脱离 go() 直接 navigateTo 会让这条策略变成只写在注释里的声明
-  'pages/entrust/case-create/case-create'
+  'pages/entrust/case-create/case-create',
+  // DR-0015 / ENT-033：会话屏（UI-03 的成果卡一半）从落地起接入 ——
+  // 它是**被 push 进入**的三级页、还会跳成果页，正是最容易绕过页面栈预算的一类
+  'pages/entrust/session/session'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */

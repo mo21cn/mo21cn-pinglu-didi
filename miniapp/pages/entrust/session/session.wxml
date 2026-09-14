@@ -1,0 +1,81 @@
+<!--
+  委托发货 · 专业会话屏（UI-03 的成果卡一半 / DR-0015 / ENT-033）
+
+  本页只闭合 AC-05 的「聊天侧」：**成果卡**。它必须与工作台、成果页
+  **同源同版本** —— 卡上的 `artifact_id` / `revision_no` 读的是同一份投影
+  （`utils/entrust.js` 的 `decorateArtifact`），本页**不复写**任何字段名映射。
+
+  不做 `running/failed jobs` 与 `manual takeover`：二者依赖尚不存在的 Agent 执行器，
+  在该执行器落地前建界面，等于建一个永远显示不出来的空壳（DR-0015 §4.2）。
+
+  编译禁形：条件与循环**分两层**，绝不把 `wx:for` 写到带 `wx:if` 的元素上
+  （`wx:else` 会绑不到 `wx:if` ⇒ 整页编译失败，见 verify_wxml_directives.js）。
+-->
+<view class="page">
+  <view class="nav" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack">返回</view>
+      <view class="nav-title">专业会话</view>
+      <view class="nav-slot"></view>
+    </view>
+  </view>
+
+  <view class="session-head">
+    <text class="session-title">委托 #{{assignmentId}}</text>
+    <text class="session-sub">会话中的成果引用与工作台同源同版本</text>
+  </view>
+
+  <view wx:if="{{view === 'loading'}}" class="state">
+    <view class="state-title">{{viewTitle}}</view>
+    <view class="state-hint">{{viewHint}}</view>
+  </view>
+  <view wx:elif="{{view === 'expired'}}" class="state">
+    <view class="state-title">{{viewTitle}}</view>
+    <view class="state-hint">{{viewHint}}</view>
+  </view>
+  <view wx:elif="{{view === 'denied'}}" class="state">
+    <view class="state-title">{{viewTitle}}</view>
+    <view class="state-hint">{{viewHint}}</view>
+  </view>
+  <view wx:elif="{{view === 'error'}}" class="state">
+    <view class="state-title">{{viewTitle}}</view>
+    <view class="state-hint">{{viewHint}}</view>
+  </view>
+  <view wx:elif="{{view === 'empty'}}" class="state">
+    <view class="state-title">{{viewTitle}}</view>
+    <view class="state-hint">{{viewHint}}</view>
+  </view>
+  <view wx:else>
+    <view class="section">
+      <view class="section-title">本单成果（{{cards.length}}）</view>
+
+      <block wx:for="{{cards}}" wx:key="artifactId">
+        <view
+          class="card"
+          data-artifact_id="{{item.artifactId}}"
+          hover-class="hover-dim"
+          bindtap="onOpenArtifact"
+        >
+          <view class="card-head">
+            <text class="card-title">成果 #{{item.artifactId}}</text>
+            <text class="chip">v{{item.currentRevisionNo}}</text>
+          </view>
+          <view class="card-sub">{{item.typeLabel}} · {{item.statusLabel}}</view>
+
+          <view class="card-rows">
+            <block wx:for="{{item.preview}}" wx:for-item="f" wx:key="name">
+              <view class="card-row">
+                <text class="card-row-label">{{f.label}}</text>
+                <text class="card-row-value">{{f.value}}</text>
+              </view>
+            </block>
+          </view>
+
+          <view class="card-actions">
+            <text class="link">查看 / 编辑 →</text>
+          </view>
+        </view>
+      </block>
+    </view>
+  </view>
+</view>

@@ -294,8 +294,15 @@ t('parents 由 push 边派生：match 的 parents 不含替换来源 cargo', () 
     R.ROUTES[MATCH].parents.slice().sort(),
     ['pages/owner/owner', 'pages/shipper/shipper']
   )
-  // 但链深仍要算上替换边（否则 match=2 会低估真实栈 3）
-  assert.strictEqual(R.chainDepth(MATCH), 4)
+  // 但链深仍要算上替换边（否则会低估真实栈）
+  //
+  // ⚠️ 4 → 3（DR-0015 / ENT-033）：委托支线的会话从公共域 `assistant` 收回
+  // 自己的 `pages/entrust/session/session`（`workbench → assistant` 那条 push 边
+  // 改指向 `workbench → session`）。于是 `assistant` 不再被委托工作台 push 进入，
+  // 链深 3 → 2，连带 `cargo` 与 `match` 各降 1。
+  // **这是拓扑真的变短了**，不是预算被放宽：改的是"委托会话属于哪个页面"，
+  // 断言数字必须跟着事实走 —— 写死旧数字会把合法改动读成回归。
+  assert.strictEqual(R.chainDepth(MATCH), 3)
 })
 
 // ─────────────────────────────────────────────────────────────

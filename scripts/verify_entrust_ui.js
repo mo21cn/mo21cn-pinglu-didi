@@ -263,7 +263,9 @@ const ENTRUST_PAGES = [
   'pages/entrust/case/case',
   // 切片四之六的登记页。列进来会顺带拿到三项现成检查：解构导入的每个函数都被导出、
   // 已在 app.json 注册、模板里的类名都有定义 —— 这三件漏掉都不报错，只是静默不生效。
-  'pages/entrust/case-create/case-create'
+  'pages/entrust/case-create/case-create',
+  // DR-0015 / ENT-033：会话屏（UI-03 的成果卡一半）
+  'pages/entrust/session/session'
 ]
 
 /**
@@ -281,6 +283,7 @@ const PAGE_CSS_CHECKS = [
   { path: 'pages/entrust/artifact/artifact', knownEmpty: [] },
   { path: 'pages/entrust/case/case', knownEmpty: [] },
   { path: 'pages/entrust/case-create/case-create', knownEmpty: [] },
+  { path: 'pages/entrust/session/session', knownEmpty: [] },
   { path: 'pages/mine/mine', knownEmpty: ['nav', 'bell-icon', 'role-chip-label'] }
 ]
 
@@ -325,6 +328,15 @@ const caseWxmlTop = read(path.join(MINI, 'pages/entrust/case/case.wxml'))
   check(`[模板] 案件页有 ${st} 分支`, new RegExp("view === '" + st + "'").test(caseWxmlTop))
 })
 check('[模板] 案件页有 ready（兜底）分支', /wx:else/.test(caseWxmlTop))
+
+const sessionWxml = read(path.join(MINI, 'pages/entrust/session/session.wxml'))
+;['loading', 'expired', 'denied', 'error', 'empty'].forEach(function (st) {
+  check(`[模板] 会话页有 ${st} 分支`, new RegExp("view === '" + st + "'").test(sessionWxml))
+})
+check('[模板] 会话页有 ready（兜底）分支', /wx:else/.test(sessionWxml))
+// 成果卡必须显示**精确版本**：AC-05 的"same object/version"就落在这一行字上，
+// 只显示成果名不显示 vN，等于把"是不是同一版"交给人去猜。
+check('[模板] 会话页成果卡显示 v{{版本号}}', /v\{\{item\.currentRevisionNo\}\}/.test(sessionWxml))
 
 // ─────────────────────────────────────────────────────────────
 // 7. 契约接线：谁都没权限"自己判断一遍"
