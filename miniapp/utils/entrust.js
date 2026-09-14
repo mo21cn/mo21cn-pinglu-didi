@@ -725,26 +725,90 @@ function _scalarText(raw) {
   return String(raw)
 }
 
-/** 字段的编辑形态：标量走单行输入，列表/对象走 JSON 多行文本 */
-function _fieldKind(raw) {
+/**
+ * 结构化值（列表 / 对象）的**显示文本**。
+ *
+ * 与 `_scalarText` 同一口径：**空就是空**。缺值时返回空串而不是
+ * `JSON.stringify(null)` 得到的 `"null"` —— 后者会让一个从没填过的字段
+ * 显示成有内容的 `null`，用户以为那里已经填了东西。
+ *
+ * `undefined` 尤其要挡住：`JSON.stringify(undefined)` 返回的是 **JS undefined
+ * 本身**（不是字符串），setData 会把这个键丢掉，输入框拿到 `undefined` 表现为
+ * 一片空白 —— 看起来"没问题"，实际是数据层少了一个键，模板判断都会走偏。
+ */
+function _structuredText(raw) {
+  if (raw === null || raw === undefined || raw === '') return ''
+  return JSON.stringify(raw, null, 2)
+}
+
+/**
+ * 后端 `registry.py` 的**字段类型取值域**（键与 `FIELD_TEXT/NUMBER/LIST/OBJECT`
+ * 逐字对应，由 `scripts/verify_entrust_ui.js` 跨语言断言）。
+ *
+ * 值写的是**前端视角的编辑形态**，不是类型的复述：`text` / `number` 都走单行
+ * 输入，只有 `list` / `object` 需要 JSON 编辑器。这样前端只判一次，不必在每个
+ * 分支里重申"number 也是标量"。
+ */
+const ARTIFACT_FIELD_KINDS = { text: '标量', number: '标量', list: '列表', object: '结构化' }
+
+/** 需要 JSON 多行编辑器的**声明类型** */
+const STRUCTURED_FIELD_KINDS = { list: true, object: true }
+
+/**
+ * 字段的编辑形态：标量走单行输入，结构化（列表/对象）走 JSON 多行文本。
+ *
+ * **契约优先，值推断只作回退** —— 第二个参数是后端注册表声明的类型
+ * （`field_types[name]`）。为什么不能只看值：**缺值字段没有值可看**。
+ * `settlement_draft.receivable_lines` 在刚创建时是空的（键可能都不存在），
+ * 按值推断会判成标量、渲染成单行输入框，用户填 `[1,2]` 存回去得到的是
+ * **字符串** `"[1,2]"` —— 内容看着对、类型错了，缺项判定与客户投影会一起错，
+ * 而界面上完全看不出异常。
+ *
+ * 回退（`declared` 为空串）**只对未知字段成立**：它们没有契约，按值推断是唯一
+ * 可得的信息，且本来就是只读的。
+ */
+function _fieldKind(raw, declared) {
+  if (declared === 'list' || declared === 'object') return 'json'
+  if (declared === 'text' || declared === 'number') return 'scalar'
   if (Array.isArray(raw) || (raw !== null && typeof raw === 'object')) return 'json'
   return 'scalar'
 }
 
 /**
- * 把编辑框文本**按原值的类型**还原。
+ * 字段类型的**界面提示**（编辑态显示在输入框上方）。
+ *
+ * 只对结构化类型给提示。用户可以接受"这里要填 JSON"，但**不可能**知道
+ * "这个框本该是列表，只是它现在空着所以看起来像文本框" —— 后者要靠提示说清楚。
+ */
+function fieldKindHint(declared) {
+  if (declared === 'list') return '列表（JSON 数组）'
+  if (declared === 'object') return '结构化（JSON 对象）'
+  return ''
+}
+
+/**
+ * 把编辑框文本**按原值（或契约声明）的类型**还原。
  *
  * 为什么需要它：表单里一切都是字符串，若原值 `rate` 是数字 12，用户没动它，
  * 存回去就变成 `"12"` —— 内容看着没变，**类型却变了**，而下游（客户投影、
  * 金额比对）对类型是敏感的。规则：
  *   · 文本与原显示文本一致 → **原值原样返回**（彻底避免"没改也被改"）；
- *   · 原来是非空数字且文本仍是数字 → 还原成数字；
+ *   · 契约声明为数字 → 文本仍是数字就还原成数字（**原值为空时也成立**：
+ *     新填的字段没有"原值类型"可看，只能靠契约）；
+ *   · 原来是数字且文本仍是数字 → 还原成数字；
  *   · 原来是布尔 → 'true'/'false' 还原成布尔；
  *   · 其余 → 文本本身。
+ *
+ * 为什么契约要**排在原值类型之前**：原值为空（`null`）是常态 —— 草稿允许不完整。
+ * 只看原值时，用户第一次填 `rate` 会存成字符串；而同一个字段第二次编辑
+ * 又会还原成数字。**同一个字段的两次编辑产生不同类型的值**，是最难查的一类不一致。
  */
-function coerceLike(raw, text) {
+function coerceLike(raw, text, declared) {
   const s = text === null || text === undefined ? '' : String(text)
   if (s === _scalarText(raw)) return raw
+  if (declared === 'number') {
+    return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s
+  }
   if (typeof raw === 'number') {
     if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s)
     return s
@@ -771,18 +835,24 @@ function decorateArtifact(artifact, spec) {
   const missing = data.missing_fields || []
   const unknown = data.unknown_fields || []
   const internal = s.internal_fields || []
+  const fieldTypes = s.field_types || {}
   const status = data.status
 
-  function row(name, isRequired) {
+  function row(name, isRequired, declared) {
     const raw = payload[name]
+    const kind = _fieldKind(raw, declared)
     return {
       name: name,
       label: artifactFieldLabel(name),
       required: !!isRequired,
       internal: internal.indexOf(name) !== -1,
       unknown: false,
-      kind: _fieldKind(raw),
-      value: _fieldKind(raw) === 'json' ? JSON.stringify(raw, null, 2) : _scalarText(raw),
+      // 注册表声明的类型（空串＝未声明）。模板据此显示"列表（JSON 数组）"提示，
+      // 也让静态断言能核对"声明有没有一路传到渲染层"。
+      declared: declared || '',
+      kindHint: fieldKindHint(declared),
+      kind: kind,
+      value: kind === 'json' ? _structuredText(raw) : _scalarText(raw),
       raw: raw === undefined ? null : raw,
       empty: raw === null || raw === undefined || raw === ''
     }
@@ -790,22 +860,26 @@ function decorateArtifact(artifact, spec) {
 
   const fields = []
   required.forEach(function (n) {
-    fields.push(row(n, true))
+    fields.push(row(n, true, fieldTypes[n]))
   })
   optional.forEach(function (n) {
-    if (required.indexOf(n) === -1) fields.push(row(n, false))
+    if (required.indexOf(n) === -1) fields.push(row(n, false, fieldTypes[n]))
   })
   unknown.forEach(function (n) {
     const raw = payload[n]
+    // 未知字段**没有契约**（注册表没声明它）：只能按值推断，且它本来就是只读的
+    const kind = _fieldKind(raw, '')
     fields.push({
       name: n,
       label: artifactFieldLabel(n),
       required: false,
       internal: false,
       unknown: true,
-      kind: _fieldKind(raw),
+      declared: '',
+      kindHint: '',
+      kind: kind,
       // 未知字段只读：它没有字段契约，做表单等于替 Agent 猜语义
-      value: _fieldKind(raw) === 'json' ? JSON.stringify(raw, null, 2) : _scalarText(raw),
+      value: kind === 'json' ? _structuredText(raw) : _scalarText(raw),
       raw: raw === undefined ? null : raw,
       empty: false
     })
@@ -921,7 +995,7 @@ function buildPayload(basePayload, fields, drafts) {
       delete payload[f.name]
       return
     }
-    payload[f.name] = coerceLike(f.raw, text)
+    payload[f.name] = coerceLike(f.raw, text, f.declared)
   })
 
   return {
@@ -1013,6 +1087,7 @@ function confirmArtifact(artifactId, revisionNo, idempotencyKey) {
 
 module.exports = {
   BASE,
+  ARTIFACT_FIELD_KINDS,
   ARTIFACT_FIELD_LABELS,
   ARTIFACT_STATUS_LABELS,
   ISSUE_KIND_LABELS,
@@ -1025,6 +1100,7 @@ module.exports = {
   STATUS_HINT,
   STATUS_META,
   STATUS_ORDER,
+  STRUCTURED_FIELD_KINDS,
   TASK_TYPE_LABELS,
   TASK_TYPE_ORDER,
   VIEW,
@@ -1057,6 +1133,7 @@ module.exports = {
   fetchRevisions,
   fetchWorkbench,
   fieldDrafts,
+  fieldKindHint,
   isArtifactDirty,
   newIdempotencyKey,
   pageHint,

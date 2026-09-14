@@ -273,19 +273,53 @@ async function bootstrap() {
     }
     try {
       entrustArtifactTypes = await get('/entrust/artifact-types', 'owner')
+      // 类型注册表：type code → spec（含 `field_types`）
+      const typeSpecs = {}
+      ;(entrustArtifactTypes.items || []).forEach(function (s) { typeSpecs[s.code] = s })
+
       // 挑**确实有成果**的那张委托。不能用 `items[0]`：组织队列里"待受理"的委托单
       // 天然没有成果，选到它会让整段走查静默跳过 —— 本轮就这样空跑过一次
       // （OK 259 / FAIL 0 全绿，但成果页一个字都没验）。
+      //
+      // 再往上一步（ENT-025）：**优先挑带「缺值列表字段」的成果**。那正是本片修的
+      // 缺口现场 —— 类型声明为 `list`、值还不存在（键都没有）。只有挑到它，
+      // 才可能在**真载荷**上证明"缺值也让列表字段走 JSON 编辑形态"，
+      // 而不是只在静态 fixture 上证明。评分：2 = 有缺值列表字段；1 = 有列表字段；
+      // 0 = 其它成果（仍会被选中，保证走查不会因为没挑到而整段跳过）。
       let artId = 0
       let pickedAid = null
+      let best = -1
       for (const a of D.entrustMine.items || []) {
         const list = await get('/entrust/assignments/' + a.assignment_id + '/artifacts', 'owner', { size: 50 })
         entrustAssignmentArtifacts[a.assignment_id] = list
-        if (!artId && (list.items || []).length) {
-          artId = list.items[0].artifact_id
-          pickedAid = a.assignment_id
+        for (const it of list.items || []) {
+          const spec = typeSpecs[it.artifact_type] || {}
+          const ft = spec.field_types || {}
+          const listFields = Object.keys(ft).filter(function (n) { return ft[n] === 'list' })
+          let score = 0
+          let emptyOnes = []
+          if (listFields.length) {
+            score = 1
+            const detail = await get('/entrust/artifacts/' + it.artifact_id, 'owner')
+            const payload = (detail.current_revision || {}).payload || {}
+            emptyOnes = listFields.filter(function (n) {
+              const v = payload[n]
+              return v === undefined || v === null || (Array.isArray(v) && v.length === 0)
+            })
+            if (emptyOnes.length) score = 2
+          }
+          if (score > best) {
+            best = score
+            artId = it.artifact_id
+            pickedAid = a.assignment_id
+            entrustWriteProof.listFields = listFields
+            entrustWriteProof.emptyListFields = emptyOnes
+          }
+          if (best === 2) break
         }
+        if (best === 2) break
       }
+      entrustWriteProof.artifactPickScore = best
       if (!artId) {
         note('成果走查 · 我的委托下都没有成果，跳过编辑/确认走查')
         return
@@ -1140,6 +1174,10 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
       '组织 ' + (D.entrustOrgs.items || []).length + ' 个 · 我的委托 0 张')
   }
 
+  // 缺值列表字段在真写里填的 JSON 数组文本。前后端断言共用同一份字符串，
+  // 避免「前端存对了、断言比错了」这种自欺。
+  const E2E_LIST_FILL = '["e2e 新增项"]'
+
   // ══════════════════ 成果的编辑与确认（ENT-023）：真写走查 ══════════════════
   //
   // 与前面各段有一处**性质差别**：这一段会真的写库。理由 ——
@@ -1289,6 +1327,41 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
       if (draftBad) fail(P + '编辑表单初值不是当前生效版本', draftBad)
       else ok()
 
+      // ⑤b 声明为 list 的字段（尤其是**缺值**的那些）：形态、类型、初始文本都要
+      //     来自**契约**。缺值字段没有值可看，按值推断必然判错 —— 本片修的缺口。
+      const declaredListNames = proof.listFields || []
+      const emptyListName = (proof.emptyListFields || []).filter(function (n) {
+        return (d2.formFields || []).some(function (f) { return f.name === n })
+      })[0] || null
+      if (!declaredListNames.length) {
+        note(P + '该成果类型没有声明为 list 的字段，缺值列表字段走查未覆盖')
+      } else {
+        let listBad = null
+        ;(d2.formFields || []).forEach(function (f) {
+          if (listBad || declaredListNames.indexOf(f.name) === -1) return
+          if (f.declared !== 'list') listBad = f.name + ' declared=' + f.declared
+          else if (f.kind !== 'json') listBad = f.name + ' kind=' + f.kind
+          else if (String(f.kindHint || '').indexOf('JSON') === -1) {
+            listBad = f.name + ' kindHint=' + String(f.kindHint)
+          }
+        })
+        if (listBad) fail(P + '列表字段没有按契约走 JSON 编辑形态', listBad)
+        else ok()
+        if (!emptyListName) {
+          note(P + '挑中的成果没有缺值列表字段（选型评分 ' + proof.artifactPickScore
+            + '），该子用例（缺值也不退化）未覆盖')
+        } else {
+          const lf = (d2.formFields || []).filter(function (f) {
+            return f.name === emptyListName
+          })[0]
+          if (lf.text !== '' || typeof lf.text !== 'string') {
+            fail(P + '缺值的列表字段初始文本不是空串（undefined 会被 setData 丢掉，'
+              + 'null 字符串会让人以为已经填了东西）',
+            emptyListName + ' text=' + JSON.stringify(lf.text))
+          } else ok()
+        }
+      }
+
       // ⑥ 改动 → 脏；改回 → 不脏（"动过就算脏"会让用户被无谓地拦在返回确认里）
       //
       // 挑字段有讲究：必须是**当前生效版本里已经有值**的标量字段。
@@ -1329,6 +1402,20 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
         const typed = String(d2.formFields[idx].text) + '（e2e 真写）'
         self.onFieldInput({ currentTarget: { dataset: { idx: idx } }, detail: { value: typed } })
         await tick(20)
+        // 缺值的列表字段一并补成合法 JSON 数组。两个目的：
+        //   · 证明"缺值也让列表字段能按数组提交"（本片修的缺口）；
+        //   · 把"补上缺值字段会**新增**一个 payload 键"这个**正确行为**变成被断言
+        //     的事实，而不是"要绕开的误报"。
+        const listIdx = emptyListName
+          ? (d2.formFields || []).map(function (f) { return f.name }).indexOf(emptyListName)
+          : -1
+        if (listIdx >= 0) {
+          self.onFieldInput({
+            currentTarget: { dataset: { idx: listIdx } },
+            detail: { value: E2E_LIST_FILL }
+          })
+          await tick(20)
+        }
         const before = pageWrites.length
         writesDriven += 1
         WRITE_ENABLED = true
@@ -1350,10 +1437,26 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           // 页面发出去的 payload 必须**从当前生效版本增量改**：键集变了就是有字段被
           // 静默丢弃（"按表单重建 payload"的典型症状，正文里有专门注释）
           const sentKeys = Object.keys(sent).sort()
-          if (sentKeys.join(',') !== baseKeys.join(',')) {
-            fail(P + '保存的 payload 键集与当前版本不一致（有字段被静默丢弃）',
-              sentKeys.join(',') + ' vs ' + baseKeys.join(','))
+          // 允许新增的键**恰好**是本次编辑的缺值列表字段（把缺的补上就是对的）；
+          // 丢键一律算"字段被静默丢弃"，多出别的键算"凭空造字段"。
+          const allowedNew = (listIdx >= 0 ? [emptyListName] : []).slice().sort()
+          const lostKeys = baseKeys.filter(function (k) { return sentKeys.indexOf(k) === -1 }).sort()
+          const addedKeys = sentKeys.filter(function (k) { return baseKeys.indexOf(k) === -1 }).sort()
+          if (lostKeys.length) {
+            fail(P + '保存的 payload 丢了字段（有字段被静默丢弃）', lostKeys.join(','))
+          } else if (addedKeys.join(',') !== allowedNew.join(',')) {
+            fail(P + '保存的 payload 新增了预期外的字段',
+              addedKeys.join(',') + ' vs ' + allowedNew.join(','))
           } else ok()
+          if (listIdx >= 0) {
+            if (!Array.isArray(sent[emptyListName])) {
+              fail(P + '缺值的列表字段被存成了非数组（内容对、类型错）',
+                emptyListName + ' = ' + JSON.stringify(sent[emptyListName]))
+            } else if (sent[emptyListName][0] !== 'e2e 新增项') {
+              fail(P + '缺值的列表字段值不是用户输入的内容',
+                JSON.stringify(sent[emptyListName]))
+            } else ok()
+          }
           if (String(sent[editedName]) !== typed) {
             fail(P + '保存的字段值不是用户输入的内容',
               JSON.stringify(sent[editedName]) + ' vs ' + JSON.stringify(typed))
@@ -1362,7 +1465,7 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           // 内部字段被重排都会在这里露头（逐值比对，跳过被编辑的那一个）
           let drift = null
           for (const k of baseKeys) {
-            if (drift || k === editedName) continue
+            if (drift || k === editedName || k === emptyListName) continue
             if (JSON.stringify(sent[k]) !== JSON.stringify(bePayload[k])) {
               drift = k + '：' + JSON.stringify(bePayload[k]) + ' → ' + JSON.stringify(sent[k])
             }
@@ -1381,6 +1484,20 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
 
           // 后端事实：追加后生效版本**没变**，版本数恰好 +1（是追加不是覆盖）
           await refreshArtifactReplay(artId)
+          if (listIdx >= 0) {
+            // 真载荷复核：后端**如实存下来的是数组**，不是字符串。这一条才是"类型对了"
+            // 的终点 —— 前面查的都是页面**发出去**什么，这里看**存下来**什么。
+            const apRow = (entrustArtifactRevisions.items || []).filter(function (r) {
+              return r.revision_no === proof.appendedNo
+            })[0]
+            const stored = apRow && apRow.payload ? apRow.payload[emptyListName] : undefined
+            if (!Array.isArray(stored)) {
+              fail(P + '后端存的缺值列表字段不是数组（前端解析没生效）',
+                emptyListName + ' = ' + JSON.stringify(stored))
+            } else if (stored[0] !== 'e2e 新增项') {
+              fail(P + '后端存的列表内容与用户输入不符', JSON.stringify(stored))
+            } else ok()
+          }
           proof.afterAppendCurrentNo = (entrustArtifact.current_revision || {}).revision_no
           if (proof.afterAppendCurrentNo !== prevNo) {
             fail(P + '编辑改变了生效版本（后端事实）', proof.afterAppendCurrentNo + ' vs ' + prevNo)
