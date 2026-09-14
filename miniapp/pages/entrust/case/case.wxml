@@ -1,0 +1,330 @@
+<!--
+  委托发货 · 案件详情（UI-08 首片 / ENT-030 切片四之四）
+  六要素（原因 / 受影响记录 / 拟解决方案 / 决定与审批 / 执行证据 / 结案）+ 处理记录。
+  四态分支（loading / expired / denied / error）一个都不能少：少一个分支就少一种表现，
+  失败会被渲染成空白（verify_entrust_ui.js 有专门断言）。
+-->
+<view class="page-sub">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">异常 / 变更</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub" wx:if="{{detail}}">{{detail.title}}</view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期 -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 无权限 / 不存在（服务端对非参与方统一 404，不泄漏存在性） -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <block wx:else>
+      <!-- 案件头卡：标题 + 影响类型 / 状态徽标 + 骨架字段。
+           影响类型与阻断后果**都显示**（后者是前者的流程后果），用户不必自己推。 -->
+      <view class="card">
+        <view class="row-between case-top">
+          <text class="case-title">{{detail.title}}</text>
+          <view class="case-chips">
+            <text class="{{detail.impactClass}}">{{detail.impactLabel}}</text>
+            <text class="{{detail.statusClass}}">{{detail.statusLabel}}</text>
+          </view>
+        </view>
+        <view wx:if="{{detail.blocking}}" class="case-blocking">
+          该案件正在阻断执行：相关任务无法完成，直到它被关闭
+        </view>
+        <view wx:for="{{fields}}" wx:key="key" class="field-row row-between">
+          <text class="field-label">{{item.label}}</text>
+          <text class="field-value">{{item.value}}</text>
+        </view>
+      </view>
+
+      <!-- 六要素（顺序与"为空时怎么说"来自 utils/entrust.js 的 CASE_ELEMENTS） -->
+      <view wx:for="{{blocks}}" wx:key="key" class="card element-card">
+        <view class="element-head">
+          <text class="element-no">{{item.no}}</text>
+          <text class="element-title">{{item.title}}</text>
+        </view>
+
+        <!-- 长文本形态 -->
+        <block wx:if="{{item.mode === 'text'}}">
+          <view wx:if="{{item.text}}" class="element-text">{{item.text}}</view>
+          <view wx:else class="element-empty">{{item.emptyText}}</view>
+        </block>
+
+        <!-- 键值形态 -->
+        <block wx:elif="{{item.mode === 'rows'}}">
+          <!-- ⚠️ `wx:if` 不得与 `wx:for` 写在同一元素上：微信编译器会把 `wx:if`
+               卷进循环作用域，紧随其后的兄弟 `wx:else` 于是绑不到任何 `wx:if`，
+               **整个 wxml 编译失败**（报 `Bad attr wx:elif … wx:if not found`），
+               页面被错误覆盖层替换 —— 看起来就像"页面白屏"。
+               外层 block 承担条件，循环留给内层元素，两层分开即可。 -->
+          <block wx:if="{{item.rows.length}}">
+            <view
+              wx:for="{{item.rows}}"
+              wx:for-item="r"
+              wx:key="key"
+              class="field-row row-between"
+            >
+              <text class="field-label">{{r.label}}</text>
+              <text class="field-value">{{r.value}}</text>
+            </view>
+          </block>
+          <view wx:else class="element-empty">{{item.emptyText}}</view>
+        </block>
+
+        <!-- 条目形态 -->
+        <block wx:else>
+          <!-- 同上：条件与循环分两层，`wx:else` 才能绑到外层的 `wx:if` -->
+          <block wx:if="{{item.items.length}}">
+            <view
+              wx:for="{{item.items}}"
+              wx:for-item="it"
+              wx:key="key"
+              class="{{it.cls}}"
+            >
+              <view class="element-item-text">{{it.text}}</view>
+              <view class="element-item-sub">{{it.sub}}</view>
+            </view>
+          </block>
+          <view wx:else class="element-empty">{{item.emptyText}}</view>
+        </block>
+      </view>
+
+      <!-- 处理记录：append-only。当前状态只说最后一步，只看状态会以为这宗案件
+           从没被关过 ——"重开后再次关闭"的两轮历史只能从这条链上看出来。 -->
+      <view wx:if="{{events.length}}" class="card element-card">
+        <view class="element-head">
+          <text class="element-title">处理记录</text>
+          <text class="element-count">共 {{events.length}} 条</text>
+        </view>
+        <view class="tl">
+          <view wx:for="{{events}}" wx:key="seq" class="tl-item tl-done">
+            <view class="tl-rail">
+              <view class="tl-dot"></view>
+              <view wx:if="{{index < events.length - 1}}" class="tl-line"></view>
+            </view>
+            <view class="tl-body">
+              <view class="tl-title">{{item.title}}</view>
+              <view class="tl-time">{{item.meta}}</view>
+              <view wx:if="{{item.note}}" class="tl-note">{{item.note}}</view>
+              <view wx:if="{{item.evidence}}" class="tl-note">证据：{{item.evidence}}</view>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- ── 处置（切片四之六）────────────────────────────────────────────
+           按钮是否出现由**服务端 `capabilities`** + 取值域镜像共同决定（本页 data 里
+           已算好 `canAddLink` / `canDecide` / `canClose` / `canReopen`）。
+           ⚠️ 隐藏按钮**不是**权限控制：写端独立复核，两者不一致时以写端为准，
+           收到 403/409 会由 caseWriteError 翻成能照做的结论弹出来。 -->
+      <view wx:if="{{canAnyAction}}" class="card element-card">
+        <view class="element-head">
+          <text class="element-title">处置</text>
+        </view>
+
+        <!-- 受影响项：移除 + 补登记 -->
+        <block wx:if="{{canAddLink || canRemoveLink}}">
+          <view class="act-label">受影响项</view>
+          <view wx:if="{{affected.length}}" class="act-chip-row">
+            <view wx:for="{{affected}}" wx:key="key" class="act-chip">
+              <text class="act-chip-text">{{item.text}}</text>
+              <view
+                wx:if="{{canRemoveLink}}"
+                class="act-chip-x"
+                data-link="{{item.linkId}}"
+                bindtap="onRemoveLink"
+                hover-class="hover-dim"
+              >✕</view>
+            </view>
+          </view>
+          <view wx:else class="act-hint">尚未登记受影响的任务或成果</view>
+
+          <block wx:if="{{canAddLink}}">
+            <view
+              class="act-btn-wide"
+              data-act-toggle-links="1"
+              bindtap="onToggleLinkPick"
+              hover-class="hover-dim"
+            >
+              {{linkPickOpen ? '收起候选' : '添加受影响项'}}
+            </view>
+            <block wx:if="{{linkPickOpen}}">
+              <view wx:if="{{candHint}}" class="act-hint">{{candHint}}</view>
+              <block wx:else>
+                <view
+                  wx:for="{{candidates}}"
+                  wx:key="key"
+                  class="cand-row"
+                  data-kind="{{item.target_kind}}"
+                  data-id="{{item.target_id}}"
+                  bindtap="onAddLinkTarget"
+                  hover-class="hover-dim"
+                >
+                  <view class="link-main">
+                    <view class="link-text">{{item.text}}</view>
+                    <view class="link-sub">{{item.sub}}</view>
+                  </view>
+                  <view class="cand-add">＋</view>
+                </view>
+              </block>
+            </block>
+          </block>
+        </block>
+
+        <!-- 记录决定。
+             ⚠️ 输入用**页内表单**而不是 `wx.showModal({editable:true})`（2026-09-14 真机实测改）：
+             ① 原生 modal 的弹层**不在渲染树里**（`.weui-dialog*` 全部 n=0、`page` 的
+                outerWXML 读出来是空），走查工具点不到它的确认键 ⇒ 这条人工落点
+                **在真机上无法被验证**，而 DR-0013 §7.3 条件 4 恰恰要求它"经界面走通"；
+             ② 一条动作连开两个弹层（问依据 → 问说明）本就比页内表单难用。
+             同一条理由此前已用过一次：7 项的任务类型选择从 `showActionSheet`
+             改成页内展开条（见 detail.js 的 TASK_TYPE_OPTIONS 注释）。 -->
+        <block wx:if="{{canDecide}}">
+          <view class="act-label">记录决定</view>
+          <view class="pick-row">
+            <view
+              wx:for="{{decisionOptions}}"
+              wx:key="key"
+              class="act-btn {{decideForm.to === item.key ? 'act-btn-on' : ''}}"
+              data-status="{{item.key}}"
+              bindtap="onPickDecision"
+              hover-class="hover-dim"
+            >{{item.label}}</view>
+          </view>
+          <block wx:if="{{decideForm.to}}">
+            <input
+              class="act-input"
+              data-df="note"
+              value="{{decideForm.note}}"
+              bindinput="onDecideInput"
+              maxlength="500"
+              placeholder="决定说明（可留空）"
+              placeholder-class="input-ph"
+            />
+            <input
+              wx:if="{{decideForm.to === 'approved'}}"
+              class="act-input"
+              data-df="basis"
+              value="{{decideForm.basis}}"
+              bindinput="onDecideInput"
+              maxlength="12"
+              type="number"
+              placeholder="依据版本号 rN（批准必填，数字）"
+              placeholder-class="input-ph"
+            />
+            <view
+              class="act-btn-wide"
+              data-act-decide-submit="1"
+              bindtap="onSubmitDecision"
+              hover-class="hover-dim"
+            >提交决定</view>
+            <view wx:if="{{decideHint}}" class="act-hint act-hint-warn">{{decideHint}}</view>
+          </block>
+          <view class="act-hint">批准（已批准）必须给出依据版本 —— 选中「已批准」会出现该输入框。</view>
+        </block>
+
+        <!-- 关闭（必须给处置与证据，没有一键关闭） -->
+        <block wx:if="{{canClose}}">
+          <view class="act-label">关闭案件</view>
+          <view class="pick-row">
+            <view
+              wx:for="{{closureOptions}}"
+              wx:key="key"
+              class="act-btn {{closeForm.disp === item.key ? 'act-btn-on' : ''}}"
+              data-disp="{{item.key}}"
+              bindtap="onPickDisposition"
+              hover-class="hover-dim"
+            >以「{{item.label}}」关闭</view>
+          </view>
+          <block wx:if="{{closeForm.disp}}">
+            <input
+              class="act-input"
+              data-df="evidence"
+              value="{{closeForm.evidence}}"
+              bindinput="onCloseInput"
+              maxlength="512"
+              placeholder="证据引用（必填：票号 / 附件名 / 现场照片）"
+              placeholder-class="input-ph"
+            />
+            <input
+              class="act-input"
+              data-df="resolution"
+              value="{{closeForm.resolution}}"
+              bindinput="onCloseInput"
+              maxlength="500"
+              placeholder="结案说明（可留空）"
+              placeholder-class="input-ph"
+            />
+            <view
+              class="act-btn-wide"
+              data-act-close-submit="1"
+              bindtap="onSubmitClose"
+              hover-class="hover-dim"
+            >提交关闭</view>
+            <view wx:if="{{closeHint}}" class="act-hint act-hint-warn">{{closeHint}}</view>
+          </block>
+          <view class="act-hint">关闭必须给出证据引用 —— 没有一键关闭。</view>
+        </block>
+
+        <!-- 重开（仅已关闭案件）：同样走页内表单，理由同上 -->
+        <block wx:if="{{canReopen}}">
+          <view class="act-label">重开案件</view>
+          <block wx:if="{{!reopenForm.open}}">
+            <view
+              class="act-btn-wide"
+              data-act-reopen="1"
+              bindtap="onOpenReopen"
+              hover-class="hover-dim"
+            >重开并说明原因</view>
+          </block>
+          <block wx:else>
+            <input
+              class="act-input"
+              data-df="reason"
+              value="{{reopenForm.reason}}"
+              bindinput="onReopenInput"
+              maxlength="255"
+              placeholder="为什么要重开（必填）"
+              placeholder-class="input-ph"
+            />
+            <view
+              class="act-btn-wide"
+              data-act-reopen-submit="1"
+              bindtap="onSubmitReopen"
+              hover-class="hover-dim"
+            >提交重开</view>
+            <view wx:if="{{reopenHint}}" class="act-hint act-hint-warn">{{reopenHint}}</view>
+          </block>
+        </block>
+      </view>
+
+      <!-- 处置能力：只说"这里现在有没有可执行的动作"，**不断言原因** —— 六个能力位
+           分不出"没授权"与"当前没有可执行动作"（见 decorateCase 的注释）。 -->
+      <view class="card case-note">{{actionHint}}</view>
+    </block>
+  </view>
+</view>

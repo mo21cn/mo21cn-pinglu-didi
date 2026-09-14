@@ -38,9 +38,20 @@ DR-0010 §3.6 要求区分「暂无记录 / 尚未分配 / 不适用 / 信息缺
 
 「本期未开放」≠「暂无记录」
 ---------------------------
-`exceptions` 槽位没有任何数据模型，按 DR-0010 §3.8 必须**显式标注为未完成项**。
-它走独立的 `available=False` + `unavailable_reason` 通道，**不套用**空值四态 ——
-否则用户会以为"这单没有异常"，而事实是"这个能力还没做"。
+槽位可以**声明为「本期未开放」**（`SlotSpec.open=False` + `not_open_reason`）：那时走
+独立的 `available=False` + `unavailable_reason` 通道，**不套用**空值四态 —— 按四态
+呈现，用户会把"这个能力还没做"读成"这单没有异常"。声明为未开放却**没给理由**
+是配置漂移，`assert_slot_specs_consistent` 会拦下（否则界面只能猜）。
+
+`exceptions` 槽曾用它挡了整条支线：投影**先写好**、由 `EXCEPTIONS_SLOT_OPEN` **一个常量**
+决定用不用。不先撤标记再补投影（中间态会对外撒谎），也不等前端做完再写投影
+（那样"真实投影"无法先被用例固定住，撤下时就只剩"看起来差不多"）。
+
+**该标记已于 2026-09-14 撤下**：DR-0013 §7.3 的五条**同一提交内**同时满足，其中条件 4
+（人工落点〔登记案件 + 记录决定 + 关闭〕在**真载荷走查**中走通）的证据见
+`docs/ENT-030-案件页真机走查交付说明.md`（真机点击走通，PASS 67 / FAIL 0）。
+常量与机制都保留：DR-0013 §5 的回退口径依赖那个常量，而"把某块能力整体收回去"
+这条路**下次还会用**。
 """
 
 from __future__ import annotations
@@ -48,11 +59,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.modules.entrust import exceptions as case_svc
 from app.modules.entrust.artifacts import (
     STATUS_ACTIVE as ARTIFACT_STATUS_ACTIVE,
 )
@@ -99,6 +111,22 @@ ISSUE_BLOCKED = "blocked"
 ISSUE_WAITING = "waiting"
 ISSUE_UNASSIGNED_TASK = "unassigned_task"
 ISSUE_INACTIVE_ARTIFACT = "inactive_artifact"
+
+#: `exceptions` 槽是否对用户开放（= 曾用来挡「本期未开放」标记的那个开关）。
+#:
+#: **`True`**：DR-0013 §7.3 的五条已于 2026-09-14 **同一提交内**同时满足 ——
+#: 三张表由版本化迁移建、两套状态机与阻断判据有服务端实现与用例、四字段走真实投影、
+#: **人工落点（登记案件 + 记录决定 + 关闭）在真载荷走查中走通**
+#: （`docs/ENT-030-案件页真机走查交付说明.md`，真机点击 PASS 67 / FAIL 0）、
+#: 客户投影白名单有用例。
+#:
+#: 收回去同样是**独立的一次提交**（本常量 + 用例 + 走查证据），不是顺手改一个布尔值：
+#: 提前撤下（或再次收回却不给理由）等于把「能力还没做」说成「这单没有异常」。
+#:
+#: 前端半边在 `scripts/verify_entrust_ui.js`：`available=false` 时前端必须按
+#: 「本期未开放」渲染，**不得**退化成空值四态 —— 机制仍在（见 `SlotSpec.open`），
+#: 只是当前七个槽位没有一个走这条路。
+EXCEPTIONS_SLOT_OPEN: Final = True
 
 
 class WorkbenchConfigError(RuntimeError):
@@ -148,8 +176,9 @@ SLOT_SPECS: tuple[SlotSpec, ...] = (
     SlotSpec(
         key="exceptions",
         title="异常与变更",
-        open=False,
-        not_open_reason="本期未开放：异常与变更尚无数据模型，不作为「暂无记录」呈现",
+        # 2026-09-14 起开放（DR-0013 §7.3 五条满足，证据见模块 docstring）。
+        # 开关仍是常量而不是字面量：再次收回要有据可依、有据可查。
+        open=EXCEPTIONS_SLOT_OPEN,
     ),
     SlotSpec(
         key="settlement",
@@ -170,6 +199,11 @@ _ARTIFACT_COLS = (
     "a.id, a.artifact_type, a.status, a.current_revision_id, "
     "r.revision_no, r.payload_json, a.updated_at"
 )
+#: 案件投影只要这 8 列。**有意不含 `severity`**：它不参与阻断判定，
+#: 本槽位也不拿它排序或分组 —— 取进来就会有人顺手用它，那就等于悄悄给它流程含义。
+_CASE_COLS = (
+    "id, assignment_id, kind, title, status, impact_kind, owner_user_id, raised_at, updated_at"
+)
 
 
 def assert_slot_specs_consistent() -> None:
@@ -180,7 +214,10 @@ def assert_slot_specs_consistent() -> None:
     1. `artifact_types` / `task_types` 里的每个取值都在取值范围里 ——
        否则该槽位永远读不到记录，查不到就是"暂无记录"，把**配置错误伪装成正常业务态**；
     2. 同一个 `task_type` / `artifact_type` **只归属一个槽位** ——
-       否则同一份记录在两个槽位各显示一次，用户会以为是两份。
+       否则同一份记录在两个槽位各显示一次，用户会以为是两份；
+    3. `open=False` 的槽位**必须**给 `not_open_reason` —— 没理由时界面只能猜，
+       猜出来就是"暂无记录"。`exceptions` 开放后本支线已无未开放槽位，这条是
+       **机制自身的守卫**：下次谁再收回某块能力，忘了写理由就会在这里红。
 
     由测试调用（`tests/test_entrust_workbench.py`），不在导入期执行 ——
     导入期副作用会让"能不能 import"依赖配置正确性，反而更难定位。
@@ -188,6 +225,12 @@ def assert_slot_specs_consistent() -> None:
     seen_tasks: set[str] = set()
     seen_artifacts: set[str] = set()
     for spec in SLOT_SPECS:
+        if not spec.open and not spec.not_open_reason:
+            raise WorkbenchConfigError(
+                f"槽位 {spec.key} 声明为「本期未开放」却没给理由 —— 界面只能猜，"
+                "猜出来的就是「暂无记录」，等于把「能力还没做」说成「这单没有」"
+                "（DR-0010 §3.8）"
+            )
         for task_type in spec.task_types:
             if task_type not in TASK_TYPES:
                 raise WorkbenchConfigError(
@@ -311,6 +354,42 @@ def _load_artifacts(session: Session, *, assignment_id: int) -> list[dict[str, A
             "status": str(r["status"]),
             "revision_no": int(r["revision_no"]) if r["revision_no"] is not None else None,
             "payload": _payload_of(r["payload_json"]),
+            "updated_at": _text_ts(r["updated_at"]),
+        }
+        for r in rows
+    ]
+
+
+def _load_cases(session: Session, *, assignment_id: int) -> list[dict[str, Any]]:
+    """该委托的**全部**案件，含已关闭（＝ `_load_tasks` 的同一理由，不是分页接口）。
+
+    已关闭的也要取：`updated_at` 的定义是"**相关业务记录的**最近更新时间"，
+    昨天关掉的那张单也是本槽位的一次真实更新，把它排除掉会让"最后更新"停在
+    上一张还活着的单上 —— 看起来像没人处理过。
+
+    只看 `assignment_id` **精确等值**：同一货主在同一组织下可能有多张委托，
+    放宽一步就是把别的委托的异常显示在这张委托的工作台上（DR-0012 / 验证 11）。
+    """
+    rows = (
+        session.execute(
+            text(
+                f"SELECT {_CASE_COLS} FROM ent_exception WHERE assignment_id = :aid ORDER BY id ASC"
+            ),
+            {"aid": assignment_id},
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        {
+            "case_id": int(r["id"]),
+            "assignment_id": int(r["assignment_id"]),
+            "kind": str(r["kind"]),
+            "title": str(r["title"]),
+            "status": str(r["status"]),
+            "impact_kind": str(r["impact_kind"]),
+            "owner_user_id": (int(r["owner_user_id"]) if r["owner_user_id"] is not None else None),
+            "raised_at": _text_ts(r["raised_at"]),
             "updated_at": _text_ts(r["updated_at"]),
         }
         for r in rows
@@ -475,12 +554,132 @@ def _latest_updated_at(
     return max(str(s) for s in stamps)
 
 
+def _is_blocking_case(case: dict[str, Any]) -> bool:
+    """经**服务层唯一判据**判定 —— 本模块不复制那份规则。
+
+    `is_blocking` 对未知取值**抛错**而不是返回 `False`（fail-closed）。这里刻意不
+    包一层 `try/except` 兜成"不阻断"：库里出现取值域外的 `impact_kind` 只可能是
+    写路径被绕过，属真实缺陷；在读取侧把它压成"看起来正常"，门禁就会静默放行。
+    """
+    return case_svc.is_blocking(
+        kind=str(case["kind"]),
+        impact_kind=str(case["impact_kind"]),
+        status=str(case["status"]),
+    )
+
+
+def _build_exceptions_slot(spec: SlotSpec, *, cases: list[dict[str, Any]]) -> dict[str, Any]:
+    """`exceptions` 槽的真实投影（DR-0010 §3.3 / §3.5，DR-0013 §4.3）。
+
+    数据落点 = "异常案件、阻断影响、变更提案、决策与已应用版本"。四字段落到这里：
+
+    | 字段 | 取值 |
+    | --- | --- |
+    | 当前成果 | 未关闭案件的摘要与数量（`no_record` 表示本单确实还没登记过案件） |
+    | 未决问题 | **阻断中**的案件逐条列出（非阻断案件是记录，不是问题） |
+    | 下一责任方 | 最该动的那张未关闭案件的责任人 —— 阻断的优先 |
+    | 最后更新 | 本单**全部**案件（含已关闭）的最近更新时间 |
+
+    两处刻意的取舍：
+
+    * **没有「信息缺失」态**。`cause` / `owner_user_id` / `due_at` 都是**可选**字段
+      （未知值保持未知是硬要求），把"可选字段为空"报成信息缺失，会变成永不消失的
+      骚扰，用户很快学会忽略整个未决问题列表。责任人未定由 `next_owner=unassigned`
+      单独表达 —— 它是"去找个人来负责"，不是"数据不全"。
+    * **排序不用 `severity`**：先阻断、再按登记顺序。严重度是业务判断，阻断是流程
+      约束；用它排序会让人以为它影响流程（C3 要堵的正是这个联想）。
+
+    `current.refs` 现在**有内容了**（DR-0014 §3.3）：未关闭案件各产出一条 `CaseRef`。
+    形状是在消费者确定之后才写的 —— 在没人读的时候先定形状等于猜，猜错的代价是
+    前端按错的键取值后静默显示成"没有案件"。
+
+    引用顺序沿用本槽位的既定口径（`next_owner` 也用它）：**阻断优先，再按案件号**。
+    与 UI-04 清单的 `id DESC` 不同是有意的 —— 槽位要的是"最该动的排前面"，
+    清单要的是"最新的排前面"。
+    """
+    open_cases = [c for c in cases if str(c["status"]) != case_svc.STATUS_CLOSED]
+    blocking = [c for c in open_cases if _is_blocking_case(c)]
+    changes = [c for c in open_cases if str(c["kind"]) == case_svc.KIND_CHANGE_REQUEST]
+
+    if open_cases:
+        parts = [f"未关闭案件 {len(open_cases)} 项"]
+        if blocking:
+            parts.append(f"阻断 {len(blocking)} 项")
+        if changes:
+            parts.append(f"变更请求 {len(changes)} 项")
+        refs = [
+            case_svc.project_case_ref(
+                case_id=c["case_id"],
+                kind=c["kind"],
+                title=c["title"],
+                status=c["status"],
+                impact_kind=c["impact_kind"],
+            )
+            for c in sorted(
+                open_cases, key=lambda c: (0 if _is_blocking_case(c) else 1, c["case_id"])
+            )
+        ]
+        current: dict[str, Any] = {
+            "state": CURRENT_PRESENT,
+            "text": " · ".join(parts),
+            "refs": refs,
+        }
+    else:
+        current = {"state": CURRENT_NO_RECORD, "text": "", "refs": []}
+
+    items: list[dict[str, str]] = [
+        {
+            "kind": ISSUE_BLOCKED,
+            # 案件号写进描述，是为了让人能凭这句话找到那张单；**不要反过来解析它** ——
+            # 结构化引用随 UI-04 的 refs 走，这里的文本是给人读的。
+            "text": f"「{c['title']}」阻断执行（案件 #{c['case_id']}）",
+        }
+        for c in blocking
+    ]
+    issues: dict[str, Any] = {
+        "state": ISSUES_PRESENT if items else ISSUES_NONE,
+        "count": len(items),
+        "items": items,
+    }
+
+    next_owner: dict[str, Any]
+    if not open_cases:
+        next_owner = {"state": OWNER_NOT_APPLICABLE, "user_id": None, "text": ""}
+    else:
+        head = min(open_cases, key=lambda c: (0 if _is_blocking_case(c) else 1, c["case_id"]))
+        owner = head["owner_user_id"]
+        if owner is None:
+            next_owner = {"state": OWNER_UNASSIGNED, "user_id": None, "text": ""}
+        else:
+            # 与 `_build_next_owner` 同一展示口径：只给 id，**不查用户表**取姓名
+            next_owner = {
+                "state": OWNER_ASSIGNED,
+                "user_id": int(owner),
+                "text": f"成员 #{owner}",
+            }
+
+    stamps = [c["updated_at"] for c in cases if c["updated_at"]]
+    return {
+        "key": spec.key,
+        "title": spec.title,
+        "available": True,
+        "unavailable_reason": "",
+        "current": current,
+        "issues": issues,
+        "next_owner": next_owner,
+        "updated_at": max(str(s) for s in stamps) if stamps else None,
+        # 本槽位没有任务与成果：计数键保持既有形状（前端按它拼文案），全为 0。
+        "counts": {"artifacts": 0, "tasks": 0, "open_tasks": 0, "unassigned_tasks": 0},
+    }
+
+
 def _build_slot(
     spec: SlotSpec,
     *,
     assignment: dict[str, Any],
     tasks: list[dict[str, Any]],
     artifacts: list[dict[str, Any]],
+    cases: list[dict[str, Any]],
 ) -> dict[str, Any]:
     if not spec.open:
         # 「本期未开放」走独立通道：它不是"暂无记录"，也不是"不适用"
@@ -495,6 +694,9 @@ def _build_slot(
             "updated_at": None,
             "counts": {"artifacts": 0, "tasks": 0, "open_tasks": 0, "unassigned_tasks": 0},
         }
+
+    if spec.key == "exceptions":
+        return _build_exceptions_slot(spec, cases=cases)
 
     slot_tasks = (
         list(tasks) if spec.all_tasks else [t for t in tasks if t["task_type"] in spec.task_types]
@@ -530,8 +732,9 @@ def _build_slot(
 def build_workbench(session: Session, *, assignment: dict[str, Any]) -> dict[str, Any]:
     """组装单委托工作台的七槽位摘要（调用方已完成可见性与权限校验）。
 
-    三条只读查询：本单任务、本单归属成果、"同 (货主, 组织) 下归属为空"的存量计数。
-    不留任何写路径 —— 工作台是**投影**，写动作各自走自己的端点。
+    三条只读查询：本单任务、本单归属成果、"同 (货主, 组织) 下归属为空"的存量计数；
+    `exceptions` 槽开放时再加一条（本单案件）。不留任何写路径 ——
+    工作台是**投影**，写动作各自走自己的端点。
     """
     owner_user_id = int(assignment["owner_user_id"])
     org_id = int(assignment["org_id"]) if assignment["org_id"] is not None else None
@@ -539,8 +742,15 @@ def build_workbench(session: Session, *, assignment: dict[str, Any]) -> dict[str
 
     tasks = _load_tasks(session, assignment_id=assignment_id)
     artifacts = _load_artifacts(session, assignment_id=assignment_id)
+    # 槽位关着就不查案件：不为了"投影已写好"而在每次工作台请求里白跑一条 SQL。
+    # 这条判断读的是**声明**而不是常量，因此切片四翻转常量时无需再改这里。
+    cases = (
+        _load_cases(session, assignment_id=assignment_id)
+        if any(s.key == "exceptions" and s.open for s in SLOT_SPECS)
+        else []
+    )
     slots = [
-        _build_slot(spec, assignment=assignment, tasks=tasks, artifacts=artifacts)
+        _build_slot(spec, assignment=assignment, tasks=tasks, artifacts=artifacts, cases=cases)
         for spec in SLOT_SPECS
     ]
     return {
@@ -559,6 +769,7 @@ def build_workbench(session: Session, *, assignment: dict[str, Any]) -> dict[str
 __all__ = [
     "CURRENT_NO_RECORD",
     "CURRENT_PRESENT",
+    "EXCEPTIONS_SLOT_OPEN",
     "ISSUES_MISSING_INFO",
     "ISSUES_NONE",
     "ISSUES_PRESENT",

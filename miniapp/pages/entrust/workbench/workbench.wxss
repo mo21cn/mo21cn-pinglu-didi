@@ -145,3 +145,55 @@
 .row-hover {
   background: #F5F8FF;
 }
+
+/* ---- 队列切换（UI-04 / 切片四之六）----
+   两个队列是**视图切换**而不是筛选：所以做成实心分段控件（比筛选 pill 更"重"、等分宽度），
+   并放在筛选条之上 —— 本页现在有三层切换（队列 / 组织 / 筛选），三层不能长得一样，
+   否则用户分不清"我现在点的是换了队列，还是只换了个筛选条件"。 */
+.queue-bar {
+  display: flex;
+  padding: 20rpx 24rpx 0;
+}
+
+.queue-pill {
+  flex: 1;
+  height: 68rpx;
+  line-height: 68rpx;
+  margin-right: 12rpx;
+  border-radius: 14rpx;
+  text-align: center;
+  font-size: 27rpx;
+  color: #3D4C63;
+  background: #F4F6FB;
+}
+
+.queue-pill:last-child {
+  margin-right: 0;
+}
+
+.queue-pill-active {
+  color: #FFFFFF;
+  font-weight: 600;
+  background: #3B5BDB;
+}
+
+/* 案件行的两个徽标（影响类型 + 案件类型）排一行，不挤进 .row-between */
+.list-chips {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin-top: 14rpx;
+}
+
+/* 阻断后果单独一行：它是"相关任务现在完成不了"这个**流程事实**，混在徽标里
+   会被当成又一个标签（徽标说"是什么"，这句说"会怎样"）。配色与案件页
+   `.case-blocking` 一致 —— 同一件事在两个页面上不该是两种颜色。 */
+.case-block-flag {
+  margin-top: 14rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 12rpx;
+  background: rgba(250, 82, 82, .08);
+  font-size: 24rpx;
+  color: #C92A2A;
+  line-height: 1.6;
+}

@@ -16,6 +16,14 @@ reopen/改派 + 固定前置条件的合法性校验）。
 **完成只允许从 in_progress / waiting 进入** —— pending 必须先 start，否则前置条件
 检查会被绕过（规则要落在唯一入口上才有意义）。
 
+执行门禁（DR-0013 §3.3 作用面 1；**有意的行为变更**）
+----------------------------------------------------
+`complete` 在「所需证据未齐 → 409」之后**再查一次阻断**：该任务若被一条
+`execution-blocking` 且未终结的案件命中，同样拒绝，并在响应里**指出案件 id** ——
+只说"存在阻断"会让人无从下手。判据只有一份实现（`exceptions.is_blocking`），
+本模块不重写：两处各写一遍，迟早出现「执行命令认阻断、结案不认」。
+`severity` 不参与判定（C3）。
+
 固定前置条件（R1 的**全部**依赖语义，AC-13 本期子用例）
 ------------------------------------------------------
 * 一个任务至多一个前置任务（`precondition_task_id`）—— 本模块**不声明**支持通用
@@ -48,6 +56,7 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, text
 from sqlalchemy.orm import Session
 
+from app.modules.entrust import exceptions as case_svc
 from app.modules.entrust.access import (
     PERM_TASK_DISPATCH,
     PERM_VIEW,
@@ -746,7 +755,16 @@ def complete_task(
     expected_generation: int | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """完成任务；**所需证据未齐则拒绝**（证据要求字段真正生效的地方）。"""
+    """完成任务；**所需证据未齐则拒绝**（证据要求字段真正生效的地方）。
+
+    拒绝的两条理由，语义不同、都要说清：
+
+    * **证据未齐** → 缺的是**材料**，语义上是"还差东西"，可以先用 `wait` 标记；
+    * **被未终结的阻断案件命中** → 缺的是**处置**，材料齐了也不该放行；
+      响应必须带案件 id，否则收到的人只能来问我们。
+
+    后者是 DR-0013 §4 记录的**有意行为变更**（旧行为：证据齐即完成）。
+    """
     task, _ = authorize(
         session,
         task_id=task_id,
@@ -763,6 +781,14 @@ def complete_task(
     missing = [kind for kind in required if kind not in provided_kinds]
     if missing:
         raise TaskStateError(f"缺少必需证据 {missing}，不能标记完成（可先用 wait 标记缺件等待）")
+
+    blocking = case_svc.blocking_cases_for_task(session, task_id=task_id)
+    if blocking:
+        listed = "、".join(f"#{c['id']}「{c['title']}」" for c in blocking)
+        raise TaskStateError(
+            f"任务 {task_id} 被 {len(blocking)} 条未终结的阻断案件命中，不能标记完成："
+            f"{listed}（先处置案件：记录决定并关闭，或由管理动作解除其阻断影响）"
+        )
 
     current = now or utcnow_naive()
     return _transition(

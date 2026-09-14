@@ -1,8 +1,11 @@
 // 委托发货 · 经理工作台（S2 前端切片 / ENT-012 / AC-04 · AC-21）
 //
-// 数据源：GET /api/v1/entrust/assignments?view=org
-// 服务端按「组织成员 + 该货主授权 + entrust:view 权限」判定可见性；
-// 前端不做任何"我是不是经理"的本地判断（那只能靠可篡改的本地角色字段）。
+// 数据源：
+//   · 委托队列 `GET /api/v1/entrust/assignments?view=org`
+//   · 异常 / 变更队列 `GET /api/v1/entrust/exceptions?view=org&org_id=…`（UI-04，切片四之六）
+// 两个队列的可见性都由服务端按「组织成员 + 该货主授权 + 权限码」判定；
+// 前端不做任何"我是不是经理"的本地判断（那只能靠可篡改的本地角色字段），
+// 也不自行拼组织范围（缺 `org_id` 后端直接 422，不提供无范围查询）。
 //
 // ENT-019：本页已接入运行期导航治理（`utils/routes.js`）——
 //   · 跳转一律经 `go()`（不再裸调 `wx.navigateTo`），页面栈预算与上下文复用才真的生效；
@@ -10,11 +13,17 @@
 //   · 本页登记在 `utils/routes.js` 的 `MIGRATED_PAGES` 里，CI 会核对"名单内不得再出现
 //     裸 `wx.navigateTo / redirectTo / reLaunch`"。
 const {
+  CASE_KIND_LABELS,
+  CASE_KIND_ORDER,
+  CASE_ORG_SCOPE_LABELS,
+  CASE_ORG_SCOPE_ORDER,
   STATUS_META,
   STATUS_ORDER,
   VIEW,
+  decorateCaseList,
   decorateList,
   decorateOrgs,
+  fetchCaseOrgList,
   fetchMyOrgs,
   fetchQueue,
   pageHint,
@@ -33,10 +42,41 @@ const PAGE_SIZE = 20
 /** 记住"上次选的组织"。存本地只是**默认值**，不是权限依据 —— 权限始终由服务端判定。 */
 const STORAGE_ORG_KEY = 'entrust_active_org'
 
+/**
+ * 本页承载**两个队列**（DR-0010 §3.8 / DR-0014 §3.1–3.2）：
+ *
+ * - `assignment` —— 委托队列（`GET /assignments?view=org`）。本页原有内容，
+ *   仍是默认队列：经理人进工作台的第一件事通常是看"有哪些单要处理"。
+ * - `case` —— 异常 / 变更队列（`GET /exceptions?view=org&org_id=…`，UI-04）。
+ *   它是**跨委托**的组合队列，与委托队列共用同一个组织定位与同一套五态裁决，
+ *   但筛选维度不同（开闭范围 + 案件类型，而不是委托状态）。
+ *
+ * 为什么做成本页的队列切换、而不是另开一个页面：两个队列的前提完全一样
+ * （同一个组织上下文、同一次组织选择、同一套五态），另开页面就得把这套
+ * 定位逻辑复制一份，或者把用户再赶回去选一次组织。同样它也**不该**被做成
+ * 两个 tabBar 页 —— 那是两个入口，不是两个视图。
+ */
+const QUEUE = { ASSIGNMENT: 'assignment', CASE: 'case' }
+
 // 筛选条：全部 + 后端取值域（不从页面里硬编码状态字面量，改后端只需改 utils）
 const FILTERS = [{ key: '', label: '全部' }].concat(
   STATUS_ORDER.map(function (key) {
     return { key: key, label: STATUS_META[key].label }
+  })
+)
+
+/**
+ * 案件队列的开闭范围。**不是状态筛选** ——
+ * 六个案件状态摊成筛选条，「未关闭」这一档就得靠多选表达，漏选就是漏看。
+ */
+const CASE_SCOPES = CASE_ORG_SCOPE_ORDER.map(function (key) {
+  return { key: key, label: CASE_ORG_SCOPE_LABELS[key] }
+})
+
+/** 案件类型筛选。合到一行会与范围筛选混成一条，故另起一行、各带自己的默认项。 */
+const CASE_KINDS = [{ key: '', label: '全部类型' }].concat(
+  CASE_KIND_ORDER.map(function (key) {
+    return { key: key, label: CASE_KIND_LABELS[key] }
   })
 )
 
@@ -46,8 +86,16 @@ Page({
     view: VIEW.LOADING,
     viewTitle: '加载中',
     viewHint: '',
+    // 当前队列（两个队列共用 items / total / pageHint 一格渲染位：
+    // 它们是"当前这个队列的数据"，不是"两个队列各自的数据"——后者会让模板
+    // 需要同时判断"哪一格是活的"，而这正是最容易渲染出错数据的形状）
+    queue: QUEUE.ASSIGNMENT,
     filters: FILTERS,
     activeStatus: '',
+    caseScopes: CASE_SCOPES,
+    caseKinds: CASE_KINDS,
+    activeCaseScope: CASE_ORG_SCOPE_ORDER[0],
+    activeCaseKind: '',
     items: [],
     total: 0,
     pageHint: '',
@@ -162,10 +210,22 @@ Page({
   },
 
   /**
-   * 取队列。**不 catch 后 setData 成空列表** —— 那会把"失败"渲染成"没有委托"，
-   * 是这类页面最常见也最难被发现的问题。一切进入 viewState 统一裁决。
+   * 取数入口：按当前队列分流。
+   *
+   * 分流放在这里、而不是让两个队列各自在 `catch` 里 `setData`，是为了让
+   * 「失败不得被渲染成没有数据」这条只有一份实现（见下方两个取数函数共用的
+   * `applyFailure`）。两个队列共用同一个组织定位结果与同一套五态裁决，
+   * 差别只在取哪个接口、空态怎么说。
    */
   loadQueue() {
+    return this.data.queue === QUEUE.CASE ? this.loadCaseQueue() : this.loadAssignmentQueue()
+  },
+
+  /**
+   * 委托队列。**不 catch 后 setData 成空列表** —— 那会把"失败"渲染成"没有委托"，
+   * 是这类页面最常见也最难被发现的问题。一切进入 viewState 统一裁决。
+   */
+  loadAssignmentQueue() {
     const self = this
     this.setData({ view: VIEW.LOADING, viewTitle: '加载中', viewHint: '' })
     return fetchQueue({
@@ -180,13 +240,64 @@ Page({
         self.applyState(viewState({ status: 200, total: total }), items, total)
       })
       .catch(function (err) {
-        const status = (err && err.httpStatus) || 0
+        self.applyFailure(err)
+      })
+  },
+
+  /**
+   * 异常 / 变更队列（UI-04，**跨委托**）。
+   *
+   * 空态文案必须与委托队列不同：两个队列空的时候说的不是一件事
+   * （"还没有委托" vs "还没有异常或变更"），复用同一句会让用户以为筛错了队列。
+   * 但判定顺序仍由 `viewState` 独占 —— 这里只覆写措辞，不覆写"错误优先于空"。
+   */
+  loadCaseQueue() {
+    const self = this
+    this.setData({ view: VIEW.LOADING, viewTitle: '加载中', viewHint: '' })
+    if (!this.data.activeOrgId) {
+      // 组织未定位就发请求，后端会以 422 回应（缺范围）。那是**编程错误**而不是业务状态，
+      // 所以按 error 态点名，而不是让它退化成一句笼统的"加载失败"。
+      this.applyState(
+        { state: VIEW.ERROR, title: '尚未确定要查看的组织', hint: '请先在上方选择服务经营主体' },
+        [],
+        0
+      )
+      return Promise.resolve()
+    }
+    return fetchCaseOrgList({
+      orgId: this.data.activeOrgId,
+      scope: this.data.activeCaseScope,
+      kind: this.data.activeCaseKind,
+      page: 1,
+      size: PAGE_SIZE
+    })
+      .then(function (res) {
+        const total = (res && res.total) || 0
+        const items = decorateCaseList(res && res.items)
         self.applyState(
-          viewState({ status: status, netError: !status, detail: err && err.detail }),
-          [],
-          0
+          viewState({
+            status: 200,
+            total: total,
+            emptyTitle: '还没有异常或变更',
+            emptyHint: '案件由经理人登记后出现在这里'
+          }),
+          items,
+          total
         )
       })
+      .catch(function (err) {
+        self.applyFailure(err)
+      })
+  },
+
+  /** 取数失败统一进 viewState（两个队列共用一份，避免各写一套判定顺序） */
+  applyFailure(err) {
+    const status = (err && err.httpStatus) || 0
+    this.applyState(
+      viewState({ status: status, netError: !status, detail: err && err.detail }),
+      [],
+      0
+    )
   },
 
   applyState(state, items, total) {
@@ -220,6 +331,58 @@ Page({
     }
     this.setData({ activeOrgId: orgId, orgReason: 'picked' })
     this.loadQueue()
+  },
+
+  /**
+   * 切换队列（委托 / 异常与变更）。**先清空再取**。
+   *
+   * 两个队列的行形状不同（`assignmentId` vs `caseId`），把上一个队列的行留在 `items`
+   * 里、只换 `queue`，模板就会拿另一个形状的字段去渲染 —— 那会是一屏"看着像这个队列
+   * 的数据"的错值，而不是明显的空白。清空之后，"还没有数据"与"数据还没回来"
+   * 仍然只由 `view` 一个字段表达（`loadQueue` 立刻置 loading）。
+   */
+  onSwitchQueue(e) {
+    const key = (e.currentTarget.dataset.queue || '').toString()
+    if (!key || key === this.data.queue) return
+    // 只认注册过的两个队列：未知值静默忽略，避免以后加队列时把某个拼错的 key
+    // 变成"切过去了但什么都没发生"。
+    if (key !== QUEUE.ASSIGNMENT && key !== QUEUE.CASE) return
+    this.setData({ queue: key, items: [], total: 0, pageHint: '' })
+    this.loadQueue()
+  },
+
+  /** 切换案件开闭范围（未关闭 / 全部）。组织已定位，只重取案件队列。 */
+  onCaseScope(e) {
+    const key = (e.currentTarget.dataset.key || '').toString()
+    if (!key || key === this.data.activeCaseScope) return
+    this.setData({ activeCaseScope: key })
+    this.loadCaseQueue()
+  },
+
+  /** 切换案件类型筛选（全部类型 / 异常 / 变更请求）。 */
+  onCaseKind(e) {
+    const key = (e.currentTarget.dataset.key || '').toString()
+    if (key === this.data.activeCaseKind) return
+    this.setData({ activeCaseKind: key })
+    this.loadCaseQueue()
+  },
+
+  /** 打开案件详情（UI-08）。与 `onOpen` 同一套 `go()` 用法，只是目标是案件页。 */
+  onOpenCase(e) {
+    const id = e.currentTarget.dataset.id
+    if (!id) return
+    const self = this
+    R.go('/pages/entrust/case/case?case_id=' + encodeURIComponent(String(id)), {
+      from: SELF,
+      ctx: { orgId: this.data.activeOrgId },
+      hasUnsaved: this.hasUnsaved(),
+      onUnsaved: function (plan) {
+        self.confirmLeave(plan)
+      },
+      fail: function () {
+        wx.showToast({ title: '打开案件失败', icon: 'none' })
+      }
+    })
   },
 
   onRetry() {
@@ -269,9 +432,11 @@ Page({
    * 本页是否有未保存的编辑。
    *
    * ⚠️ 当前恒为 `false`，而且**这是事实而不是遗漏**：本页只有组织选择（选中即落本地，
-   *    不存在"改了没提交"）与筛选条（纯视图状态，丢了不算数据丢失）。第一个真正的
-   *    编辑面（成果编辑 / 任务派发）在 UI-05 之后出现，届时**必须**改这里，
-   *    否则 `go()` 的 confirm-unsaved 分支永远走不到。
+   *    不存在"改了没提交"）、队列切换与筛选条（都是纯视图状态，丢了不算数据丢失）。
+   *    第一个真正的编辑面（登记案件表单 / 成果编辑 / 任务派发）出现时，**必须**改这里，
+   *    否则 `go()` 的 confirm-unsaved 分支永远走不到。登记案件表单因此**没有**做在本页
+   *    的弹层里，而是独立的 `pages/entrust/case-create/case-create`：本页有两个队列、
+   *    两套筛选与两套行形状，"再来一个带未保存状态的表单"会让这一页的三件事互相纠缠。
    */
   hasUnsaved() {
     return false

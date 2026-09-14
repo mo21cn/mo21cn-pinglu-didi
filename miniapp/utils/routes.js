@@ -157,12 +157,62 @@ const NAV_EDGES = [
   // ENT-023：从工作台槽位里的成果引用进入成果页。**push**（进入下一级）而不是 replace ——
   // 用户看完成果还要回到这张工作台继续处理别的槽位，替换掉它等于把人踢出上下文。
   { from: 'pages/entrust/detail/detail', to: 'pages/entrust/artifact/artifact', strategy: 'push' },
+  // ENT-030 切片四之四：案件详情（UI-08）。三条进入边对应 PRD 第 155 行的
+  // 「accessible from workbench and chat」—— 委托工作台的「异常与变更」槽、
+  // UI-04 组合工作台的异常队列、会话里引用的案件。
+  // 三条都**先声明、后接线**：页面先落地，入口代码随后进（四之五 / 四之六 / 会话侧）。
+  // 现状：委托工作台异常槽（四之五）与 UI-04 组合队列（四之六）**已接线**，
+  // 只剩会话侧那一端仍未接线（`pending` 保留在那里）。
+  // ⚠️ **有代码证据就必须移除 `pending`**，否则 verify_routes.js 报"过期 pending"。
+  {
+    // 已接线（切片四之五）：`detail.js` 的 `onOpenRef` 按 `kind === 'case'` 分流到本边。
+    from: 'pages/entrust/detail/detail',
+    to: 'pages/entrust/case/case',
+    strategy: 'push',
+    reason: '从委托工作台「异常与变更」槽的案件引用进入案件详情'
+  },
+  {
+    // 已接线（切片四之六）：`workbench.js` 的 `onOpenCase` 由案件队列的每一行调用。
+    from: 'pages/entrust/workbench/workbench',
+    to: 'pages/entrust/case/case',
+    strategy: 'push',
+    reason: '从组合工作台（UI-04）的异常 / 变更队列进入案件详情'
+  },
+  {
+    from: 'pages/assistant/assistant',
+    to: 'pages/entrust/case/case',
+    strategy: 'push',
+    pending: '会话侧的案件引用尚未接入（PRD 第 155 行要求可从 chat 进入）',
+    reason: '会话里引用的案件直接打开详情；进入后返回走 navigateBack / reset，不声明回边'
+  },
+
+  // ── 登记案件（切片四之六 / ENT-030）─────────────────────────────────
+  // 入口只有**委托详情页**一处：登记案件必须先有一张已受理（`claimed`）的委托
+  // ——受理前没有责任主体，`raise_case` 会以 409 拒绝。详情页恰恰是"这张委托
+  // 现在是什么状态"的权威显示点，入口放这里，用户不会点进一个必然失败的按钮。
+  {
+    from: 'pages/entrust/detail/detail',
+    to: 'pages/entrust/case-create/case-create',
+    strategy: 'push',
+    reason: '从委托详情页登记一条异常 / 变更（仅已受理的委托显示该入口）'
+  },
+  {
+    // 登记成功后进入这宗案件的详情页。**replace 而不是 push**：
+    // 返回键不该把用户带回一张已经提交过的表单（同 `cargo --redirectTo--> match`
+    // 的口径 —— 提交完的页面不该留在返回路径上）。
+    from: 'pages/entrust/case-create/case-create',
+    to: 'pages/entrust/case/case',
+    strategy: 'replace',
+    reason: '登记成功后替换掉表单，落到这宗案件的详情'
+  },
 
   // ── 重置栈（回首页重走身份链路）────────────────────────────────────
   { from: 'pages/mine/mine', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/workbench/workbench', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/detail/detail', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/artifact/artifact', to: 'pages/index/index', strategy: 'reset' },
+  { from: 'pages/entrust/case/case', to: 'pages/index/index', strategy: 'reset' },
+  { from: 'pages/entrust/case-create/case-create', to: 'pages/index/index', strategy: 'reset' },
 
   // ── 工作台 ↔ 会话：产品要求「经理人可在会话/工作台/成果之间反复切换」────
   //    HO 明确指出：有循环的业务导航不一定无限压栈，不能把所有循环判成错误。
@@ -331,6 +381,28 @@ const ROUTES = {
     // 一种**会漂移**的推断（工作台引用的是精确 ID 与版本，见 PRD 第 187 行）。
     paramSchema: { artifact_id: { type: 'id', required: true } },
     note: '成果详情（查看 / 编辑 / 确认；从工作台槽位的成果引用进入）'
+  },
+  'pages/entrust/case/case': {
+    kind: 'detail', deepLink: 'require-params', domain: 'entrust',
+    // `case_id` 必需：没有它页面无从知道该读哪宗案件，而"读最新那宗"是一种
+    // **会漂移**的推断（与 `artifact_id` 同理）。
+    // ⚠️ 它与接口路径参数名 `{exception_id}` **不同名但同值** —— DR-0014 §7 有意
+    //    如此（路径已发布，改名会牵动它），别"顺手统一"。
+    paramSchema: { case_id: { type: 'id', required: true } },
+    // ⚠️ 刻意**不**声明 `keyContext: ['org']`：案件所属组织由 `case_id` 唯一决定，
+    //    它不是"当前选中的组织"。算进复用键会让同一宗案件在不同组织上下文下被当成
+    //    两个页面，白压一层栈 —— 这正是 keyContext 用在 workbench 上的反面。
+    note: '案件详情（异常 / 变更；从委托工作台异常槽、UI-04 队列或会话进入）'
+  },
+  'pages/entrust/case-create/case-create': {
+    kind: 'detail', deepLink: 'require-params', domain: 'entrust',
+    // `assignment_id` 必需：登记案件必须先知道登记到**哪张委托**上 ——
+    // 它是写端路径参数（`POST /assignments/{assignment_id}/exceptions`），
+    // 而"按当前组织猜一张委托"是一种**会漂移**的推断（与 case_id 同理）。
+    paramSchema: { assignment_id: { type: 'id', required: true } },
+    // ⚠️ 与案件详情页同理，**不**声明 `keyContext: ['org']`：
+    //    所登记的委托由 `assignment_id` 唯一决定，它不是"当前选中的组织"。
+    note: '登记案件（异常 / 变更；从委托详情页进入，成功后转到案件详情）'
   }
 }
 
@@ -365,7 +437,15 @@ const MIGRATED_PAGES = [
   'pages/entrust/workbench/workbench',
   'pages/entrust/detail/detail',
   // ENT-023：成果页（查看 / 编辑 / 确认）从落地起就接入，避免"新增页面绕过预算"
-  'pages/entrust/artifact/artifact'
+  'pages/entrust/artifact/artifact',
+  // ENT-030 切片四之四：案件详情（UI-08）从落地起接入 —— 它是**被 push 进入**的
+  // 三级页，恰恰是"页面栈预算"最容易被绕过的一类（本页只读、没有表单，
+  // 但预算与深链契约与该页有没有表单无关）
+  'pages/entrust/case/case',
+  // ENT-030 切片四之六：登记案件页。它是**带未保存状态的表单页**，
+  // 正是"未保存编辑"那条策略（`hasUnsaved`）唯一真正起作用的地方 ——
+  // 脱离 go() 直接 navigateTo 会让这条策略变成只写在注释里的声明
+  'pages/entrust/case-create/case-create'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */

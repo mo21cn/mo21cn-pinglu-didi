@@ -1229,6 +1229,34 @@ section('⑤ 静态防线')
           log.push('fetchWorkbench:' + id)
           return Promise.resolve({ slots: [], unassigned_artifact_total: 0 })
         },
+        fetchCase: (id) => { log.push('fetchCase:' + id); return Promise.resolve({}) },
+        // 组织级案件清单（UI-04 / 切片四之六）。本节把所有组织桩成「没有组织身份」，
+        // 工作台会停在 denied 态、案件队列根本不会取数；这里登记它是为了**将来**有人
+        // 改动桩时不会让取数落到真实实现上（那会在 Node 里挂在一个永不 resolve 的
+        // Promise 上，页面停在 loading，断言全成空转 —— 比红更糟）。
+        fetchCaseOrgList: (opts) => {
+          log.push('fetchCaseOrgList:' + JSON.stringify(opts || {}))
+          return Promise.resolve({ items: [], total: 0, org_id: (opts && opts.orgId) || 0 })
+        },
+        // 受影响项候选（切片四之六：登记案件 / 处置里选目标）。同为"必须有桩"的取数：
+        // 留着真实实现会在 Node 里挂在一个永不 resolve 的 Promise 上。
+        fetchTaskCandidates: (id) => {
+          log.push('fetchTaskCandidates:' + id)
+          return Promise.resolve({ items: [], total: 0 })
+        },
+        fetchArtifactCandidates: (id) => {
+          log.push('fetchArtifactCandidates:' + id)
+          return Promise.resolve({ items: [], total: 0 })
+        },
+        // 六个案件写命令：本节不驱动它们（写路径的端到端由 verify_frontend_e2e 的
+        // 真写段与真机走查覆盖），登记它们只是为了**不会落到真实实现上** ——
+        // 落到真实实现在 Node 里同样是一个永不 resolve 的 Promise。
+        createCase: () => Promise.resolve({ case_id: 1 }),
+        addCaseLink: () => Promise.resolve({ case_id: 1 }),
+        removeCaseLink: () => Promise.resolve({ case_id: 1 }),
+        decideCase: () => Promise.resolve({ case_id: 1 }),
+        closeCase: () => Promise.resolve({ case_id: 1 }),
+        reopenCase: () => Promise.resolve({ case_id: 1 }),
         viewState: () => ({ state: 'empty', title: '还没有委托', hint: '' })
       })
 
@@ -1511,8 +1539,178 @@ section('⑤ 静态防线')
       JSON.stringify(dtCold.__calls)
     )
 
-    // —— 两页都不再裸调 wx 导航（运行期治理真的接上了） ——
-    for (const [file, label] of [[WB, '工作台'], [DT, '详情']]) {
+    // —— 详情页：槽位引用分流（ENT-030 切片四之五）——
+    // `kind` 由投影层写进 dataset、页面只转发。**真跳一次**才看得出分流对不对：
+    // 静态断言能证明"两个分支都在"，证明不了"点案件走的是 case_id 而不是 artifact_id"。
+    const dtRefCase = makeWx()
+    const dt5 = instantiate(loadEntrustPage(DT, dtRefCase, []))
+    withRuntime(dtRefCase, [{ route: SELF_DT, options: { assignment_id: 'A-1' } }], () =>
+      dt5.onOpenRef({ currentTarget: { dataset: { kind: 'case', id: 12 } } })
+    )
+    check(
+      '详情页：点案件引用 → 进案件页且带 case_id（不是把案件号当成果号读）',
+      dtRefCase.__calls.navigateTo.length === 1 &&
+        dtRefCase.__calls.navigateTo[0].url === '/pages/entrust/case/case?case_id=12',
+      JSON.stringify(dtRefCase.__calls)
+    )
+
+    const dtRefArt = makeWx()
+    const dt6 = instantiate(loadEntrustPage(DT, dtRefArt, []))
+    withRuntime(dtRefArt, [{ route: SELF_DT, options: { assignment_id: 'A-1' } }], () =>
+      dt6.onOpenRef({ currentTarget: { dataset: { kind: 'artifact', id: '7' } } })
+    )
+    check(
+      '详情页：点成果引用 → 进成果页且带 artifact_id（第二片的既有行为不能被改坏）',
+      dtRefArt.__calls.navigateTo.length === 1 &&
+        dtRefArt.__calls.navigateTo[0].url === '/pages/entrust/artifact/artifact?artifact_id=7',
+      JSON.stringify(dtRefArt.__calls)
+    )
+
+    const dtRefUnknown = makeWx()
+    const dt7 = instantiate(loadEntrustPage(DT, dtRefUnknown, []))
+    withRuntime(dtRefUnknown, [{ route: SELF_DT, options: { assignment_id: 'A-1' } }], () =>
+      dt7.onOpenRef({ currentTarget: { dataset: { kind: 'zzz', id: 12 } } })
+    )
+    check(
+      '详情页：未知引用形状**一律不跳**（静默退回成果页会把案件号当成果号读）',
+      dtRefUnknown.__calls.navigateTo.length === 0 &&
+        dtRefUnknown.__calls.redirectTo.length === 0 &&
+        dtRefUnknown.__calls.reLaunch.length === 0,
+      JSON.stringify(dtRefUnknown.__calls)
+    )
+
+    // —— 案件详情（UI-08 只读片 / ENT-030 切片四之四）——
+    // 这一页的"接线"有两个容易漏的点，都在这里钉住：
+    //   ① 它是 `require-params` 深链页，守卫必须在**取数之前**拦下缺参/非法参数；
+    //   ② 路由参数名是 `case_id`，而接口路径参数名是 `exception_id`（DR-0014 §7）——
+    //      页面把哪个值交给取数，只有真跑一遍才看得出来。
+    const CS = path.join(MP, 'pages/entrust/case/case.js')
+    const SELF_CS = 'pages/entrust/case/case'
+
+    const csMiss = makeWx()
+    const logCsMiss = []
+    const cs1 = instantiate(loadEntrustPage(CS, csMiss, logCsMiss))
+    cs1.onLoad({})
+    check(
+      '案件页：缺 case_id → error 态且不取数（错误优先于空）',
+      cs1.data.view === 'error' && cs1.data.viewTitle === '缺少案件编号' && logCsMiss.length === 0,
+      cs1.data.view + ' / ' + cs1.data.viewTitle + ' / ' + JSON.stringify(logCsMiss)
+    )
+
+    const csBad = makeWx()
+    const logCsBad = []
+    const cs2 = instantiate(loadEntrustPage(CS, csBad, logCsBad))
+    cs2.onLoad({ case_id: '../etc' })
+    check(
+      '案件页：非法编号字符 → error 态且不取数（只查 `!id` 会把它放过去）',
+      cs2.data.view === 'error' && cs2.data.viewTitle === '案件编号不合法' && logCsBad.length === 0,
+      cs2.data.view + ' / ' + cs2.data.viewTitle + ' / ' + JSON.stringify(logCsBad)
+    )
+
+    const csOk = makeWx()
+    const logCsOk = []
+    const cs3 = instantiate(loadEntrustPage(CS, csOk, logCsOk))
+    cs3.onLoad({ case_id: '12' })
+    check(
+      '案件页：合法 case_id 放行，且只按这一个编号取一次（取错单要被拦下）',
+      logCsOk.length === 1 && logCsOk[0] === 'fetchCase:12',
+      JSON.stringify(logCsOk)
+    )
+
+    const csCold = makeWx()
+    const cs4 = instantiate(loadEntrustPage(CS, csCold, []))
+    withRuntime(csCold, [{ route: SELF_CS, options: {} }], () => cs4.onBack())
+    check(
+      '案件页：冷启动返回键 → reLaunch 首页（不再是无效的 navigateBack）',
+      csCold.__calls.reLaunch.length === 1 &&
+        csCold.__calls.reLaunch[0].url === '/pages/index/index' &&
+        csCold.__calls.navigateBack.length === 0,
+      JSON.stringify(csCold.__calls)
+    )
+
+    const csWarm = makeWx()
+    const cs5 = instantiate(loadEntrustPage(CS, csWarm, []))
+    withRuntime(csWarm, [{ route: SELF_DT, options: {} }, { route: SELF_CS, options: {} }], () =>
+      cs5.onBack()
+    )
+    check(
+      '案件页：热路径返回键 → navigateBack（回到"谁把我推进来的"那一页）',
+      csWarm.__calls.navigateBack.length === 1 && csWarm.__calls.reLaunch.length === 0,
+      JSON.stringify(csWarm.__calls)
+    )
+
+    // 登记案件页（切片四之六）。两件事必须在**取数之前**成立：
+    //   ① 它是 `require-params` 深链页 —— 缺参 / 非法编号都不得发起取数；
+    //   ② 它是本支线唯一**带未保存状态**的页面 —— `hasUnsaved()` 必须真的能区分
+    //      "填过内容"与"没填过"，否则返回键的二次确认要么永不出现、要么次次出现。
+    const CC = path.join(MP, 'pages/entrust/case-create/case-create.js')
+    const SELF_CC = 'pages/entrust/case-create/case-create'
+
+    const ccMiss = makeWx()
+    const logCcMiss = []
+    const cc1 = instantiate(loadEntrustPage(CC, ccMiss, logCcMiss))
+    cc1.onLoad({})
+    check(
+      '登记页：缺 assignment_id → error 态且不取数（错误优先于空）',
+      cc1.data.view === 'error' && cc1.data.viewTitle === '缺少委托编号' && logCcMiss.length === 0,
+      cc1.data.view + ' / ' + cc1.data.viewTitle + ' / ' + JSON.stringify(logCcMiss)
+    )
+
+    const ccBad = makeWx()
+    const logCcBad = []
+    const cc2 = instantiate(loadEntrustPage(CC, ccBad, logCcBad))
+    cc2.onLoad({ assignment_id: '../etc' })
+    check(
+      '登记页：非法编号字符 → error 态且不取数（只查 `!id` 会把它放过去）',
+      cc2.data.view === 'error' && cc2.data.viewTitle === '委托编号不合法' && logCcBad.length === 0,
+      cc2.data.view + ' / ' + cc2.data.viewTitle + ' / ' + JSON.stringify(logCcBad)
+    )
+
+    const ccOk = makeWx()
+    const logCcOk = []
+    const cc3 = instantiate(loadEntrustPage(CC, ccOk, logCcOk))
+    cc3.onLoad({ assignment_id: '7' })
+    check(
+      '登记页：合法 assignment_id 放行，且按这一个编号取委托摘要',
+      logCcOk.length >= 1 && logCcOk[0] === 'fetchAssignment:7',
+      JSON.stringify(logCcOk)
+    )
+
+    // 未保存编辑的判据：空表单必须是 false —— 否则"刚进来就退出"也会弹确认框，
+    // 用户会被训练成一律点确定（那比不提示更糟，routes.js 的注释里写过同一条）。
+    const ccClean = instantiate(loadEntrustPage(CC, makeWx(), []))
+    ccClean.onLoad({ assignment_id: '7' })
+    const cleanFlag = ccClean.hasUnsaved()
+    const ccDirty = instantiate(loadEntrustPage(CC, makeWx(), []))
+    ccDirty.onLoad({ assignment_id: '7' })
+    ccDirty.onInput({ currentTarget: { dataset: { field: 'title' } }, detail: { value: '主机故障' } })
+    const dirtyFlag = ccDirty.hasUnsaved()
+    check(
+      '登记页：hasUnsaved() 空表单为 false、填过标题为 true（否则确认框要么不弹要么次次弹）',
+      cleanFlag === false && dirtyFlag === true,
+      cleanFlag + ' / ' + dirtyFlag
+    )
+
+    // 改动内容必须作废上一次提交的幂等键：沿用旧键会让服务端把新内容当成旧提交的重放
+    check(
+      '登记页：改动内容作废幂等键（否则改了再提交＝服务端按重放处理，内容不生效）',
+      /lastKey/.test(fs.readFileSync(CC, 'utf8')) &&
+        /setData\(\{ lastKey: '' \}\)|lastKey: ''/.test(fs.readFileSync(CC, 'utf8'))
+    )
+
+    const ccCold = makeWx()
+    const cc4 = instantiate(loadEntrustPage(CC, ccCold, []))
+    withRuntime(ccCold, [{ route: SELF_CC, options: {} }], () => cc4.onBack())
+    check(
+      '登记页：冷启动返回键 → reLaunch 首页（不再是无效的 navigateBack）',
+      ccCold.__calls.reLaunch.length === 1 &&
+        ccCold.__calls.reLaunch[0].url === '/pages/index/index' &&
+        ccCold.__calls.navigateBack.length === 0,
+      JSON.stringify(ccCold.__calls)
+    )
+
+    // —— 四页都不再裸调 wx 导航（运行期治理真的接上了） ——
+    for (const [file, label] of [[WB, '工作台'], [DT, '详情'], [CS, '案件'], [CC, '登记']]) {
       const src = fs.readFileSync(file, 'utf8')
       check(
         `${label}页：不再出现裸 wx.navigateTo / redirectTo / reLaunch`,

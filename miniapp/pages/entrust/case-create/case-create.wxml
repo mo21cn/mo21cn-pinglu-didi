@@ -1,0 +1,208 @@
+<!--
+  委托发货 · 登记案件（ENT-030 切片四之六 / DR-0013 §7.1「登记案件」人工落点）
+  四态分支（loading / expired / denied / error）一个都不能少：少一个分支就少一种表现，
+  失败会被渲染成空白（verify_entrust_ui.js 有专门断言）。
+  表单字段一律由 JS 侧 `caseCreateBody()` 做前置校验（C1/C2），本模板不做业务判断。
+-->
+<view class="page-sub">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">登记异常 / 变更</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub" wx:if="{{detail}}">委托 #{{detail.assignmentId}} · {{detail.title}}</view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期 -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 无权限 / 不存在（服务端对非参与方统一 404，不泄漏存在性） -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <block wx:else>
+      <!-- ① 案件类型 -->
+      <view class="card form-card">
+        <view class="form-label">案件类型</view>
+        <view class="pick-row">
+          <view
+            wx:for="{{kinds}}"
+            wx:key="key"
+            class="pick-pill {{form.kind === item.key ? 'pick-pill-on' : ''}}"
+            data-field="kind"
+            data-key="{{item.key}}"
+            bindtap="onPick"
+            hover-class="hover-dim"
+          >{{item.label}}</view>
+        </view>
+
+        <view class="form-label form-gap">一句话摘要</view>
+        <input
+          class="form-input"
+          value="{{form.title}}"
+          data-field="title"
+          bindinput="onInput"
+          maxlength="200"
+          placeholder="例如：原船主机故障，需就近靠泊检修"
+          placeholder-class="input-ph"
+        />
+      </view>
+
+      <!-- ② 严重度 / 影响类型。两者正交：严重度是"多要紧"，影响类型是"会挡住什么" -->
+      <view class="card form-card">
+        <view class="form-label">严重度</view>
+        <view class="pick-row">
+          <view
+            wx:for="{{severities}}"
+            wx:key="key"
+            class="pick-pill {{form.severity === item.key ? 'pick-pill-on' : ''}}"
+            data-field="severity"
+            data-key="{{item.key}}"
+            bindtap="onPick"
+            hover-class="hover-dim"
+          >{{item.label}}</view>
+        </view>
+
+        <view class="form-label form-gap">影响类型</view>
+        <view class="pick-row">
+          <view
+            wx:for="{{impacts}}"
+            wx:key="key"
+            class="pick-pill {{form.impact_kind === item.key ? 'pick-pill-on' : ''}}"
+            data-field="impact_kind"
+            data-key="{{item.key}}"
+            bindtap="onPick"
+            hover-class="hover-dim"
+          >{{item.label}}</view>
+        </view>
+        <view class="form-tip">选「阻断执行」时，下方必须至少登记一条受影响项</view>
+      </view>
+
+      <!-- ③ 受影响项（任务 / 成果）。可以随案件一起提交 —— 阻断类案件本来就要求它 -->
+      <view class="card form-card">
+        <view class="row-between">
+          <text class="form-label">受影响项</text>
+          <text class="form-tip-inline">已选 {{links.length}} 条</text>
+        </view>
+
+        <block wx:if="{{links.length}}">
+          <view wx:for="{{links}}" wx:key="key" class="link-row">
+            <view class="link-main">
+              <view class="link-text">{{item.text}}</view>
+              <view class="link-sub">{{item.sub}}</view>
+            </view>
+            <view
+              class="link-remove"
+              data-rm-key="{{item.key}}"
+              bindtap="onRemoveLink"
+              hover-class="hover-dim"
+            >移除</view>
+          </view>
+        </block>
+        <view wx:else class="form-empty">还没有登记受影响项</view>
+
+        <view
+          class="link-add"
+          data-act-toggle-links="1"
+          bindtap="onToggleLinks"
+          hover-class="hover-dim"
+        >
+          {{pickOpen ? '收起候选' : '从本单的任务 / 成果中选择'}}
+        </view>
+
+        <block wx:if="{{pickOpen}}">
+          <view wx:if="{{candHint}}" class="form-empty">{{candHint}}</view>
+          <block wx:else>
+            <view
+              wx:for="{{candidates}}"
+              wx:key="key"
+              class="cand-row"
+              data-kind="{{item.target_kind}}"
+              data-id="{{item.target_id}}"
+              bindtap="onAddLink"
+              hover-class="hover-dim"
+            >
+              <view class="link-main">
+                <view class="link-text">{{item.text}}</view>
+                <view class="link-sub">{{item.sub}}</view>
+              </view>
+              <view class="cand-add">＋</view>
+            </view>
+          </block>
+        </block>
+      </view>
+
+      <!-- ④ 原因 / 拟解决方案 / 截止时间 -->
+      <view class="card form-card">
+        <view class="form-label">原因（可选）</view>
+        <textarea
+          class="form-textarea"
+          value="{{form.cause}}"
+          data-field="cause"
+          bindinput="onInput"
+          maxlength="500"
+          placeholder="为什么会发生 / 为什么要变更"
+          placeholder-class="input-ph"
+        />
+
+        <view class="form-label form-gap">拟解决方案（可选）</view>
+        <textarea
+          class="form-textarea"
+          value="{{form.proposed_action}}"
+          data-field="proposed_action"
+          bindinput="onInput"
+          maxlength="500"
+          placeholder="打算怎么处理"
+          placeholder-class="input-ph"
+        />
+
+        <view class="form-label form-gap">截止时间（可选）</view>
+        <view class="due-row">
+          <picker mode="date" value="{{form.due_at}}" bindchange="onDueChange">
+            <view class="due-value {{form.due_at ? '' : 'due-value-empty'}}">
+              {{form.due_at ? form.due_at : '未设置'}}
+            </view>
+          </picker>
+          <view
+            wx:if="{{form.due_at}}"
+            class="link-remove"
+            bindtap="onClearDue"
+            hover-class="hover-dim"
+          >清除</view>
+        </view>
+      </view>
+
+      <!-- 提交 -->
+      <view class="card form-card submit-card">
+        <view
+          class="btn-primary submit-btn"
+          data-act-submit-case="1"
+          bindtap="onSubmit"
+          hover-class="hover-dim"
+        >{{submitting ? '登记中…' : '登记案件'}}</view>
+        <view class="form-tip">登记后进入案件详情页，在那里登记受影响项、记录决定或关闭。</view>
+      </view>
+    </block>
+  </view>
+</view>

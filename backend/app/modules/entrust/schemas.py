@@ -560,12 +560,40 @@ class WorkbenchArtifactRef(BaseModel):
     revision_no: int | None
 
 
+class CaseRef(BaseModel):
+    """UI-05 的 `exceptions` 槽里引用的一宗案件（DR-0014 §3.3）。
+
+    **与 `WorkbenchArtifactRef` 平行但独立** —— 这不是「风格统一」问题：
+
+    | | `WorkbenchArtifactRef` | `CaseRef` |
+    | --- | --- | --- |
+    | 键 | artifact_id / artifact_type / label / revision_no | case_id / kind / title / status / blocking |
+    | 「版本」 | **精确版本**，两端引用同一对 (artifact_id, revision_no) | **无** —— 案件的 revision_no 是乐观锁版本号，不是「看哪一版」 |
+    | 消费者 | 成果页（`artifact_id` 进深链） | 案件页（`case_id` 进深链） |
+
+    字段名不同是**刻意的防线**：一旦共用键名，前端就会用一个渲染分支吃两种数据，
+    而两边「有版本 / 无版本」的语义差异会在某次改动里静默错位。
+    前端按**槽位 `key`** 选渲染分支，不靠猜字段。
+    """
+
+    case_id: int
+    kind: str
+    title: str
+    status: str
+    blocking: bool
+
+
 class WorkbenchCurrentOut(BaseModel):
-    """「当前成果」：有效业务版本；多个成果时给摘要与数量。"""
+    """「当前成果」：有效业务版本；多个成果时给摘要与数量。
+
+    `refs` 按**槽位**承载不同形状，且**不混装**：普通槽位是 `WorkbenchArtifactRef`，
+    `exceptions` 槽是 `CaseRef`。用联合而不是另开一个字段，是为了让「这一槽位里
+    可点的引用」对前端保持**一个**入口 —— 渲染分支按槽位 `key` 选。
+    """
 
     state: str
     text: str
-    refs: list[WorkbenchArtifactRef] = Field(default_factory=list)
+    refs: list[WorkbenchArtifactRef | CaseRef] = Field(default_factory=list)
 
 
 class WorkbenchIssueOut(BaseModel):
@@ -608,6 +636,10 @@ class WorkbenchSlotOut(BaseModel):
     `available=False` 表示该槽位的能力**本期未开放**（当前只有 `exceptions`），
     此时 `unavailable_reason` 非空，界面显示"本期未开放"而**不是**"暂无记录"——
     后者会把"能力还没做"说成"这单没有异常"（DR-0010 §3.8）。
+
+    `exceptions` 的真实投影已实现（DR-0013 A1 切片三之三），但标记按
+    DR-0013 §7.3 仍需保持 —— 撤下条件第 4 条（人工落点在真载荷走查中走通）未满足。
+    见 `workbench.EXCEPTIONS_SLOT_OPEN`。
     """
 
     key: str
@@ -634,3 +666,251 @@ class WorkbenchOut(BaseModel):
     status: str
     slots: list[WorkbenchSlotOut]
     unassigned_artifact_total: int
+
+
+# ── 异常与变更案件（ENT-030 / DR-0013）────────────────────────────────────────
+# 投影形状直接对应服务层的 `project_case_internal`：**不在这里再挑一遍字段**。
+# 若响应模型自己挑字段，就会出现「服务层投影漏了一个字段、但没人发现」——
+# 因为响应模型把它丢了，前端只会觉得"这个字段还没做"。
+# 对客投影（`project_case_for_customer`）刻意**没有**对应的响应模型：
+# 它属 UI-07（客户页，未开工），现在造一个模型就等于宣称它可用。
+
+
+class ExceptionCaseLinkIn(BaseModel):
+    """一条受影响项（任务或成果）。归属校验在服务层（跨委托 → 403）。
+
+    用于**随案件一起登记**的场景（`ExceptionCaseCreate.links`），因此**不带**
+    `expected_revision` —— 那时案件还没有版本号可言。
+    """
+
+    target_kind: str = Field(min_length=1, max_length=16)
+    target_id: int = Field(ge=1)
+
+
+class ExceptionCaseLinkAddIn(BaseModel):
+    """给**已有**案件补登记一条受影响项。
+
+    `expected_revision` 是**案件**的乐观锁：登记受影响项同样推进案件版本，
+    否则两个客户端可以各自往同一案件里塞 link 而互不察觉。
+    """
+
+    expected_revision: int = Field(ge=1)
+    target_kind: str = Field(min_length=1, max_length=16)
+    target_id: int = Field(ge=1)
+
+
+class ExceptionCaseCreate(BaseModel):
+    """登记案件。
+
+    `links` 允许**随案件一次登记**：`impact_kind='execution-blocking'` 时 C2 要求
+    至少一条受影响项，若必须先建案件再补 link，那个中间态本身就违反 C2。
+
+    `org_id` 是**可选的冗余声明**：带上就必须与委托所属组织一致（否则 403），
+    不带上则完全由服务端派生 —— 二者都不会让客户端**决定**作用域。
+    """
+
+    kind: str = Field(min_length=1, max_length=16)
+    title: str = Field(min_length=1, max_length=200)
+    severity: str = Field(min_length=1, max_length=16)
+    impact_kind: str = Field(min_length=1, max_length=24)
+    cause: str | None = None
+    owner_user_id: int | None = Field(default=None, ge=1)
+    source: str = Field(default="manual", min_length=1, max_length=24)
+    due_at: datetime | None = None
+    proposed_action: str | None = None
+    links: list[ExceptionCaseLinkIn] | None = None
+    org_id: int | None = Field(default=None, ge=1)
+
+
+class ExceptionCaseDecisionIn(BaseModel):
+    """记录决定。
+
+    **没有** `severity` / `impact_kind` 字段 —— 这是 C3 在接口层的形态：
+    决定路径不存在「顺手改一个展示用字段」的入口。
+    """
+
+    expected_revision: int = Field(ge=1)
+    to_status: str = Field(min_length=1, max_length=16)
+    decision_note: str | None = None
+    basis_revision_id: int | None = Field(default=None, ge=1)
+
+
+class ExceptionCaseCloseIn(BaseModel):
+    """关闭案件。`closure_disposition` 与 `evidence_ref` 都是必填 —— 没有一键关闭。"""
+
+    expected_revision: int = Field(ge=1)
+    closure_disposition: str = Field(min_length=1, max_length=32)
+    evidence_ref: str = Field(min_length=1, max_length=512)
+    decision_note: str | None = None
+    resolution_note: str | None = None
+
+
+class ExceptionCaseReopenIn(BaseModel):
+    """重开已关闭案件：原因必填，落审计事件的 `note`。"""
+
+    expected_revision: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=255)
+
+
+class ExceptionCaseLinkOut(BaseModel):
+    link_id: int
+    target_kind: str
+    target_id: int
+    applied_revision_id: int | None
+
+
+class ExceptionCaseDecisionOut(BaseModel):
+    note: str | None
+    by: int | None
+    at: str | None
+    basis_revision_id: int | None
+
+
+class ExceptionCaseResolutionOut(BaseModel):
+    note: str | None
+
+
+class ExceptionCaseClosureOut(BaseModel):
+    disposition: str | None
+    by: int | None
+    at: str | None
+
+
+class ExceptionCaseEventOut(BaseModel):
+    """一条案件事件（append-only）。`payload` 是附加结构化信息。"""
+
+    seq: int
+    event_kind: str
+    from_status: str | None
+    to_status: str | None
+    actor_user_id: int
+    note: str | None
+    evidence_ref: str | None
+    basis_revision_id: int | None
+    payload: dict[str, Any] | None
+    created_at: str
+
+
+class ExceptionCaseOut(BaseModel):
+    """案件投影（**内部**；`project_case_internal` 的响应形态）。"""
+
+    case_id: int
+    assignment_id: int
+    org_id: int
+    kind: str
+    title: str
+    cause: str | None
+    severity: str
+    impact_kind: str
+    status: str
+    owner_user_id: int | None
+    raised_by_user_id: int
+    source: str
+    raised_at: str
+    due_at: str | None
+    proposed_action: str | None
+    decision: ExceptionCaseDecisionOut
+    resolution: ExceptionCaseResolutionOut
+    closure: ExceptionCaseClosureOut
+    blocking: bool
+    affected: list[ExceptionCaseLinkOut] = Field(default_factory=list)
+    revision_no: int
+    created_at: str
+    updated_at: str
+
+
+class ExceptionCaseListOut(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: list[ExceptionCaseOut]
+
+
+class ExceptionCaseListItem(BaseModel):
+    """组织级清单的一行（UI-04 的「异常/变更」队列，DR-0014 §3.2）。
+
+    UI-04 是**跨委托**的组合工作台，因此这里要带 `assignment_id`（界面得说清
+    「是哪张单的」）；但**不带** `org_id` —— 视图本身已限定单个组织，回传没有信息量。
+
+    **刻意不含 `severity`**：C3 的用意是堵住「按严重度决定流程」的联想，清单里给了它，
+    界面迟早会拿它排序或加重；而清单已经有表达轻重的正确字段 —— `blocking`（流程约束）
+    与 `impact_kind`（影响类型）。严重度属详情页的业务判断，留在 UI-08。
+    """
+
+    case_id: int
+    assignment_id: int
+    kind: str
+    title: str
+    status: str
+    impact_kind: str
+    blocking: bool
+    due_at: str | None = None
+    updated_at: str
+    affected_count: int
+
+
+class ExceptionCaseOrgListOut(BaseModel):
+    """`GET /exceptions?view=org` 的响应（DR-0014 §3.1）。
+
+    与单委托视图**共用分页口径**（`ORDER BY id DESC`、`size` 上限 100），
+    但行形状不同：单委托视图给完整投影（含 `cause` / 决定 / 处置 / 受影响项明细），
+    组织视图只给清单所需的最小集合 —— 组合工作台没有"同时展开 N 宗案件详情"的用途，
+    而每宗案件详情都带事件链。
+    """
+
+    total: int
+    page: int
+    size: int
+    org_id: int
+    items: list[ExceptionCaseListItem]
+
+
+class ExceptionCaseCapabilities(BaseModel):
+    """UI-08 的按钮可用性（DR-0014 §3.4）。
+
+    **挂在详情而不挂共享模型上**：它描述的是**调用者**，不是案件数据。
+    挂进 `ExceptionCaseOut` 会污染白名单投影，并让清单的每一行都带一份
+    「我能做什么」；写端点也仍返回纯数据的 `ExceptionCaseOut` ——
+    界面写完重新拉详情刷新能力。
+
+    字段的判定一律来自服务层 `case_capabilities`（与写命令同源），
+    这里**不重算、不给默认值**：任何本地推算都是第二份实现。
+    """
+
+    can_add_link: bool
+    can_remove_link: bool
+    can_decide: bool
+    can_close: bool
+    can_reopen: bool
+    can_apply_change: bool
+
+
+class ExceptionCaseDetailOut(BaseModel):
+    """案件详情：投影 + 完整事件链（重开再关闭的两轮历史在此可判定）。
+
+    `capabilities` **必填**（不给默认值）：它缺席时界面只能靠猜按钮可用性，
+    而「猜」正是 DR-0014 §3.4 要消除的东西。
+    """
+
+    case: ExceptionCaseOut
+    capabilities: ExceptionCaseCapabilities
+    events: list[ExceptionCaseEventOut] = Field(default_factory=list)
+
+
+def exception_case_out(data: dict[str, Any]) -> ExceptionCaseOut:
+    """服务层投影 dict → 响应模型。"""
+    return ExceptionCaseOut.model_validate(data)
+
+
+def exception_case_list_item(data: dict[str, Any]) -> ExceptionCaseListItem:
+    """服务层「清单行」投影 dict → 响应模型。"""
+    return ExceptionCaseListItem.model_validate(data)
+
+
+def exception_case_capabilities(data: dict[str, Any]) -> ExceptionCaseCapabilities:
+    """服务层能力投影 dict → 响应模型。"""
+    return ExceptionCaseCapabilities.model_validate(data)
+
+
+def exception_event_out(data: dict[str, Any]) -> ExceptionCaseEventOut:
+    return ExceptionCaseEventOut.model_validate(data)

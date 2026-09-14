@@ -55,6 +55,12 @@ let entrustArtifactTypes = { items: [] }
 let entrustArtifact = null
 let entrustArtifactRevisions = { items: [] }
 const entrustAssignmentArtifacts = {}   // assignmentId → 单委托成果清单
+const entrustTasksByAssignment = {}     // assignmentId → 单委托任务清单（受影响项候选）
+// ⑯ 段案件详情走查用的真载荷。**按 case_id 存一份**，不是只留最后一个：
+// 队列里的两宗刻意覆盖"有受影响项"与"无受影响项"两种形状，⑯ 段要逐宗都走 ——
+// 只留一宗会让另一宗拿到"载荷对不上"的桩错误，于是"页面缺陷"与"脚本没准备数据"
+// 混在一起（本轮就踩到：案件 #1 被判成 error 态）。
+const entrustCaseDetails = {}
 const entrustWriteProof = {}            // ⑮ 段真写前后的读数对比（后端事实）
 
 // ── 页面驱动的写通道 ──────────────────────────────────────────────────────
@@ -144,6 +150,11 @@ async function bootstrap() {
     tok[r] = sw.data.access_token
   }
   console.log('三角色登录成功：seed-shipper / seed-owner / seed-port')
+  // 组织经理 token 在这里就交到模块级（原来只在"挑中成果"时才赋）：
+  // 后面凡是要以经理身份**读**组织侧载荷的段（案件候选、案件详情）都要用它，
+  // 与"有没有挑中成果"无关 —— 挂在挑中分支里会让不挑成果的那次运行拿不到 token，
+  // 表现为相关的段整段 401，看起来像"接口坏了"。
+  ownerToken = tok.owner
 
   const get = async (p, role, params) => {
     const res = await api('GET', p + qs(params), { token: tok[role] })
@@ -243,6 +254,32 @@ async function bootstrap() {
     D.entrustQueue = { total: 0, page: 1, size: 50, items: [] }
   }
 
+  // ⑬b 异常 / 变更队列（UI-04 / ENT-030 切片四之六）：与委托队列**同口径** ——
+  // 组织级真载荷，页面不拿脚本编的数据渲染。演示种子目前不造案件，所以这两条载荷
+  // 多半是 `total:0`；正因为它是真载荷，「空」才是可以断言的业务事实，
+  // 而不是「脚本忘了给数据」。（有案件的走查在真机走查脚本里做，那里会真登记一宗。）
+  const caseQueueParams = entrustOrgId
+    ? { view: 'org', org_id: entrustOrgId, size: 50 }
+    : null
+  if (caseQueueParams) {
+    D.entrustCaseQueue = await get('/entrust/exceptions', 'owner',
+      Object.assign({ scope: 'unclosed' }, caseQueueParams))
+    // 范围筛选的对照载荷：与上面状态筛选同理 —— 只证明"数组换了"是没意义的。
+    D.entrustCaseQueueAll = await get('/entrust/exceptions', 'owner',
+      Object.assign({ scope: 'all' }, caseQueueParams))
+  } else {
+    D.entrustCaseQueue = { total: 0, page: 1, size: 50, org_id: 0, items: [] }
+    D.entrustCaseQueueAll = { total: 0, page: 1, size: 50, org_id: 0, items: [] }
+  }
+  // 案件**详情**（UI-08 + 处置区）。队列里每一宗都取一次 —— 不是"随便挑一个编号"，
+  // 而是**队列自己报出来的**那些，于是"队列能列出来"与"详情能打开"用的是同一条事实。
+  // 队列为空时一张都不取：⑯ 段据此把详情走查整段标成 note，而不是判失败
+  // （"库里没有案件"是数据状态，不是页面缺陷）。
+  for (const row of D.entrustCaseQueue.items || []) {
+    const c = await api('GET', '/entrust/exceptions/' + row.case_id, { token: tok.owner })
+    if (c.status === 200) entrustCaseDetails[String(row.case_id)] = c.data
+  }
+
   for (const a of D.entrustMine.items || []) {
     const d = await api('GET', '/entrust/assignments/' + a.assignment_id, { token: tok.shipper })
     if (d.status === 200) entrustDetail[a.assignment_id] = d.data
@@ -292,6 +329,12 @@ async function bootstrap() {
       for (const a of D.entrustMine.items || []) {
         const list = await get('/entrust/assignments/' + a.assignment_id + '/artifacts', 'owner', { size: 50 })
         entrustAssignmentArtifacts[a.assignment_id] = list
+        // 同一张委托的任务清单一起拉：登记案件时"选受影响项"要它。
+        // 放在打分循环**之前** —— 一旦挑中（`best === 2`）就会 break，
+        // 那时再拉就来不及了（被挑中的那张委托恰恰是最需要它的）。
+        entrustTasksByAssignment[a.assignment_id] = await get(
+          '/entrust/tasks', 'owner', { assignment_id: a.assignment_id, size: 50 }
+        )
         for (const it of list.items || []) {
           const spec = typeSpecs[it.artifact_type] || {}
           const ft = spec.field_types || {}
@@ -402,6 +445,31 @@ function route(url, body) {
     return d ? { ok: d } : { err: '委托不存在：' + m[1] }
   }
   if (u === '/entrust/my-orgs') return { ok: D.entrustOrgs }
+  // 单委托任务清单（登记案件 / 处置里选受影响项用）。**精确匹配**：它是
+  // `GET /entrust/tasks?assignment_id=`，若落到别的分支，页面会把一份委托载荷
+  // 当成任务列出来（形状不对，表现为"受影响项里全是委托标题"这种静默错值）。
+  if (u === '/entrust/tasks') {
+    const q = body || {}
+    const rows = entrustTasksByAssignment[Number(q.assignment_id)]
+    return rows ? { ok: rows } : { err: '未拉取委托 ' + q.assignment_id + ' 的任务清单' }
+  }
+  // 组织级案件清单（UI-04）。**精确匹配** `/entrust/exceptions`：它没有子路径，
+  // 但也绝不能落到下面的 `/entrust/assignments` 分支里 —— 那会让队列页拿到一份
+  // 委托载荷渲染案件行（形状不对，表现为"案件标题是委托标题"这种静默错值）。
+  if (u === '/entrust/exceptions') {
+    const q = body || {}
+    if ((q.view || '') === 'org') {
+      return q.scope === 'all' ? { ok: D.entrustCaseQueueAll } : { ok: D.entrustCaseQueue }
+    }
+    return { err: '本脚本未拉取单委托视图的案件载荷（缺 assignment_id 视图）' }
+  }
+  // 案件**详情**（UI-08 + 处置区）。按编号回放 bootstrap 那一份真载荷。
+  // 编号必须对得上：页面若问了别的案件，回放另一份会让它"看起来正常"，
+  // 而处置区显示的 `revision_no` / 受影响项就全错了 —— 那才是最坏的假绿。
+  if ((m = u.match(/^\/entrust\/exceptions\/(\d+)$/))) {
+    const c = entrustCaseDetails[m[1]]
+    return c ? { ok: c } : { err: '未拉取案件 ' + m[1] + ' 的详情' }
+  }
   if (u === '/entrust/assignments') {
     const q = body || {}
     if ((q.view || 'owner') === 'org') {
@@ -554,6 +622,17 @@ function loadPage(file, ctx) {
         },
         fetchAssignment: (id) => fetchVia('/entrust/assignments/' + id),
         fetchWorkbench: (id) => fetchVia('/entrust/assignments/' + id + '/workbench'),
+        // 组织级案件清单（UI-04）。查询参数**不在这里重拼**：直接用真实模块的
+        // `caseOrgListQuery`，否则这个桩会变成第二份实现 —— 它拼错了，
+        // 走查照样绿，因为两边都是它自己。
+        fetchCaseOrgList: (opts) => fetchVia('/entrust/exceptions', real.caseOrgListQuery(opts)),
+        fetchCase: (id) => fetchVia('/entrust/exceptions/' + id),
+        // 受影响项候选（登记案件 / 处置时选目标）。两个端点都是**既有接口**，
+        // 本脚本只把它们接到 route() 的回放载荷上 —— 不在桩里另写一份筛选逻辑。
+        fetchTaskCandidates: (id, size) =>
+          fetchVia('/entrust/tasks', { assignment_id: id, page: 1, size: size || 50 }),
+        fetchArtifactCandidates: (id, size) =>
+          fetchVia('/entrust/assignments/' + id + '/artifacts', { page: 1, size: size || 50 }),
         // 成果页（ENT-023）三条取数：与其它页同口径 —— 载荷来自 bootstrap 的真接口，
         // 只是经 route() 回放（写之后由 refreshArtifactReplay() 换成真事实）。
         fetchArtifactTypes: () => fetchVia('/entrust/artifact-types'),
@@ -570,7 +649,28 @@ function loadPage(file, ctx) {
         createTask: (id, body, key) =>
           pageWrite('POST', '/entrust/assignments/' + id + '/tasks', body, key).then(rejectIfNotOk),
         claimAssignment: (id, key) =>
-          pageWrite('POST', '/entrust/assignments/' + id + '/claim', {}, key).then(rejectIfNotOk)
+          pageWrite('POST', '/entrust/assignments/' + id + '/claim', {}, key).then(rejectIfNotOk),
+        // 案件六个写命令（切片四之六）。与上面三条同一条通道：**只在 WRITE_ENABLED
+        // 的段里**才真的发出去，取数阶段一律被拒 —— 登记案件会改库（新案件会进
+        // 组织队列），在"读"的段里发生它会让后续断言拿到一个被自己污染的世界。
+        createCase: (id, body, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/exceptions', body, key)
+            .then(rejectIfNotOk),
+        addCaseLink: (id, body, key) =>
+          pageWrite('POST', '/entrust/exceptions/' + id + '/links', body, key).then(rejectIfNotOk),
+        removeCaseLink: (id, linkId, rev, key) =>
+          pageWrite(
+            'DELETE',
+            '/entrust/exceptions/' + id + '/links/' + linkId + '?expected_revision=' + rev,
+            {},
+            key
+          ).then(rejectIfNotOk),
+        decideCase: (id, body, key) =>
+          pageWrite('POST', '/entrust/exceptions/' + id + '/decision', body, key).then(rejectIfNotOk),
+        closeCase: (id, body, key) =>
+          pageWrite('POST', '/entrust/exceptions/' + id + '/close', body, key).then(rejectIfNotOk),
+        reopenCase: (id, body, key) =>
+          pageWrite('POST', '/entrust/exceptions/' + id + '/reopen', body, key).then(rejectIfNotOk)
       })
     }
     if (s.indexOf('auth') !== -1) {
@@ -1025,6 +1125,62 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
         collect('pages/entrust/workbench/workbench',
           path.join(ROOT, 'miniapp/pages/entrust/workbench/workbench.js'), d2)
       }
+
+      // ── ⑬b 异常与变更队列（UI-04 / 切片四之六）──
+      //
+      // 这一节钉三件在真载荷下才成立的事：
+      //   ① 切队列真的换了**行形状**（`caseId` 而不是 `assignmentId`）；
+      //   ② 案件队列的空态说的是案件队列的话（沿用"还没有委托"就说明两个队列共用了一句）；
+      //   ③ 范围筛选切到「全部」后拿的是**另一份真载荷**（只断言"数组换了"没有意义）。
+      let qThrown = null
+      try {
+        s.onSwitchQueue({ currentTarget: { dataset: { queue: 'case' } } })
+      } catch (e) {
+        qThrown = e
+      }
+      await tick(90)
+      if (qThrown) {
+        fail('09b 案件队列 · 切队列抛异常', qThrown.message)
+      } else {
+        const dq = s._final()
+        const wantCase = D.entrustCaseQueue
+        if (dq.queue !== 'case') fail('09b 案件队列 · 未切到案件队列', String(dq.queue))
+        else ok()
+        if (wantCase.total === 0) {
+          if (dq.view !== 'empty') fail('09b 案件队列 · 空载荷未落到 empty 态', String(dq.view))
+          else if (String(dq.viewTitle).indexOf('还没有委托') !== -1) {
+            fail('09b 案件队列 · 空态沿用了委托队列的文案', String(dq.viewTitle))
+          } else ok()
+          if ((dq.items || []).length !== 0) fail('09b 案件队列 · 空载荷却有行', String((dq.items || []).length))
+          else ok()
+        } else {
+          const gotCase = (dq.items || []).map((x) => String(x.caseId)).sort().join(',')
+          const expCase = (wantCase.items || []).map((x) => String(x.case_id)).sort().join(',')
+          if (dq.view !== 'ready') fail('09b 案件队列 · 有载荷却不是 ready', String(dq.view))
+          else if (gotCase !== expCase) fail('09b 案件队列 · 案件条目与载荷不符', gotCase + ' vs ' + expCase)
+          else if (dq.total !== wantCase.total) {
+            fail('09b 案件队列 · total 与载荷不符', dq.total + ' vs ' + wantCase.total)
+          } else ok()
+        }
+
+        let scThrown = null
+        try {
+          s.onCaseScope({ currentTarget: { dataset: { key: 'all' } } })
+        } catch (e) {
+          scThrown = e
+        }
+        await tick(90)
+        if (scThrown) fail('09b 案件队列 · 切换范围抛异常', scThrown.message)
+        else {
+          const dAll = s._final()
+          if (dAll.activeCaseScope !== 'all') fail('09b 案件队列 · 范围未切到 all', String(dAll.activeCaseScope))
+          else if (dAll.total !== D.entrustCaseQueueAll.total) {
+            fail('09b 案件队列 · 范围 all 的 total 与载荷不符', dAll.total + ' vs ' + D.entrustCaseQueueAll.total)
+          } else ok()
+        }
+        collect('pages/entrust/workbench/workbench',
+          path.join(ROOT, 'miniapp/pages/entrust/workbench/workbench.js'), s._final())
+      }
     }
   }
 
@@ -1143,8 +1299,15 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     // 那种"全空且理由齐全"的界面其实什么都没显示。所以要有正向计数。
     if (opened === 0) fail('09 详情 #' + aid + ' · 七个槽位全部未开放，页面等于什么都没显示')
     else ok()
-    if (closedKeys.length && closedKeys.join(',') !== 'exceptions') {
-      fail('09 详情 #' + aid + ' · 未开放槽位不止 exceptions', closedKeys.join(','))
+    // `exceptions` 的「本期未开放」标记已于 2026-09-14 撤下（DR-0013 §7.3 五条满足），
+    // 于是这条从"未开放槽位只能是 exceptions"翻成"**一个都不能有**"。
+    // ⚠️ 不能只把它删掉或改成"不报错"：`closedKeys` 恒空时任何形状的断言都会绿，
+    //    那就是空转。这里**显式**要求为空 —— 有人再收回某块能力，这条要红。
+    if (closedKeys.length !== 0) {
+      fail(
+        '09 详情 #' + aid + ' · 出现未开放槽位（标记已撤下，多一个都说明能力被悄悄降级）',
+        closedKeys.join(',')
+      )
     } else ok()
 
     // ③ 历史成果（归属机制上线前的存量）必须如实报数
@@ -1595,10 +1758,211 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     }
   }
 
+  // ⑯ 案件登记与处置（切片四之六 / ENT-030）────────────────────────────
+  //
+  // 这一节在**真载荷**下钉三件：
+  //   ① 登记页拿得到委托摘要、算得出候选、守得住非法入参；
+  //   ② 案件页的处置区由 `capabilities` **与**取值域镜像**共同**决定 ——
+  //      只看 `can_decide` 会在 `change_request/rejected`、`exception/applied` 上
+  //      渲染出一个空的选择条（后端对这两个状态给 `can_decide=true`，
+  //      而它们唯一的出边 `closed` 归 close 所有）；
+  //   ③ 受影响项行带得出 `link_id`（移除要它；模板里拿不到就等于移除按钮永远无效）。
+  //
+  // ⚠️ 本节**不写库**：登记 / 决定 / 关闭三步的真流程由真机走查完成
+  //    （DR-0013 §7.3 条件 4 要求"经界面操作走通"，那要在真模拟器里点）。
+  //    这里只保证"页面能拿真载荷把该显示的都显示出来"，并核对写请求数没变。
+  {
+    const caseRows = D.entrustCaseQueue.items || []
+    // 候选（任务 / 成果）只对**案件所属的那张委托**有意义。bootstrap 只为
+    // "我的委托"拉过一轮，可能没覆盖到（它会挑中即 break）—— 这里按需补一次。
+    // 不补的话页面会拿到"未拉取"的桩错误，把**数据准备问题**误判成页面缺陷。
+    const aids = new Set(caseRows.map(function (x) { return Number(x.assignment_id) }))
+    for (const aid of aids) {
+      if (!entrustTasksByAssignment[aid]) {
+        const r = await api('GET', '/entrust/tasks?assignment_id=' + aid + '&size=50', { token: ownerToken })
+        if (r.status === 200) entrustTasksByAssignment[aid] = r.data
+      }
+      if (!entrustAssignmentArtifacts[aid]) {
+        const r = await api('GET', '/entrust/assignments/' + aid + '/artifacts?size=50', { token: ownerToken })
+        if (r.status === 200) entrustAssignmentArtifacts[aid] = r.data
+      }
+    }
+
+    // ⑯-a 登记案件页：非法入参被守卫拦下（且**不发起取数**）
+    for (const [tag, arg] of [['缺参', {}], ['非法编号', { assignment_id: '../../x' }]]) {
+      const s = await walk('⑯ 登记案件 · ' + tag, 'pages/entrust/case-create/case-create', null,
+        { role: 'owner', arg }, ['onLoad'])
+      if (!s) continue
+      const d = s._final()
+      if (d.view !== 'error') fail('⑯ 登记案件 ' + tag + ' · 未落 error 态（会被当成正常业务状态）', String(d.view))
+      else if (!d.viewTitle) fail('⑯ 登记案件 ' + tag + ' · error 态没有标题')
+      else ok()
+      if (d.detail) fail('⑯ 登记案件 ' + tag + ' · 被拦下却还是取了数', String(d.detail.assignmentId))
+      else ok()
+    }
+
+    // ⑯-b 登记案件页：合法入参进 ready，且候选 / 受影响项走得通
+    const firstAid = caseRows.length
+      ? String(caseRows[0].assignment_id)
+      : String(((D.entrustMine.items || [])[0] || {}).assignment_id || '')
+    if (!firstAid || firstAid === 'undefined') {
+      note('⑯ 登记案件 · 没有可用的委托编号，登记页走查跳过')
+    } else {
+      const writesBefore = pageWrites.length
+      const s = await walk('⑯ 登记案件 · #' + firstAid, 'pages/entrust/case-create/case-create', null,
+        { role: 'owner', arg: { assignment_id: firstAid } }, ['onLoad'])
+      if (s) {
+        const d = s._final()
+        if (d.view !== 'ready') fail('⑯ 登记案件 · 未落 ready 态', String(d.view))
+        else if (String(d.assignmentId) !== firstAid) {
+          fail('⑯ 登记案件 · 持有的委托编号与入参不符', String(d.assignmentId))
+        } else if (!d.detail) fail('⑯ 登记案件 · 没有委托摘要（头卡会是空的）')
+        else ok()
+        // 三个选择条必须与契约取值域一致（页面不自己 Object.keys 标签表）
+        const kindOk = (d.kinds || []).length === Object.keys(E.CASE_KIND_LABELS).length
+        const sevOk = (d.severities || []).length === Object.keys(E.CASE_SEVERITY_LABELS).length
+        const impOk = (d.impacts || []).length === Object.keys(E.CASE_IMPACT_LABELS).length
+        if (!kindOk || !sevOk || !impOk) {
+          fail('⑯ 登记案件 · 选择条取值域与契约不符',
+            [kindOk, sevOk, impOk].join(','))
+        } else ok()
+        // 默认影响类型**不得**是阻断（阻断有后果，不能是"没改过就是这个"）
+        if (d.form.impact_kind === 'execution-blocking') {
+          fail('⑯ 登记案件 · 默认影响类型是"阻断执行"（默认值不该有流程后果）')
+        } else ok()
+
+        // 候选：展开面板 → 懒加载 → 拿到本单的任务 / 成果
+        let pickThrown = null
+        try { s.onToggleLinks() } catch (e) { pickThrown = e }
+        await tick(90)
+        if (pickThrown) fail('⑯ 登记案件 · 展开候选抛异常', pickThrown.message)
+        else {
+          const dc = s._final()
+          if (dc.candLoaded !== true) fail('⑯ 登记案件 · 候选没有加载完成（candLoaded 仍为 false）')
+          else if ((dc.candidates || []).length && dc.candHint) {
+            fail('⑯ 登记案件 · 有候选却还带着失败提示', String(dc.candHint))
+          } else ok()
+          const cand = (dc.candidates || [])[0]
+          if (!cand) {
+            note('⑯ 登记案件 · 本单没有任务 / 成果，选受影响项一步跳过')
+          } else {
+            let addThrown = null
+            try {
+              s.onAddLink({ currentTarget: { dataset: { kind: cand.target_kind, id: cand.target_id } } })
+            } catch (e) { addThrown = e }
+            await tick(20)
+            const dl = s._final()
+            if (addThrown) fail('⑯ 登记案件 · 选受影响项抛异常', addThrown.message)
+            else if ((dl.links || []).length !== 1) {
+              fail('⑯ 登记案件 · 选中的受影响项没有进列表', String((dl.links || []).length))
+            } else if (!dl.links[0].key || String(dl.links[0].target_id) !== String(cand.target_id)) {
+              fail('⑯ 登记案件 · 受影响项行缺 key 或编号不对', JSON.stringify(dl.links[0]))
+            } else ok()
+            // 去掉一条也要能生效（移除按钮靠 dataset 里的行标识，不是靠数组下标）
+            // ⚠️ 键名是 `rmKey` 而**不是** `key`：模板里该按钮用 `data-rm-key`
+            //    （`data-key` 已被筛选 pill 占用，共用会让走查选择器歧义）。
+            //    本轮把模板改成 `data-rm-key` 却漏改了这里的驱动，CI 立刻报
+            //    「移除后列表仍有条目」—— 这条断言的价值就在这：驱动与模板的键名
+            //    必须同步，改了任一侧而另一侧没跟上就会红。
+            let rmThrown = null
+            try { s.onRemoveLink({ currentTarget: { dataset: { rmKey: dl.links[0].key } } }) }
+            catch (e) { rmThrown = e }
+            await tick(20)
+            const dr = s._final()
+            if (rmThrown) fail('⑯ 登记案件 · 移除受影响项抛异常', rmThrown.message)
+            else if ((dr.links || []).length !== 0) {
+              fail('⑯ 登记案件 · 移除后列表仍有条目', String((dr.links || []).length))
+            } else ok()
+          }
+        }
+        collect('pages/entrust/case-create/case-create',
+          path.join(ROOT, 'miniapp/pages/entrust/case-create/case-create.js'), s._final())
+      }
+      // 取数阶段不得写：登记页的 onLoad 只读不写
+      if (pageWrites.length !== writesBefore) {
+        fail('⑯ 登记案件 · 取数阶段发出了写请求', String(pageWrites.length - writesBefore))
+      } else ok()
+    }
+
+    // ⑯-c 案件页（含处置区）。**逐宗都走**：队列里的两宗刻意覆盖"有受影响项"与
+    //      "无受影响项"两种形状，只走第一宗会让另一种形状的模板字段永远拿不到运行时值
+    //      （模板核对会因此报"模板读取但数据与生产均未产出"——那是模板核对在替我们数形状）。
+    if (!caseRows.length) {
+      note('⑯ 案件页 · 组织队列里没有案件，处置区走查跳过')
+    }
+    for (const row of caseRows) {
+      const cid = String(row.case_id)
+      const s = await walk('⑯ 案件详情 · #' + cid, 'pages/entrust/case/case', null,
+        { role: 'owner', arg: { case_id: cid } }, ['onLoad'])
+      if (!s) continue
+      const d = s._final()
+      if (d.view !== 'ready') {
+        fail('⑯ 案件详情 #' + cid + ' · 未落 ready 态', String(d.view))
+        continue
+      }
+      if (String(d.caseId) !== cid) fail('⑯ 案件详情 #' + cid + ' · 持有的案件编号不对', String(d.caseId))
+      else ok()
+      if (!d.detail) { fail('⑯ 案件详情 #' + cid + ' · 没有投影（页面会是空的）'); continue }
+
+      // 处置区：能力位与取值域镜像**共同**决定渲染条件
+      const caps = (entrustCaseDetails[cid] || {}).capabilities || null
+      if (!caps) {
+        note('⑯ 案件详情 #' + cid + ' · 无 bootstrap 载荷可对照能力位')
+      } else {
+        const wantDecide = E.caseDecideAvailable(caps, d.kind, d.status)
+        const wantClose = !!caps.can_close && E.caseClosureOptions(d.kind, d.status).length > 0
+        if (d.canAddLink !== !!caps.can_add_link || d.canDecide !== wantDecide || d.canClose !== wantClose) {
+          fail('⑯ 案件详情 #' + cid + ' · 处置能力位与契约结论不符',
+            JSON.stringify({ canAddLink: d.canAddLink, canDecide: d.canDecide, canClose: d.canClose }) +
+            ' vs ' + JSON.stringify({ canAddLink: !!caps.can_add_link, canDecide: wantDecide, canClose: wantClose }))
+        } else ok()
+        if (d.canAnyAction !== (!!caps.can_add_link || wantDecide || wantClose || !!caps.can_reopen)) {
+          fail('⑯ 案件详情 #' + cid + ' · canAnyAction 与各分项不自洽', String(d.canAnyAction))
+        } else ok()
+      }
+      // 处置选项必须与契约镜像逐项相等（差一项就是用户能看到一个必然被拒的选项）
+      const wantD = E.caseDecisionOptions(d.kind, d.status).map((x) => x.key).join(',')
+      const gotD = (d.decisionOptions || []).map((x) => x.key).join(',')
+      const wantC = E.caseClosureOptions(d.kind, d.status).map((x) => x.key).join(',')
+      const gotC = (d.closureOptions || []).map((x) => x.key).join(',')
+      if (wantD !== gotD) fail('⑯ 案件详情 #' + cid + ' · 决定选项与契约不符', gotD + ' vs ' + wantD)
+      else if (wantC !== gotC) fail('⑯ 案件详情 #' + cid + ' · 关闭处置与契约不符', gotC + ' vs ' + wantC)
+      else ok()
+      // 受影响项行必须带得出 link_id（移除按钮靠它；拿不到就等于永远移除不掉）。
+      // 对照的是**后端原始载荷**（`entrustCaseDetails[cid].case.affected`），
+      // 不是 `d.detail` 的同名字段 —— 后者本来就没有 `affected` 这一项
+      // （受影响项在投影里是**六要素②的 items**，`decorateCase` 不另给顶层字段）。
+      // 拿不存在的字段当基准会得到 `0 vs 1` 这种看起来像页面错的假失败。
+      const rawAffected = ((entrustCaseDetails[cid] || {}).case || {}).affected || []
+      if ((d.affected || []).length !== rawAffected.length) {
+        fail('⑯ 案件详情 #' + cid + ' · 处置区的受影响项条数与后端载荷不符',
+          (d.affected || []).length + ' vs ' + rawAffected.length)
+      } else if (rawAffected.length && (d.affected || []).some(function (x) { return !x.linkId })) {
+        fail('⑯ 案件详情 #' + cid + ' · 受影响项行没有 link_id（移除按钮会拿不到参数）')
+      } else ok()
+
+      // 处置区的候选：仅在有 can_add_link 时展开（否则那个面板根本不渲染）
+      if (d.canAddLink) {
+        let thrown = null
+        try { s.onToggleLinkPick() } catch (e) { thrown = e }
+        await tick(90)
+        const dc = s._final()
+        if (thrown) fail('⑯ 案件详情 #' + cid + ' · 展开候选抛异常', thrown.message)
+        else if (dc.candLoaded !== true) fail('⑯ 案件详情 #' + cid + ' · 候选没有加载完成')
+        else ok()
+      }
+      collect('pages/entrust/case/case', path.join(ROOT, 'miniapp/pages/entrust/case/case.js'), s._final())
+    }
+  }
+
   auditTemplates()
 
   console.log('\n' + '='.repeat(78))
   console.log('OK ' + N_OK + ' · FAIL ' + FAILS.length + ' · note ' + NOTES.length)
+  // 报出**实际**覆盖的页面数：这个数字会被 ci.yml 的 job 注释与计划文档引用，
+  // 与其在别处写一个会过期的数，不如每次由脚本自己说出来（本轮就因为注释里的
+  // 旧数字与新增页面不一致而需要额外核对一次）。
+  console.log('覆盖页面 ' + Object.keys(pageUniverse).length + ' 个 / 断言 ' + N_OK)
   console.log('='.repeat(78))
   if (FAILS.length) { console.log('\n需处理：'); FAILS.forEach((f) => console.log('  - ' + f)) }
   if (NOTES.length) { console.log('\n备注：'); NOTES.forEach((n) => console.log('  - ' + n)) }

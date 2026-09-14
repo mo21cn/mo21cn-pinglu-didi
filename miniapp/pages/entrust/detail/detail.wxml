@@ -63,6 +63,21 @@
         </view>
       </view>
 
+      <!-- 已受理：登记异常 / 变更案件（切片四之六）。入口只在 claimed 时出现 ——
+           受理前没有责任主体，`raise_case` 会以 409 拒绝，摆一个必然失败的按钮
+           等于把服务端规则说成"随机失败"。 -->
+      <view wx:if="{{canCreateCase}}" class="card slot-card">
+        <view class="slot-note">遇到异常或需要变更时，在这里登记一宗案件；阻断类案件需要同时登记受影响项</view>
+        <view class="slot-actions">
+          <view
+            class="slot-btn"
+            data-act-create-case="create-case"
+            bindtap="onCreateCase"
+            hover-class="hover-dim"
+          >登记异常 / 变更</view>
+        </view>
+      </view>
+
       <!-- 归属机制上线前的历史成果：如实报数，不静默藏起来 -->
       <view wx:if="{{unassignedHint}}" class="card slot-card">
         <view class="slot-note">{{unassignedHint}}</view>
@@ -96,22 +111,24 @@
             </view>
           </view>
 
-          <!-- 成果引用可点进成果页（UI-05 第二片 / ENT-023）。
-               点的是**这一条**的 artifact_id，而不是"去成果列表里找" ——
+          <!-- 槽位引用可点（UI-05 第二片 / ENT-023；案件引用是 ENT-030 切片四之五）。
+               点的是**这一条**的 ID，而不是"去列表里再找一次" ——
                工作台引用的本来就是精确 ID 与版本（PRD 第 187 行），
-               让用户自己再找一遍就是把已经确定的事实重新变成可能搞错的事。 -->
+               让用户自己再找一遍就是把已经确定的事实重新变成可能搞错的事。
+               两个形状（成果 / 案件）由投影层各给一行 `text` 与一个 `kind`：
+               本页只把 `kind` **原样转交** `onOpenRef`，既不猜字段、
+               也不自己决定"这条该跳去哪"（那是 `REF_PROJECTORS` 的事）。 -->
           <view wx:if="{{item.refs.length}}" class="slot-refs">
             <view
               wx:for="{{item.refs}}"
               wx:for-item="rf"
-              wx:key="artifactId"
-              class="slot-ref slot-ref-link"
-              data-id="{{rf.artifactId}}"
-              bindtap="onOpenArtifact"
+              wx:key="id"
+              class="slot-ref slot-ref-link {{rf.cls}}"
+              data-id="{{rf.id}}"
+              data-kind="{{rf.kind}}"
+              bindtap="onOpenRef"
               hover-class="hover-dim"
-            >
-              成果 #{{rf.artifactId}} · {{rf.text}} ›
-            </view>
+            >{{rf.text}} ›</view>
           </view>
 
           <view wx:if="{{item.countsText}}" class="slot-counts">{{item.countsText}}</view>

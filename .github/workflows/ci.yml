@@ -240,6 +240,8 @@ jobs:
   #   verify_entrust_ui    委托发货：入口隔离（AC-02）/ 五态判定（AC-21）/
   #                        跨端状态取值域 / 工作台用到的 CSS 类存在性
   #   verify_tabbar_targets 动态 switchTab 目标取值域（驱动真实首页 / 自定义 tabBar 逻辑）
+  #   verify_wxml_directives wxml 的 wx:if / wx:elif / wx:else 链可编译性
+  #                        （禁形会让整页编译失败且不进 console，只能靠读截图发现）
   # 真机走查依赖微信开发者工具，无法在 CI 运行，仍由本机执行：
   #   现行轨 → scripts/verify_miniapp_devtools.py（IDE 自带 wechatide 工具链，
   #            驱动层 scripts/wechatide_client.py）
@@ -306,10 +308,27 @@ jobs:
         #   两者都不做真实路径解析）。本步补上「解析出的目标文件必须真实存在」这一维。
         run: node scripts/verify_require_paths.js
 
+      - name: WXML 条件 / 循环禁形校验
+        # 2026-09-14 真机走查发现：`case.wxml` 把 `wx:if` 与 `wx:for` 写在**同一个元素**上，
+        # 微信编译器会把 `wx:if` 卷进循环作用域，紧随其后的兄弟 `wx:else` 于是绑不到
+        # 任何 `wx:if`（报 `Bad attr wx:elif … wx:if not found`），**整个 wxml 编译失败**，
+        # 整页被错误覆盖层替换 —— 真机上看起来就是"页面白屏"，而这条错误**不进模拟器
+        # console**，只能在 IDE 的编译覆盖层里看到。既有门禁全绿也照样发生：
+        #   verify_miniapp 只查 JSON/四件套/tabBar；verify_ui_interactions 只加载页面 **JS**；
+        #   verify_entrust_ui 读源码**文本**；verify_frontend_e2e 不经过编译器。
+        # 本步补上对 wx:if / wx:elif / wx:else 链的可编译性检查。
+        run: node scripts/verify_wxml_directives.js
+
   # ─────────────────────────────────────────────────────────────
   # 前端端到端：真起后端 → 铺演示数据 → 真载荷驱动页面逻辑
   #   verify_login_flow     登录链路顺序 / 鉴权头 / token 角色
-  #   verify_frontend_e2e   15 个页面的取数与装饰逻辑（含模板字段产出、派生数值边界）
+  #   verify_frontend_e2e   各页面的取数与装饰逻辑（含模板字段产出、派生数值边界）
+  #                         ⚠️ 覆盖页面数**由脚本自己在汇总行报出**（`覆盖页面 N 个`），
+  #                         不在这里写死 —— 写死的数字随切片增长必然过期，
+  #                         而"注释里的数字"没人会去核对（ENT-030 就多核了一次）。
+  #                         ENT-030 切四新增 ⑯ 段：登记案件页 + 案件详情页**逐宗**真载荷
+  #                         （两宗刻意覆盖"有/无受影响项"两种形状，只走一宗会让另一种
+  #                          形状的模板字段拿不到运行时值 —— 模板核对会把它报成缺陷）。
   #                         第 ⑬⑭ 段为「委托队列 · 经理工作台」与「委托详情」，跑的是真载荷
   # 说明：后端与校验放在同一个 shell —— 跨 step 的后台进程会被 runner 回收。
   # ─────────────────────────────────────────────────────────────

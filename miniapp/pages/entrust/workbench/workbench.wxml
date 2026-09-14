@@ -35,8 +35,28 @@
     </view>
   </view>
 
-  <!-- 状态筛选：错误/空态下也保留，用户要先能改条件再重试 -->
-  <scroll-view class="filter-scroll" scroll-x="true" enable-flex="true">
+  <!--
+    队列切换（UI-04 / 切片四之六）：委托队列 ↔ 异常与变更。
+    它是**视图切换**而不是筛选 —— 两个队列的数据源与筛选维度都不同，所以放在
+    筛选条之上并与它视觉分层（与组织选择器的分层理由相同：三层切换不能长得一样）。
+  -->
+  <view class="queue-bar">
+    <view
+      class="queue-pill {{queue === 'assignment' ? 'queue-pill-active' : ''}}"
+      data-queue="assignment"
+      bindtap="onSwitchQueue"
+      hover-class="hover-dim"
+    >委托队列</view>
+    <view
+      class="queue-pill {{queue === 'case' ? 'queue-pill-active' : ''}}"
+      data-queue="case"
+      bindtap="onSwitchQueue"
+      hover-class="hover-dim"
+    >异常与变更</view>
+  </view>
+
+  <!-- 委托队列的状态筛选：错误/空态下也保留，用户要先能改条件再重试 -->
+  <scroll-view wx:if="{{queue === 'assignment'}}" class="filter-scroll" scroll-x="true" enable-flex="true">
     <view class="filter-bar">
       <view
         wx:for="{{filters}}"
@@ -48,6 +68,38 @@
       >{{item.label}}</view>
     </view>
   </scroll-view>
+
+  <!--
+    案件队列的两行筛选：第一行开闭范围，第二行案件类型。
+    刻意**不合成一行**：合成一行后「全部」会出现两次，用户分不清自己点的是哪一个。
+    这两行是 `scope` 与 `kind` 两个正交维度，不是同一列候选项。
+  -->
+  <block wx:else>
+    <scroll-view class="filter-scroll" scroll-x="true" enable-flex="true">
+      <view class="filter-bar">
+        <view
+          wx:for="{{caseScopes}}"
+          wx:key="key"
+          class="filter-pill {{activeCaseScope === item.key ? 'filter-pill-active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onCaseScope"
+          hover-class="hover-dim"
+        >{{item.label}}</view>
+      </view>
+    </scroll-view>
+    <scroll-view class="filter-scroll" scroll-x="true" enable-flex="true">
+      <view class="filter-bar">
+        <view
+          wx:for="{{caseKinds}}"
+          wx:key="key"
+          class="filter-pill {{activeCaseKind === item.key ? 'filter-pill-active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="onCaseKind"
+          hover-class="hover-dim"
+        >{{item.label}}</view>
+      </view>
+    </scroll-view>
+  </block>
 
   <view class="page-content">
     <!-- 加载中 -->
@@ -87,27 +139,62 @@
     <block wx:else>
       <view class="list-head row-between">
         <text class="result-count">{{pageHint}}</text>
-        <text class="chip chip-muted">只读列表</text>
+        <!-- 「只读」要说清是哪一种只读：本队列**没有**登记/处置入口（那在案件页与
+             登记表单，由 `capabilities` 决定可用性），避免用户以为卡片点不动是坏了 -->
+        <text class="chip chip-muted">{{queue === 'assignment' ? '只读列表' : '只读清单'}}</text>
       </view>
-      <view
-        wx:for="{{items}}"
-        wx:key="assignmentId"
-        class="card list-card"
-        data-id="{{item.assignmentId}}"
-        bindtap="onOpen"
-        hover-class="row-hover"
-      >
-        <view class="row-between">
-          <text class="card-title">{{item.title}}</text>
-          <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+
+      <!-- 委托队列 -->
+      <block wx:if="{{queue === 'assignment'}}">
+        <view
+          wx:for="{{items}}"
+          wx:key="assignmentId"
+          class="card list-card"
+          data-id="{{item.assignmentId}}"
+          bindtap="onOpen"
+          hover-class="row-hover"
+        >
+          <view class="row-between">
+            <text class="card-title">{{item.title}}</text>
+            <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+          </view>
+          <view class="card-line">{{item.cargoSummary}}</view>
+          <view class="card-line card-line-weak">{{item.quantityText}}</view>
+          <view class="card-foot row-between">
+            <text class="card-meta">#{{item.assignmentId}} · {{item.createdAt}}</text>
+            <text class="card-caret">›</text>
+          </view>
         </view>
-        <view class="card-line">{{item.cargoSummary}}</view>
-        <view class="card-line card-line-weak">{{item.quantityText}}</view>
-        <view class="card-foot row-between">
-          <text class="card-meta">#{{item.assignmentId}} · {{item.createdAt}}</text>
-          <text class="card-caret">›</text>
+      </block>
+
+      <!-- 异常 / 变更队列（UI-04）：跨委托，所以每一行都写明「是哪张单的」 -->
+      <block wx:else>
+        <view
+          wx:for="{{items}}"
+          wx:key="caseId"
+          class="card list-card"
+          data-id="{{item.caseId}}"
+          bindtap="onOpenCase"
+          hover-class="row-hover"
+        >
+          <view class="row-between">
+            <text class="card-title">{{item.title}}</text>
+            <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+          </view>
+          <view class="list-chips">
+            <text class="{{item.impactClass}}">{{item.impactLabel}}</text>
+            <text class="chip chip-muted">{{item.kindLabel}}</text>
+          </view>
+          <!-- 阻断是流程后果（相关任务直接 409），在清单里就要看得见，
+               不能让用户点进去才发现这单走不动 -->
+          <view wx:if="{{item.blocking}}" class="case-block-flag">阻断执行中：相关任务无法完成，直到案件关闭</view>
+          <view class="card-line card-line-weak">{{item.assignmentText}} · {{item.affectedText}} · {{item.dueText}}</view>
+          <view class="card-foot row-between">
+            <text class="card-meta">{{item.caseNo}} · 更新 {{item.updatedAt}}</text>
+            <text class="card-caret">›</text>
+          </view>
         </view>
-      </view>
+      </block>
     </block>
   </view>
 </view>
