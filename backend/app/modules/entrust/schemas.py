@@ -798,6 +798,45 @@ class ExceptionCaseListOut(BaseModel):
     items: list[ExceptionCaseOut]
 
 
+class ExceptionCaseListItem(BaseModel):
+    """组织级清单的一行（UI-04 的「异常/变更」队列，DR-0014 §3.2）。
+
+    UI-04 是**跨委托**的组合工作台，因此这里要带 `assignment_id`（界面得说清
+    「是哪张单的」）；但**不带** `org_id` —— 视图本身已限定单个组织，回传没有信息量。
+
+    **刻意不含 `severity`**：C3 的用意是堵住「按严重度决定流程」的联想，清单里给了它，
+    界面迟早会拿它排序或加重；而清单已经有表达轻重的正确字段 —— `blocking`（流程约束）
+    与 `impact_kind`（影响类型）。严重度属详情页的业务判断，留在 UI-08。
+    """
+
+    case_id: int
+    assignment_id: int
+    kind: str
+    title: str
+    status: str
+    impact_kind: str
+    blocking: bool
+    due_at: str | None = None
+    updated_at: str
+    affected_count: int
+
+
+class ExceptionCaseOrgListOut(BaseModel):
+    """`GET /exceptions?view=org` 的响应（DR-0014 §3.1）。
+
+    与单委托视图**共用分页口径**（`ORDER BY id DESC`、`size` 上限 100），
+    但行形状不同：单委托视图给完整投影（含 `cause` / 决定 / 处置 / 受影响项明细），
+    组织视图只给清单所需的最小集合 —— 组合工作台没有"同时展开 N 宗案件详情"的用途，
+    而每宗案件详情都带事件链。
+    """
+
+    total: int
+    page: int
+    size: int
+    org_id: int
+    items: list[ExceptionCaseListItem]
+
+
 class ExceptionCaseDetailOut(BaseModel):
     """案件详情：投影 + 完整事件链（重开再关闭的两轮历史在此可判定）。"""
 
@@ -808,6 +847,11 @@ class ExceptionCaseDetailOut(BaseModel):
 def exception_case_out(data: dict[str, Any]) -> ExceptionCaseOut:
     """服务层投影 dict → 响应模型。"""
     return ExceptionCaseOut.model_validate(data)
+
+
+def exception_case_list_item(data: dict[str, Any]) -> ExceptionCaseListItem:
+    """服务层「清单行」投影 dict → 响应模型。"""
+    return ExceptionCaseListItem.model_validate(data)
 
 
 def exception_event_out(data: dict[str, Any]) -> ExceptionCaseEventOut:

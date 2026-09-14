@@ -438,8 +438,11 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         GUARD_ENTRUSTMENT_VIEW,
         "entrust:view",
         owner_scope=True,
-        note="可见性前置复用 authz.assert_can_view_assignment（与工作台、成果清单同一判据）；"
-        "归属按 assignment_id **精确等值**，不放宽到货主或组织（DR-0012）",
+        note="缺省视图的可见性前置复用 authz.assert_can_view_assignment（与工作台、成果清单同一"
+        "判据），归属按 assignment_id **精确等值**，不放宽到货主或组织（DR-0012）；"
+        "`view=org` 分支（DR-0014 §3.1）改走 authz.assert_can_view_org —— 按**单个** org_id 精确"
+        "限定（不做 IN、也不接受「我所属全部组织」），两视图参数分别校验（混用 400 / 缺范围 422），"
+        "且授权先于计数与分页",
     ),
     _r(
         "GET",

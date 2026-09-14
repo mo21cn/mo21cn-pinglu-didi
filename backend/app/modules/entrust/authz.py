@@ -186,6 +186,27 @@ def assert_can_view_scoped_object(
     return context
 
 
+def assert_can_view_org(
+    session: Session, *, user_id: int, org_id: int, detail: str = "组织不存在"
+) -> AccessContext:
+    """**组织级**读可见性：该组织的成员且具备 `entrust:view`，否则 **404**。
+
+    与 `assert_can_view_assignment` 的差别是**没有「货主本人」旁路** ——
+    组织级视图（如 `GET /exceptions?view=org`）按定义只对组织成员成立，
+    加一条"我是这批委托的货主所以能列全组织案件"的旁路，等于把
+    组织边界让给数据归属，DR-0008 的两个维度就混了。
+
+    两个维度仍然分开：这里判 `org_id=` 维度（组织成员资格 + 授予该组织的权限）。
+    它对"能不能看见这批案件"负责，**不**回答"能不能处置某一宗" ——
+    后者必须走 `owner_user_id=` 维度（见 `exceptions._assert_can_write`）。
+    """
+    context = _ctx(session, user_id)
+    assert_org_member(context, org_id=org_id, detail=detail)
+    if not context.can(PERM_VIEW, org_id=org_id):
+        raise not_found(detail)
+    return context
+
+
 def map_access_denied(exc: Exception) -> HTTPException | None:
     """叠加层权限异常 → 403（供服务层的 `assert_can` 复用同一口径）。"""
     if isinstance(exc, AccessDeniedError):
@@ -199,6 +220,7 @@ __all__ = [
     "ENTRUSTMENT_COLS",
     "assert_can_view_assignment",
     "assert_can_view_entrustment",
+    "assert_can_view_org",
     "assert_can_view_scoped_object",
     "assert_can_write_entrustment",
     "assert_org_member",

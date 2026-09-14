@@ -3,7 +3,8 @@
 R1 端点集合（DR-0013 §7.1「人工处置端点」）：
 
 - POST   /api/v1/entrust/assignments/{assignment_id}/exceptions   登记案件（幂等）
-- GET    /api/v1/entrust/exceptions                                按委托列案件
+- GET    /api/v1/entrust/exceptions                                列案件（缺省按委托 `assignment_id`；
+                                                                   `view=org` 按单个组织 `org_id`，DR-0014 §3.1）
 - GET    /api/v1/entrust/exceptions/{exception_id}                 案件详情（含事件链）
 - POST   /api/v1/entrust/exceptions/{exception_id}/links           登记受影响项（幂等）
 - DELETE /api/v1/entrust/exceptions/{exception_id}/links/{link_id} 移除受影响项（幂等）
@@ -22,8 +23,10 @@ R1 端点集合（DR-0013 §7.1「人工处置端点」）：
 * 非参与方 **404** 不泄漏存在性（`authz` 抛的就是 404）；作用域不一致 **403**；
 * 本 router 不触碰 `current_role`，权限全部走叠加层（ENT-003 / `authz.py`）。
 
-**本片不含**的工作台 `exceptions` 槽真实投影与 `complete_task` 阻断门禁，
-分别在切片三之三与三之四；在它们落地之前，「案件能登记」**不等于**「阻断已生效」。
+**已落地**（切片三之三 / 三之四）：工作台 `exceptions` 槽的真实投影，以及
+`complete_task` 的阻断门禁 —— 后者与结案检查共用 `exceptions.is_blocking` **一个**判据。
+本提交在此之上补**组织级视图**（`view=org`，DR-0014 §3.1）；案件详情的 `capabilities`
+与 UI-05 槽的 `case_refs` 随后落地，**当前尚不存在**，不要照本文件的 description 去调。
 """
 
 from __future__ import annotations
@@ -44,7 +47,11 @@ from app.modules.entrust._http import (
     require_entrust_enabled,
     run_write,
 )
-from app.modules.entrust.authz import assert_can_view_assignment, load_assignment
+from app.modules.entrust.authz import (
+    assert_can_view_assignment,
+    assert_can_view_org,
+    load_assignment,
+)
 from app.modules.entrust.schemas import (
     ExceptionCaseCloseIn,
     ExceptionCaseCreate,
@@ -52,13 +59,18 @@ from app.modules.entrust.schemas import (
     ExceptionCaseDetailOut,
     ExceptionCaseLinkAddIn,
     ExceptionCaseListOut,
+    ExceptionCaseOrgListOut,
     ExceptionCaseOut,
     ExceptionCaseReopenIn,
+    exception_case_list_item,
     exception_case_out,
     exception_event_out,
 )
 
 router = APIRouter()
+
+#: `GET /exceptions` 的组织级视图名（DR-0014 §3.1）。缺省视图（单委托）不带 `view`。
+ORG_VIEW = "org"
 
 _SCOPE_CREATE = "entrust:exception:create"
 _SCOPE_LINK_ADD = "entrust:exception:link:add"
@@ -177,22 +189,26 @@ def raise_case(
 # ── 读 ───────────────────────────────────────────────────────────────────────
 
 
-@router.get(
-    "/exceptions",
-    response_model=ExceptionCaseListOut,
-    summary="按委托列案件（货主本人或该组织成员）",
-    dependencies=[Depends(require_entrust_enabled)],
-)
-def list_exceptions(
-    assignment_id: int = Query(ge=1),
-    case_status: str | None = Query(default=None, alias="status"),
-    case_kind: str | None = Query(default=None, alias="kind"),
-    page: int = Query(default=1, ge=1),
-    size: int = Query(default=20, ge=1, le=100),
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> Any:
-    _visible_assignment(db, assignment_id=assignment_id, user_id=int(user.id))
+def _case_error_guard(exc: Exception) -> HTTPException:
+    """把服务层异常翻成 HTTP；认不出的一律原样抛出（**不吞真实 bug**）。"""
+    mapped = _map_case_error(exc)
+    if mapped is None:
+        raise exc
+    return mapped
+
+
+def _list_assignment_view(
+    db: Session,
+    *,
+    user_id: int,
+    assignment_id: int,
+    case_status: str | None,
+    case_kind: str | None,
+    page: int,
+    size: int,
+) -> ExceptionCaseListOut:
+    """缺省视图：按**一张委托**列案件（既有语义，本片不改）。"""
+    _visible_assignment(db, assignment_id=assignment_id, user_id=user_id)
     try:
         total, cases = svc.list_cases(
             db,
@@ -202,11 +218,8 @@ def list_exceptions(
             page=page,
             size=size,
         )
-    except Exception as exc:
-        mapped = _map_case_error(exc)
-        if mapped is None:
-            raise
-        raise mapped from exc
+    except Exception as exc:  # 经 _case_error_guard 分类，认不出的原样抛出（不吞真实 bug）
+        raise _case_error_guard(exc) from exc
 
     grouped = svc.list_links_for_cases(db, [int(case["id"]) for case in cases])
     items = [
@@ -214,6 +227,127 @@ def list_exceptions(
         for case in cases
     ]
     return ExceptionCaseListOut(total=total, page=page, size=size, items=items)
+
+
+def _list_org_view(
+    db: Session,
+    *,
+    user_id: int,
+    org_id: int,
+    scope: str | None,
+    case_kind: str | None,
+    page: int,
+    size: int,
+) -> ExceptionCaseOrgListOut:
+    """`view=org`：按**单个组织**列案件（DR-0014 §3.1）。
+
+    授权在**调用服务之前**完成 —— 顺序不能倒：先查再判会让 `total` 与
+    `items` 的构造发生在可能未被授权的目标上，而计数本身就是一次信息泄漏。
+    """
+    assert_can_view_org(db, user_id=user_id, org_id=org_id)
+    try:
+        total, cases = svc.list_cases_for_org(
+            db,
+            org_id=org_id,
+            scope=(scope or svc.ORG_SCOPE_UNCLOSED),
+            kind=case_kind,
+            page=page,
+            size=size,
+        )
+    except Exception as exc:  # 同上
+        raise _case_error_guard(exc) from exc
+
+    linked = svc.list_links_for_cases(db, [int(case["id"]) for case in cases])
+    items = [
+        exception_case_list_item(
+            svc.project_case_list_item(case, affected_count=len(linked.get(int(case["id"]), [])))
+        )
+        for case in cases
+    ]
+    return ExceptionCaseOrgListOut(total=total, page=page, size=size, org_id=org_id, items=items)
+
+
+@router.get(
+    "/exceptions",
+    response_model=ExceptionCaseListOut | ExceptionCaseOrgListOut,
+    summary="列案件：缺省按委托（assignment_id），view=org 按组织（org_id）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def list_exceptions(
+    view: str | None = Query(default=None),
+    assignment_id: int | None = Query(default=None, ge=1),
+    org_id: int | None = Query(default=None, ge=1),
+    scope: str | None = Query(default=None),
+    case_status: str | None = Query(default=None, alias="status"),
+    case_kind: str | None = Query(default=None, alias="kind"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """两个视图的**参数分别校验**，混用一律 400（DR-0014 §3.1）。
+
+    刻意**不静默忽略**多余参数：`?view=org&assignment_id=7` 如果被当成组织视图，
+    调用方会以为「筛了这张单」，而结果里却有整个组织的案件 —— 这类
+    「我筛了却筛不掉」是查不出来的 bug（界面看起来完全正常）。
+
+    缺范围同样拒绝（422）：`view=org` 不给 `org_id` 不是「返回全部」，
+    「返回我所属全部组织」正是 HO 明确禁止的跨组织拼接。
+    """
+    if view is not None and view not in ("", ORG_VIEW):
+        raise HTTPException(
+            status_code=400, detail=f"未知视图：{view!r}（取值域：{ORG_VIEW!r}，缺省为单委托视图）"
+        )
+
+    user_id = int(user.id)
+    if view == ORG_VIEW:
+        if assignment_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="view=org 不接受 assignment_id（组织视图按 org_id 限定范围）",
+            )
+        if case_status is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="view=org 不接受 status（开闭范围用 scope=unclosed|all 表达）",
+            )
+        if org_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="view=org 必须给出 org_id —— 不提供「我所属全部组织」这种无范围查询",
+            )
+        return _list_org_view(
+            db,
+            user_id=user_id,
+            org_id=org_id,
+            scope=scope,
+            case_kind=case_kind,
+            page=page,
+            size=size,
+        )
+
+    if org_id is not None:
+        raise HTTPException(
+            status_code=400, detail="缺省视图不接受 org_id（按委托查询请用 assignment_id）"
+        )
+    if scope is not None:
+        raise HTTPException(
+            status_code=400, detail="缺省视图不接受 scope（按委托查询的开闭筛选请用 status）"
+        )
+    if assignment_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="缺省视图必须给出 assignment_id —— 不提供无范围的案件列表",
+        )
+    return _list_assignment_view(
+        db,
+        user_id=user_id,
+        assignment_id=assignment_id,
+        case_status=case_status,
+        case_kind=case_kind,
+        page=page,
+        size=size,
+    )
 
 
 @router.get(

@@ -13,6 +13,10 @@
    **决定路径改不了 `impact_kind`**、同一个 `rejected` 在两种 kind 下相反、
    关闭缺处置/证据 422、`rejected` 的异常不得以 `resolved` 关闭、
    两轮关闭历史按 `seq` 完整可判定。
+7. **组织级视图**（DR-0014 §3.1，切片四）：跨委托聚合与归属准确、跨组织不泄漏
+   （含 `total`）、只读成员可见而**能力**另论、`blocking` 与 `is_blocking` 逐条一致
+   （含 `rejected` 的相反语义）、开闭范围与 `scope=all`、分页/筛选/`id DESC`、
+   清单字段集合被冻结且**不含** `severity`、两视图参数分别校验（混用 400 / 缺范围 422）。
 
 本文件**只断言端点口径**（状态码、幂等重放、可见性、投影形状与字段取舍）；
 业务不变量在 `test_entrust_exceptions_service.py`，纯规则在 `test_entrust_exceptions.py`。
@@ -1045,3 +1049,321 @@ def test_close_then_reopen_keeps_two_rounds(env):
     assert detail["events"][3]["evidence_ref"] == "evidence://case/1"
     assert detail["events"][2]["note"] == "同一问题再次出现"
     assert detail["case"]["closure"]["disposition"] == exc.DISPOSITION_CANCELLED
+
+
+# ─────────────────────────────────────────── 7. 组织级视图（DR-0014 §3.1）
+
+
+def _second_assignment(env, s) -> int:
+    """在同一组织下再造一张**已受理**的委托单（同一货主）。
+
+    组织级视图的语义是「跨委托」，所以只造一张单是测不出来的 ——
+    单张单用一个 `WHERE assignment_id` 就能满足，看不出聚合是否正确。
+    """
+    draft = assign_svc.create_assignment(s.db, owner_user_id=OWNER, title="第二批钢材")
+    submitted = assign_svc.submit_assignment(
+        s.db,
+        assignment_id=draft["assignment_id"],
+        actor_id=OWNER,
+        org_id=s.org,
+        expected_revision=draft["revision"],
+    )
+    claimed = assign_svc.claim_assignment(
+        s.db, assignment_id=submitted["assignment_id"], actor_id=int(s.manager["user_id"])
+    )
+    return int(claimed["assignment_id"])
+
+
+def _raise_on(
+    env,
+    s,
+    assignment_id: int,
+    *,
+    title: str,
+    kind: str = exc.KIND_EXCEPTION,
+    blocking: bool = False,
+) -> dict:
+    """在**指定**委托单上登记一宗案件（`_raise_req` 固定用 `s.assignment_id`）。"""
+    body: dict = {
+        "kind": kind,
+        "title": title,
+        "severity": "medium",
+        "impact_kind": exc.IMPACT_INFORMATIONAL,
+    }
+    if blocking:
+        body.update(
+            severity="high",
+            impact_kind=exc.IMPACT_EXECUTION_BLOCKING,
+            links=[
+                {
+                    "target_kind": exc.TARGET_TASK,
+                    "target_id": _task(s, assignment_id=assignment_id),
+                }
+            ],
+        )
+    resp = env.client.post(
+        _RAISE_URL.format(aid=assignment_id),
+        json=body,
+        headers=_headers(s.manager, uuid.uuid4().hex),
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _org_list(env, who: dict, *, org_id: int, **params):
+    return env.client.get(
+        _LIST_URL,
+        params={"view": "org", "org_id": org_id, **params},
+        headers=_headers(who),
+    )
+
+
+def test_org_view_aggregates_cases_across_assignments(env):
+    """验收 1：同组织多委托的案件可一次聚合，且每行归属准确。"""
+    s = _seed(env)
+    second = _second_assignment(env, s)
+    first_case = _raise_on(env, s, s.assignment_id, title="第一单的船期延误")
+    second_case = _raise_on(env, s, second, title="第二单的货损")
+
+    resp = _org_list(env, s.manager, org_id=s.org)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["org_id"] == s.org
+    assert body["total"] == 2
+
+    by_id = {item["case_id"]: item for item in body["items"]}
+    assert set(by_id) == {first_case["case_id"], second_case["case_id"]}
+    # 归属必须准确：这正是「委托计数不能替代清单」要保证的东西
+    assert by_id[first_case["case_id"]]["assignment_id"] == s.assignment_id
+    assert by_id[second_case["case_id"]]["assignment_id"] == second
+
+
+def test_org_view_does_not_leak_across_orgs(env):
+    """验收 2：跨组织的记录与计数**都不**泄漏；查他组织一律 404（非 403）。"""
+    s = _seed(env)
+    mine = _raise_on(env, s, s.assignment_id, title="本组织案件")
+
+    other = _seed(env, owner_id=901)
+    _raise_on(env, other, other.assignment_id, title="他组织案件")
+
+    resp = _org_list(env, s.manager, org_id=s.org)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 1, "计数里混进了别的组织"
+    assert [i["case_id"] for i in body["items"]] == [mine["case_id"]]
+
+    # 用甲组织成员查乙组织：404 —— 若这里给 403，就等于承认「这个组织存在」
+    resp = _org_list(env, s.manager, org_id=other.org)
+    assert resp.status_code == 404
+
+
+def test_org_view_allows_plain_member_but_not_non_member(env):
+    """只读成员（`member`，仅 `entrust:view`）可见；非成员 404。
+
+    处置能力（`capabilities`）是另一条维度，不在这里断言 —— 它按 `owner_user_id`
+    判定，与本视图的 `org_id` 判定不可混用（DR-0008 / DR-0014 §3.5）。
+    """
+    s = _seed(env)
+    case = _raise_on(env, s, s.assignment_id, title="只读可见")
+
+    reader = _login(env.client, "viewer")
+    _member(s.db, s.org, user_id=int(reader["user_id"]), role="member")
+    resp = _org_list(env, reader, org_id=s.org)
+    assert resp.status_code == 200, resp.text
+    assert [i["case_id"] for i in resp.json()["items"]] == [case["case_id"]]
+
+    outsider = _login(env.client, "outsider")
+    assert _org_list(env, outsider, org_id=s.org).status_code == 404
+
+
+def test_org_item_blocking_equals_is_blocking(env):
+    """验收 5：清单的 `blocking` 与 `is_blocking` 逐条一致，含 `rejected` 的相反语义。
+
+    这条是「清单不得自建第二份判据」的落点：若有人把判据翻译成 SQL，
+    两种 `kind` 下 `rejected` 的差异会被抹平，而这里会立刻红。
+    """
+    s = _seed(env)
+
+    blocked_exception, _ = _blocking_case(env, s)
+    _decide(env, s, blocked_exception, to_status=exc.STATUS_REJECTED)
+    blocked_change, _ = _blocking_case(env, s, kind=exc.KIND_CHANGE_REQUEST)
+    _decide(env, s, blocked_change, to_status=exc.STATUS_REJECTED)
+    informational = _raise_on(env, s, s.assignment_id, title="仅记录")
+
+    body = _org_list(env, s.manager, org_id=s.org, scope="all").json()
+    for item in body["items"]:
+        expected = exc.is_blocking(
+            kind=item["kind"], impact_kind=item["impact_kind"], status=item["status"]
+        )
+        assert item["blocking"] is expected, item
+
+    by_id = {item["case_id"]: item for item in body["items"]}
+    # 真实异常：驳回的是方案，异常还在 ⇒ 继续阻断
+    assert by_id[blocked_exception["case_id"]]["blocking"] is True
+    # 变更请求：被否 ⇒ 该变更不会发生 ⇒ 不再阻断
+    assert by_id[blocked_change["case_id"]]["blocking"] is False
+    assert by_id[informational["case_id"]]["blocking"] is False
+
+
+def test_org_view_scope_unclosed_moves_closed_case_out_and_back(env):
+    """验收 6：关闭后移出 `unclosed`；`scope=all` 仍可见；重开后重新回到 `unclosed`。"""
+    s = _seed(env)
+    case = _raise_on(env, s, s.assignment_id, title="待关闭的案件")
+    cid = case["case_id"]
+
+    def listed(scope: str | None = None) -> tuple[list[int], int]:
+        params = {} if scope is None else {"scope": scope}
+        resp = _org_list(env, s.manager, org_id=s.org, **params)
+        assert resp.status_code == 200, resp.text
+        return [i["case_id"] for i in resp.json()["items"]], resp.json()["total"]
+
+    assert listed() == ([cid], 1)
+
+    closed = _close(env, s, case, disposition=exc.DISPOSITION_DUPLICATE, decision_note="重复登记")
+    assert closed.status_code == 200, closed.text
+    assert listed() == ([], 0), "已关闭案件不该留在 unclosed 清单里"
+    assert listed(exc.ORG_SCOPE_ALL)[0] == [cid]
+
+    reopened = env.client.post(
+        _REOPEN_URL.format(cid=cid),
+        json={"expected_revision": closed.json()["revision_no"], "reason": "同一问题再次出现"},
+        headers=_headers(s.manager, uuid.uuid4().hex),
+    )
+    assert reopened.status_code == 200, reopened.text
+    assert listed() == ([cid], 1)
+
+
+def test_org_view_pagination_filter_and_order(env):
+    """验收 7：`total` 与分页一致、`kind` 筛选生效、排序 `id DESC`。"""
+    s = _seed(env)
+    second = _second_assignment(env, s)
+    for index in range(3):
+        _raise_on(env, s, s.assignment_id, title=f"异常 {index}")
+    _raise_on(env, s, second, title="变更一宗", kind=exc.KIND_CHANGE_REQUEST)
+
+    whole = _org_list(env, s.manager, org_id=s.org, size=100).json()
+    ids = [i["case_id"] for i in whole["items"]]
+    assert whole["total"] == 4
+    assert ids == sorted(ids, reverse=True), "排序必须是 id DESC（与单委托视图同一口径）"
+
+    page1 = _org_list(env, s.manager, org_id=s.org, page=1, size=2).json()
+    page2 = _org_list(env, s.manager, org_id=s.org, page=2, size=2).json()
+    assert (page1["total"], page2["total"]) == (4, 4)
+    assert [i["case_id"] for i in page1["items"]] == ids[:2]
+    assert [i["case_id"] for i in page2["items"]] == ids[2:]
+    assert not ({i["case_id"] for i in page1["items"]} & {i["case_id"] for i in page2["items"]})
+
+    only_change = _org_list(env, s.manager, org_id=s.org, kind=exc.KIND_CHANGE_REQUEST).json()
+    assert only_change["total"] == 1
+    assert [i["title"] for i in only_change["items"]] == ["变更一宗"]
+
+
+def test_org_item_shape_is_frozen_and_omits_severity(env):
+    """清单行的字段集合被**冻结**：多一个字段就是改了契约。
+
+    `severity` 的缺席是刻意的（C3）：一旦清单里有了它，界面迟早拿它排序或加重，
+    而清单表达轻重已经有正确的字段 —— `blocking` 与 `impact_kind`。
+    """
+    s = _seed(env)
+    case, _ = _blocking_case(env, s)  # execution-blocking ⇒ 带一条受影响项
+    body = _org_list(env, s.manager, org_id=s.org).json()
+    item = body["items"][0]
+
+    assert set(item) == {
+        "case_id",
+        "assignment_id",
+        "kind",
+        "title",
+        "status",
+        "impact_kind",
+        "blocking",
+        "due_at",
+        "updated_at",
+        "affected_count",
+    }
+    assert "severity" not in item
+    assert "severity" not in body
+    assert item["affected_count"] == 1
+    assert item["due_at"] is None, "未填的截止时间必须保持未知，不造默认值"
+    assert item["case_id"] == case["case_id"]
+
+
+def test_org_items_report_affected_count_per_row(env):
+    """`affected_count` 逐行独立，不是整页共用一个数。
+
+    批量取回（`list_links_for_cases`）很容易写成「拿第一行的键去取」，
+    那样每行都显示同一个数量 —— 只有一宗案件时看不出来，
+    等清单里有两宗（一宗带受影响项、一宗不带）才会暴露。
+    """
+    s = _seed(env)
+    expected: dict[int, int] = {}
+    for _ in range(3):
+        case, _ = _blocking_case(env, s)
+        expected[case["case_id"]] = 1
+    plain = _raise_on(env, s, s.assignment_id, title="没有受影响项的记录")
+    expected[plain["case_id"]] = 0
+
+    body = _org_list(env, s.manager, org_id=s.org, size=100).json()
+    assert {i["case_id"]: i["affected_count"] for i in body["items"]} == expected
+
+
+def test_org_view_rejects_mixed_parameters(env):
+    """两视图参数**分别**校验：混用一律 400，不静默忽略。
+
+    静默忽略会让「我筛了却筛不掉」变成查不出的 bug —— 界面看起来完全正常，
+    而结果里混着整个组织的数据。
+    """
+    s = _seed(env)
+    cases = [
+        {"view": "org", "org_id": s.org, "assignment_id": s.assignment_id},
+        {"view": "org", "org_id": s.org, "status": "open"},
+        {"assignment_id": s.assignment_id, "org_id": s.org},
+        {"assignment_id": s.assignment_id, "scope": "all"},
+        {"view": "everything", "org_id": s.org},
+    ]
+    for params in cases:
+        resp = env.client.get(_LIST_URL, params=params, headers=_headers(s.manager))
+        assert resp.status_code == 400, (params, resp.status_code, resp.text)
+
+
+def test_list_always_requires_a_scope(env):
+    """不允许无范围查询：缺省视图缺 `assignment_id` → 422；`view=org` 缺 `org_id` → 422。
+
+    「`view=org` 不传 `org_id` 就返回我所属全部组织」正是 HO 禁止的跨组织拼接，
+    所以它是 422 而不是「默认全部」。
+    """
+    s = _seed(env)
+    assert env.client.get(_LIST_URL, headers=_headers(s.manager)).status_code == 422
+    resp = env.client.get(_LIST_URL, params={"view": "org"}, headers=_headers(s.manager))
+    assert resp.status_code == 422
+
+
+def test_org_view_unknown_scope_400(env):
+    """`scope` 取值域由服务层裁定，未知取值 400（不是静默当成 unclosed）。"""
+    s = _seed(env)
+    assert _org_list(env, s.manager, org_id=s.org, scope="everything").status_code == 400
+
+
+def test_default_assignment_view_shape_unchanged(env):
+    """验收 8：缺省视图（按委托）响应形状**不变** —— 旧调用方与既有用例无需改动。
+
+    这里只断言「两个视图形状确实不同」，不去抄 `ExceptionCaseOut` 的全字段清单 ——
+    抄一遍就等于多一处会漂移的副本。
+    """
+    s = _seed(env)
+    case = _raise_on(env, s, s.assignment_id, title="形状不变")
+    resp = env.client.get(
+        _LIST_URL, params={"assignment_id": s.assignment_id}, headers=_headers(s.manager)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body) == {"total", "page", "size", "items"}
+    assert "org_id" not in body
+
+    item = body["items"][0]
+    assert item["case_id"] == case["case_id"]
+    # 单委托视图给的是**完整投影**：capabilities 之外的业务字段都在
+    assert {"severity", "cause", "affected", "decision", "closure"} <= set(item)
+    # 而组织级清单只给最小集合 —— 两者形状不同是刻意的，不是漏投影
+    org_item = _org_list(env, s.manager, org_id=s.org).json()["items"][0]
+    assert "severity" not in org_item and "affected" not in org_item

@@ -636,6 +636,34 @@ def list_links_for_cases(session: Session, case_ids: list[int]) -> dict[int, lis
     return grouped
 
 
+def _page_cases(
+    session: Session, *, where: list[str], params: dict[str, Any], page: int, size: int
+) -> tuple[int, list[dict[str, Any]]]:
+    """按 `where` 分页取案件 —— `ORDER BY id DESC` 是**唯一**排序口径。
+
+    计数与取页共用同一个 `WHERE` 与同一份 `params`。两处各拼一次 SQL 是
+    「`total` 与内容对不上」最常见的来源（筛选条件只加在取页那一边，
+    数据少时看不出来，等翻到第二页才发现总数虚高）。
+    """
+    clause = " AND ".join(where)
+    total = int(
+        session.execute(text(f"SELECT COUNT(*) FROM ent_exception WHERE {clause}"), params).scalar()
+        or 0
+    )
+    rows = (
+        session.execute(
+            text(
+                f"SELECT {_CASE_COLS} FROM ent_exception WHERE {clause} "
+                "ORDER BY id DESC LIMIT :lim OFFSET :off"
+            ),
+            {**params, "lim": size, "off": (page - 1) * size},
+        )
+        .mappings()
+        .all()
+    )
+    return total, [_case_from_row(row) for row in rows]
+
+
 def list_cases(
     session: Session,
     *,
@@ -664,24 +692,56 @@ def list_cases(
     if kind is not None:
         where.append("kind = :kind")
         params["kind"] = kind
-    clause = " AND ".join(where)
+    return _page_cases(session, where=where, params=params, page=page, size=size)
 
-    total = int(
-        session.execute(text(f"SELECT COUNT(*) FROM ent_exception WHERE {clause}"), params).scalar()
-        or 0
-    )
-    rows = (
-        session.execute(
-            text(
-                f"SELECT {_CASE_COLS} FROM ent_exception WHERE {clause} "
-                "ORDER BY id DESC LIMIT :lim OFFSET :off"
-            ),
-            {**params, "lim": size, "off": (page - 1) * size},
-        )
-        .mappings()
-        .all()
-    )
-    return total, [_case_from_row(row) for row in rows]
+
+#: 组织级视图的开闭范围取值域（DR-0014 §3.1）。
+#:
+#: 用 `scope` 而**不**复用 `status`：`status != 'closed'` 表达的是一个**范围**，
+#: 塞进只接受单值的 `status` 就得自造 `status=!closed` 这类语法，
+#: 而每一个消费方（前端、用例、将来的导出）都得先学会解析它。
+ORG_SCOPES: Final = frozenset({"unclosed", "all"})
+ORG_SCOPE_UNCLOSED = "unclosed"
+ORG_SCOPE_ALL = "all"
+
+
+def list_cases_for_org(
+    session: Session,
+    *,
+    org_id: int,
+    scope: str = ORG_SCOPE_UNCLOSED,
+    kind: str | None = None,
+    page: int = 1,
+    size: int = 50,
+) -> tuple[int, list[dict[str, Any]]]:
+    """按**单个组织**列案件（`GET /exceptions?view=org`，DR-0014 §3.1）。
+
+    三条硬约束，与 DR-0014 §3.1 一一对应：
+
+    1. **作用域只接受一个 `org_id`**：`WHERE org_id = :oid` 是精确等值，**不是** `IN`。
+       没有「不传 `org_id` 就返回我所属全部组织」的用法 —— 那正是跨组织拼接；
+       要列多个组织就分多次请求，每次独立过一遍授权。
+    2. **授权先于分页与计数**：本函数**不判权限**，由 API 层在**调用它之前**
+       经 `authz.assert_can_view_org` 判定。把判定塞进函数里看似更安全，实则不然 ——
+       那样计数会发生在可能未被授权的目标上，而 `total` 本身就是一次信息泄漏。
+    3. **开闭范围以 `scope` 表达**，不用 `status`（理由见 `ORG_SCOPES`）。
+
+    排序与 `size` 上限沿用单委托视图（`_page_cases`），**不引入第二套规则**。
+    """
+    if scope not in ORG_SCOPES:
+        raise ExceptionCaseError(f"未知范围：{scope!r}（取值域：{sorted(ORG_SCOPES)}）")
+    if kind is not None:
+        _require_known_kind(kind)
+
+    where = ["org_id = :oid"]
+    params: dict[str, Any] = {"oid": org_id}
+    if scope != ORG_SCOPE_ALL:
+        where.append("status != :closed")
+        params["closed"] = STATUS_CLOSED
+    if kind is not None:
+        where.append("kind = :kind")
+        params["kind"] = kind
+    return _page_cases(session, where=where, params=params, page=page, size=size)
 
 
 def count_open_cases(session: Session, *, assignment_id: int) -> int:
@@ -1594,6 +1654,34 @@ def project_case_internal(
     }
 
 
+def project_case_list_item(case: dict[str, Any], *, affected_count: int) -> dict[str, Any]:
+    """组织级清单的一行（DR-0014 §3.2）。
+
+    `blocking` 由 `is_blocking` **当场算出**，不读任何缓存列 —— 清单与执行门禁
+    必须是同一次判定的结果，否则会出现「门禁拦住但清单没标阻断」（或反向）。
+
+    `affected_count` 由调用方传入：列表端点用 `list_links_for_cases` 一次取回整页的
+    受影响项，在这里再查一遍就成了 N+1。传长度而不是传列表，是为了让
+    「这一行只需要数量」这件事写在签名里。
+    """
+    return {
+        "case_id": int(case["id"]),
+        "assignment_id": int(case["assignment_id"]),
+        "kind": str(case["kind"]),
+        "title": str(case["title"]),
+        "status": str(case["status"]),
+        "impact_kind": str(case["impact_kind"]),
+        "blocking": is_blocking(
+            kind=str(case["kind"]),
+            impact_kind=str(case["impact_kind"]),
+            status=str(case["status"]),
+        ),
+        "due_at": case["due_at"],
+        "updated_at": case["updated_at"],
+        "affected_count": int(affected_count),
+    }
+
+
 def project_case_for_customer(
     case: dict[str, Any], *, links: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
@@ -1653,6 +1741,9 @@ __all__ = [
     "KINDS",
     "KIND_CHANGE_REQUEST",
     "KIND_EXCEPTION",
+    "ORG_SCOPE_ALL",
+    "ORG_SCOPES",
+    "ORG_SCOPE_UNCLOSED",
     "SEVERITIES",
     "SEVERITY_CRITICAL",
     "SOURCES",
@@ -1687,12 +1778,14 @@ __all__ = [
     "is_blocking",
     "list_blocking_cases",
     "list_cases",
+    "list_cases_for_org",
     "list_events",
     "list_links",
     "list_links_for_cases",
     "load_visible_case",
     "project_case_for_customer",
     "project_case_internal",
+    "project_case_list_item",
     "raise_case",
     "remove_link",
     "reopen_case",
