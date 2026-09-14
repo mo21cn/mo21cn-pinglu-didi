@@ -516,6 +516,23 @@ def _parse_ts(raw: Any) -> str | None:
     return str(raw)
 
 
+# ── 案件的两个形状：主键键名**故意不同**，别当成疏漏 ──────────────────────────
+#
+#   * **行形状**（镜像数据库列，键名 == 列名）—— 主键键名 `id`：
+#     `get_case` / `list_cases` / `load_visible_case` / `blocking_cases_for_task` /
+#     `list_blocking_cases`。跟着 `_CASE_COLS` 走，加一列只改一处 SQL。
+#   * **投影形状**（要出服务层的载荷）—— 主键键名 `case_id`：
+#     `project_case_internal` / `project_case_for_customer`。不用裸 `id`，是因为
+#     投影里同时有 `affected[].link_id`，`case_id` / `link_id` 并列才自解释；
+#     API 响应沿用投影的 `case_id`，前端与用例都按它取值。
+#
+# 两个形状的对应关系已被用例钉住：
+# `test_internal_projection_exposes_decision_and_affected` 里的
+# `assert view["case_id"] == int(case["id"])` 就是这条约定。要统一键名的话，改的是
+# 这层约定**与投影的消费方**（含 API 契约与前端取值），不是随手改一个函数。
+# ────────────────────────────────────────────────────────────────────────────
+
+
 def _case_from_row(row: Any) -> dict[str, Any]:
     data = dict(row)
     for col in _CASE_TIME_COLS:
@@ -713,7 +730,17 @@ def _blocking_only(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def list_blocking_cases(session: Session, *, assignment_id: int) -> list[dict[str, Any]]:
-    """该委托下**当前阻断**的全部案件（结案检查与工作台共用同一判据）。"""
+    """该委托下**当前阻断**的全部案件（未关闭候选集 → `is_blocking` 过滤）。
+
+    与工作台共用的是**判据** `is_blocking`，**不是这个函数**：工作台的 `exceptions`
+    槽要连**已关闭**案件一起看（"最后更新"取自全部案件），候选集不同，它走自己的
+    `_load_cases` + `_is_blocking_case`（后者同样只调 `is_blocking`）。所以别把这里
+    写成"工作台通过本函数取阻断项" —— 那是另一条路径，改了这边不会影响工作台。
+
+    ⚠️ 当前**没有生产调用方**（只有 `test_list_blocking_cases_uses_the_same_judgement`）。
+    保留它是因为「某委托下哪些案件在阻断」是一个独立、可复用的查询口径；但它此刻
+    **不是**任何门禁的执行路径，不要拿它当"阻断已生效"的证据。
+    """
     candidates = _load_case_rows(
         session,
         clause="assignment_id = :aid AND status != :closed",
