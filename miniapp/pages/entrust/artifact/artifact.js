@@ -156,6 +156,9 @@ Page({
     // 进入编辑态：把当前值填进表单。用**平坦数组 + text** 而不是 `drafts[name]`，
     // 因为 WXML 的动态键取值 `{{obj[key]}}` 在各基础库版本上表现不一致，
     // 而"输入框拿到的是 undefined"只会表现为一片空白，很难归因。
+    // 白名单必须**显式带上** `declared` 与 `kindHint`：模板要按 `item.kindHint`
+    // 显示"列表（JSON 数组）"。少传一个键不会报错，只会让那行提示**永远不渲染** ——
+    // 而缺值的列表字段与单行文本框长得一模一样，提示不显示就等于这个缺口没修。
     const fields = (this._fields || []).map(function (f) {
       return {
         name: f.name,
@@ -164,6 +167,8 @@ Page({
         internal: f.internal,
         unknown: f.unknown,
         kind: f.kind,
+        declared: f.declared,
+        kindHint: f.kindHint,
         text: f.value
       }
     })

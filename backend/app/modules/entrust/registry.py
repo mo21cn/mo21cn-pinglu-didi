@@ -49,6 +49,24 @@ ALL_EVIDENCE_KINDS = frozenset(
     }
 )
 
+# ── 字段**类型**的取值域（契约的一部分，不由运行时值推断）──────────────────
+#
+# 为什么需要它：前端原先只能**按运行时值的类型**推断编辑形态（`_fieldKind`），
+# 于是**缺值**字段一律退化成单行输入框 —— `settlement_draft.receivable_lines`
+# 本该是列表，在刚创建、还没填的时候会显示成文本框；用户填 `[1,2]` 存回去，
+# 得到的是一段**字符串** `"[1,2]"`，缺项判定与客户投影都会跟着错。
+# 类型是契约，不该由"这个值恰好长什么样"推出来。
+
+FIELD_TEXT = "text"
+FIELD_NUMBER = "number"
+FIELD_LIST = "list"
+FIELD_OBJECT = "object"
+
+ALL_FIELD_KINDS = frozenset({FIELD_TEXT, FIELD_NUMBER, FIELD_LIST, FIELD_OBJECT})
+
+#: 需要**结构化编辑器**（JSON 多行）的字段类型
+STRUCTURED_FIELD_KINDS = frozenset({FIELD_LIST, FIELD_OBJECT})
+
 
 @dataclass(frozen=True)
 class ArtifactTypeSpec:
@@ -66,10 +84,47 @@ class ArtifactTypeSpec:
     evidence_kinds: tuple[str, ...] = ()
     #: 是否允许人工直接编辑（R1 全为 True；保留位体现"只读计算类成果"的差异）
     editable: bool = True
+    #: **字段类型声明**（`(字段名, 类型)` 有序元组，顺序即展示顺序）。
+    #:
+    #: 用元组而不是 `dict`：冻结 dataclass 的字段必须不可变，且**顺序有意义**
+    #: （展示顺序不由 payload 的键序决定，见 `decorateArtifact` 的注释）。
+    #: 覆盖范围**必须是全部已知字段**（required + optional），由模块底部的
+    #: `_assert_registry_complete()` 在 import 期强制 —— 少一个就起不来。
+    field_types: tuple[tuple[str, str], ...] = ()
 
     @property
     def known_fields(self) -> frozenset[str]:
         return frozenset(self.required_fields) | frozenset(self.optional_fields)
+
+    @property
+    def field_kind_map(self) -> dict[str, str]:
+        """字段名 → 声明类型（供前端查表；未声明的字段不在表内）。"""
+        return dict(self.field_types)
+
+    def field_kind(self, name: str) -> str:
+        """某字段的**声明类型**；未声明返回**空串**（不猜、不给默认）。
+
+        返回空串而不是 `text`：未知字段（历史数据 / 前端未跟上的新增字段）必须
+        能被识别为「没有契约」，前端据此回退到"按值推断"，而不是被伪装成文本。
+        """
+        for field_name, kind in self.field_types:
+            if field_name == name:
+                return kind
+        return ""
+
+    def undeclared_fields(self) -> list[str]:
+        """已知字段里**没有类型声明**的（注册表自检用）。"""
+        declared = {name for name, _ in self.field_types}
+        return sorted(self.known_fields - declared)
+
+    def mistyped_fields(self) -> list[tuple[str, str]]:
+        """声明了类型但**不属于已知字段**的（拼错字段名 / 残留字段）。"""
+        known = self.known_fields
+        return [(name, kind) for name, kind in self.field_types if name not in known]
+
+    def bad_field_kinds(self) -> list[tuple[str, str]]:
+        """类型值**不在取值域内**的（拼错类型名 ⇒ 前端会当作"未声明"）。"""
+        return [(name, kind) for name, kind in self.field_types if kind not in ALL_FIELD_KINDS]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -80,6 +135,10 @@ class ArtifactTypeSpec:
             "internal_fields": list(self.internal_fields),
             "evidence_kinds": list(self.evidence_kinds),
             "editable": self.editable,
+            # 前端按此决定编辑形态：结构化类型走 JSON 多行编辑器。
+            # 输出成对象（而不是有序对的数组）是因为前端只做**查表**，
+            # 展示顺序由 required_fields / optional_fields 决定。
+            "field_types": dict(self.field_types),
         }
 
 
@@ -93,6 +152,15 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
         optional_fields=("cargo_name", "quantity", "quantity_unit", "route", "valid_until"),
         internal_fields=(),
         evidence_kinds=(EVIDENCE_DOCUMENT, EVIDENCE_EMAIL, EVIDENCE_PHOTO),
+        field_types=(
+            ("carrier", FIELD_TEXT),
+            ("rate", FIELD_NUMBER),
+            ("cargo_name", FIELD_TEXT),
+            ("quantity", FIELD_NUMBER),
+            ("quantity_unit", FIELD_TEXT),
+            ("route", FIELD_TEXT),
+            ("valid_until", FIELD_TEXT),
+        ),
     ),
     ArtifactTypeSpec(
         code="supplier_compare",
@@ -102,6 +170,11 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
         # 供应商比价与成本口径属于内部信息（计划 §2.1「客户端字段白名单」）
         internal_fields=("candidates", "selected_candidate", "comparison_note"),
         evidence_kinds=(EVIDENCE_DOCUMENT, EVIDENCE_EMAIL),
+        field_types=(
+            ("candidates", FIELD_LIST),
+            ("selected_candidate", FIELD_TEXT),
+            ("comparison_note", FIELD_TEXT),
+        ),
     ),
     ArtifactTypeSpec(
         code="customer_quote",
@@ -111,6 +184,14 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
         # 对客报价本身要能到客户手里，但内部成本口径绝不在其中
         internal_fields=(),
         evidence_kinds=(EVIDENCE_DOCUMENT, EVIDENCE_CONFIRMATION),
+        field_types=(
+            ("amount", FIELD_NUMBER),
+            ("currency", FIELD_TEXT),
+            ("includes", FIELD_LIST),
+            ("valid_until", FIELD_TEXT),
+            ("excludes", FIELD_LIST),
+            ("note", FIELD_TEXT),
+        ),
     ),
     ArtifactTypeSpec(
         code="contract_review",
@@ -119,6 +200,12 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
         optional_fields=("clauses", "effective_date", "note"),
         internal_fields=(),
         evidence_kinds=(EVIDENCE_CONTRACT, EVIDENCE_DOCUMENT),
+        field_types=(
+            ("parties", FIELD_LIST),
+            ("clauses", FIELD_LIST),
+            ("effective_date", FIELD_TEXT),
+            ("note", FIELD_TEXT),
+        ),
     ),
     ArtifactTypeSpec(
         code="procurement_confirm",
@@ -128,6 +215,13 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
         # 采购价与毛利是内部事实，客户侧只能看到对客报价
         internal_fields=("agreed_amount", "currency", "supplier"),
         evidence_kinds=(EVIDENCE_RECEIPT, EVIDENCE_PAYMENT, EVIDENCE_DOCUMENT),
+        field_types=(
+            ("supplier", FIELD_TEXT),
+            ("agreed_scope", FIELD_TEXT),
+            ("agreed_amount", FIELD_NUMBER),
+            ("currency", FIELD_TEXT),
+            ("effective_from", FIELD_TEXT),
+        ),
     ),
     ArtifactTypeSpec(
         code="settlement_draft",
@@ -136,6 +230,12 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
         optional_fields=("payable_lines", "disputed", "note"),
         internal_fields=("payable_lines",),
         evidence_kinds=(EVIDENCE_RECEIPT, EVIDENCE_PAYMENT),
+        field_types=(
+            ("receivable_lines", FIELD_LIST),
+            ("payable_lines", FIELD_LIST),
+            ("disputed", FIELD_LIST),
+            ("note", FIELD_TEXT),
+        ),
     ),
 )
 
@@ -143,6 +243,37 @@ ARTIFACT_TYPES: dict[str, ArtifactTypeSpec] = {spec.code: spec for spec in _SPEC
 
 #: 客户可见（可进入客户投影）的成果类型 —— 其余类型一律不可对客户开放
 CUSTOMER_VISIBLE_TYPES: frozenset[str] = frozenset({"customer_quote", "contract_review"})
+
+
+def _assert_registry_complete() -> None:
+    """注册表完整性自检 —— **在 import 期 fail fast**。
+
+    三条都必须成立：
+
+    1. 每个**已知字段**（required + optional）都有类型声明。少一个，前端在该字段
+       缺值时就会退回"按值猜"，而缺值字段必然猜错 —— 这正是本次要修的问题；
+    2. 声明的字段名必须**属于已知字段**。拼错名字不会报错、只会静默失效；
+    3. 类型值必须在**取值域**内。拼错类型名会被前端当成"没有契约"。
+
+    为什么放在 import 期而不是只写测试：`_SPECS` 是**编译期常量**，它错了就没有
+    "正确的运行方式"。让进程在启动前失败，胜过让某个缺值字段在界面上静静退化成
+    单行输入框 —— 后者要等到有人真的编辑那个字段才会被发现。
+    """
+    problems: list[str] = []
+    for spec in _SPECS:
+        for name in spec.undeclared_fields():
+            problems.append(f"{spec.code}.{name} 缺少类型声明")
+        for name, _kind in spec.mistyped_fields():
+            problems.append(f"{spec.code}.{name} 声明了类型但不在已知字段内")
+        for name, kind in spec.bad_field_kinds():
+            problems.append(
+                f"{spec.code}.{name} 的类型 {kind!r} 不在取值域 {sorted(ALL_FIELD_KINDS)}"
+            )
+    if problems:
+        raise ValueError("成果注册表不完整：" + "；".join(problems))
+
+
+_assert_registry_complete()
 
 
 class UnknownArtifactTypeError(ValueError):
@@ -242,8 +373,14 @@ def project_for_customer(artifact_type: str, payload: dict[str, Any]) -> dict[st
 
 __all__ = [
     "ALL_EVIDENCE_KINDS",
+    "ALL_FIELD_KINDS",
     "ARTIFACT_TYPES",
     "CUSTOMER_VISIBLE_TYPES",
+    "FIELD_LIST",
+    "FIELD_NUMBER",
+    "FIELD_OBJECT",
+    "FIELD_TEXT",
+    "STRUCTURED_FIELD_KINDS",
     "ArtifactTypeSpec",
     "UnknownArtifactTypeError",
     "diff_payloads",

@@ -135,6 +135,16 @@
   background: #F1F4F8;
 }
 
+/* 字段类型提示（如「列表（JSON 数组）」）。
+   结构化类型在**缺值**时与单行文本框外观一致 —— 这行文案是用户唯一能看出
+   "这里该填 JSON 数组而不是一段文字"的地方，所以它必须存在且显式。 */
+.art-kind-hint {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 21rpx;
+  color: #6B7A8C;
+}
+
 .art-value {
   display: block;
   margin-top: 8rpx;

@@ -961,6 +961,204 @@ check(
   '多余：' + extraLabel.join('、')
 )
 
+// ── 字段**类型**声明（ENT-025）──────────────────────────────────────────
+//
+// 为什么要在静态层守住：前端的编辑形态原先只能**按运行时值的类型**推断，
+// 于是**缺值**字段一律退化成单行输入框 —— 本该是列表的字段（如
+// `settlement_draft.receivable_lines`）在刚创建、还没填的时候显示成文本框。
+// 类型是**契约**，必须由注册表声明，且必须覆盖**全部**已知字段：
+// 漏掉一个，那个字段在缺值时就会静静地退化回去。
+const declaredKinds = {}
+const kindPairRe = /\("([a-z_]+)",\s*(FIELD_[A-Z]+)\)/g
+let km = kindPairRe.exec(specBlock)
+while (km !== null) {
+  declaredKinds[km[1]] = km[2]
+  km = kindPairRe.exec(specBlock)
+}
+const kindMissing = uniqueDeclared.filter(function (f) {
+  return !declaredKinds[f]
+})
+check(
+  `[成果] 注册表为全部 ${uniqueDeclared.length} 个字段声明了类型（缺一个则该字段在缺值时退化成文本框）`,
+  kindMissing.length === 0,
+  '缺类型：' + kindMissing.join('、')
+)
+
+// 取值域跨语言核对：后端 `FIELD_*` 常量 ⇄ 前端 `ARTIFACT_FIELD_KINDS` 的键
+const backendKindConsts = pyConstKeys(regPy, 'FIELD_')
+const frontKindKeys = Object.keys(E.ARTIFACT_FIELD_KINDS || {}).sort()
+check(
+  '[成果] 字段类型取值域：前端 ARTIFACT_FIELD_KINDS ⇄ 后端 FIELD_* 逐字对齐',
+  backendKindConsts.join(',') === frontKindKeys.join(','),
+  '后端 ' + backendKindConsts.join('/') + ' vs 前端 ' + frontKindKeys.join('/')
+)
+
+// 声明的类型名必须都落在取值域内 —— 拼错类型名会被前端当作"没有契约"
+const backendKindNames = {}
+backendKindConsts.forEach(function (k) {
+  backendKindNames['FIELD_' + k.toUpperCase()] = k
+})
+const badKindRefs = Object.keys(declaredKinds).filter(function (f) {
+  return !backendKindNames[declaredKinds[f]]
+})
+check(
+  '[成果] 注册表声明的类型名都在取值域内（拼错会被当成"没有契约"而回退到按值猜）',
+  badKindRefs.length === 0,
+  '异常：' + badKindRefs.map(function (f) { return f + '=' + declaredKinds[f] }).join('、')
+)
+
+// **行为**断言：缺值的结构化字段仍走 JSON 编辑形态 —— 这正是本片要修的那个缺口
+const SPEC_SETTLE = {
+  code: 'settlement_draft',
+  label: '结算草稿',
+  required_fields: ['receivable_lines'],
+  optional_fields: ['note'],
+  internal_fields: [],
+  editable: true,
+  field_types: { receivable_lines: 'list', note: 'text' }
+}
+const ART_EMPTY_LIST = {
+  artifact_id: 11,
+  entrustment_id: 3,
+  assignment_id: 4,
+  artifact_type: 'settlement_draft',
+  status: 'active',
+  current_revision_id: 30,
+  updated_at: '2026-09-14 10:00:00',
+  current_revision: {
+    revision_id: 30,
+    revision_no: 1,
+    // `receivable_lines` **键都不存在** —— 缺值字段没有"值"可看，只能靠契约
+    payload: { note: '只填了备注' },
+    source: 'manual',
+    note: '',
+    created_at: '2026-09-14 10:00:00'
+  },
+  missing_fields: ['receivable_lines'],
+  unknown_fields: []
+}
+const emptyListProj = E.decorateArtifact(ART_EMPTY_LIST, SPEC_SETTLE)
+const listRow = emptyListProj.fields.filter(function (f) {
+  return f.name === 'receivable_lines'
+})[0]
+check(
+  '[成果] 缺值的列表字段仍按 JSON 编辑形态渲染（按值推断会判成标量 —— 就是原缺口）',
+  !!listRow && listRow.kind === 'json' && listRow.declared === 'list',
+  listRow ? listRow.kind + '/' + listRow.declared : '字段缺失'
+)
+check(
+  '[成果] 缺值的结构化字段给出类型提示（用户无法从空白输入框看出该填 JSON 数组）',
+  !!listRow && listRow.kindHint.indexOf('JSON') !== -1,
+  listRow ? listRow.kindHint : '（无提示）'
+)
+check(
+  '[成果] 未声明类型的字段仍回退到按值推断（未知字段没有契约可依，且只读）',
+  emptyListProj.fields.filter(function (f) { return f.unknown }).every(function (f) {
+    return f.declared === '' && f.kindHint === ''
+  })
+)
+
+// 缺值时的两个**具体故障**（本片一并修）。它们与上面两条不同：上面验的是"判成什么
+// 形态"，这里验的是"编辑框初始文本是什么" —— 形态对了、文本错了照样填不了。
+//   · `JSON.stringify(undefined)` 返回 **JS undefined 本身**（不是字符串）⇒ setData
+//     会把这个键丢掉，输入框拿到 undefined，表现为一片空白，看起来"没问题"；
+//   · `JSON.stringify(null)` 返回字符串 `'null'` ⇒ 从没填过的字段看起来已经有内容。
+check(
+  '[成果] 缺值的结构化字段初始文本是空串（不是 JS undefined，也不是 "null"）',
+  !!listRow && listRow.value === '' && typeof listRow.value === 'string',
+  listRow ? JSON.stringify(listRow.value) : '字段缺失'
+)
+const withSettlePayload = function (payload) {
+  return Object.assign({}, ART_EMPTY_LIST, {
+    current_revision: Object.assign({}, ART_EMPTY_LIST.current_revision, { payload: payload })
+  })
+}
+const nullListRow = E.decorateArtifact(
+  withSettlePayload({ receivable_lines: null, note: '只填了备注' }),
+  SPEC_SETTLE
+).fields.filter(function (f) { return f.name === 'receivable_lines' })[0]
+check(
+  '[成果] 显式 null 的结构化字段同样显示为空（空就是空，不显示 "null"）',
+  !!nullListRow && nullListRow.value === '' && nullListRow.empty === true,
+  nullListRow ? JSON.stringify(nullListRow.value) : '字段缺失'
+)
+const filledListRow = E.decorateArtifact(
+  withSettlePayload({ receivable_lines: ['运费 8000'], note: '只填了备注' }),
+  SPEC_SETTLE
+).fields.filter(function (f) { return f.name === 'receivable_lines' })[0]
+check(
+  '[成果] 有值的列表字段显示成缩进 JSON（多行可读，不挤成一行）',
+  !!filledListRow &&
+    filledListRow.value.indexOf('\n') !== -1 &&
+    JSON.parse(filledListRow.value)[0] === '运费 8000',
+  filledListRow ? JSON.stringify(filledListRow.value) : '字段缺失'
+)
+
+// 接线：模板里写了 `{{item.kindHint}}`，但数据层不传这个键就等于**永不渲染**。
+// 这类"模板有、数据无"的失效不会报错，只能靠断言兜住。
+const pageArtJs = read(path.join(MINI, 'pages/entrust/artifact/artifact.js'))
+check(
+  '[接线] 成果页编辑态把 declared / kindHint 一并投影进 formFields（漏传键只会让提示永不渲染）',
+  pageArtJs.indexOf('declared: f.declared') !== -1 &&
+    pageArtJs.indexOf('kindHint: f.kindHint') !== -1
+)
+
+// 编辑提交：结构化字段的三条硬语义（数组提交 / 清空＝移除键 / 非法 JSON 不提交）
+const fillList = E.buildPayload({ note: '只填了备注' }, emptyListProj.fields, {
+  receivable_lines: '["运费 8000"]',
+  note: '只填了备注'
+})
+check(
+  '[成果] 编辑后结构化字段以**数组**提交（不是字符串 "[...]" —— 内容对、类型错）',
+  fillList.ok === true &&
+    Array.isArray(fillList.payload.receivable_lines) &&
+    fillList.payload.receivable_lines[0] === '运费 8000',
+  JSON.stringify(fillList.payload.receivable_lines)
+)
+const clearList = E.buildPayload(
+  { receivable_lines: ['旧'], note: '只填了备注' },
+  emptyListProj.fields,
+  { receivable_lines: '', note: '只填了备注' }
+)
+check(
+  '[成果] 结构化字段被清空＝移除该键（不写成空数组/空对象 —— 它们在缺项判定里非空）',
+  clearList.ok === true && !('receivable_lines' in clearList.payload)
+)
+const badJson = E.buildPayload({ note: '只填了备注' }, emptyListProj.fields, {
+  receivable_lines: '[未闭合',
+  note: '只填了备注'
+})
+check(
+  '[成果] 非法 JSON 不提交并给出定位提示（不静默存成字符串）',
+  badJson.ok === false && badJson.errorHint.indexOf('JSON') !== -1,
+  badJson.errorHint
+)
+// 数字：原值**为空**（新填）时也必须还原成数字。只看原值类型时，同一个字段
+// 第一次编辑存成字符串、第二次存成数字 —— 这种"两次编辑类型不同"最难查。
+check(
+  '[成果] 契约声明 number 时，原值为空也把新填的值还原成数字',
+  E.coerceLike(null, '12', 'number') === 12 && typeof E.coerceLike(null, '12', 'number') === 'number'
+)
+check(
+  '[成果] 声明 number 但填的不是数字时原样保留（不静默吞掉用户输入）',
+  E.coerceLike(null, '一打', 'number') === '一打'
+)
+check(
+  '[成果] 未声明类型的字段仍按原值类型还原',
+  E.coerceLike(12, '13', '') === 13
+)
+
+const artWxmlForKinds = read(path.join(MINI, 'pages/entrust/artifact/artifact.wxml'))
+const artWxssForKinds = read(path.join(MINI, 'pages/entrust/artifact/artifact.wxss'))
+check(
+  '[接线] 成果页编辑态渲染声明的类型提示（kindHint）',
+  artWxmlForKinds.indexOf('item.kindHint') !== -1
+)
+check(
+  '[接线] 类型提示类 .art-kind-hint 在本页样式中已定义（类名不存在不会报错，只会没样式）',
+  cssClasses(artWxssForKinds).has('art-kind-hint')
+)
+
 // ── 投影行为 ──────────────────────────────────────────────────────────
 const SPEC_QUOTE = {
   code: 'quote_parsed',
@@ -968,7 +1166,8 @@ const SPEC_QUOTE = {
   required_fields: ['carrier', 'rate'],
   optional_fields: ['cargo_name', 'valid_until'],
   internal_fields: [],
-  editable: true
+  editable: true,
+  field_types: { carrier: 'text', rate: 'number', cargo_name: 'text', valid_until: 'text' }
 }
 const SPEC_PROC = {
   code: 'procurement_confirm',
@@ -976,7 +1175,8 @@ const SPEC_PROC = {
   required_fields: ['supplier', 'agreed_scope'],
   optional_fields: ['agreed_amount'],
   internal_fields: ['agreed_amount'],
-  editable: true
+  editable: true,
+  field_types: { supplier: 'text', agreed_scope: 'text', agreed_amount: 'number' }
 }
 const ART_RAW = {
   artifact_id: 9,
