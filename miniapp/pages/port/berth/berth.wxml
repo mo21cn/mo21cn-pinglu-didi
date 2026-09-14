@@ -74,7 +74,7 @@
         </view>
 
         <view wx:else class="gt">
-          <view wx:for="{{bars}}" wx:key="key" class="gt-row">
+          <view wx:for="{{bars}}" wx:key="key" class="gt-row" data-bar-key="{{item.key}}">
             <view class="gt-meta">
               <text class="gt-name">{{item.label}}</text>
               <text class="gt-ship">{{item.ship}}</text>
@@ -96,7 +96,7 @@
           <text class="section-head-title">预约前置校验链</text>
           <text class="chip chip-muted">纯规则 · 零 LLM</text>
         </view>
-        <view wx:for="{{rules}}" wx:key="key" class="rule">
+        <view wx:for="{{rules}}" wx:key="key" class="rule" data-rule-key="{{item.key}}">
           <view class="rule-no">{{index + 1}}</view>
           <view class="rule-body">
             <view class="rule-title">{{item.title}}</view>

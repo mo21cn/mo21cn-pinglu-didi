@@ -11,6 +11,8 @@
  *   6. tabBar 页面用 switchTab、非 tabBar 页面用 navigateTo（错用会导致静默失败）
  *   7. wxml 事件绑定的方法在同名 .js 中已定义（抓事件名写错/漏定义）
  *   8. project.config.json 的 AppID 格式合法（wx + 16 位 = 18 位；抓手抄漏字符）
+ *   9. 真机走查锚点契约：登记过的属性仍在预期元素上、值仍是模板表达式
+ *      （走查工具没有 index 参数、不支持伪类，只能靠属性选择器；锚点失效是静默的）
  *
  * 用法：node scripts/verify_miniapp.js
  * 退出码：0 通过 / 1 有问题
@@ -155,9 +157,117 @@ if (fs.existsSync(cfgPath)) {
   }
 }
 
+// ---- 6. 真机走查锚点契约（抓「属性被搬走/改成常量」这类静默失效） ----
+// 背景：走查工具（`wechatide`）**没有 index 参数、不支持伪类**，只能靠属性选择器
+// 定位元素；`--x/--y` 坐标触摸也会落到第一个匹配元素。所以「点第 i 个订单卡」这件事
+// 只能写成 `[data-order-id="123"]`。以下三条失效都是**静默**的：
+//   ① 锚点被挪到内层按钮上（同一属性出现在多个元素 ⇒ 选到谁看引擎实现）；
+//   ② 值写成常量（每行同值 ⇒ 选择器退化成"第一个"）；
+//   ③ 属性被删（走查脚本报「找不到元素」，但那要跑真机才发现）。
+// 本表把「章节依赖哪个锚点」写进 CI 可校验的登记表：改坏了这里先红。
+//
+// 登记项 kind 语义：
+//   row    列表行的身份锚点 —— 带该属性的标签必须含该类名，且值必须是模板表达式
+//   act    行内动作锚点 —— 带该属性的标签必须绑定指定事件处理函数
+//   static 枚举型锚点 —— 值本来就是常量（如 `data-mode="fixed"`），只查类名归属
+const WALK_ANCHORS = [
+  // ⑦/⑦b/⑦c/⑧/⑨/⑨b 六章共用：订单卡与行内动作
+  { kind: 'row', file: 'pages/trade/orders/orders.wxml', class: 'order-card', attr: 'data-order-id', value: '{{item.id}}' },
+  { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-contract', handler: 'onContractPage', value: '{{item.id}}' },
+  { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-pay', handler: 'onPayPage', value: '{{item.id}}' },
+  { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-cancel', handler: 'onCancel', value: '{{item.id}}' },
+  { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-complete', handler: 'onComplete', value: '{{item.id}}' },
+  { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-detail', handler: 'onDetail', value: '{{item.id}}' },
+  { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-ship', handler: 'onShip', value: '{{item.id}}' },
+  // ④b 撮合：两个方向的候选卡与「选船下单」
+  { kind: 'row', file: 'pages/trade/match/match.wxml', class: 'cand-card', attr: 'data-ship-id', value: '{{item.ship_id}}' },
+  { kind: 'row', file: 'pages/trade/match/match.wxml', class: 'cand-card', attr: 'data-cargo-id', value: '{{item.cargo_id}}' },
+  { kind: 'act', file: 'pages/trade/match/match.wxml', attr: 'data-act-pick-ship', handler: 'onTapCandidate', value: '{{item.ship_id}}' },
+  // ⑩ 泊位档期、⑪ 预约审核：列表行
+  { kind: 'row', file: 'pages/port/berth/berth.wxml', class: 'gt-row', attr: 'data-bar-key', value: '{{item.key}}' },
+  { kind: 'row', file: 'pages/port/berth/berth.wxml', class: 'rule', attr: 'data-rule-key', value: '{{item.key}}' },
+  { kind: 'row', file: 'pages/port/appt/appt.wxml', class: 'tl-item', attr: 'data-tl-key', value: '{{item.key}}' },
+  // ⑤ 发布空船：计价方式分段控件（既有锚点，一并纳管）
+  { kind: 'static', file: 'pages/publish/ship/ship.wxml', class: 'seg-item', attr: 'data-mode' },
+]
+
+// 把 wxml 切成「标签」块：先剥掉注释（注释里的撇号会被当成引号，导致整个标签块
+// 一路吞到下一个同样的引号 —— 实测会把 20 行卷进一个"标签"里，报出假歧义），
+// 再按 `<` 起步、跳过属性值引号内的 `>`。属性值统一是双引号，
+// 只跟踪 `"`（把 `'` 也当引号会让 `{{a ? 'x' : ''}}` 提前闭合）。
+function tagsOf(src) {
+  const body = src.replace(/<!--[\s\S]*?-->/g, '')
+  const out = []
+  let i = 0
+  while (i < body.length) {
+    const lt = body.indexOf('<', i)
+    if (lt < 0) break
+    let j = lt + 1
+    let quote = null
+    while (j < body.length) {
+      const ch = body[j]
+      if (quote) { if (ch === quote) quote = null } else if (ch === '"') quote = ch
+      else if (ch === '>') break
+      j++
+    }
+    out.push(body.slice(lt, j + 1))
+    i = j + 1
+  }
+  return out
+}
+
+function attrValue(tag, name) {
+  // 前置 (^|\s) 是必须的：`\bclass\s*=` 会命中 `hover-class=`（`-` 是非单词字符，
+  // `\b` 在它和 `c` 之间成立），于是拿 hover 的值当 class 判，报出假的「锚点搬走」。
+  const m = tag.match(new RegExp('(?:^|\\s)' + name + '\\s*=\\s*"([^"]*)"'))
+  return m ? m[1] : null
+}
+
+const anchorSeen = new Set()
+checked.anchors = 0
+for (const a of WALK_ANCHORS) {
+  const label = `[ANCHOR] ${a.file} · ${a.attr}`
+  const key = a.file + '|' + a.attr
+  if (anchorSeen.has(key)) errors.push(`${label}: 同一文件内重复登记`)
+  anchorSeen.add(key)
+
+  const abs = path.join(ROOT, a.file)
+  if (!fs.existsSync(abs)) {
+    errors.push(`${label}: 文件不存在（登记表指向了已删除的模板）`)
+    continue
+  }
+  const tags = tagsOf(fs.readFileSync(abs, 'utf8'))
+  const hits = tags.filter((t) => attrValue(t, a.attr) !== null)
+  if (!hits.length) {
+    errors.push(`${label}: 模板里找不到该属性（走查选择器会失效）`)
+    continue
+  }
+  for (const t of hits) {
+    checked.anchors++
+    const cls = attrValue(t, 'class') || ''
+    const val = attrValue(t, a.attr)
+    if (a.class && cls.split(/\s+/).indexOf(a.class) === -1) {
+      errors.push(`${label}: 该属性出现在不含 .${a.class} 的标签上 —— 锚点被搬走会造成选择歧义`)
+    }
+    if (a.value !== undefined && val !== a.value) {
+      errors.push(`${label}: 值应为 ${a.value}，实际 ${JSON.stringify(val)}（值写成常量会让每行同值）`)
+    }
+    if (a.kind === 'row' && val.indexOf('{{') === -1) {
+      errors.push(`${label}: 行锚点的值必须是模板表达式，实际 ${JSON.stringify(val)}`)
+    }
+    if (a.kind === 'act') {
+      const bind = (t.match(/\b(?:catch|bind)tap\s*=\s*"([^"]*)"/) || [])[1]
+      if (bind !== a.handler) {
+        errors.push(`${label}: 应绑定 ${a.handler}，实际 ${JSON.stringify(bind || null)}`)
+      }
+    }
+  }
+}
+
 // ---- 输出 ----
 console.log(
-  `检查完成：JSON ${checked.json} 个 / 页面 ${pages.size} 个 / 路由引用 ${checked.routes} 处 / 事件绑定 ${checked.handlers} 处`
+  `检查完成：JSON ${checked.json} 个 / 页面 ${pages.size} 个 / 路由引用 ${checked.routes} 处 / ` +
+    `事件绑定 ${checked.handlers} 处 / 走查锚点 ${checked.anchors} 处`
 )
 if (errors.length) {
   console.log(`\n发现 ${errors.length} 个问题：`)
