@@ -54,6 +54,29 @@
    **触发条件**：若将来这些脚本进入生产路径（被服务端导入或用于正式数据操作），
    再单独立 DR 把 `mypy` 一并纳入。
 
+## 范围补充（2026-09-14，ENT-028：扩展到**仓库根** `scripts/`）
+
+上面说的 `scripts/` 一直是 **`backend/scripts/`**（CI 两步的 CWD 是 `backend`）。
+2026-09-14 查明：**仓库根的 `scripts/*.py` 不在任何一个 CI job 内**，属真正的盲区
+（`backend/scripts/` 已在门禁内，仓库根那 3 个文件不在）。
+
+按本记录既有的判定标准（「这份代码是否在 CI 的执行路径上」），它们**并非必须纳入**。
+但盲区本身要消除，处置如下：
+
+| 文件 | 处置 | 理由 |
+| --- | --- | --- |
+| `scripts/verify_miniapp_devtools.py` | **纳入** ruff check + format | 真机走查现行轨（DR-0009 换轨实现），仍在用 |
+| `scripts/wechatide_client.py` | **纳入** ruff check + format | 同上；真机走查的驱动层 |
+| `scripts/verify_baseline.py` | **登记豁免**（文件头已标注历史工具） | 一次性冻结基线取证工具，产出 `docs/baselines/2026-09-10-v0.4.0/`；不随仓库演进维护 |
+
+- 复用 `backend/pyproject.toml` 的 ruff 配置（`--config backend/pyproject.toml`），
+  不新建第二套 lint 配置。
+- **`mypy` 仍不含**仓库根 `scripts/`，理由与本记录 §决策 第 3 点同源
+  （实测 27 个错误 / 3 文件，全为注解层面，无逻辑信号）。
+- **不在 CI 启动 IDE**：本步只做静态 lint，真机走查仍由本机执行。
+- **登记完整性**：CI 那一步末尾会遍历 `scripts/*.py`，凡既未纳入 lint、又未登记豁免的
+  新脚本一律**报错退出** —— 用「失败提醒」代替「静默漏过」。
+
 ## 影响
 
 - 后端（工具链配置）：

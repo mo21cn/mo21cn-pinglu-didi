@@ -91,6 +91,11 @@ cd backend
 ruff check app tests scripts            # lint（scripts 是 CI 会执行的代码，同在门禁内）
 ruff format --check app tests scripts   # 格式门禁（CI 阻塞；ruff 版本已锁定 0.16.7，见 DR-0004）
 mypy app migrations migrate.py  # 类型检查（有意不含 scripts，见 ci.yml 注释）
+
+# 仓库根 scripts/*.py：在用的两个工具已纳入 ruff（在**仓库根**执行；
+# verify_baseline.py 是历史基线工具，已登记豁免。见 DR-0007「范围补充」）
+ruff check --config backend/pyproject.toml scripts/verify_miniapp_devtools.py scripts/wechatide_client.py
+ruff format --check --config backend/pyproject.toml scripts/verify_miniapp_devtools.py scripts/wechatide_client.py
 pytest                          # 单测（APP_ENV=test）
 python migrate.py --status      # 迁移状态
 python migrate.py --verify      # 执行迁移 + 校验 + 断言无待执行（CI 用）

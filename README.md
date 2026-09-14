@@ -64,6 +64,8 @@ python scripts/seed_demo.py
 
 > 前四条**已纳入 CI**（`.github/workflows/ci.yml` 的 `frontend-static` + `frontend-e2e` 两个 job），
 > push / 开 PR 即自动执行；真机走查依赖微信开发者工具，无法在 CI 运行，仍由本机执行。
+> 仓库根 `scripts/*.py` 中的**在用工具**（`verify_miniapp_devtools.py` / `wechatide_client.py`）
+> 亦已纳入 ruff 门禁（`backend` job 的 `Lint（ruff check，仓库根 scripts/*.py）` 一步）。
 
 ```bash
 # 小程序静态校验（JSON 语法 / 页面四件套 / tabBar / 路由可达 / 事件处理函数存在性）
@@ -78,9 +80,10 @@ node scripts/verify_ui_interactions.js
 # 登录链路复现校验（真 HTTP 打后端，验链路顺序 / 鉴权头 / token 角色 / 失败可定位；需后端已起）
 node scripts/verify_login_flow.js
 
-# 真机走查（需开发者工具「设置 → 安全设置 → 服务端口」已开启）
-# 前置：后端已起 + 已执行 backend/scripts/seed_demo.py
-MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
+# 真机走查（现行轨：IDE 自带 wechatide 工具链；驱动层 scripts/wechatide_client.py）
+# 前置：后端已起 + 已铺演示数据 + IDE 已打开本工程并完成一次人工授权（授权持久）
+python scripts/verify_miniapp_devtools.py
+python scripts/verify_miniapp_devtools.py --section 16      # 只跑指定章节
 ```
 
 > ⚠️ **identity 进入失败这类缺陷要用 `verify_login_flow.js` 才抓得到**：其余脚本都只能
@@ -93,8 +96,11 @@ MINIAPP_AUTO_WS=ws://127.0.0.1:9421 node scripts/verify_miniapp_device.js
 > 港口共 13 个，请统一用 `components/port-picker`（底部滚动列表，可承载任意长度）。
 > `scripts/verify_ui_interactions.js` 已把这条写成静态防线。
 
-> `verify_miniapp_device.js` 依赖 `miniprogram-automator`（未入库），按需 `npm i -g miniprogram-automator`；
-> 付费点击等会产生副作用的步骤默认关闭，用 `WALK_PAY=1` 显式开启。
+> ⚠️ `scripts/verify_miniapp_device.js`（旧轨，依赖 `miniprogram-automator`）**已退役** ——
+> 微信开发者工具 3.17.3 起不再服务它的 ws 协议。现行轨见上方 `verify_miniapp_devtools.py`；
+> **未迁移章节的覆盖缺口**登记在
+> [DR-0009「后续增量」](docs/entrust/decisions/0009-真机走查工具链换轨.md)，不假装已覆盖。
+> 旧脚本保留作章节对照（付费点击等副作用步骤原本默认关闭、用 `WALK_PAY=1` 开启）。
 
 ## 工程规范（务必先读）
 
