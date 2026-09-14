@@ -96,9 +96,21 @@
             </view>
           </view>
 
+          <!-- 成果引用可点进成果页（UI-05 第二片 / ENT-023）。
+               点的是**这一条**的 artifact_id，而不是"去成果列表里找" ——
+               工作台引用的本来就是精确 ID 与版本（PRD 第 187 行），
+               让用户自己再找一遍就是把已经确定的事实重新变成可能搞错的事。 -->
           <view wx:if="{{item.refs.length}}" class="slot-refs">
-            <view wx:for="{{item.refs}}" wx:for-item="rf" wx:key="artifactId" class="slot-ref">
-              成果 #{{rf.artifactId}} · {{rf.text}}
+            <view
+              wx:for="{{item.refs}}"
+              wx:for-item="rf"
+              wx:key="artifactId"
+              class="slot-ref slot-ref-link"
+              data-id="{{rf.artifactId}}"
+              bindtap="onOpenArtifact"
+              hover-class="hover-dim"
+            >
+              成果 #{{rf.artifactId}} · {{rf.text}} ›
             </view>
           </view>
 

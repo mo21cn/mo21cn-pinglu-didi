@@ -233,8 +233,12 @@ const appClasses = cssClasses(read(path.join(MINI, 'app.wxss')))
     })
 })
 
-/** 本切片新增/改动的两个页面：不允许任何未定义类名 */
-const ENTRUST_PAGES = ['pages/entrust/workbench/workbench', 'pages/entrust/detail/detail']
+/** 本切片新增/改动的三个页面：不允许任何未定义类名 */
+const ENTRUST_PAGES = [
+  'pages/entrust/workbench/workbench',
+  'pages/entrust/detail/detail',
+  'pages/entrust/artifact/artifact'
+]
 
 /**
  * 参与"类名存在性"检查的页面，及各自的已知空类名。
@@ -248,6 +252,7 @@ const ENTRUST_PAGES = ['pages/entrust/workbench/workbench', 'pages/entrust/detai
 const PAGE_CSS_CHECKS = [
   { path: 'pages/entrust/workbench/workbench', knownEmpty: [] },
   { path: 'pages/entrust/detail/detail', knownEmpty: [] },
+  { path: 'pages/entrust/artifact/artifact', knownEmpty: [] },
   { path: 'pages/mine/mine', knownEmpty: ['nav', 'bell-icon', 'role-chip-label'] }
 ]
 
@@ -280,6 +285,12 @@ check('[模板] 工作台有 ready（兜底）分支', /wx:else/.test(wbWxml))
   check(`[模板] 详情页有 ${st} 分支`, new RegExp("view === '" + st + "'").test(dtWxml))
 })
 check('[模板] 详情页有 ready（兜底）分支', /wx:else/.test(dtWxml))
+
+const artWxml = read(path.join(MINI, 'pages/entrust/artifact/artifact.wxml'))
+;['loading', 'expired', 'denied', 'error'].forEach(function (st) {
+  check(`[模板] 成果页有 ${st} 分支`, new RegExp("view === '" + st + "'").test(artWxml))
+})
+check('[模板] 成果页有 ready（兜底）分支', /wx:else/.test(artWxml))
 
 // ─────────────────────────────────────────────────────────────
 // 7. 契约接线：谁都没权限"自己判断一遍"
@@ -859,6 +870,332 @@ check(
   /it\.kindLabel/.test(dtWxml) && /it\.text/.test(dtWxml)
 )
 check('[模板] 历史成果报数有专位呈现', /unassignedHint/.test(dtWxml))
+
+// ─────────────────────────────────────────────────────────────
+// 9. 成果的编辑与确认（UI-05 第二片 / ENT-023）
+// ─────────────────────────────────────────────────────────────
+const artJs = read(path.join(MINI, 'pages/entrust/artifact/artifact.js'))
+const artPy = read(path.join(REPO, 'backend/app/modules/entrust/artifacts.py'))
+
+/** 从 Python 源码里取 `PREFIX_X = "value"` 的 value 集合（跨语言取值域核对用） */
+function pyConstKeys(src, prefix) {
+  const out = []
+  const re = new RegExp('^' + prefix + '[A-Z_]*\\s*=\\s*"([a-z_]+)"', 'gm')
+  let m = re.exec(src)
+  while (m !== null) {
+    out.push(m[1])
+    m = re.exec(src)
+  }
+  return out.sort()
+}
+
+const backendArtifactStatuses = pyConstKeys(artPy, 'STATUS_')
+const frontArtifactStatuses = Object.keys(E.ARTIFACT_STATUS_LABELS || {}).sort()
+check(
+  '[成果] 成果状态标签覆盖后端 STATUS_* 全部取值',
+  backendArtifactStatuses.join(',') === frontArtifactStatuses.join(','),
+  '后端 ' + backendArtifactStatuses.join('/') + ' vs 前端 ' + frontArtifactStatuses.join('/')
+)
+
+const backendSources = pyConstKeys(artPy, 'SOURCE_')
+const frontSources = Object.keys(E.REVISION_SOURCE_LABELS || {}).sort()
+check(
+  '[成果] 版本来源标签覆盖后端 SOURCE_* 全部取值',
+  backendSources.join(',') === frontSources.join(','),
+  '后端 ' + backendSources.join('/') + ' vs 前端 ' + frontSources.join('/')
+)
+
+// 状态类名必须真的存在于 app.wxss —— 模板里拼类名会让"类是否存在"变成运行期才知道，
+// 写错只表现为"标签没颜色"，静态脚本抓不到。所以类名在契约层算好，这里核对它存在。
+Object.keys(E.ARTIFACT_STATUS_LABELS || {}).forEach(function (st) {
+  E.artifactStatusClass(st)
+    .split(/\s+/)
+    .forEach(function (cls) {
+      check(`[成果] 状态 ${st} 的类 .${cls} 存在于 app.wxss`, appClasses.has(cls))
+    })
+})
+check(
+  '[成果] "有效"不用绿色成功态（绿色意味着"这件事成功了"，而它只是"还没被作废"）',
+  E.artifactStatusClass('active').indexOf('success') === -1
+)
+check(
+  '[接线] 成果页不硬编码成果状态字面量（只在契约层出现，页面里重复一份就会漂移）',
+  Object.keys(E.ARTIFACT_STATUS_LABELS || {}).every(function (st) {
+    return artJs.indexOf("'" + st + "'") === -1
+  })
+)
+
+/**
+ * 字段标签必须覆盖注册表里出现的**每一个** required + optional 字段名。
+ * 回退值是字段名本身（看得见但不该出现），少一个就意味着界面上会冒出英文键。
+ * 反向也查：标签表多出注册表没有的名字，说明字段被删而标签没删，下次会误导。
+ */
+const regPy = read(path.join(REPO, 'backend/app/modules/entrust/registry.py'))
+const specBlock = regPy.slice(regPy.indexOf('_SPECS: tuple[ArtifactTypeSpec, ...] = ('))
+const declaredFields = []
+const fieldRe = /(?:required_fields|optional_fields)=\(([^)]*)\)/g
+let fm = fieldRe.exec(specBlock)
+while (fm !== null) {
+  const names = fm[1].match(/"[a-z_]+"/g) || []
+  names.forEach(function (q) {
+    declaredFields.push(q.replace(/"/g, ''))
+  })
+  fm = fieldRe.exec(specBlock)
+}
+const uniqueDeclared = Array.from(new Set(declaredFields)).sort()
+const labelledFields = Object.keys(E.ARTIFACT_FIELD_LABELS || {}).sort()
+const missingLabel = uniqueDeclared.filter(function (f) {
+  return labelledFields.indexOf(f) === -1
+})
+const extraLabel = labelledFields.filter(function (f) {
+  return uniqueDeclared.indexOf(f) === -1
+})
+check(
+  `[成果] 字段中文标签覆盖注册表全部 required + optional 字段（${uniqueDeclared.length} 个）`,
+  missingLabel.length === 0,
+  '缺标签：' + missingLabel.join('、')
+)
+check(
+  '[成果] 字段标签表没有注册表之外的多余项',
+  extraLabel.length === 0,
+  '多余：' + extraLabel.join('、')
+)
+
+// ── 投影行为 ──────────────────────────────────────────────────────────
+const SPEC_QUOTE = {
+  code: 'quote_parsed',
+  label: '报价解析稿',
+  required_fields: ['carrier', 'rate'],
+  optional_fields: ['cargo_name', 'valid_until'],
+  internal_fields: [],
+  editable: true
+}
+const SPEC_PROC = {
+  code: 'procurement_confirm',
+  label: '采购确认',
+  required_fields: ['supplier', 'agreed_scope'],
+  optional_fields: ['agreed_amount'],
+  internal_fields: ['agreed_amount'],
+  editable: true
+}
+const ART_RAW = {
+  artifact_id: 9,
+  entrustment_id: 3,
+  assignment_id: 4,
+  artifact_type: 'quote_parsed',
+  status: 'active',
+  current_revision_id: 22,
+  updated_at: '2026-09-14 10:00:00',
+  current_revision: {
+    revision_id: 22,
+    revision_no: 2,
+    payload: { carrier: '桂平船务', rate: 12, extra_note: 'x' },
+    source: 'manual',
+    note: '改价',
+    created_at: '2026-09-14 10:00:00'
+  },
+  missing_fields: [],
+  unknown_fields: ['extra_note']
+}
+const artProj = E.decorateArtifact(ART_RAW, SPEC_QUOTE)
+check('[成果] 投影取的是生效版本的精确版本号', artProj.currentRevisionNo === 2)
+check('[成果] 类型中文名来自注册表（前端不硬编码类型名）', artProj.typeLabel === '报价解析稿')
+check(
+  '[成果] 必填在前、选填在后（顺序由注册表决定，不由 payload 键序决定）',
+  artProj.fields[0].name === 'carrier' &&
+    artProj.fields[1].name === 'rate' &&
+    artProj.fields[2].name === 'cargo_name',
+  artProj.fields.map(function (f) { return f.name }).join(',')
+)
+const artLast = artProj.fields[artProj.fields.length - 1]
+check(
+  '[成果] 未声明的历史字段被识别出来并置于末尾（只读且会原样保留）',
+  artLast.unknown === true && artLast.name === 'extra_note',
+  artLast.name
+)
+check(
+  '[成果] 数字字段在投影里仍是数字（不因表单而变成字符串）',
+  artProj.fields[1].raw === 12 && artProj.fields[1].kind === 'scalar'
+)
+check(
+  '[成果] 缺项提示点名到字段，而不是只说"信息不完整"',
+  E.decorateArtifact(
+    Object.assign({}, ART_RAW, { missing_fields: ['rate'] }),
+    SPEC_QUOTE
+  ).missingHint.indexOf('报价单价') !== -1
+)
+const procProj = E.decorateArtifact(
+  Object.assign({}, ART_RAW, {
+    artifact_type: 'procurement_confirm',
+    current_revision: { revision_id: 1, revision_no: 1, payload: { supplier: 'A', agreed_amount: 5000 } }
+  }),
+  SPEC_PROC
+)
+check(
+  '[成果] 内部字段被单独标注（经理能看到，但要能分辨"这栏不会到客户手里"）',
+  procProj.fields.filter(function (f) { return f.internal }).length === 1 &&
+    procProj.fields.filter(function (f) { return f.internal })[0].name === 'agreed_amount'
+)
+const voidProj = E.decorateArtifact(Object.assign({}, ART_RAW, { status: 'void' }), SPEC_QUOTE)
+check(
+  '[成果] 已作废：不给编辑/确认入口，且说清理由（不是把按钮藏起来让人猜）',
+  voidProj.canEdit === false && voidProj.canConfirm === false && !!voidProj.statusHint
+)
+const noSpecProj = E.decorateArtifact(ART_RAW, null)
+check(
+  '[成果] 类型不在注册表中：字段契约无从校验 ⇒ 只读 + 说明理由',
+  noSpecProj.registryKnown === false && noSpecProj.canEdit === false && !!noSpecProj.registryHint
+)
+
+const revProj = E.decorateRevisions(
+  [
+    { revision_id: 21, revision_no: 1, source: 'agent', note: '', created_at: '2026-09-13 09:00:00' },
+    { revision_id: 22, revision_no: 2, source: 'manual', note: '改价', created_at: '2026-09-14 10:00:00' }
+  ],
+  22
+)
+check(
+  '[成果] 「生效 / 历史」由 current_revision_id 派生（不是前端另记一份）',
+  revProj[1].isCurrent === true && revProj[1].roleLabel === E.REVISION_ROLE.current &&
+    revProj[0].isCurrent === false && revProj[0].roleLabel === E.REVISION_ROLE.superseded
+)
+check('[成果] 无备注时也给出可读文本（不留空行）', revProj[0].summary === '（无备注）')
+
+// ── 编辑：payload 构建的三条硬语义 ────────────────────────────────────
+const basePayload = { carrier: '桂平船务', rate: 12, extra_note: 'x' }
+const draftsSame = { carrier: '桂平船务', rate: '12', cargo_name: '', valid_until: '', extra_note: 'x' }
+const builtSame = E.buildPayload(basePayload, artProj.fields, draftsSame)
+check(
+  '[成果] 编辑不丢未声明的历史字段（这是"从当前 payload 增量改"而非"按表单重建"的理由）',
+  builtSame.payload.extra_note === 'x'
+)
+check(
+  '[成果] 用户没改动的数字字段类型不变（12 不会变成 "12"）',
+  builtSame.payload.rate === 12
+)
+const builtChanged = E.buildPayload(basePayload, artProj.fields, Object.assign({}, draftsSame, { rate: '15.5' }))
+check('[成果] 改动过的数字字段按数字存回', builtChanged.payload.rate === 15.5)
+const builtClear = E.buildPayload(
+  Object.assign({}, basePayload, { cargo_name: '玉米' }),
+  artProj.fields,
+  Object.assign({}, draftsSame, { cargo_name: '' })
+)
+check(
+  '[成果] 清空标量＝移除该字段（不是留一个空字符串冒充已填）',
+  !Object.prototype.hasOwnProperty.call(builtClear.payload, 'cargo_name')
+)
+const specJson = {
+  code: 'supplier_compare',
+  label: '供应报价对比',
+  required_fields: ['candidates'],
+  optional_fields: [],
+  internal_fields: [],
+  editable: true
+}
+const jsonProj = E.decorateArtifact(
+  Object.assign({}, ART_RAW, {
+    artifact_type: 'supplier_compare',
+    current_revision: { revision_id: 1, revision_no: 1, payload: { candidates: [{ name: 'A' }] } }
+  }),
+  specJson
+)
+const builtJsonBad = E.buildPayload({ candidates: [{ name: 'A' }] }, jsonProj.fields, { candidates: '{oops' })
+check(
+  '[成果] 结构化字段 JSON 非法 ⇒ 明确报错且**不提交**（不静默吞掉用户输入）',
+  builtJsonBad.ok === false && builtJsonBad.errors.length === 1 &&
+    builtJsonBad.errors[0].name === 'candidates' && builtJsonBad.errorHint.indexOf('候选方案') !== -1
+)
+const builtJsonClear = E.buildPayload({ candidates: [{ name: 'A' }] }, jsonProj.fields, { candidates: '   ' })
+check(
+  '[成果] 清空结构化字段＝移除该键（不是留一个空对象，让下游以为这栏已办）',
+  !Object.prototype.hasOwnProperty.call(builtJsonClear.payload, 'candidates')
+)
+
+const initialDrafts = E.fieldDrafts(artProj.fields)
+check('[成果] 表单初值就是投影出来的文本（查看态与编辑态同一口径）',
+  initialDrafts.rate === '12' && initialDrafts.extra_note === 'x')
+check('[成果] 未改动 ⇒ 不脏', E.isArtifactDirty(artProj.fields, initialDrafts, initialDrafts) === false)
+check('[成果] 改动可编辑字段 ⇒ 脏',
+  E.isArtifactDirty(artProj.fields, Object.assign({}, initialDrafts, { carrier: '别家' }), initialDrafts) === true)
+check('[成果] 未声明的只读字段不算改动（它根本不参与编辑）',
+  E.isArtifactDirty(artProj.fields, Object.assign({}, initialDrafts, { extra_note: 'changed' }), initialDrafts) === false)
+
+// ── 确认卡：必须点名 artifact ID 与**精确**版本 ───────────────────────
+const card = E.confirmCard(artProj, 1)
+check(
+  '[成果] 确认卡带 target「成果 #N · vK」（PRD 187/188：对话与工作台引用同一 ID 与版本）',
+  card.target.indexOf('#9') !== -1 && card.target.indexOf('v1') !== -1,
+  card.target
+)
+check('[成果] 确认卡说明"生效版本会被绑定到该版本"，而不是笼统的"确认这一版"',
+  card.body.indexOf('v1') !== -1)
+
+// ── 页面接线：模板与脚本 ──────────────────────────────────────────────
+check('[接线] 成果页同时拉取成果详情与版本历史', /fetchArtifact\(/.test(artJs) && /fetchRevisions\(/.test(artJs))
+check(
+  '[接线] 成果页拉注册表（字段标签与必填分组来自服务端契约，不在前端另写一套）',
+  /fetchArtifactTypes\(/.test(artJs)
+)
+check(
+  '[接线] 成果页用 buildPayload 构建提交内容（不自己拼 payload —— 那样会丢未声明字段）',
+  /buildPayload\(/.test(artJs)
+)
+check('[接线] 成果页编辑走追加版本端点', /appendRevision\(/.test(artJs))
+check('[接线] 成果页确认走 confirmArtifact', /confirmArtifact\(/.test(artJs))
+check(
+  '[接线] 确认卡由 confirmCard 生成（不在页面里手写文案，否则"带精确版本"这条没人守）',
+  /confirmCard\(/.test(artJs)
+)
+check(
+  '[接线] 编辑与确认各自带幂等键（网络抖动重试不会留下两条一样的版本/动作）',
+  (artJs.match(/newIdempotencyKey\(/g) || []).length >= 2
+)
+check(
+  '[接线] 保存后的提示必须说清"生效版本有没有变"',
+  /生效版本仍是 v/.test(artJs) && /superseding|revision_no/.test(artJs)
+)
+check('[接线] 成果页入口守卫（深链/冷启动在本页自检）', /R\.guardEntry\(/.test(artJs))
+check(
+  '[接线] 有未保存编辑时返回要先确认（不静默丢掉用户刚敲的内容）',
+  /dirty/.test(artJs) && /放弃未保存的编辑/.test(artJs)
+)
+check(
+  '[接线] 详情页槽位可点进成果页，且带的是这一条的 artifact_id',
+  /onOpenArtifact\(/.test(dtJs) && /onOpenArtifact/.test(dtWxml) &&
+    /data-id="\{\{rf\.artifactId\}\}"/.test(dtWxml) &&
+    /artifact_id=/.test(dtJs)
+)
+
+check(
+  '[模板] 成果页显示生效版本号，并对"尚未确认"给出独立说法',
+  /artifact\.currentRevisionNo/.test(artWxml) && /尚未确认任何版本/.test(artWxml)
+)
+check(
+  '[模板] 确认按钮经 dataset 带上被点那一行的**精确版本号**',
+  /bindtap="onConfirm"/.test(artWxml) && /data-no="\{\{item\.revisionNo\}\}"/.test(artWxml)
+)
+check(
+  '[模板] 「设为生效版本」只在非生效版本上出现（已生效的那条不重复给入口）',
+  /!item\.isCurrent/.test(artWxml)
+)
+check('[模板] 缺项提醒有专位呈现', /artifact\.missingHint/.test(artWxml))
+check('[模板] 未声明字段的只读说明有专位呈现', /artifact\.unknownHint/.test(artWxml))
+check(
+  '[模板] 编辑态与查看态互斥（不会出现一边显示旧值一边可改）',
+  /wx:if="\{\{!editing\}\}"/.test(artWxml) && /<view wx:else class="card">/.test(artWxml)
+)
+check(
+  '[模板] 编辑表单的输入都绑到 onFieldInput 并带下标（动态键取值在各基础库上不稳）',
+  /bindinput="onFieldInput"/.test(artWxml) && /data-idx="\{\{index\}\}"/.test(artWxml)
+)
+check(
+  '[模板] 结构化字段走多行文本，标量走单行（不是一律文本框，让用户自己猜 JSON）',
+  /item\.kind === 'json'/.test(artWxml) && /<textarea/.test(artWxml) && /<input/.test(artWxml)
+)
+check(
+  '[模板] 必填 / 内部 / 未声明三种标记彼此可分（各带独立文字与样式）',
+  /必填/.test(artWxml) && /内部/.test(artWxml) && /未声明|只读/.test(artWxml)
+)
 
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)

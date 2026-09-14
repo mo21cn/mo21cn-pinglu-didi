@@ -48,14 +48,80 @@ const entrustDetail = {}        // assignmentId → 委托详情
 const entrustWorkbench = {}     // assignmentId → 七槽位工作台摘要
 const entrustQueueByStatus = {} // status → 组织队列（同一筛选条件下的**真载荷**）
 
+// 成果的编辑与确认（ENT-023）。这几份载荷都来自**真接口**，且 ⑮ 段会**真的写库** ——
+// 「编辑不改变生效版本」「确认绑定精确版本」这两条语义必须由后端事实证明，
+// 只靠前端自己的返回值构造是自证。
+let entrustArtifactTypes = { items: [] }
+let entrustArtifact = null
+let entrustArtifactRevisions = { items: [] }
+const entrustAssignmentArtifacts = {}   // assignmentId → 单委托成果清单
+const entrustWriteProof = {}            // ⑮ 段真写前后的读数对比（后端事实）
+
+// ── 页面驱动的写通道 ──────────────────────────────────────────────────────
+// 写请求**只在 ⑮ 段的显式用户动作里放行**（点"保存新版本"、点"设为生效版本"）：
+// `load()` 期间任何写请求都被拒 —— 与 route() 里"写端点有意不登记"是同一条纪律。
+// 但写动作必须真的发到后端，否则页面拿不到真响应，断言又退化成自证。
+let WRITE_ENABLED = false
+let ownerToken = ''                     // seed-owner（演示组织经理）：⑮ 段的真写与写后复读
+const pageWrites = []                   // 真实发出的写请求，供"该不该写"的断言使用
+let lastWx = null                       // 最近一次页面装载用的 wx 桩（读取弹层文案）
+
+async function pageWrite(method, p, body, key) {
+  if (!WRITE_ENABLED) {
+    return { rejected: true, reason: '取数阶段不得发写请求：' + method + ' ' + p }
+  }
+  const res = await api(method, p, {
+    token: ownerToken,
+    body: body,
+    headers: { 'Idempotency-Key': key }
+  })
+  // 连**响应**一起记下来：⑮ 段要拿后端返回的 `revision_no` 做断言，
+  // 而不是从页面的 setData 里反推（那又变成自证）。
+  pageWrites.push({ method: method, path: p, body: body, status: res.status, data: res.data })
+  return res
+}
+
+/**
+ * 写通道的响应 → 页面期待的 Promise 语义：非 200 抛**带 `httpStatus`** 的错误
+ * （与 utils/request.js 的拒绝形状一致），页面据此走"服务端已给出原因、
+ * 自己不再弹 toast"那条分支；错误形状不对会把正确的页面行为判成缺陷。
+ */
+function rejectIfNotOk(res) {
+  if (res && res.rejected) throw new Error(res.reason)
+  if (res.status !== 200) {
+    const err = new Error('写请求被拒 ' + res.status)
+    err.httpStatus = res.status
+    err.detail = res.data && res.data.detail
+    throw err
+  }
+  return res.data
+}
+
+/**
+ * 写之后把回放快照换成**真事实**。
+ *
+ * route() 回放的是 bootstrap 那一份静态快照 —— 页面自己写完之后再 `load()`，
+ * 拿到的是**写之前**的库。若不复读，后面"生效版本变没变"的断言会假绿
+ * （页面显示的是旧快照，我却拿它当"页面反映了后端"）。
+ */
+async function refreshArtifactReplay(artifactId) {
+  const a = await api('GET', '/entrust/artifacts/' + artifactId, { token: ownerToken })
+  if (a.status === 200) entrustArtifact = a.data
+  const r = await api('GET', '/entrust/artifacts/' + artifactId + '/revisions', { token: ownerToken })
+  if (r.status === 200) entrustArtifactRevisions = r.data
+}
+
 const qs = (p) => (p ? '?' + new URLSearchParams(p).toString() : '')
 
-async function api(method, p, { token, body } = {}) {
+async function api(method, p, { token, body, headers } = {}) {
   const res = await fetch(BASE + '/api/v1' + p, {
     method,
     headers: Object.assign(
       { 'Content-Type': 'application/json' },
-      token ? { Authorization: 'Bearer ' + token } : {}
+      token ? { Authorization: 'Bearer ' + token } : {},
+      // 委托支线的写端点要求 `Idempotency-Key`（缺了直接 400），
+      // 故 api() 需要能把额外头传进来 —— 只靠 token/body 两个参数写不出真写用例。
+      headers || {}
     ),
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -190,6 +256,54 @@ async function bootstrap() {
     a.status === 'submitted'
   ])
 
+  // ── 成果页载荷（ENT-023）：**只读**取一次 ───────────────────────────────
+  //
+  // 这里刻意不写库。写动作改由 ⑮ 段**从页面**驱动（点"保存新版本"、点"设为生效版本"），
+  // 走的是真实用户路径：页面自己组 payload、自己带幂等键、自己读返回值。
+  //
+  // 反过来，若在 bootstrap 里先写一遍再让 ⑮ 段比对，就会退化 ——
+  // 例如先确认 v4、页面再保存一次，页面看到的生效版本已经是 v4，
+  // 于是"编辑不改变生效版本"被断言成「已保存为 v4，生效版本仍是 v4」：
+  // 看起来通过，其实什么都没证明。
+  await (async function loadArtifactPayload() {
+    const firstAid = (D.entrustMine.items || [])[0] && D.entrustMine.items[0].assignment_id
+    if (!firstAid) {
+      note('成果走查 · 无委托载荷，跳过（先确认 seed_entrust_demo.py 已生效）')
+      return
+    }
+    try {
+      entrustArtifactTypes = await get('/entrust/artifact-types', 'owner')
+      // 挑**确实有成果**的那张委托。不能用 `items[0]`：组织队列里"待受理"的委托单
+      // 天然没有成果，选到它会让整段走查静默跳过 —— 本轮就这样空跑过一次
+      // （OK 259 / FAIL 0 全绿，但成果页一个字都没验）。
+      let artId = 0
+      let pickedAid = null
+      for (const a of D.entrustMine.items || []) {
+        const list = await get('/entrust/assignments/' + a.assignment_id + '/artifacts', 'owner', { size: 50 })
+        entrustAssignmentArtifacts[a.assignment_id] = list
+        if (!artId && (list.items || []).length) {
+          artId = list.items[0].artifact_id
+          pickedAid = a.assignment_id
+        }
+      }
+      if (!artId) {
+        note('成果走查 · 我的委托下都没有成果，跳过编辑/确认走查')
+        return
+      }
+      entrustWriteProof.artifactId = artId
+      entrustWriteProof.assignmentId = pickedAid
+      entrustArtifact = await get('/entrust/artifacts/' + artId, 'owner')
+      entrustArtifactRevisions = await get('/entrust/artifacts/' + artId + '/revisions', 'owner')
+      entrustWriteProof.beforeCurrentNo = (entrustArtifact.current_revision || {}).revision_no
+      entrustWriteProof.beforeRevisionCount = (entrustArtifactRevisions.items || []).length
+      // 写端点要求组织侧 `entrust:quote:create`；把 seed-owner 放到经理位置上的是
+      // seed_entrust_demo.py（与队列页用的是同一个身份，不新增登录约定）。
+      ownerToken = tok.owner
+    } catch (e) {
+      note('成果走查 · 取数失败，跳过：' + (e && e.message))
+    }
+  })()
+
   console.log('载荷就绪：货 %d · 船 %d · 泊位 %d · 预约 %d · 订单 %d · 支付单 %d · 合同 %d',
     (D.cargoList.items || []).length, (D.ships.items || []).length, (D.berths.items || []).length,
     (D.appts.items || []).length, (D.orders.items || []).length,
@@ -197,6 +311,12 @@ async function bootstrap() {
   console.log('委托载荷：我的委托 %d · 组织队列 %d · 组织 %d 个 · 工作台 %d 张',
     (D.entrustMine.items || []).length, (D.entrustQueue.items || []).length,
     (D.entrustOrgs.items || []).length, Object.keys(entrustWorkbench).length)
+  if (entrustArtifact) {
+    console.log('成果载荷：注册表 %d 类 · 成果 #%s（%s，生效 v%s）· 版本 %d 条',
+      (entrustArtifactTypes.items || []).length, String(entrustArtifact.artifact_id),
+      String(entrustArtifact.artifact_type), String(entrustWriteProof.beforeCurrentNo),
+      (entrustArtifactRevisions.items || []).length)
+  }
   if (!(D.entrustMine.items || []).length) {
     note('委托支线无载荷 —— 请确认已铺 backend/scripts/seed_entrust_demo.py')
   }
@@ -239,6 +359,10 @@ function route(url, body) {
     const w = entrustWorkbench[Number(m[1])]
     return w ? { ok: w } : { err: '工作台不存在：' + m[1] }
   }
+  if ((m = u.match(/^\/entrust\/assignments\/(\d+)\/artifacts$/))) {
+    const l = entrustAssignmentArtifacts[Number(m[1])]
+    return l ? { ok: l } : { err: '未拉取委托 ' + m[1] + ' 的成果清单' }
+  }
   if ((m = u.match(/^\/entrust\/assignments\/(\d+)$/))) {
     const d = entrustDetail[Number(m[1])]
     return d ? { ok: d } : { err: '委托不存在：' + m[1] }
@@ -255,8 +379,26 @@ function route(url, body) {
     }
     return { ok: D.entrustMine }
   }
-  // 写端点（记录任务 / 受理委托）**有意不登记**：本脚本只驱动取数链路，
-  // 页面若在取数时误发写请求，应在这里显式失败而不是被静默吞掉。
+  // 成果详情 / 版本历史 / 注册表（ENT-023）。三者都是**精确匹配**，且
+  // `/artifacts/{id}/revisions` 必须排在裸 `/artifacts/{id}` 之前。
+  // 回放的是 bootstrap 那一份只读快照；⑮ 段写完库后用 refreshArtifactReplay()
+  // 把它换成真事实，再让页面重载 —— 否则页面看到的是写之前的库。
+  if ((m = u.match(/^\/entrust\/artifacts\/(\d+)\/revisions$/))) {
+    if (!entrustArtifact) return { err: '成果载荷未就绪：' + m[1] }
+    return { ok: entrustArtifactRevisions }
+  }
+  if ((m = u.match(/^\/entrust\/artifacts\/(\d+)$/))) {
+    if (!entrustArtifact) return { err: '成果载荷未就绪：' + m[1] }
+    // 编号对不上就直接失败：页面若问了别的成果，回放同一份快照会让它"看起来正常"
+    if (String(entrustArtifact.artifact_id) !== m[1]) {
+      return { err: '页面请求成果 ' + m[1] + '，但载荷是 ' + entrustArtifact.artifact_id }
+    }
+    return { ok: entrustArtifact }
+  }
+  if (u === '/entrust/artifact-types') return { ok: entrustArtifactTypes }
+  // 写端点（`POST /artifacts/{id}/revisions` 与 `/confirm`）**依然不在这里登记**：
+  // 它们由 requireStub 里的写通道接管（带"取数阶段不得写"的闸门），
+  // 任何绕过该通道的写请求都会落到下面这行兜底里显式失败。
   if (u.indexOf('/entrust/') === 0) return { err: '未登记的委托接口 ' + u }
 
   if (u === '/healthz') return { ok: { status: 'ok' } }   // 首页连通性预检
@@ -378,8 +520,23 @@ function loadPage(file, ctx) {
         },
         fetchAssignment: (id) => fetchVia('/entrust/assignments/' + id),
         fetchWorkbench: (id) => fetchVia('/entrust/assignments/' + id + '/workbench'),
-        createTask: () => Promise.resolve({}),
-        claimAssignment: () => Promise.resolve({})
+        // 成果页（ENT-023）三条取数：与其它页同口径 —— 载荷来自 bootstrap 的真接口，
+        // 只是经 route() 回放（写之后由 refreshArtifactReplay() 换成真事实）。
+        fetchArtifactTypes: () => fetchVia('/entrust/artifact-types'),
+        fetchArtifact: (id) => fetchVia('/entrust/artifacts/' + id),
+        fetchRevisions: (id) => fetchVia('/entrust/artifacts/' + id + '/revisions'),
+        // 写端点：**只放行显式用户动作**（见 WRITE_ENABLED）。走真网络，
+        // 失败时抛带 `httpStatus` 的错误 —— 与 utils/request.js 的拒绝形状一致，
+        // 页面据此走"服务端已给出原因、不重复弹 toast"那条分支。
+        appendRevision: (id, body, key) =>
+          pageWrite('POST', '/entrust/artifacts/' + id + '/revisions', body, key).then(rejectIfNotOk),
+        confirmArtifact: (id, no, key) =>
+          pageWrite('POST', '/entrust/artifacts/' + id + '/confirm', { revision_no: no }, key)
+            .then(rejectIfNotOk),
+        createTask: (id, body, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/tasks', body, key).then(rejectIfNotOk),
+        claimAssignment: (id, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/claim', {}, key).then(rejectIfNotOk)
       })
     }
     if (s.indexOf('auth') !== -1) {
@@ -407,7 +564,12 @@ function loadPage(file, ctx) {
     return {}
   }
   const wxStub = {
-    setNavigationBarTitle() {}, showToast() {}, showModal() {}, showLoading() {},
+    _modals: [],
+    setNavigationBarTitle() {}, showToast() {}, showLoading() {},
+    // showModal 只**记录**、不自动点确认：确认卡上的「成果 #N · vK」就是在这里被
+    // 断言的（PRD 第 187 行），而真正的提交由 ⑮ 段显式驱动 submitConfirm()。
+    // 让桩自动确认会把"文案对不对"与"写没写"两件事缠在一起，失败时分不清是哪一侧。
+    showModal(o) { wxStub._modals.push(o || {}) },
     hideLoading() {}, switchTab() {}, navigateTo() {}, redirectTo() {}, reLaunch() {},
     stopPullDownRefresh() {}, showActionSheet() {}, setClipboardData() {},
     getWindowInfo: () => ({ statusBarHeight: 44, windowWidth: 375, windowHeight: 812 }),
@@ -421,7 +583,35 @@ function loadPage(file, ctx) {
     requireStub, (c) => { cfg = c }, wxStub,
     () => ({ globalData: { role: ctx.role }, routeByRole: () => '/pages/index/index', workspacePages: {}, publishPages: {} })
   )
+  lastWx = wxStub
   return cfg
+}
+
+/**
+ * 按小程序的**路径键**语义写值（`formFields[0].text` / `a.b`）。
+ *
+ * 为什么必须有：成果编辑页用 `setData({'formFields[idx].text': v})` 往数组元素里写值 ——
+ * 真机上这是 setData 的标准用法。桩若不认路径键，会把它当成一个**字面键**记下来，
+ * `this.data.formFields[i].text` 读到的还是旧值，页面就被误判成"输入没生效"。
+ * 桩不真实会把**正确的**代码判成缺陷，比漏测更难查。
+ *
+ * @returns {boolean} true = 已按路径写入；false = 交给调用方按普通键处理
+ */
+function setByPath(target, key, value) {
+  const m = String(key).match(/^([A-Za-z_$][\w$]*)((?:\[\d+\]|\.[A-Za-z_$][\w$]*)+)$/)
+  if (!m) return false
+  const parts = m[2].match(/\[\d+\]|\.[A-Za-z_$][\w$]*/g) || []
+  let cur = target[m[1]]
+  if (cur === null || typeof cur !== 'object') return false
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]
+    const k = p.charAt(0) === '[' ? Number(p.slice(1, -1)) : p.slice(1)
+    if (i === parts.length - 1) { cur[k] = value; return true }
+    const nxt = cur[k]
+    if (nxt === null || typeof nxt !== 'object') return false
+    cur = nxt
+  }
+  return false
 }
 
 function instantiate(cfg, ctx) {
@@ -429,8 +619,13 @@ function instantiate(cfg, ctx) {
   self.data = Object.assign(JSON.parse(JSON.stringify(cfg.data || {})), ctx.data || {})
   self._set = null
   self.setData = function (patch, cb) {
-    self._set = Object.assign({}, self._set, patch)
-    Object.assign(self.data, patch) // 页面会回读 this.data，必须同步写入
+    const plain = {}
+    for (const k of Object.keys(patch || {})) {
+      if (setByPath(self.data, k, patch[k])) continue
+      plain[k] = patch[k]
+      self.data[k] = patch[k] // 页面会回读 this.data，必须同步写入
+    }
+    self._set = Object.assign({}, self._set, plain)
     if (cb) cb()
   }
   self._final = () => Object.assign({}, self.data, self._set || {})
@@ -943,6 +1138,344 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
   if (!D.entrustCases.length) {
     fail('09 委托 · 无委托载荷（seed_entrust_demo.py 未生效 / ENTRUST_ENABLED 未开）',
       '组织 ' + (D.entrustOrgs.items || []).length + ' 个 · 我的委托 0 张')
+  }
+
+  // ══════════════════ 成果的编辑与确认（ENT-023）：真写走查 ══════════════════
+  //
+  // 与前面各段有一处**性质差别**：这一段会真的写库。理由 ——
+  // 「编辑不改变生效版本」「确认绑定精确版本」这两条语义若只在只读载荷上核对，
+  // 核对的是我构造的数据。这里让**页面**把改动提交给后端（点"保存新版本"、
+  // 点"设为生效版本"），再用后端事实判定：两次 `GET` 出的 `current_revision_no`
+  // 才是结论，页面的 setData 只是被检查的对象。
+  //
+  // 写闸门（WRITE_ENABLED）只在显式驱动的那一刻打开、`finally` 里立刻关掉：
+  // 闸门开着时若有别的页面在取数并误发写请求，也会被当成"该写"放行。
+  if (!entrustArtifact) {
+    // 有委托载荷却一份成果都挑不出来 = 种子或归属出了问题。这里**显式失败**：
+    // 本 job 的 CI 定义里明确串了 seed_entrust_demo.py，静默跳过等于整段没验 ——
+    // 而"全绿但什么都没验"比红更难发现（本轮已经这样空跑过一次）。
+    fail('10 成果详情 · 取不到任何成果（seed_entrust_demo.py 未生效？）',
+      '我的委托 ' + (D.entrustMine.items || []).length + ' 张 · '
+      + '已查成果清单的委托 ' + Object.keys(entrustAssignmentArtifacts).length + ' 张')
+  } else {
+    const proof = entrustWriteProof
+    const artId = entrustArtifact.artifact_id
+    const bePayload = (entrustArtifact.current_revision || {}).payload || {}
+    const spec = (entrustArtifactTypes.items || []).filter(function (t) {
+      return t && t.code === entrustArtifact.artifact_type
+    })[0] || null
+    let writesDriven = 0
+
+    const self = await walk('10 成果详情 · #' + artId, 'pages/entrust/artifact/artifact', null,
+      { role: 'owner', arg: { artifact_id: String(artId) } }, ['onLoad'])
+
+    if (self) {
+      const P = '10 成果详情 #' + artId + ' · '
+      const d = self._final()
+      const art = d.artifact || {}
+      const beCurrentNo = (entrustArtifact.current_revision || {}).revision_no
+
+      // ① 页面把后端事实如实摆出来
+      if (d.view !== E.VIEW.READY) fail(P + '正常载荷下未进入 ready', d.view + ' ' + d.viewHint)
+      else ok()
+      if (String(d.artifactId) !== String(artId) || String(art.artifactId) !== String(artId)) {
+        fail(P + '页面持有的成果编号不对', String(d.artifactId) + '/' + String(art.artifactId))
+      } else ok()
+      if (art.currentRevisionNo !== beCurrentNo) {
+        fail(P + '生效版本与后端不一致', String(art.currentRevisionNo) + ' vs ' + String(beCurrentNo))
+      } else ok()
+      if (art.canEdit !== true || art.canConfirm !== true) {
+        fail(P + '有效且已登记的类型却不可编辑/确认',
+          'canEdit=' + art.canEdit + ' canConfirm=' + art.canConfirm)
+      } else ok()
+
+      // ② 注册表 → 表单：行数、顺序、标签、必填标记四处都要与注册表逐字对齐
+      const reqs = (spec && spec.required_fields) || []
+      const opts = (spec && spec.optional_fields) || []
+      const unk = entrustArtifact.unknown_fields || []
+      const wantRows = reqs.length
+        + opts.filter(function (n) { return reqs.indexOf(n) === -1 }).length + unk.length
+      if (!spec) {
+        fail(P + '成果类型不在注册表中', String(entrustArtifact.artifact_type))
+      } else if (art.registryKnown !== true) {
+        fail(P + '类型已登记但页面判为未登记')
+      } else if ((art.fields || []).length !== wantRows) {
+        fail(P + '字段行数与注册表不符', (art.fields || []).length + ' vs ' + wantRows)
+      } else if (art.typeLabel !== spec.label) {
+        fail(P + '类型中文名未取注册表', String(art.typeLabel))
+      } else ok()
+      const labelValues = Object.keys(E.ARTIFACT_FIELD_LABELS).map(function (k) {
+        return E.ARTIFACT_FIELD_LABELS[k]
+      })
+      let labelBad = null
+      for (const f of art.fields || []) {
+        if (labelBad) break
+        // 已知字段必须译成中文；未知字段回退成原始键名（回退成空串才会没人发现）
+        if (f.unknown) { if (f.label !== f.name) labelBad = f.name + ' 应为原始键名' } else if (
+          labelValues.indexOf(f.label) === -1) labelBad = f.name + ' → ' + f.label
+      }
+      if (labelBad) fail(P + '字段标签不在标签表内', labelBad)
+      else ok()
+      let reqBad = null
+      for (const f of art.fields || []) {
+        if (reqBad) break
+        // 必填标错会让人去补不必补的字段，或漏补真正必需的字段
+        if (!f.unknown && !!f.required !== (reqs.indexOf(f.name) !== -1)) {
+          reqBad = f.name + ' required=' + f.required
+        }
+      }
+      if (reqBad) fail(P + '必填标记与注册表不符', reqBad)
+      else ok()
+
+      // ③ 缺项与未声明字段：有就说、没有就不许凭空提示
+      const beMissing = entrustArtifact.missing_fields || []
+      if (beMissing.length && String(art.missingHint || '').indexOf(String(beMissing.length)) === -1) {
+        fail(P + '缺项提示未如实报数', String(art.missingHint) + ' vs missing=' + beMissing.length)
+      } else if (!beMissing.length && art.missingHint) {
+        fail(P + '无缺项却给了缺项提示', String(art.missingHint))
+      } else ok()
+      if (!unk.length && art.unknownHint) fail(P + '无未声明字段却给了提示', String(art.unknownHint))
+      else if (unk.length && !art.unknownHint) fail(P + '有未声明字段却没有任何提示')
+      else ok()
+
+      // ④ 版本历史：「生效 / 历史」派生自后端事实，且**恰好一条**生效
+      const beRevs = entrustArtifactRevisions.items || []
+      if ((d.revisions || []).length !== beRevs.length) {
+        fail(P + '版本条数与后端不符', (d.revisions || []).length + ' vs ' + beRevs.length)
+      } else ok()
+      const currents = (d.revisions || []).filter(function (r) { return r.isCurrent })
+      if (currents.length !== 1) {
+        fail(P + '生效版本条数不是 1', String(currents.length))
+      } else if (currents[0].revisionNo !== beCurrentNo) {
+        fail(P + '「生效版本」标在了别的版本上', currents[0].revisionNo + ' vs ' + beCurrentNo)
+      } else if (currents[0].roleLabel !== E.REVISION_ROLE.current) {
+        fail(P + '生效版本角色文案不对', String(currents[0].roleLabel))
+      } else ok()
+      const byNo = function (a, b) { return a - b }
+      const wantNos = beRevs.map(function (r) { return r.revision_no }).sort(byNo)
+      const gotNos = (d.revisions || []).map(function (r) { return r.revisionNo }).sort(byNo)
+      if (wantNos.join(',') !== gotNos.join(',')) {
+        fail(P + '版本号与后端不符', gotNos.join(',') + ' vs ' + wantNos.join(','))
+      } else ok()
+      let tlBad = null
+      for (const r of d.revisions || []) {
+        if (tlBad) break
+        // 标题行缺来源看着像"这一版不知道是谁产生的"；缺摘要则时间轴只剩版本号
+        if (!r.title || String(r.title).indexOf('v' + r.revisionNo) !== 0) tlBad = 'title=' + r.title
+        else if (!r.summary) tlBad = 'v' + r.revisionNo + ' 无摘要'
+        else if (!r.roleClass) tlBad = 'v' + r.revisionNo + ' 无角色样式'
+      }
+      if (tlBad) fail(P + '版本时间轴行信息不全', tlBad)
+      else ok()
+
+      // ⑤ 编辑态：初值 = 当前生效版本的内容，未改动即不脏
+      self.onEdit()
+      await tick(30)
+      const d2 = self._final()
+      const fields = (d2.artifact || {}).fields || []
+      if (d2.editing !== true) fail(P + '进入编辑态失败')
+      else if ((d2.formFields || []).length !== fields.length) {
+        fail(P + '编辑表单行数与字段数不符', (d2.formFields || []).length + ' vs ' + fields.length)
+      } else if (d2.dirty !== false) fail(P + '刚进入编辑态就判定为脏')
+      else ok()
+      let draftBad = null
+      ;(d2.formFields || []).forEach(function (f, i) {
+        if (draftBad) return
+        if (f.name !== fields[i].name) draftBad = '第 ' + i + ' 行是 ' + f.name + '，字段是 ' + fields[i].name
+        else if (f.text !== fields[i].value) {
+          draftBad = f.name + ' 初值 ' + JSON.stringify(f.text) + ' ≠ ' + JSON.stringify(fields[i].value)
+        }
+      })
+      if (draftBad) fail(P + '编辑表单初值不是当前生效版本', draftBad)
+      else ok()
+
+      // ⑥ 改动 → 脏；改回 → 不脏（"动过就算脏"会让用户被无谓地拦在返回确认里）
+      //
+      // 挑字段有讲究：必须是**当前生效版本里已经有值**的标量字段。
+      // 改一个"本来就缺"的字段会让 payload 新增一个键 —— 那是**正确**行为，
+      // 却会被 ⑦ 里"键集必须与当前版本一致"的断言判成丢字段。
+      // 本轮就是这样误报过一次：挑中的是刻意缺必填的 settlement_draft，
+      // 而 index 0 正是它缺的那个 receivable_lines。
+      const scalarIdx = (d2.formFields || []).findIndex(function (f) {
+        return !f.unknown && f.kind !== 'json'
+          && f.text !== '' && f.text !== undefined && bePayload[f.name] !== undefined
+      })
+      const editable = scalarIdx >= 0
+      if (!editable) {
+        note(P + '该类型没有"已有值且可编辑"的标量字段，脏判定与保存的真写分支未覆盖')
+      } else {
+        const orig = d2.formFields[scalarIdx].text
+        self.onFieldInput({
+          currentTarget: { dataset: { idx: scalarIdx } }, detail: { value: orig + '（e2e 改动）' }
+        })
+        await tick(20)
+        if (self._final().dirty !== true) fail(P + '字段被改动后未标记为脏')
+        else ok()
+        self.onFieldInput({ currentTarget: { dataset: { idx: scalarIdx } }, detail: { value: orig } })
+        await tick(20)
+        if (self._final().dirty !== false) fail(P + '改回原值后仍判定为脏')
+        else ok()
+      }
+
+      // ⑦ 真写 ①：保存 → 追加新版本。**生效版本必须没变** —— 这句话既要在后端成立，
+      //    也要被界面说出来（少说一句，用户会以为客户已经看到新内容）。
+      if (!editable) {
+        note(P + '跳过保存走查（没有"已有值且可编辑"的标量字段）')
+      } else {
+        const prevNo = (self._final().artifact || {}).currentRevisionNo
+        const baseKeys = Object.keys(bePayload).sort()
+        const idx = scalarIdx
+        const editedName = d2.formFields[idx].name
+        const typed = String(d2.formFields[idx].text) + '（e2e 真写）'
+        self.onFieldInput({ currentTarget: { dataset: { idx: idx } }, detail: { value: typed } })
+        await tick(20)
+        const before = pageWrites.length
+        writesDriven += 1
+        WRITE_ENABLED = true
+        let saveThrown = null
+        try {
+          await self.onSave()
+          await tick(60)
+        } catch (e) { saveThrown = e } finally { WRITE_ENABLED = false }
+        const d3 = self._final()
+        const w1 = pageWrites[pageWrites.length - 1]
+        if (saveThrown) fail(P + '保存抛异常', saveThrown.message)
+        else if (pageWrites.length !== before + 1 || !w1) fail(P + '保存没有发出写请求')
+        else if (w1.status !== 200) {
+          note(P + '追加版本被拒（' + w1.status + '）：' + JSON.stringify(w1.data || {}).slice(0, 160))
+        } else {
+          proof.appendedNo = w1.data.revision_no
+          proof.appendSupersedingCurrent = w1.data.superseding_current
+          const sent = (w1.body || {}).payload || {}
+          // 页面发出去的 payload 必须**从当前生效版本增量改**：键集变了就是有字段被
+          // 静默丢弃（"按表单重建 payload"的典型症状，正文里有专门注释）
+          const sentKeys = Object.keys(sent).sort()
+          if (sentKeys.join(',') !== baseKeys.join(',')) {
+            fail(P + '保存的 payload 键集与当前版本不一致（有字段被静默丢弃）',
+              sentKeys.join(',') + ' vs ' + baseKeys.join(','))
+          } else ok()
+          if (String(sent[editedName]) !== typed) {
+            fail(P + '保存的字段值不是用户输入的内容',
+              JSON.stringify(sent[editedName]) + ' vs ' + JSON.stringify(typed))
+          } else ok()
+          // "键集没变"还不等于"值没被悄悄改掉"：数值/布尔被表单 string 化、
+          // 内部字段被重排都会在这里露头（逐值比对，跳过被编辑的那一个）
+          let drift = null
+          for (const k of baseKeys) {
+            if (drift || k === editedName) continue
+            if (JSON.stringify(sent[k]) !== JSON.stringify(bePayload[k])) {
+              drift = k + '：' + JSON.stringify(bePayload[k]) + ' → ' + JSON.stringify(sent[k])
+            }
+          }
+          if (drift) fail(P + '保存顺带改动了未编辑的字段', drift)
+          else ok()
+          if (proof.appendedNo === prevNo) {
+            fail(P + '追加出的版本号与生效版本相同，断言退化', String(proof.appendedNo))
+          } else if (String(d3.saveNotice || '').indexOf('已保存为 v' + proof.appendedNo) === -1) {
+            fail(P + '保存提示未说清新版本号', String(d3.saveNotice))
+          } else if (String(d3.saveNotice).indexOf('生效版本仍是 v' + prevNo) === -1) {
+            fail(P + '保存提示没说清生效版本未变', String(d3.saveNotice))
+          } else ok()
+          if (d3.editing !== false) fail(P + '保存成功后未退出编辑态')
+          else ok()
+
+          // 后端事实：追加后生效版本**没变**，版本数恰好 +1（是追加不是覆盖）
+          await refreshArtifactReplay(artId)
+          proof.afterAppendCurrentNo = (entrustArtifact.current_revision || {}).revision_no
+          if (proof.afterAppendCurrentNo !== prevNo) {
+            fail(P + '编辑改变了生效版本（后端事实）', proof.afterAppendCurrentNo + ' vs ' + prevNo)
+          } else ok()
+          const afterCount = (entrustArtifactRevisions.items || []).length
+          if (afterCount !== proof.beforeRevisionCount + 1) {
+            fail(P + '版本数没有恰好 +1（不是追加？）',
+              afterCount + ' vs ' + (proof.beforeRevisionCount + 1))
+          } else ok()
+          if (proof.appendSupersedingCurrent !== false) {
+            fail(P + '追加响应的 superseding_current 不是 false', String(proof.appendSupersedingCurrent))
+          } else ok()
+
+          // 页面重载后要把这些事实显示出来：新版本进历史、生效版本仍是旧的
+          self.onRetry()
+          await tick(90)
+          const d4 = self._final()
+          const newRow = (d4.revisions || []).filter(function (r) {
+            return r.revisionNo === proof.appendedNo
+          })[0]
+          if (!newRow) fail(P + '重载后版本历史里没有刚追加的 v' + proof.appendedNo)
+          else if (newRow.isCurrent) fail(P + '刚追加的版本被显示为生效版本')
+          else ok()
+          if ((d4.artifact || {}).currentRevisionNo !== prevNo) {
+            fail(P + '重载后生效版本显示不对', String((d4.artifact || {}).currentRevisionNo))
+          } else ok()
+
+          // ⑧ 真写 ②：点"设为生效版本" → 确认卡必须点名**成果 ID + 精确版本**
+          //    （PRD 第 187 行：对话与工作台引用同一 artifact ID 与版本）
+          if (!newRow) {
+            note(P + '没有刚追加的版本行，确认走查跳过')
+          } else {
+            lastWx._modals = []
+            self.onConfirm({ currentTarget: { dataset: { no: newRow.revisionNo } } })
+            await tick(20)
+            const modal = (lastWx._modals || [])[0]
+            const want = '成果 #' + artId + ' · v' + newRow.revisionNo
+            if (!modal) fail(P + '确认卡没有弹出')
+            else if (String(modal.content || '').indexOf(want) === -1) {
+              fail(P + '确认卡未点名成果 ID 与精确版本', String(modal.content))
+            } else ok()
+            if (!modal) {
+              note(P + '确认走查跳过')
+            } else {
+              const before2 = pageWrites.length
+              writesDriven += 1
+              WRITE_ENABLED = true
+              let confThrown = null
+              try {
+                await self.submitConfirm(newRow.revisionNo)
+                await tick(60)
+              } catch (e) { confThrown = e } finally { WRITE_ENABLED = false }
+              const w2 = pageWrites[pageWrites.length - 1]
+              if (confThrown) fail(P + '确认抛异常', confThrown.message)
+              else if (pageWrites.length !== before2 + 1 || !w2) fail(P + '确认没有发出写请求')
+              else if (w2.status !== 200) {
+                note(P + '确认被拒（' + w2.status + '）：' + JSON.stringify(w2.data || {}).slice(0, 160))
+              } else {
+                await refreshArtifactReplay(artId)
+                proof.afterConfirmNo = (entrustArtifact.current_revision || {}).revision_no
+                if (proof.afterConfirmNo !== newRow.revisionNo) {
+                  // 后端事实：确认绑定的是**被点中的那个版本**，不是"再取一次最新"
+                  fail(P + '确认未绑定到所点的精确版本（后端事实）',
+                    proof.afterConfirmNo + ' vs ' + newRow.revisionNo)
+                } else ok()
+                // `submitConfirm` 内部只重载过一次，而那时回放快照还是**写之前**的
+                // （快照要等我这边刷新）。所以必须再重载一次，读到的才是写之后的库 ——
+                // 否则会把"桩的快照旧"误判成"页面标记错了"（本轮误报过一次）。
+                self.onRetry()
+                await tick(90)
+                const d5 = self._final()
+                if (String(d5.saveNotice || '').indexOf('生效版本已切换为 v' + newRow.revisionNo) === -1) {
+                  fail(P + '确认后未告知生效版本已切换', String(d5.saveNotice))
+                } else ok()
+                const cur5 = (d5.revisions || []).filter(function (r) { return r.isCurrent })
+                if (cur5.length !== 1 || cur5[0].revisionNo !== newRow.revisionNo) {
+                  fail(P + '确认后生效版本的界面标记不对',
+                    cur5.map(function (r) { return r.revisionNo }).join(','))
+                } else ok()
+                note('10 成果详情 · 真写链路：生效 v' + proof.beforeCurrentNo + ' →(编辑) v'
+                  + proof.appendedNo + '（生效未变）→(确认) 生效 v' + proof.afterConfirmNo
+                  + '；版本数 ' + proof.beforeRevisionCount + '→' + (entrustArtifactRevisions.items || []).length)
+              }
+            }
+          }
+        }
+      }
+
+      // ⑨ 取数阶段不得发写请求：全程写请求数必须**恰好等于**显式驱动的次数。
+      //    页面若在 load() 里顺手写点什么（比如自动确认最新版本），这条立刻红 ——
+      //    而那种缺陷在只读走查里是看不见的。
+      if (pageWrites.length !== writesDriven) {
+        fail(P + '写请求数与显式驱动的次数不符', pageWrites.length + ' vs ' + writesDriven)
+      } else ok()
+    }
   }
 
   auditTemplates()

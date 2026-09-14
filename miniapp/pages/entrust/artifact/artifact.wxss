@@ -1,0 +1,218 @@
+/* 委托发货 · 成果详情（UI-05 第二片 / ENT-023）—— 只写本页特有排版，其余复用 app.wxss。
+   页面级样式不会继承别的页面：detail.wxss 里的 .head-bg / .field-row 等同名类
+   必须在这里自带一份，否则真机上只会表现为"没有样式"，不会报错。 */
+
+.head-bg {
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  padding-bottom: 24rpx;
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  height: 88rpx;
+  padding: 0 24rpx;
+}
+
+.nav-back {
+  width: 64rpx;
+  font-size: 48rpx;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.nav-spacer {
+  width: 64rpx;
+}
+
+.head-sub {
+  padding: 0 28rpx;
+  font-size: 25rpx;
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.art-top {
+  padding-bottom: 20rpx;
+  border-bottom: 1rpx solid #EEF1F6;
+}
+
+.art-title {
+  flex: 1;
+  margin-right: 16rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.art-section-title {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+/* 保存 / 确认之后的结论条：与普通说明卡区分开颜色，避免被当成又一段提示文字忽略掉 */
+.art-notice {
+  margin-bottom: 20rpx;
+  border-left: 6rpx solid #3B5BDB;
+  font-size: 25rpx;
+  color: #2B3B52;
+  line-height: 1.6;
+}
+
+/* 说明类（已作废 / 类型不在注册表 / 未声明字段） */
+.art-note {
+  margin-top: 20rpx;
+  font-size: 24rpx;
+  color: #6B7A8C;
+  line-height: 1.6;
+}
+
+/* 缺项提醒：这是"该有却没有"，与普通说明不是一回事（四态里的「信息缺失」） */
+.art-warn {
+  margin-top: 20rpx;
+  font-size: 24rpx;
+  color: #C77700;
+  line-height: 1.6;
+}
+
+.art-note-inline {
+  padding-top: 12rpx;
+  font-size: 24rpx;
+  color: #98A6B8;
+}
+
+.art-field {
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #F4F6FB;
+}
+
+.art-field:last-child {
+  border-bottom: none;
+}
+
+.art-field-label {
+  font-size: 25rpx;
+  color: #98A6B8;
+}
+
+/* 三个标记必须**彼此可分**：必填 / 内部 / 未声明含义完全不同 ——
+   「内部」告诉经理这栏不会到客户手里，「未声明」告诉他这栏没有字段契约。 */
+.art-mark-required {
+  margin-left: 8rpx;
+  padding: 0 8rpx;
+  border-radius: 6rpx;
+  font-size: 19rpx;
+  color: #C77700;
+  background: rgba(240, 140, 0, 0.10);
+}
+
+.art-mark-internal {
+  margin-left: 8rpx;
+  padding: 0 8rpx;
+  border-radius: 6rpx;
+  font-size: 19rpx;
+  color: #7048E8;
+  background: rgba(112, 72, 232, 0.08);
+}
+
+.art-mark-unknown {
+  margin-left: 8rpx;
+  padding: 0 8rpx;
+  border-radius: 6rpx;
+  font-size: 19rpx;
+  color: #6B7A8C;
+  background: #F1F4F8;
+}
+
+.art-value {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 27rpx;
+  color: #0F2540;
+  word-break: break-all;
+}
+
+.art-value-empty {
+  color: #B4BECC;
+}
+
+/* 结构化值：等宽、可换行、不截断 —— 列表/对象截断了就等于内容看不全 */
+.art-json {
+  display: block;
+  margin-top: 8rpx;
+  padding: 16rpx;
+  border-radius: 10rpx;
+  background: #F7F9FC;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 23rpx;
+  color: #2B3B52;
+  line-height: 1.5;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.art-input {
+  margin-top: 10rpx;
+  height: 72rpx;
+  padding: 0 18rpx;
+  border: 1rpx solid #E3E9F2;
+  border-radius: 10rpx;
+  font-size: 27rpx;
+  color: #0F2540;
+}
+
+.art-textarea {
+  margin-top: 10rpx;
+  width: 100%;
+  min-height: 140rpx;
+  padding: 14rpx 18rpx;
+  box-sizing: border-box;
+  border: 1rpx solid #E3E9F2;
+  border-radius: 10rpx;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 23rpx;
+  color: #2B3B52;
+  line-height: 1.5;
+}
+
+/* JSON 解析失败：**就地**报错并保留用户输入，不提交 */
+.art-error {
+  margin-top: 14rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+  color: #FA5252;
+  background: rgba(250, 82, 82, 0.08);
+  line-height: 1.6;
+}
+
+/* 版本历史里行的「设为生效版本」按钮：与详情页槽位的动作按钮同一形态 */
+.slot-btn {
+  display: inline-block;
+  margin-top: 12rpx;
+  padding: 0 24rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+  color: #3B5BDB;
+  background: #EEF2FF;
+}
+
+/* ---- 本页 hover 反馈 ----
+   `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
+   漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */
+.hover-dim {
+  opacity: .6;
+}

@@ -603,11 +603,423 @@ function claimAssignment(assignmentId, idempotencyKey) {
   })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 成果的编辑与确认（UI-05 第二片 / ENT-023）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── 本片补的是什么 ────────────────────────────────────────────────────
+// 首片（ENT-021）把七个槽位和「当前成果 · vN」显示出来了，但成果是**只读**的：
+// §3.8 要求"范围内槽位必须有可用人工操作（编辑、记录、确认）"，成果这一侧当时
+// 缺的正是编辑与确认。所以本片不是新造机制 —— 后端 `POST /artifacts/{aid}/revisions`
+// 与 `/confirm` 早已存在且测试扎实，缺的是**人与确认的落点**。
+//
+// ── 三条不可含糊的语义（写在代码里，不靠注释口头保证）────────────────
+//
+// 1. **编辑不改变生效版本**。`append_revision` 只追加，生效版本只能被显式确认
+//    改变。界面必须把这件事**说出来**：保存成功后提示「已保存为 vN，生效版本仍是 vM」。
+//    只说"保存成功"会让用户以为客户看到的已经是新内容 —— 这是最坏的一种误导。
+//
+// 2. **确认绑定的是精确版本号，不是"最新"**。确认卡上必须显示
+//    `target artifact #N · vK`（PRD 第 187/188 行：对话与工作台引用同一 ID 与版本）。
+//    允许把生效版本**回退**到更早的历史版本 —— 后端如此设计（可以确认 v1），
+//    界面不得擅自禁止（禁止了就与后端语义分叉，而分叉的那一侧将来一定不同步）。
+//
+// 3. **编辑不得静默丢弃任何字段**。表单从**当前生效版本的 payload** 出发做增量修改，
+//    而不是从表单字段重新拼一份：这样未在注册表里声明的历史字段（`unknown_fields`）
+//    会原样保留。用"按表单重建"的写法，一次无害的编辑就会把 Agent 早期产出的
+//    额外字段悄悄抹掉，而且没有任何人会察觉。
+//
+// ── 为什么不引入成果自己的状态机 ──────────────────────────────────────
+// PRD 第 275 行描述的是 `draft / in_review / confirmed / superseded` 加独立的
+// 共享/接受/执行/证据状态，后端目前只有 `ent_artifact.status`(active/void) 与
+// `current_revision_id`。本片**不假装**已有那套状态机：界面上出现的每一个标签
+// 都是从既有事实**派生**的（生效/历史 = 是否等于 `current_revision_id`；
+// 来源 = revision 的 `source`），没有一个是凭空写死的枚举。
+
+/**
+ * 版本角色标签 —— **派生**，不是存储的状态。
+ *
+ * 「生效版本」= `current_revision_id` 指向的那一条；其余都是历史版本。
+ * 不引入 revision 级 status 字段，是为了不与后端语义分叉：
+ * 一旦前端自己记"哪个是最新的"，两边就会在某个编辑/确认交错后不一致。
+ */
+const REVISION_ROLE = { current: '生效版本', superseded: '历史版本' }
+
+/** 成果可用性标签。键与后端 `artifacts.STATUS_*` 逐字对应（静态脚本交叉断言）。 */
+const ARTIFACT_STATUS_LABELS = { active: '有效', void: '已作废' }
+
+/**
+ * 版本来源标签。键与后端 `artifacts.SOURCE_*` 逐字对应。
+ * 中文不写「手工」而写「人工」：它要与「人工接管优先」这条机制同名，
+ * 用户看到「人工」才能对应上"我改过之后 Agent 不会再覆盖"。
+ */
+const REVISION_SOURCE_LABELS = { manual: '人工', agent: 'Agent' }
+
+/**
+ * 成果字段中文标签。键必须**覆盖后端 `registry.py` 全部 required + optional 字段**
+ * （由 `scripts/verify_entrust_ui.js` 交叉断言，少一个即红）。
+ *
+ * 回退值是字段名本身而不是空串：未知字段（历史数据或注册表新增但前端没跟）
+ * 会显示成 `receivable_lines` 这样的原始键 —— 难看，但**看得见**。
+ * 回退成空串会让整行变成一个空白标签，那才是真的没人能发现出了问题。
+ */
+const ARTIFACT_FIELD_LABELS = {
+  carrier: '承运方',
+  rate: '报价单价',
+  cargo_name: '货名',
+  quantity: '数量',
+  quantity_unit: '数量单位',
+  route: '航线 / 区间',
+  valid_until: '有效期至',
+  candidates: '候选方案',
+  selected_candidate: '已选方案',
+  comparison_note: '比价说明',
+  amount: '报价金额',
+  currency: '币种',
+  includes: '包含项',
+  excludes: '不含项',
+  note: '备注',
+  parties: '合同当事方',
+  clauses: '条款清单',
+  effective_date: '生效日期',
+  supplier: '供应商',
+  agreed_scope: '约定范围',
+  agreed_amount: '约定金额',
+  effective_from: '起始生效时间',
+  receivable_lines: '应收明细',
+  payable_lines: '应付明细',
+  disputed: '争议项'
+}
+
+function artifactFieldLabel(name) {
+  return ARTIFACT_FIELD_LABELS[name] || name
+}
+
+function artifactStatusLabel(status) {
+  return ARTIFACT_STATUS_LABELS[status] || '未知状态'
+}
+
+/**
+ * 成果状态 → 全局样式类（app.wxss 里的 `chip*`）。
+ *
+ * 刻意**不用** `chip-success`（绿）表示"有效"：绿色的语义是"这件事成功了"，
+ * 而"有效"只是"它还没被作废"。绿色会让一个还没被确认过的成果看起来像已经办妥
+ * —— 与 PRD 第 183 行"不要渲染静态成功徽标"是同一条理由。
+ */
+function artifactStatusClass(status) {
+  if (status === 'active') return 'chip chip-purple'
+  return 'chip chip-muted'
+}
+
+function revisionSourceLabel(source) {
+  return REVISION_SOURCE_LABELS[source] || source || '未知来源'
+}
+
+/**
+ * 标量值的**显示文本**。结构化值（列表 / 对象）走 JSON，见 `_fieldKind`。
+ * `null` / 缺值一律显示空串 —— 空就是空，不显示 "null" 让人以为填了个值。
+ */
+function _scalarText(raw) {
+  if (raw === null || raw === undefined) return ''
+  if (typeof raw === 'boolean') return raw ? 'true' : 'false'
+  return String(raw)
+}
+
+/** 字段的编辑形态：标量走单行输入，列表/对象走 JSON 多行文本 */
+function _fieldKind(raw) {
+  if (Array.isArray(raw) || (raw !== null && typeof raw === 'object')) return 'json'
+  return 'scalar'
+}
+
+/**
+ * 把编辑框文本**按原值的类型**还原。
+ *
+ * 为什么需要它：表单里一切都是字符串，若原值 `rate` 是数字 12，用户没动它，
+ * 存回去就变成 `"12"` —— 内容看着没变，**类型却变了**，而下游（客户投影、
+ * 金额比对）对类型是敏感的。规则：
+ *   · 文本与原显示文本一致 → **原值原样返回**（彻底避免"没改也被改"）；
+ *   · 原来是非空数字且文本仍是数字 → 还原成数字；
+ *   · 原来是布尔 → 'true'/'false' 还原成布尔；
+ *   · 其余 → 文本本身。
+ */
+function coerceLike(raw, text) {
+  const s = text === null || text === undefined ? '' : String(text)
+  if (s === _scalarText(raw)) return raw
+  if (typeof raw === 'number') {
+    if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s)
+    return s
+  }
+  if (typeof raw === 'boolean') return s === 'true'
+  return s
+}
+
+/**
+ * 成果详情投影。
+ *
+ * `fields` 的顺序 = 注册表声明的顺序（必填在前、选填在后），**不由 payload 的键序决定**：
+ * 键序随 JSON 序列化实现变化，界面顺序会莫名其妙地抖。
+ * 未在注册表声明的字段（`unknown_fields`）追加在最后并标 `unknown: true` ——
+ * 它们**只读**，但会随编辑一起原样保存（见 `buildPayload`）。
+ */
+function decorateArtifact(artifact, spec) {
+  const data = artifact || {}
+  const s = spec || {}
+  const current = data.current_revision || {}
+  const payload = current.payload || {}
+  const required = s.required_fields || []
+  const optional = s.optional_fields || []
+  const missing = data.missing_fields || []
+  const unknown = data.unknown_fields || []
+  const internal = s.internal_fields || []
+  const status = data.status
+
+  function row(name, isRequired) {
+    const raw = payload[name]
+    return {
+      name: name,
+      label: artifactFieldLabel(name),
+      required: !!isRequired,
+      internal: internal.indexOf(name) !== -1,
+      unknown: false,
+      kind: _fieldKind(raw),
+      value: _fieldKind(raw) === 'json' ? JSON.stringify(raw, null, 2) : _scalarText(raw),
+      raw: raw === undefined ? null : raw,
+      empty: raw === null || raw === undefined || raw === ''
+    }
+  }
+
+  const fields = []
+  required.forEach(function (n) {
+    fields.push(row(n, true))
+  })
+  optional.forEach(function (n) {
+    if (required.indexOf(n) === -1) fields.push(row(n, false))
+  })
+  unknown.forEach(function (n) {
+    const raw = payload[n]
+    fields.push({
+      name: n,
+      label: artifactFieldLabel(n),
+      required: false,
+      internal: false,
+      unknown: true,
+      kind: _fieldKind(raw),
+      // 未知字段只读：它没有字段契约，做表单等于替 Agent 猜语义
+      value: _fieldKind(raw) === 'json' ? JSON.stringify(raw, null, 2) : _scalarText(raw),
+      raw: raw === undefined ? null : raw,
+      empty: false
+    })
+  })
+
+  return {
+    artifactId: data.artifact_id,
+    entrustmentId: data.entrustment_id,
+    assignmentId: data.assignment_id === null || data.assignment_id === undefined
+      ? ''
+      : String(data.assignment_id),
+    typeCode: data.artifact_type,
+    typeLabel: s.label || data.artifact_type,
+    status: status,
+    statusLabel: artifactStatusLabel(status),
+    statusClass: artifactStatusClass(status),
+    voided: status === 'void',
+    currentRevisionId: data.current_revision_id,
+    currentRevisionNo: current.revision_no === undefined ? null : current.revision_no,
+    currentNote: current.note || '',
+    currentCreatedAt: current.created_at || '',
+    updatedAt: data.updated_at || '',
+    fields: fields,
+    missingFields: missing,
+    missingLabels: missing.map(artifactFieldLabel),
+    // 「缺项」必须点名到字段：只说"信息不完整"，用户不知道该去补哪一个
+    missingHint: missing.length
+      ? '还缺 ' + missing.length + ' 项必填：' + missing.map(artifactFieldLabel).join('、')
+      : '',
+    unknownFields: unknown,
+    unknownHint: unknown.length
+      ? '另有 ' + unknown.length + ' 个未在注册表中声明的字段（' + unknown.join('、') + '），只读且会原样保留'
+      : '',
+    // 注册表的 editable 是**声明**（R1 全为真，保留给"只读计算类成果"）；
+    // 这里消费它，避免出现"注册表声明了但没人看"的字段。
+    //
+    // `registryKnown` 一并参与判定：类型不在注册表里时后端 `append_revision` 必然
+    // 400（字段契约无从校验），前端就不该先把编辑入口亮出来让人白填一遍。
+    registryKnown: !!s.code,
+    canEdit: status === 'active' && !!s.code && s.editable !== false,
+    canConfirm: status === 'active',
+    // 是否可确认**取决于选中的版本**，由页面在拿到选中项后填；这里只给状态前提
+    statusHint: status === 'void' ? '已作废的成果不能再编辑或确认（历史版本仍可审计）' : '',
+    registryHint: s.code ? '' : '该成果类型不在当前注册表中，字段契约无从校验：只读'
+  }
+}
+
+/**
+ * 版本历史投影。`currentRevisionId` 决定每条的「生效 / 历史」角色 ——
+ * 派生自后端事实，不由前端另记一份。
+ */
+function decorateRevisions(items, currentRevisionId) {
+  return (items || []).map(function (r) {
+    const isCurrent =
+      currentRevisionId !== null &&
+      currentRevisionId !== undefined &&
+      String(r.revision_id) === String(currentRevisionId)
+    return {
+      revisionId: r.revision_id,
+      revisionNo: r.revision_no,
+      isCurrent: isCurrent,
+      roleLabel: isCurrent ? REVISION_ROLE.current : REVISION_ROLE.superseded,
+      roleClass: isCurrent ? 'chip chip-purple' : 'chip chip-muted',
+      source: r.source || '',
+      sourceLabel: revisionSourceLabel(r.source),
+      note: r.note || '',
+      createdAt: r.created_at || '',
+      title: 'v' + r.revision_no + ' · ' + revisionSourceLabel(r.source),
+      summary: (r.note || '').trim() || '（无备注）'
+    }
+  })
+}
+
+/**
+ * 由编辑表单构建提交用的 payload。**从当前 payload 出发做增量修改**。
+ *
+ * 这条决定不是实现细节，而是上面第 3 条语义的落点：任何"按表单字段重建 payload"
+ * 的写法都会丢掉注册表未声明的键（`unknown_fields`）—— 那是一次静默的数据丢失。
+ *
+ * @param {object} basePayload 当前生效版本的 payload（原样拷贝的起点）
+ * @param {Array} fields       decorateArtifact().fields（含 unknown）
+ * @param {object} drafts      { 字段名: 编辑框文本 }
+ * @returns {{ok:boolean, payload:object, errors:Array<{name:string,reason:string}>}}
+ */
+function buildPayload(basePayload, fields, drafts) {
+  const payload = {}
+  const base = basePayload || {}
+  // 先整体拷一份：未参与表单的键（历史上出现过、后来从注册表移除的）不该被这次编辑抹掉
+  Object.keys(base).forEach(function (k) {
+    payload[k] = base[k]
+  })
+
+  const d = drafts || {}
+  const errors = []
+  ;(fields || []).forEach(function (f) {
+    if (f.unknown) return // 只读字段：原样保留，不参与本次修改
+    const text = d[f.name] === undefined || d[f.name] === null ? '' : String(d[f.name])
+    if (f.kind === 'json') {
+      if (text.trim() === '') {
+        // 清空结构化字段＝移除它。**不是**写成空对象：空对象在缺项判定里非空，
+        // 会把"我没填"变成"填了个空壳"，而下游据此以为这栏已经办好了。
+        delete payload[f.name]
+        return
+      }
+      try {
+        payload[f.name] = JSON.parse(text)
+      } catch (e) {
+        errors.push({ name: f.name, reason: '不是合法的 JSON' })
+      }
+      return
+    }
+    if (text === '') {
+      delete payload[f.name]
+      return
+    }
+    payload[f.name] = coerceLike(f.raw, text)
+  })
+
+  return {
+    ok: errors.length === 0,
+    payload: payload,
+    errors: errors,
+    errorHint: errors.length
+      ? errors.map(function (e) { return artifactFieldLabel(e.name) + '：' + e.reason }).join('；')
+      : ''
+  }
+}
+
+/** 原始字段值 → 编辑框初始文本（与 decorateArtifact 的 `value` 同口径） */
+function fieldDrafts(fields) {
+  const out = {}
+  ;(fields || []).forEach(function (f) {
+    out[f.name] = f.value
+  })
+  return out
+}
+
+/** 表单是否有未保存改动（与初始文本逐字段比对；只比可编辑字段） */
+function isArtifactDirty(fields, drafts, initial) {
+  const d = drafts || {}
+  const init = initial || {}
+  return (fields || []).some(function (f) {
+    if (f.unknown) return false
+    const a = d[f.name] === undefined || d[f.name] === null ? '' : String(d[f.name])
+    const b = init[f.name] === undefined || init[f.name] === null ? '' : String(init[f.name])
+    return a !== b
+  })
+}
+
+/**
+ * 确认前的「确认卡」文案。**必须点名目标的 artifact 与精确版本**（PRD 187/188）：
+ * 只说"确认这一版"在有多条历史版本时无法核对，用户点下去其实不知道自己确认了什么。
+ */
+function confirmCard(artifact, revisionNo) {
+  const a = artifact || {}
+  return {
+    title: '确认生效版本',
+    // 与 PRD 第 187 行的口径一字对应：ID + 精确版本
+    target: '成果 #' + a.artifactId + ' · v' + revisionNo,
+    typeLabel: a.typeLabel || '',
+    body: a.typeLabel
+      ? '将该成果（' + a.typeLabel + '）的生效版本绑定到 v' + revisionNo + '。'
+        + '此前生效的版本会转为历史版本，历史版本本身不会被修改。'
+      : '将该成果的生效版本绑定到 v' + revisionNo + '。'
+  }
+}
+
+/** 成果类型注册表（静态契约，不是租户数据）。编辑表单的字段契约来源。 */
+function fetchArtifactTypes() {
+  return request({ url: BASE + '/artifact-types', method: 'GET' })
+}
+
+/** 成果详情（含生效版本内容与缺项）。可见性由服务端判定：非参与方 404。 */
+function fetchArtifact(artifactId) {
+  return request({ url: BASE + '/artifacts/' + artifactId, method: 'GET' })
+}
+
+/** 版本历史（append-only 审计视图，与详情同可见性）。 */
+function fetchRevisions(artifactId) {
+  return request({ url: BASE + '/artifacts/' + artifactId + '/revisions', method: 'GET' })
+}
+
+/**
+ * **编辑成果**：追加新版本。服务端语义是"不改变生效版本"——
+ * 所以调用方必须把这件事如实告诉用户（见本段开头的第 1 条）。
+ */
+function appendRevision(artifactId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/artifacts/' + artifactId + '/revisions',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** **确认成果**：把生效版本绑定到精确的 `revisionNo`（不是"最新"）。 */
+function confirmArtifact(artifactId, revisionNo, idempotencyKey) {
+  return request({
+    url: BASE + '/artifacts/' + artifactId + '/confirm',
+    method: 'POST',
+    data: { revision_no: revisionNo },
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
 module.exports = {
   BASE,
+  ARTIFACT_FIELD_LABELS,
+  ARTIFACT_STATUS_LABELS,
   ISSUE_KIND_LABELS,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
+  REVISION_ROLE,
+  REVISION_SOURCE_LABELS,
   SLOT_EMPTY_TEXT,
   SLOT_FIELD_LABELS,
   STATUS_HINT,
@@ -617,24 +1029,40 @@ module.exports = {
   TASK_TYPE_ORDER,
   VIEW,
   WORKBENCH_SLOTS,
+  appendRevision,
+  artifactFieldLabel,
+  artifactStatusClass,
+  artifactStatusLabel,
+  buildPayload,
   claimAssignment,
+  coerceLike,
+  confirmArtifact,
+  confirmCard,
   createTask,
   decorateAssignment,
+  decorateArtifact,
   decorateDetail,
   decorateList,
   decorateOrg,
   decorateOrgs,
+  decorateRevisions,
   decorateSlot,
   decorateWorkbench,
   entryDecision,
+  fetchArtifact,
+  fetchArtifactTypes,
   fetchAssignment,
   fetchMyOrgs,
   fetchQueue,
+  fetchRevisions,
   fetchWorkbench,
+  fieldDrafts,
+  isArtifactDirty,
   newIdempotencyKey,
   pageHint,
   pickOrg,
   probeEntry,
+  revisionSourceLabel,
   statusClass,
   statusLabel,
   viewState

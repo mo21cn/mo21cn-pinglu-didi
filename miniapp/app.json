@@ -16,7 +16,8 @@
     "pages/preview/preview",
     "pages/mine/mine",
     "pages/entrust/workbench/workbench",
-    "pages/entrust/detail/detail"
+    "pages/entrust/detail/detail",
+    "pages/entrust/artifact/artifact"
   ],
   "window": {
     "navigationBarTitleText": "船好多",
