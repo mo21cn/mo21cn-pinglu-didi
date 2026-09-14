@@ -588,3 +588,173 @@ def test_workbench_is_read_only(env):
     before = snapshot()
     assert _get(env, manager, aid).status_code == 200
     assert snapshot() == before
+
+
+# ─────────────────────────────────────────── 7. `exceptions` 槽的真实投影
+#                                                （DR-0013 A1 切片三之三）
+
+
+def _open_exceptions_slot(monkeypatch) -> None:
+    """**临时**把 `exceptions` 槽打开，只用来验证投影本身。
+
+    线上默认仍是关闭：DR-0013 §7.3 撤下条件的第 4 条（人工落点须在**真载荷走查**中
+    走通）依赖 UI-08 与 UI-04，尚未满足。这不是绕过门禁，而是把两件事分开断言 ——
+    「投影已就绪」靠本函数与下面的用例；「标记可以撤下」靠
+    `test_exceptions_slot_marker_still_held`。
+    """
+    import dataclasses
+
+    from app.modules.entrust import workbench as wb
+
+    monkeypatch.setattr(
+        wb,
+        "SLOT_SPECS",
+        tuple(
+            dataclasses.replace(spec, open=True, not_open_reason="")
+            if spec.key == "exceptions"
+            else spec
+            for spec in wb.SLOT_SPECS
+        ),
+    )
+
+
+def _case(db, *, aid: int, actor: int, **overrides) -> dict:
+    """经**服务层**登记一个案件（端点侧口径由 `test_entrust_exceptions_api.py` 覆盖）。"""
+    from app.modules.entrust import exceptions as case_svc
+
+    params: dict = {
+        "assignment_id": aid,
+        "actor_id": actor,
+        "kind": case_svc.KIND_EXCEPTION,
+        "title": "船期延误",
+        "severity": "medium",
+        "impact_kind": case_svc.IMPACT_INFORMATIONAL,
+    }
+    params.update(overrides)
+    return case_svc.raise_case(db, **params)
+
+
+def test_exceptions_slot_marker_still_held(env):
+    """标记与常量都仍是「未开放」，且理由指向**尚未满足的那一条**。
+
+    这是撤下动作的**闸门**：谁翻转 `EXCEPTIONS_SLOT_OPEN`，这条就会红。撤下必须是
+    独立提交，并在**同一提交内**带上真载荷走查证据（DR-0013 §7.3）——
+    「能力还没做」与「这单没有异常」是两句不同的话。
+    """
+    from app.modules.entrust import workbench as wb
+
+    assert wb.EXCEPTIONS_SLOT_OPEN is False, "撤下标记要先补走查证据，不能顺手翻常量"
+
+    db = env.make_session()
+    manager, _, _, _, aid = _seed(env, db)
+    _case(db, aid=aid, actor=int(manager["user_id"]), title="确有异常")
+
+    slot = _slot(_get(env, manager, aid).json(), "exceptions")
+    # 案件确实存在，槽位仍报「未开放」——这正是「未开放 ≠ 空」的可测形式
+    assert slot["available"] is False
+    assert "§7.3" in slot["unavailable_reason"]
+
+
+def test_exceptions_projection_without_cases_is_no_record(env, monkeypatch):
+    """无案件 → 四态里的「暂无记录」，四个字段各自给出对应的态，不是空数组糊过去。"""
+    _open_exceptions_slot(monkeypatch)
+    db = env.make_session()
+    manager, _, _, _, aid = _seed(env, db)
+
+    slot = _slot(_get(env, manager, aid).json(), "exceptions")
+    assert slot["available"] is True
+    assert slot["unavailable_reason"] == ""
+    assert slot["current"]["state"] == "no_record"
+    assert slot["issues"]["state"] == "none"
+    assert slot["next_owner"]["state"] == "not_applicable"
+    assert slot["updated_at"] is None
+
+
+def test_exceptions_projection_reports_open_cases_and_blocking(env, monkeypatch):
+    """未关闭案件 → 摘要与数量；**只有阻断的**进未决问题；阻断的那张优先成为责任方。"""
+    from app.modules.entrust import exceptions as case_svc
+
+    _open_exceptions_slot(monkeypatch)
+    db = env.make_session()
+    manager, _, _, _, aid = _seed(env, db)
+    actor = int(manager["user_id"])
+    task_id = _task(db, assignment_id=aid, task_type="execution", title="执行任务")
+
+    _case(db, aid=aid, actor=actor, title="信息补充")
+    _case(
+        db,
+        aid=aid,
+        actor=actor,
+        title="船期延误",
+        severity="high",
+        impact_kind=case_svc.IMPACT_EXECUTION_BLOCKING,
+        links=[{"target_kind": case_svc.TARGET_TASK, "target_id": task_id}],
+        owner_user_id=actor,
+    )
+    _case(
+        db,
+        aid=aid,
+        actor=actor,
+        kind=case_svc.KIND_CHANGE_REQUEST,
+        title="改配载",
+        severity="low",
+    )
+
+    slot = _slot(_get(env, manager, aid).json(), "exceptions")
+    assert slot["current"]["state"] == "present"
+    assert slot["current"]["text"] == "未关闭案件 3 项 · 阻断 1 项 · 变更请求 1 项"
+    # 非阻断案件是**记录**，不是问题：不进未决问题列表
+    assert [i["kind"] for i in slot["issues"]["items"]] == ["blocked"]
+    assert "船期延误" in slot["issues"]["items"][0]["text"]
+    # 「下一责任方」= 最该动的那张 —— 阻断优先，而不是按登记顺序（#1 没有责任人）
+    assert slot["next_owner"] == {"state": "assigned", "user_id": actor, "text": f"成员 #{actor}"}
+
+
+def test_exceptions_projection_without_owner_is_unassigned(env, monkeypatch):
+    """有未关闭案件但没定责任人 → 「尚未分配」，不是「不适用」（后者没有下一步动作）。"""
+    _open_exceptions_slot(monkeypatch)
+    db = env.make_session()
+    manager, _, _, _, aid = _seed(env, db)
+    _case(db, aid=aid, actor=int(manager["user_id"]))
+
+    slot = _slot(_get(env, manager, aid).json(), "exceptions")
+    assert slot["current"]["state"] == "present"
+    assert slot["next_owner"]["state"] == "unassigned"
+
+
+def test_exceptions_projection_closed_case_only_moves_updated_at(env, monkeypatch):
+    """已关闭的案件不再是未决问题、也不再选责任方 —— 但它确实是一次业务更新。"""
+    from app.modules.entrust import exceptions as case_svc
+
+    _open_exceptions_slot(monkeypatch)
+    db = env.make_session()
+    manager, _, _, _, aid = _seed(env, db)
+    actor = int(manager["user_id"])
+    case = _case(db, aid=aid, actor=actor, title="重复登记")
+    closed = case_svc.close_case(
+        db,
+        exception_id=int(case["id"]),
+        actor_id=actor,
+        closure_disposition=case_svc.DISPOSITION_DUPLICATE,
+        expected_revision=int(case["revision_no"]),
+        evidence_ref="evidence://dup",
+        decision_note="同一问题已另案登记",
+    )
+
+    slot = _slot(_get(env, manager, aid).json(), "exceptions")
+    assert slot["current"]["state"] == "no_record"
+    assert slot["issues"]["state"] == "none"
+    assert slot["next_owner"]["state"] == "not_applicable"
+    assert slot["updated_at"] == closed["updated_at"]
+
+
+def test_exceptions_projection_is_isolated_per_assignment(env, monkeypatch):
+    """A 单的案件不出现在 B 单的工作台（DR-0012 / 验证 11）。"""
+    _open_exceptions_slot(monkeypatch)
+    db = env.make_session()
+    manager, owner, org, _, aid_a = _seed(env, db)
+    aid_b = _assignment(db, owner_id=owner["user_id"], org_id=org)
+    _case(db, aid=aid_a, actor=int(manager["user_id"]), title="甲单的异常")
+
+    assert _slot(_get(env, manager, aid_a).json(), "exceptions")["current"]["state"] == "present"
+    assert _slot(_get(env, manager, aid_b).json(), "exceptions")["current"]["state"] == "no_record"

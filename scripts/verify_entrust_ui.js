@@ -495,6 +495,20 @@ function sliceParenBlock(src, headRe) {
 }
 
 const slotSpecBlock = sliceParenBlock(wbPy, /SLOT_SPECS[^=]*=\s*\(/)
+
+/** 撤下「本期未开放」标记的唯一开关（DR-0013 §7.3）。**必须读它的值**，
+ *  不能只认 `open=False` 字面量：切片四把常量翻成 True 时，若这里仍按"匹配不到
+ *  open=False 就算开放"处理，这条断言会继续绿着 —— 那时它就成了一个骗人的门禁。
+ *  锚在行首并把 `[^=]` 限制在行内，避免跨行扫到别的 `=`。 */
+const slotOpenMatch = /^EXCEPTIONS_SLOT_OPEN[^=\n]*=\s*(True|False)\s*$/m.exec(wbPy)
+const exceptionsSlotOpen = slotOpenMatch ? slotOpenMatch[1] === 'True' : null
+
+function slotIsOpen(chunk) {
+  if (/open=False/.test(chunk)) return false
+  if (/open=EXCEPTIONS_SLOT_OPEN/.test(chunk)) return exceptionsSlotOpen === true
+  return true
+}
+
 const backendSlots = slotSpecBlock
   .split(/SlotSpec\(/)
   .slice(1)
@@ -502,7 +516,7 @@ const backendSlots = slotSpecBlock
     return {
       key: (chunk.match(/key="([^"]+)"/) || [])[1] || '',
       title: (chunk.match(/title="([^"]+)"/) || [])[1] || '',
-      open: !/open=False/.test(chunk)
+      open: slotIsOpen(chunk)
     }
   })
 
@@ -510,6 +524,11 @@ const frontSlots = E.WORKBENCH_SLOTS || []
 
 check('[槽位] 前端配置表 7 条', frontSlots.length === 7, '实际 ' + frontSlots.length)
 check('[槽位] 后端 SLOT_SPECS 解析出 7 条', backendSlots.length === 7, '实际 ' + backendSlots.length)
+check(
+  '[槽位] 能解析出后端 EXCEPTIONS_SLOT_OPEN 的值（解析不到就无从判断谁未开放）',
+  exceptionsSlotOpen !== null,
+  '实际 ' + String(exceptionsSlotOpen)
+)
 check(
   '[槽位] key 与顺序前后端逐字一致（DR-0010 §3.1：不得重排）',
   frontSlots.map((s) => s.key).join(',') === backendSlots.map((s) => s.key).join(','),
@@ -798,7 +817,9 @@ check(
 
 // 「未开放」与「空」是两条路径 —— 本片最容易做错的一处
 const boardClosed = E.decorateWorkbench({
-  slots: [{ key: 'exceptions', title: '异常与变更', available: false, unavailable_reason: '本期未开放：尚无数据模型' }]
+  // 理由文案由后端给（本脚本只断言"有理由"）；这里用一句中性的合成文本，
+  // 不抄后端的现行措辞 —— 抄了就成了一份会过期的副本，还容易被读成契约。
+  slots: [{ key: 'exceptions', title: '异常与变更', available: false, unavailable_reason: '本期未开放' }]
 })
 const projClosed = slotOf(boardClosed, 'exceptions')
 check(

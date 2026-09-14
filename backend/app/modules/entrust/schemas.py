@@ -608,6 +608,10 @@ class WorkbenchSlotOut(BaseModel):
     `available=False` 表示该槽位的能力**本期未开放**（当前只有 `exceptions`），
     此时 `unavailable_reason` 非空，界面显示"本期未开放"而**不是**"暂无记录"——
     后者会把"能力还没做"说成"这单没有异常"（DR-0010 §3.8）。
+
+    `exceptions` 的真实投影已实现（DR-0013 A1 切片三之三），但标记按
+    DR-0013 §7.3 仍需保持 —— 撤下条件第 4 条（人工落点在真载荷走查中走通）未满足。
+    见 `workbench.EXCEPTIONS_SLOT_OPEN`。
     """
 
     key: str
