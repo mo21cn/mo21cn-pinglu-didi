@@ -1851,9 +1851,14 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
             } else if (!dl.links[0].key || String(dl.links[0].target_id) !== String(cand.target_id)) {
               fail('⑯ 登记案件 · 受影响项行缺 key 或编号不对', JSON.stringify(dl.links[0]))
             } else ok()
-            // 去掉一条也要能生效（移除按钮靠 `key`，不是靠数组下标）
+            // 去掉一条也要能生效（移除按钮靠 dataset 里的行标识，不是靠数组下标）
+            // ⚠️ 键名是 `rmKey` 而**不是** `key`：模板里该按钮用 `data-rm-key`
+            //    （`data-key` 已被筛选 pill 占用，共用会让走查选择器歧义）。
+            //    本轮把模板改成 `data-rm-key` 却漏改了这里的驱动，CI 立刻报
+            //    「移除后列表仍有条目」—— 这条断言的价值就在这：驱动与模板的键名
+            //    必须同步，改了任一侧而另一侧没跟上就会红。
             let rmThrown = null
-            try { s.onRemoveLink({ currentTarget: { dataset: { key: dl.links[0].key } } }) }
+            try { s.onRemoveLink({ currentTarget: { dataset: { rmKey: dl.links[0].key } } }) }
             catch (e) { rmThrown = e }
             await tick(20)
             const dr = s._final()
