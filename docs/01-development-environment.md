@@ -81,10 +81,12 @@ pinglu-didi/
 
 | 命令 | 说明 |
 |------|------|
-| `ruff check app tests scripts` | 后端 lint（与 CI 同范围） |
+| `ruff check app tests scripts` | 后端 lint（与 CI 同范围；**`scripts` 指 `backend/scripts`**） |
 | `ruff format app tests scripts` | 后端格式化（与 CI 同范围） |
 | `pytest` | 运行测试 |
 | `mypy app migrations migrate.py` | 类型检查（有意不含 `scripts`） |
+| `ruff check --config backend/pyproject.toml scripts/verify_miniapp_devtools.py scripts/wechatide_client.py` | **仓库根** `scripts/*.py` 里在用工具的 lint（在仓库根执行；CI 同范围） |
+| `python scripts/verify_miniapp_devtools.py` | 真机走查（现行轨；需 IDE 已开工程并完成一次授权） |
 | `git flow` / 分支命令 | 见 `docs/02-git-flow.md` |
 
 ## 5. 故障排查

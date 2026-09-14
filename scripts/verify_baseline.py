@@ -5,6 +5,14 @@ Usage from the repository root:
 
 Evidence is written to tmp/baseline-a. Mypy is recorded separately, matching
 the existing CI's non-blocking type-check policy. No application code is patched.
+
+⚠️ HISTORICAL TOOL（历史基线工具，2026-09-14 标注）
+--------------------------------------------------
+本脚本是为**冻结基线取证**写的一次性工具，产出 `docs/baselines/2026-09-10-v0.4.0/`。
+它**不参与**日常开发，也**不在** CI 执行路径上，因此**有意不纳入** ruff 门禁
+（范围与理由见 `docs/entrust/decisions/0007-scripts纳入lint门禁.md` 的「范围补充」）。
+保留它是为了留痕与可复现性，**不随仓库演进维护** ——
+再次使用前请先确认它调用的命令与当前 CI 仍一致。
 """
 from __future__ import annotations
 

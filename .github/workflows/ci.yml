@@ -47,6 +47,33 @@ jobs:
         # 门禁信号。这是**显式决策**，不是漏配 —— 将来若这些脚本进入生产路径再一并纳入。
         run: mypy app migrations migrate.py
 
+      - name: Lint（ruff check，仓库根 scripts/*.py）
+        # CI 里的 `scripts` 指 backend/scripts（本 job 默认 CWD 是 backend）。
+        # 仓库根的 scripts/*.py 此前**完全不在任何门禁内**：它们不在 CI 执行路径上，
+        # 按 DR-0007 的标准并非「必须纳入」—— 但它们仍是随仓库演进的代码，
+        # 至少在 lint / 格式这层不该裸奔（ENT-028 扩范围；mypy 仍有意排除，理由同上一步）。
+        #
+        # 逐个点名而非扫目录，是为了让「谁在门禁内」在 ci.yml 里一眼可见；
+        # ⚠️ 新增仓库根 Python 脚本时请加进下面的名单 —— 末尾的登记检查会**失败提醒**，
+        #    不会静默漏过（这正是把 verify_baseline.py 显式登记为豁免的原因）。
+        working-directory: .
+        run: |
+          ruff check --config backend/pyproject.toml \
+            scripts/verify_miniapp_devtools.py scripts/wechatide_client.py
+          ruff format --check --config backend/pyproject.toml \
+            scripts/verify_miniapp_devtools.py scripts/wechatide_client.py
+
+          # 登记完整性：仓库根每个 .py 必须「已纳入 lint」或「已登记豁免」，二者必居其一。
+          linted="scripts/verify_miniapp_devtools.py scripts/wechatide_client.py"
+          exempt="scripts/verify_baseline.py"
+          for f in scripts/*.py; do
+            case " ${linted} ${exempt} " in
+              *" ${f} "*) ;;
+              *) echo "✗ ${f} 既未纳入 ruff 门禁、也未登记豁免；请二选一，不要静默漏过"; exit 1 ;;
+            esac
+          done
+          echo "✓ 仓库根 scripts/*.py 登记完整（linted 2 / exempt 1）"
+
       - name: 测试（pytest）
         env:
           APP_ENV: test
@@ -212,7 +239,12 @@ jobs:
   #   verify_ui_interactions 组件 props 与事件 / 弹层闭环 / 长列表与日期等静态防线
   #   verify_entrust_ui    委托发货：入口隔离（AC-02）/ 五态判定（AC-21）/
   #                        跨端状态取值域 / 工作台用到的 CSS 类存在性
-  # 真机走查（verify_miniapp_device）依赖微信开发者工具，无法在 CI 运行，仍由本机执行。
+  # 真机走查依赖微信开发者工具，无法在 CI 运行，仍由本机执行：
+  #   现行轨 → scripts/verify_miniapp_devtools.py（IDE 自带 wechatide 工具链，
+  #            驱动层 scripts/wechatide_client.py）
+  #   旧轨   → scripts/verify_miniapp_device.js（miniprogram-automator / ws）**已退役**：
+  #            微信开发者工具 3.17.3 起不再服务该协议。文件保留作章节对照，**不执行**。
+  #            未迁移章节的**覆盖缺口**登记在 DR-0009「后续增量」，不假装已覆盖。
   # ─────────────────────────────────────────────────────────────
   frontend-static:
     name: 前端静态契约（结构 / 路由 / UI 交互）
