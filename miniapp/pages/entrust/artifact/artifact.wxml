@@ -161,7 +161,10 @@
                 <text class="tl-title">{{item.title}}</text>
                 <text class="{{item.roleClass}}">{{item.roleLabel}}</text>
               </view>
-              <view class="tl-time">{{item.createdAt}}</view>
+              <!-- 版本 id 必须**显示出来**：案件页「批准」要填的是这个 id
+                   （`basis_revision_id`），而它不是 `vN` 里的那个 revision_no。
+                   不显示 ⇒ 那个必填项在界面上根本无值可填（2026-09-14 走查发现）。 -->
+              <view class="tl-time">{{item.createdAt}} · 版本 id {{item.revisionId}}</view>
               <view class="tl-note">{{item.summary}}</view>
               <view
                 wx:if="{{artifact.canConfirm && !item.isCurrent && !editing}}"

@@ -233,7 +233,7 @@
               bindinput="onDecideInput"
               maxlength="12"
               type="number"
-              placeholder="依据版本号 rN（批准必填，数字）"
+              placeholder="依据成果版本 id（批准必填，数字）"
               placeholder-class="input-ph"
             />
             <view
@@ -244,7 +244,7 @@
             >提交决定</view>
             <view wx:if="{{decideHint}}" class="act-hint act-hint-warn">{{decideHint}}</view>
           </block>
-          <view class="act-hint">批准（已批准）必须给出依据版本 —— 选中「已批准」会出现该输入框。</view>
+          <view class="act-hint">批准（已批准）必须给出依据版本 —— 填「成果版本的 id」：成果页的「版本历史」里每条都标着「版本 id N」。它不是 vN 里的那个号，也不是本案件的编号。选中「已批准」才会出现该输入框。</view>
         </block>
 
         <!-- 关闭（必须给处置与证据，没有一键关闭） -->

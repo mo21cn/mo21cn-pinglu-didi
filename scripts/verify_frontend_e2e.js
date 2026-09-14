@@ -1165,7 +1165,7 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
 
         let scThrown = null
         try {
-          s.onCaseScope({ currentTarget: { dataset: { key: 'all' } } })
+          s.onCaseScope({ currentTarget: { dataset: { caseScope: 'all' } } })
         } catch (e) {
           scThrown = e
         }

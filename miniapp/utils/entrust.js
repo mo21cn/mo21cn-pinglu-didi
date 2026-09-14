@@ -1512,7 +1512,14 @@ function decorateCase(payload) {
       }
       if (decision.at) rows.push({ key: 'at', label: '决定时间', value: decision.at })
       if (decision.basis_revision_id !== null && decision.basis_revision_id !== undefined) {
-        rows.push({ key: 'basis', label: '依据版本', value: 'r' + decision.basis_revision_id })
+        // 显示的是**成果版本的 id**（`ent_artifact_revision.id`），**不是** `revision_no`。
+        // 两者是不同的数：写成 `rN` 会与工作台那个真正的 `rN`（revision_no）混为一谈，
+        // 而案件页「批准」要填的正是这个 id —— 口径不一致，用户就会去填另一个号。
+        rows.push({
+          key: 'basis',
+          label: '依据版本',
+          value: '版本 id ' + decision.basis_revision_id
+        })
       }
       return { rows: rows }
     },

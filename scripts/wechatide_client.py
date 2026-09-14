@@ -311,14 +311,24 @@ class Client:
     def count(self, selector: str) -> int:
         """元素个数；查询失败返回 -1（与「查到 0 个」区分开）。
 
-        优先走 `createSelectorQuery`（渲染层直查，不受页面节点绑定时机影响），
-        失败再退化为 `automation_page_action`。
+        ⚠️ **优先走工具的 `querySelectorAll`**（`automation_page_action`，
+        2026-09-14 实测可靠：同一页上 `view` 84 个、`[class]` 137 个）。
+
+        历史上这里优先走 `createSelectorQuery`（`evaluate` + `_COUNT_FN`），而那条路
+        在同一页上 `selectAll('view')` / `selectAll('[class]')` / `selectAll('[data-role]')`
+        **全部回 0**（只有 `.page` 这类简单类选择器回 1）。后果不是"少数断言不准"，
+        而是**所有靠 `count` 的锚点断言一起变成 `n=0`** ——
+        看起来像"锚点被搬走了/模板没渲染"，实际是取值通道回了一个**假 0**。
+        （2026-09-14 因此产生 39 条假失败，跨 ⑯/㉕/㉖/㉗/㉘/㉙/㉚ 七章。）
+
+        `createSelectorQuery` 保留为**兜底**：工具通道不可用时至少有个数
+        （但它回 0 时不可信，勿用来下"元素不存在"的结论）。
         """
-        n = self.evaluate(_COUNT_FN, [selector])
-        if isinstance(n, int):
-            return n
         els = self.query_selector_all(selector)
-        return -1 if els is None else len(els)
+        if els is not None:
+            return len(els)
+        n = self.evaluate(_COUNT_FN, [selector])
+        return n if isinstance(n, int) else -1
 
     def rects(self, selector: str) -> list[dict]:
         """匹配元素的几何数组（视口坐标 + dataset）。

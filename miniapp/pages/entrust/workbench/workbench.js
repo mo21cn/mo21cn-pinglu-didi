@@ -353,7 +353,7 @@ Page({
 
   /** 切换案件开闭范围（未关闭 / 全部）。组织已定位，只重取案件队列。 */
   onCaseScope(e) {
-    const key = (e.currentTarget.dataset.key || '').toString()
+    const key = (e.currentTarget.dataset.caseScope || '').toString()
     if (!key || key === this.data.activeCaseScope) return
     this.setData({ activeCaseScope: key })
     this.loadCaseQueue()
@@ -361,7 +361,7 @@ Page({
 
   /** 切换案件类型筛选（全部类型 / 异常 / 变更请求）。 */
   onCaseKind(e) {
-    const key = (e.currentTarget.dataset.key || '').toString()
+    const key = (e.currentTarget.dataset.caseKind || '').toString()
     if (key === this.data.activeCaseKind) return
     this.setData({ activeCaseKind: key })
     this.loadCaseQueue()
@@ -369,7 +369,7 @@ Page({
 
   /** 打开案件详情（UI-08）。与 `onOpen` 同一套 `go()` 用法，只是目标是案件页。 */
   onOpenCase(e) {
-    const id = e.currentTarget.dataset.id
+    const id = e.currentTarget.dataset.caseId
     if (!id) return
     const self = this
     R.go('/pages/entrust/case/case?case_id=' + encodeURIComponent(String(id)), {

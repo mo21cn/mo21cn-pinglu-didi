@@ -206,6 +206,18 @@ const WALK_ANCHORS = [
   // 受影响项候选行（任务 / 成果共用一份候选表，靠 `target_kind` 区分）
   { kind: 'row', file: 'pages/entrust/case-create/case-create.wxml', class: 'cand-row',
     attr: 'data-id', value: '{{item.target_id}}' },
+  // ENT-032（第 ㉙ 章）：UI-04 组织级队列依赖的锚点。
+  // ⚠️ 同一页上有**四组**可点元素：两个队列 pill、两行筛选、案件卡。
+  //    属性名必须两两不同 —— 否则 `[data-key="all"]` 这种选择器会落到
+  //    另一个筛选条上（工具没有 index，选到谁是引擎实现细节）。
+  { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'queue-pill',
+    attr: 'data-queue', handler: 'onSwitchQueue' },
+  { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'filter-pill',
+    attr: 'data-case-scope', handler: 'onCaseScope' },
+  { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'filter-pill',
+    attr: 'data-case-kind', handler: 'onCaseKind' },
+  { kind: 'row', file: 'pages/entrust/workbench/workbench.wxml', class: 'list-card',
+    attr: 'data-case-id', value: '{{item.caseId}}' },
   { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-toggle-links',
     value: '1', handler: 'onToggleLinkPick' },
   { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-reopen',
