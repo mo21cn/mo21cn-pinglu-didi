@@ -1512,6 +1512,46 @@ section('⑤ 静态防线')
       JSON.stringify(dtCold.__calls)
     )
 
+    // —— 详情页：槽位引用分流（ENT-030 切片四之五）——
+    // `kind` 由投影层写进 dataset、页面只转发。**真跳一次**才看得出分流对不对：
+    // 静态断言能证明"两个分支都在"，证明不了"点案件走的是 case_id 而不是 artifact_id"。
+    const dtRefCase = makeWx()
+    const dt5 = instantiate(loadEntrustPage(DT, dtRefCase, []))
+    withRuntime(dtRefCase, [{ route: SELF_DT, options: { assignment_id: 'A-1' } }], () =>
+      dt5.onOpenRef({ currentTarget: { dataset: { kind: 'case', id: 12 } } })
+    )
+    check(
+      '详情页：点案件引用 → 进案件页且带 case_id（不是把案件号当成果号读）',
+      dtRefCase.__calls.navigateTo.length === 1 &&
+        dtRefCase.__calls.navigateTo[0].url === '/pages/entrust/case/case?case_id=12',
+      JSON.stringify(dtRefCase.__calls)
+    )
+
+    const dtRefArt = makeWx()
+    const dt6 = instantiate(loadEntrustPage(DT, dtRefArt, []))
+    withRuntime(dtRefArt, [{ route: SELF_DT, options: { assignment_id: 'A-1' } }], () =>
+      dt6.onOpenRef({ currentTarget: { dataset: { kind: 'artifact', id: '7' } } })
+    )
+    check(
+      '详情页：点成果引用 → 进成果页且带 artifact_id（第二片的既有行为不能被改坏）',
+      dtRefArt.__calls.navigateTo.length === 1 &&
+        dtRefArt.__calls.navigateTo[0].url === '/pages/entrust/artifact/artifact?artifact_id=7',
+      JSON.stringify(dtRefArt.__calls)
+    )
+
+    const dtRefUnknown = makeWx()
+    const dt7 = instantiate(loadEntrustPage(DT, dtRefUnknown, []))
+    withRuntime(dtRefUnknown, [{ route: SELF_DT, options: { assignment_id: 'A-1' } }], () =>
+      dt7.onOpenRef({ currentTarget: { dataset: { kind: 'zzz', id: 12 } } })
+    )
+    check(
+      '详情页：未知引用形状**一律不跳**（静默退回成果页会把案件号当成果号读）',
+      dtRefUnknown.__calls.navigateTo.length === 0 &&
+        dtRefUnknown.__calls.redirectTo.length === 0 &&
+        dtRefUnknown.__calls.reLaunch.length === 0,
+      JSON.stringify(dtRefUnknown.__calls)
+    )
+
     // —— 案件详情（UI-08 只读片 / ENT-030 切片四之四）——
     // 这一页的"接线"有两个容易漏的点，都在这里钉住：
     //   ① 它是 `require-params` 深链页，守卫必须在**取数之前**拦下缺参/非法参数；

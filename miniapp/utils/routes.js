@@ -160,13 +160,13 @@ const NAV_EDGES = [
   // ENT-030 切片四之四：案件详情（UI-08）。三条进入边对应 PRD 第 155 行的
   // 「accessible from workbench and chat」—— 委托工作台的「异常与变更」槽、
   // UI-04 组合工作台的异常队列、会话里引用的案件。
-  // 三条都**先声明、后接线**：页面已落地，但入口代码在切片四之五 / 四之六，
-  // 故标 `pending`（有代码证据时**必须**移除该标记，否则 verify_routes.js 报"过期 pending"）。
+  // 三条都**先声明、后接线**：页面先落地，入口代码随后进（四之五 / 四之六 / 会话侧）。
+  // ⚠️ **有代码证据就必须移除 `pending`**，否则 verify_routes.js 报"过期 pending"。
   {
+    // 已接线（切片四之五）：`detail.js` 的 `onOpenRef` 按 `kind === 'case'` 分流到本边。
     from: 'pages/entrust/detail/detail',
     to: 'pages/entrust/case/case',
     strategy: 'push',
-    pending: '切片四之五（槽位引用可点）接入后产生真实调用；当前无代码证据',
     reason: '从委托工作台「异常与变更」槽的案件引用进入案件详情'
   },
   {

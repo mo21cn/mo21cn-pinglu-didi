@@ -334,15 +334,24 @@ function decorateDetail(row) {
  * `taskType` = 该槽位「记录任务」动作的默认任务类型（取值域 = 后端 `tasks.TASK_TYPES`）；
  * 留空即不提供该动作。`taskPick` 表示让用户先选类型 —— `plan_tasks` 本来就是
  * **全单任务总览**，不该替用户假定类型。
+ *
+ * `refKind` = 该槽位 `current.refs` 的**形状**（`REF_PROJECTORS` 的键）。**每个槽位都
+ * 必须显式声明**：没有它取不到引用，而不是"退回成果形状"——见 `REF_PROJECTORS` 上
+ * 的说明。`exceptions` 槽是唯一 `case`，其余是 `artifact`。
  */
 const WORKBENCH_SLOTS = [
-  { key: 'overview', title: '委托概况', taskType: '' },
-  { key: 'plan_tasks', title: '方案与任务', taskType: '', taskPick: true },
-  { key: 'procurement', title: '采购与报价', taskType: 'purchase' },
-  { key: 'customer_contracts', title: '对客方案与合同', taskType: 'contract' },
-  { key: 'execution', title: '履约与交接', taskType: 'execution' },
-  { key: 'exceptions', title: '异常与变更', taskType: '' },
-  { key: 'settlement', title: '费用与结案', taskType: 'settlement' }
+  { key: 'overview', title: '委托概况', taskType: '', refKind: 'artifact' },
+  { key: 'plan_tasks', title: '方案与任务', taskType: '', taskPick: true, refKind: 'artifact' },
+  { key: 'procurement', title: '采购与报价', taskType: 'purchase', refKind: 'artifact' },
+  {
+    key: 'customer_contracts',
+    title: '对客方案与合同',
+    taskType: 'contract',
+    refKind: 'artifact'
+  },
+  { key: 'execution', title: '履约与交接', taskType: 'execution', refKind: 'artifact' },
+  { key: 'exceptions', title: '异常与变更', taskType: '', refKind: 'case' },
+  { key: 'settlement', title: '费用与结案', taskType: 'settlement', refKind: 'artifact' }
 ]
 
 /** 任务类型 → 中文。键必须覆盖后端 `tasks.TASK_TYPES` 全部取值（静态断言守） */
@@ -465,18 +474,89 @@ function _countsText(slot) {
   return parts.join(' · ')
 }
 
+/** 引用里的 ID 缺了就写 `—`：`'#' + undefined` 会渲染成 `#undefined`（未知被装扮成已知） */
+function _refId(id) {
+  return id === null || id === undefined || id === '' ? '—' : id
+}
+
+/** 只连接有的项 —— 缺一项就少一个分隔符，不留 `a ·  · b` 这种悬空分隔符 */
+function _joinParts(parts) {
+  return parts
+    .filter(function (p) {
+      return p !== null && p !== undefined && p !== ''
+    })
+    .join(' · ')
+}
+
 /** 成果精确版本引用（PRD 第 187 行：对话与工作台引用**同一** artifact ID 与版本） */
 function _artifactRefs(slot) {
   const current = slot.current || {}
   return (current.refs || []).map(function (ref) {
     const version = ref.revision_no === null || ref.revision_no === undefined ? '—' : ref.revision_no
     return {
-      artifactId: ref.artifact_id,
-      label: ref.label || ref.artifact_type,
-      revisionNo: ref.revision_no,
-      text: (ref.label || ref.artifact_type) + ' · v' + version
+      kind: 'artifact',
+      id: ref.artifact_id,
+      cls: '',
+      // 整行文案在投影层拼好，模板只做 `{{rf.text}}`：
+      // 「模板只做 wx:for，不做表达式」是这一层的既有约定，好处是未知值
+      // （缺 ID / 缺版本）的处理只有一处，不在 wxml 里判第二次。
+      text: _joinParts([
+        '成果 #' + _refId(ref.artifact_id),
+        ref.label || ref.artifact_type,
+        'v' + version
+      ])
     }
   })
+}
+
+/**
+ * 案件引用（UI-05 `exceptions` 槽；DR-0014 §3.3 的 `CaseRef`）。
+ *
+ * **必须是独立的一个投影器**，不能与 `_artifactRefs` 合一：
+ *
+ *   · 键不同 —— 案件是 `case_id` / `title` / `kind` / `status` / `blocking`；
+ *   · **没有「第几版」** —— 案件的 `revision_no` 是乐观锁版本号，不是"看哪一版"。
+ *     把两个形状喂给同一个映射，会在某次改动里静默错位，症状是槽位渲染出
+ *     `undefined · v—`，且 `data-id` 为空、**点了没反应**；
+ *   · 深链参数也不同（成果页要 `artifact_id`、案件页要 `case_id`）。
+ *
+ * 阻断标记写进文案而不是只给一个类名：它是"为什么要现在看这宗案子"的答案，
+ * 只在样式里表达（颜色）会让不点进去的人永远不知道。
+ */
+function _caseRefs(slot) {
+  const current = slot.current || {}
+  return (current.refs || []).map(function (ref) {
+    return {
+      kind: 'case',
+      id: ref.case_id,
+      cls: ref.blocking ? 'slot-ref-block' : '',
+      text: _joinParts([
+        '案件 #' + _refId(ref.case_id),
+        ref.title,
+        CASE_KIND_LABELS[ref.kind],
+        CASE_STATUS_LABELS[ref.status],
+        ref.blocking ? '阻断执行' : ''
+      ])
+    }
+  })
+}
+
+/**
+ * 槽位引用投影器表 —— `decorateSlot` 按槽位配置的 `refKind` 取，**不靠猜字段**。
+ *
+ * 后端 `current.refs` 是联合类型（`WorkbenchArtifactRef | CaseRef`，`schemas.py`）。
+ * 取不到投影器时给空数组**而不是退回成果形状**：退回就是把"这个槽位的引用格式
+ * 还没对齐"装扮成"这个槽位没有引用"，而后者是一句业务结论。
+ */
+const REF_PROJECTORS = {
+  artifact: _artifactRefs,
+  case: _caseRefs
+}
+
+/** 按槽位配置取引用投影器；未知 `refKind` 给空数组（理由见 `REF_PROJECTORS` 注释） */
+function _refsFor(config, slot) {
+  const project = REF_PROJECTORS[config.refKind]
+  return typeof project === 'function' ? project(slot) : []
 }
 
 /**
@@ -528,7 +608,7 @@ function decorateSlot(config, raw) {
       }
     }),
     countsText: _countsText(slot),
-    refs: _artifactRefs(slot),
+    refs: _refsFor(config, slot),
     canRecordTask: !!(config.taskType || config.taskPick),
     actionLabel: config.taskPick ? '新建任务' : config.taskType ? '记录任务' : ''
   }
@@ -1467,6 +1547,7 @@ module.exports = {
   ISSUE_KIND_LABELS,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
+  REF_PROJECTORS,
   REVISION_ROLE,
   REVISION_SOURCE_LABELS,
   SLOT_EMPTY_TEXT,

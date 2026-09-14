@@ -157,6 +157,13 @@
   color: #3B5BDB;
 }
 
+/* 阻断执行的案件引用（ENT-030 切片四之五）：颜色是**第二重**信号。
+   文案里已经写明"阻断执行"——只靠颜色的话，截图里的红字说不清红在哪，
+   而色觉差异的用户会完全看不到这条信息。 */
+.slot-ref-block {
+  color: #FA5252;
+}
+
 .slot-counts {
   padding-top: 12rpx;
   font-size: 23rpx;

@@ -23,10 +23,11 @@ R1 端点集合（DR-0013 §7.1「人工处置端点」）：
 * 非参与方 **404** 不泄漏存在性（`authz` 抛的就是 404）；作用域不一致 **403**；
 * 本 router 不触碰 `current_role`，权限全部走叠加层（ENT-003 / `authz.py`）。
 
-**已落地**（切片三之三 / 三之四）：工作台 `exceptions` 槽的真实投影，以及
-`complete_task` 的阻断门禁 —— 后者与结案检查共用 `exceptions.is_blocking` **一个**判据。
-本提交在此之上补**组织级视图**（`view=org`，DR-0014 §3.1）；案件详情的 `capabilities`
-与 UI-05 槽的 `case_refs` 随后落地，**当前尚不存在**，不要照本文件的 description 去调。
+**已落地**（切片三之三 / 三之四 / 切片四）：工作台 `exceptions` 槽的真实投影
+（`CaseRef`）、`complete_task` 的阻断门禁（与结案检查共用 `exceptions.is_blocking`
+**一个**判据）、组织级视图（`view=org`，DR-0014 §3.1）、案件详情的 `capabilities`
+与工作台槽位的 `case_refs`（DR-0014 §3.3–3.4）。前端侧的案件详情页（UI-08）与
+槽位引用分流（UI-05）同批接入。
 """
 
 from __future__ import annotations

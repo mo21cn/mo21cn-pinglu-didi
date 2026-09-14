@@ -891,8 +891,10 @@ check(
   /bindtap="onRecordTask"/.test(dtWxml) && /data-task="\{\{item\.taskType\}\}"/.test(dtWxml)
 )
 check(
-  '[模板] 成果精确版本（artifact_id + 版本）在槽位里显示出来',
-  /rf\.artifactId/.test(dtWxml) && /rf\.text/.test(dtWxml)
+  // 「精确 ID + 版本」由投影层拼进 `text`（§11 按字符串逐字断言），
+  // 模板侧只需渲染 `text` 并把 `id` 交给 dataset —— 两处各守一半。
+  '[模板] 槽位引用渲染投影层给的一行文案与 id（模板不自己拼 "成果 #… · v…"）',
+  /\{\{rf\.text\}\}/.test(dtWxml) && /data-id="\{\{rf\.id\}\}"/.test(dtWxml)
 )
 check(
   '[模板] 未决明细渲染类别徽标与描述（不只是把一句话贴上去）',
@@ -1389,9 +1391,10 @@ check(
   /dirty/.test(artJs) && /放弃未保存的编辑/.test(artJs)
 )
 check(
-  '[接线] 详情页槽位可点进成果页，且带的是这一条的 artifact_id',
-  /onOpenArtifact\(/.test(dtJs) && /onOpenArtifact/.test(dtWxml) &&
-    /data-id="\{\{rf\.artifactId\}\}"/.test(dtWxml) &&
+  '[接线] 详情页槽位引用可点，且带的是这一条的 ID 与形状（dataset 由投影层给）',
+  /onOpenRef\(/.test(dtJs) && /onOpenRef/.test(dtWxml) &&
+    /data-id="\{\{rf\.id\}\}"/.test(dtWxml) &&
+    /data-kind="\{\{rf\.kind\}\}"/.test(dtWxml) &&
     /artifact_id=/.test(dtJs)
 )
 
@@ -1775,6 +1778,134 @@ check(
 check(
   '[模板] 阻断后果单独成行（徽标说"是什么"，这句说"会怎样"）',
   /detail\.blocking/.test(casePageWxml)
+)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §11 槽位引用可点（UI-05）—— 成果与案件是**两个形状**，按槽位配置分流
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// 这一节来自一个**真会静默发生**的缺陷：`exceptions` 槽的 `refs` 是 `CaseRef`
+// （键是 `case_id` / `title` / `kind` / `status` / `blocking`），而投影层早先只认
+// `WorkbenchArtifactRef` 的 `artifact_id`。该槽一旦有案件就会渲染成 `undefined · v—`、
+// `data-id` 为空、点了没反应 —— 而演示数据里**没有案件**，于是端到端一路绿。
+// 所以这一节按**键名**断言，不按"看起来对"断言。
+
+const slotRefKeys = Object.keys(E.REF_PROJECTORS || {})
+const slotRefKinds = (E.WORKBENCH_SLOTS || []).map(function (s) {
+  return s.key + '=' + s.refKind
+})
+check(
+  '[槽位] 每个槽位都声明了 refKind，且取值都有对应的投影器（没声明=取不到引用）',
+  slotRefKinds.length === 7 &&
+    (E.WORKBENCH_SLOTS || []).every(function (s) {
+      return slotRefKeys.indexOf(s.refKind) !== -1
+    }),
+  JSON.stringify(slotRefKinds)
+)
+check(
+  '[槽位] `exceptions` 是唯一案件槽，其余槽位的引用形状是成果',
+  (E.WORKBENCH_SLOTS || [])
+    .filter(function (s) {
+      return s.refKind === 'case'
+    })
+    .map(function (s) {
+      return s.key
+    })
+    .join(',') === 'exceptions'
+)
+
+const REF_OVERVIEW_CFG = { key: 'overview', title: '委托概况', refKind: 'artifact' }
+const REF_EXCEPTIONS_CFG = { key: 'exceptions', title: '异常与变更', refKind: 'case' }
+const refSlot = function (cfg, refs) {
+  return E.decorateSlot(cfg, { available: true, current: { refs: refs }, issues: {}, counts: {} })
+}
+
+const refArtSlot = refSlot(REF_OVERVIEW_CFG, [
+  { artifact_id: 7, artifact_type: 'document', label: '报关单', revision_no: 3 }
+])
+check(
+  '[引用] 成果槽读 `artifact_id` + `revision_no`，整行文案由投影层拼好',
+  refArtSlot.refs.length === 1 &&
+    refArtSlot.refs[0].kind === 'artifact' &&
+    refArtSlot.refs[0].id === 7 &&
+    refArtSlot.refs[0].text === '成果 #7 · 报关单 · v3',
+  JSON.stringify(refArtSlot.refs)
+)
+
+const refCaseSlot = refSlot(REF_EXCEPTIONS_CFG, [
+  { case_id: 12, kind: 'exception', title: '原船主机故障', status: 'open', blocking: true }
+])
+check(
+  '[引用] 案件槽读 `case_id`（**不是** `artifact_id`），阻断与否写进文案',
+  refCaseSlot.refs.length === 1 &&
+    refCaseSlot.refs[0].kind === 'case' &&
+    refCaseSlot.refs[0].id === 12 &&
+    refCaseSlot.refs[0].text === '案件 #12 · 原船主机故障 · 异常 · 待处理 · 阻断执行',
+  JSON.stringify(refCaseSlot.refs)
+)
+check(
+  '[引用] 未阻断的案件不带"阻断执行"（这条说法不能成为固定后缀）',
+  refSlot(REF_EXCEPTIONS_CFG, [{ case_id: 13, kind: 'change_request', status: 'open' }]).refs[0]
+    .text === '案件 #13 · 变更请求 · 待处理'
+)
+check(
+  '[引用] 两个形状不混装：案件形状喂成果槽不会产出"案件 #"，反之亦然',
+  refSlot(REF_OVERVIEW_CFG, [{ case_id: 12, title: 'X' }]).refs[0].text.indexOf('案件 #') ===
+    -1 &&
+    refSlot(REF_EXCEPTIONS_CFG, [{ artifact_id: 7, label: '报关单' }]).refs[0].text.indexOf(
+      '成果 #'
+    ) === -1
+)
+check(
+  '[引用] 缺 ID / 缺标题时**不产出** `#undefined`（未知不装扮成已知）',
+  refSlot(REF_EXCEPTIONS_CFG, [{}]).refs[0].text.indexOf('undefined') === -1 &&
+    refSlot(REF_OVERVIEW_CFG, [{}]).refs[0].text.indexOf('undefined') === -1,
+  JSON.stringify(refSlot(REF_EXCEPTIONS_CFG, [{}]).refs)
+)
+check(
+  '[引用] `refKind` 未知时给空数组，**不退回成果形状**' +
+    '（退回就是把"两侧格式没对齐"说成"这个槽位没有引用"）',
+  E.decorateSlot(
+    { key: 'x', title: 'X', refKind: 'nope' },
+    { available: true, current: { refs: [{ artifact_id: 1 }] }, issues: {}, counts: {} }
+  ).refs.length === 0
+)
+check(
+  '[引用] 槽位未开放时不给引用（"本期未开放"与"没有引用"是两件事，不叠在一张卡上）',
+  E.decorateSlot(REF_EXCEPTIONS_CFG, { available: false, current: { refs: [{ case_id: 1 }] } })
+    .refs.length === 0
+)
+
+// 样式：投影层算出的类必须真的有定义（模板里 `class="… {{rf.cls}}"` 静态扫不到）
+const refClasses = new Set([
+  ...appClasses,
+  ...cssClasses(read(path.join(MINI, 'pages/entrust/detail/detail.wxss')))
+])
+;[refArtSlot, refCaseSlot].forEach(function (s) {
+  ;(s.refs || []).forEach(function (rf) {
+    ;(rf.cls || '')
+      .split(/\s+/)
+      .forEach(function (c) {
+        if (c) check(`[样式] 槽位引用投影产出的类 .${c} 有定义`, refClasses.has(c))
+      })
+  })
+})
+
+check(
+  '[模板] 引用行的文案只有一份（模板不拼"成果 #/案件 #"，只渲染投影层给的 text）',
+  !/成果 #/.test(dtWxml) && !/案件 #/.test(dtWxml) && /\{\{rf\.text\}\}/.test(dtWxml)
+)
+check(
+  '[接线] 详情页按 dataset 的 kind 分流：案件进案件页、成果进成果页',
+  /if \(ds\.kind === 'case'\)/.test(dtJs) &&
+    /case_id=/.test(dtJs) &&
+    /if \(ds\.kind === 'artifact'\)/.test(dtJs)
+)
+check(
+  '[接线] 两个分支各自提前返回，未知 kind 自然落空（不用 else 兜底）',
+  /if \(ds\.kind === 'case'\)[\s\S]{0,260}?return[\s\S]{0,120}?if \(ds\.kind === 'artifact'\)/.test(
+    dtJs
+  )
 )
 
 // ---- 输出 ----
