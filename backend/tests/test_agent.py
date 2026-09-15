@@ -106,6 +106,180 @@ def test_cargo_parse_llm_failure_degrades(shipper, client, monkeypatch):
     assert "稍后重试" in resp.json()["detail"]
 
 
+async def test_llm_402_is_quota_not_bad_request(monkeypatch):
+    """HTTP 402（余额/配额耗尽）必须单独成 `quota` 类。
+
+    2026-09-16 H7a 首跑实测撞到：MiniMax 余额不足返回
+    `{"type":"insufficient_balance_error"}` + 402，被落进通用的 `bad_request`。
+    报出来就变成「请求被拒绝」—— 掩盖了「该充值」这个**真正要做的动作**。
+    """
+    import httpx
+
+    from app.core.config import get_settings
+    from app.modules.agent import llm as llm_gw
+
+    class _StubClient:
+        """只用来回一个 402；不发起任何真实网络请求。"""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return
+
+        async def __aenter__(self) -> _StubClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+        async def post(self, url: str, **kwargs: object) -> httpx.Response:
+            return httpx.Response(402, json={"error": {"message": "insufficient balance (1008)"}})
+
+    monkeypatch.setattr(llm_gw.httpx, "AsyncClient", _StubClient)
+    monkeypatch.setattr(get_settings(), "LLM_MOCK", False)
+    monkeypatch.setattr(get_settings(), "LLM_API_KEY", "test-key")
+
+    with pytest.raises(LLMError) as excinfo:
+        await llm_gw.chat_json(system="s", user="u")
+    assert excinfo.value.kind == "quota"
+
+
+def _stub_llm_once(monkeypatch, content: object):
+    """把网关的 httpx 客户端换成一个只回一条 `content` 的桩（不发真实请求）。
+
+    夹具的 `content` 直接照录自 2026-09-16 对 MiniMax-M2.7 的真实响应体 ——
+    推理模型的坑只有拿真实形态才复现得出来（自造一个 `<think>` 字符串
+    很容易造出跟线上不一样的形态，那样测试就变成自证）。
+    """
+    import httpx
+
+    from app.core.config import get_settings
+    from app.modules.agent import llm as llm_gw
+
+    class _StubClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return
+
+        async def __aenter__(self) -> _StubClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+        async def post(self, url: str, **kwargs: object) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"role": "assistant", "content": content}}],
+                    "usage": {"prompt_tokens": 68, "completion_tokens": 671},
+                },
+            )
+
+    monkeypatch.setattr(llm_gw.httpx, "AsyncClient", _StubClient)
+    monkeypatch.setattr(get_settings(), "LLM_MOCK", False)
+    monkeypatch.setattr(get_settings(), "LLM_API_KEY", "test-key")
+    return llm_gw
+
+
+async def test_llm_reasoning_model_inline_think_is_parsed(monkeypatch):
+    """推理模型把思维链内联在 `content` 里时，仍要解析出 JSON。
+
+    2026-09-16：H7a 首跑 24 次**全部** `bad_response`，一条可评分结果都没有。
+    探针照录响应体后看清 —— MiniMax-M2.7 把 `<think>…</think>` 写在 `content` 开头，
+    答案跟在其后，且 `response_format` 被无视；整段 `json.loads` 必然在 char 0 崩。
+    """
+    payload = (
+        "<think>The user asks to extract fields. Thus final.\n</think>\n\n\n"
+        '{"cargo_name": "水泥", "weight_t": 3000}'
+    )
+    llm_gw = _stub_llm_once(monkeypatch, payload)
+
+    result = await llm_gw.chat_json(system="s", user="u")
+
+    assert result.content == {"cargo_name": "水泥", "weight_t": 3000}
+    # raw 是**答案**，不是思维链 —— 否则 response_digest 会退化成几千字推理
+    assert result.raw == '{"cargo_name": "水泥", "weight_t": 3000}'
+    # 推理链另存，不丢（"事实有来源"）
+    assert result.reasoning == "The user asks to extract fields. Thus final."
+    assert result.mocked is False
+
+
+async def test_llm_plain_json_is_untouched_by_reasoning_strip(monkeypatch):
+    """非推理模型（content 本来就是纯 JSON）不受剥离逻辑影响，`reasoning` 为空。"""
+    llm_gw = _stub_llm_once(monkeypatch, '{"cargo_type": "bulk"}')
+
+    result = await llm_gw.chat_json(system="s", user="u")
+
+    assert result.content == {"cargo_type": "bulk"}
+    assert result.raw == '{"cargo_type": "bulk"}'
+    assert result.reasoning == ""
+
+
+async def test_llm_fenced_json_after_reasoning_is_parsed(monkeypatch):
+    """推理块之后是 markdown 围栏里的 JSON —— 也要解析出来。
+
+    夹具照录 2026-09-16 重跑 H7a 时 S10 的真实响应体（`_s10_body.json`）：
+    同一份货源解析提示词（`service.build_cargo_prompt()`）、同一句话，模型**有时**给裸 JSON、**有时**给
+    `</think>` + ```` ```json ```` 围栏 —— 所以这不是理论边界情况。
+    当时"没观测到就不做兜底"的判断，就是被这一条打回来的。
+    """
+    payload = (
+        "<think>上海和广州都不在 13 个枚举里，两个港口都置 null。\n</think>\n\n\n"
+        "```json\n"
+        "{\n"
+        '  "cargo_name": "瓷砖",\n'
+        '  "origin_port": null,\n'
+        '  "dest_port": null,\n'
+        '  "expect_date": "2026-10-09"\n'
+        "}\n"
+        "```"
+    )
+    llm_gw = _stub_llm_once(monkeypatch, payload)
+
+    result = await llm_gw.chat_json(system="s", user="u")
+
+    assert result.content["cargo_name"] == "瓷砖"
+    assert result.content["origin_port"] is None
+    # raw 取"真被解析的那段"，围栏与推理块都不含在内
+    assert result.raw.startswith('{\n  "cargo_name"')
+    assert "```" not in result.raw
+    assert "上海和广州都不在" in result.reasoning
+
+
+async def test_llm_json_object_inside_prose_is_recovered(monkeypatch):
+    """答案前后夹了客套话 ⇒ 取其中第一个完整的顶层对象。"""
+    llm_gw = _stub_llm_once(monkeypatch, '好的，结果如下：\n{"weight_t": 30}\n以上。')
+
+    result = await llm_gw.chat_json(system="s", user="u")
+
+    assert result.content == {"weight_t": 30}
+    assert result.raw == '{"weight_t": 30}'
+
+
+async def test_llm_unclosed_think_fails_loudly_with_content_head(monkeypatch):
+    """没闭合的推理块 ⇒ 必须报 `bad_response`，**且把 content 开头带出来**。
+
+    这是"不静默吞错"的具体要求：早先那条错误信息只有"无法解析为 JSON"，
+    逼得人另写探针才定位到根因（H7a 首跑就是这么绕过去的）。
+    """
+    llm_gw = _stub_llm_once(monkeypatch, "<think>我还在想，先不回答")
+
+    with pytest.raises(LLMError) as excinfo:
+        await llm_gw.chat_json(system="s", user="u")
+
+    assert excinfo.value.kind == "bad_response"
+    assert "<think>我还在想" in str(excinfo.value)
+
+
+async def test_llm_json_array_is_rejected_as_not_object(monkeypatch):
+    """能解析但不是对象 ⇒ 单独一句"不是对象"，不与"解析失败"混为一谈。"""
+    llm_gw = _stub_llm_once(monkeypatch, "[1, 2, 3]")
+
+    with pytest.raises(LLMError) as excinfo:
+        await llm_gw.chat_json(system="s", user="u")
+
+    assert excinfo.value.kind == "bad_response"
+    assert "不是对象" in str(excinfo.value)
+
+
 # ---------- F10 客服导购 ----------
 
 
@@ -175,6 +349,68 @@ def test_audit_row_written_on_success_and_failure():
     assert ok_row.latency_ms >= 0
     assert fail_row.success is False
     assert fail_row.error_kind == "network"
+
+
+# 星期几的中文写法，**在测试里独立写一份**：若直接引用实现里的常量，
+# 表本身写错了（比如周日起算）这条测试就抓不到。
+_WEEKDAY_CN = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+
+
+def test_build_cargo_prompt_renders_placeholders_not_frozen_at_import():
+    """提示词渲染：占位符被真实日期/星期替掉，且随传入日期变化。
+
+    模板正文含字面 `{}`（JSON 示例）⇒ 只能用 `str.replace`。
+    这条同时锁住"不是 import 期渲染"：长驻服务跨零点后，冻结的日期就是错的。
+    """
+    from datetime import date as _date
+
+    p = service.build_cargo_prompt(_date(2026, 9, 16))  # 2026-09-16 是星期三
+    assert "2026-09-16" in p
+    assert "星期三" in p
+    assert "{today}" not in p and "{weekday}" not in p
+    # 模板里的 JSON 示例未被 str.format 之类的操作吃掉
+    assert '"cargo_name"' in p and '"field_confidence"' in p
+    # 不同日期渲染出不同提示词（防"import 期冻死"回归）
+    assert service.build_cargo_prompt(_date(2026, 1, 1)) != p
+
+
+def test_cargo_parse_sends_prompt_that_carries_today(monkeypatch):
+    """真正发给模型的那一份提示词必须携带基准日期。
+
+    2026-09-16 H7a 实测暴露的**提示词缺陷**（不是模型质量问题）：提示词写着
+    「口语'下周三'等按今天推算」，本身却**不含任何日期** ——
+    模型缺一个它无法推断的输入，只能瞎猜年份：`expect_date` 准确率 4/24 = 17%，
+    且错年份时 `field_confidence` 仍报 1.0 ⇒ 置信度校准被拖到 −0.167。
+
+    ⚠️ 断言放在**网关收到的那一份**上，而不是只测 `build_cargo_prompt()`：
+    否则有人绕过渲染入口直接把模板发给模型，测试照样绿。
+    """
+    from datetime import date as _date
+
+    from app.modules.agent.llm import LLMResult
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+
+    seen: dict[str, str] = {}
+
+    async def _capture(*, system: str, user: str, **kwargs: object) -> LLMResult:
+        seen["system"] = system
+        return LLMResult(content={"cargo_name": "水泥"}, raw="{}", latency_ms=0, mocked=False)
+
+    monkeypatch.setattr(service.llm_gateway, "chat_json", _capture)
+    asyncio.run(service.parse_cargo(db, user_id=1, text="下周三装水泥从南宁到贵港"))
+
+    today = _date.today()
+    prompt = seen["system"]
+    assert today.isoformat() in prompt, "提示词没告诉模型今天几号 ⇒ 相对日期只能瞎猜年份"
+    assert _WEEKDAY_CN[today.weekday()] in prompt, "只说日期不够：算'下周三'要知道今天星期几"
+    assert "{today}" not in prompt and "{weekday}" not in prompt
     db.close()
 
 

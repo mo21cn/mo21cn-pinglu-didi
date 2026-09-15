@@ -34,6 +34,24 @@ def force_wechat_mock(monkeypatch):
     monkeypatch.setattr(get_settings(), "WECHAT_MOCK", True)
 
 
+@pytest.fixture(autouse=True)
+def force_llm_mock(monkeypatch):
+    """所有用例强制 LLM 规则模板模式（与 `force_wechat_mock` 同理，同一类污染）。
+
+    `.env.local` 是本机敏感值、**优先级最高**：本机一旦为调试真实模型填上
+    `LLM_MOCK=false` + Key，所有经过 Agent 的用例就会真的发起网络请求 ——
+    表现为「本地一片红、CI 全绿」，而红的原因与被测代码无关（2026-09-16 实测：
+    H7a 配完 Key 后 `test_claim_next_consumes_attempt_and_execute_succeeds`
+    由 succeeded 变 failed，真因是本机改了配置，不是并发守卫写错）。
+
+    需要验证真实链路的用例，自行在函数内再 monkeypatch 覆盖（见 test_agent.py
+    的 402 → `quota` 分类那条）。
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "LLM_MOCK", True)
+
+
 @pytest.fixture()
 def client(monkeypatch):
     """每个测试用独立的 SQLite 内存库 + TestClient。"""

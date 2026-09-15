@@ -37,7 +37,15 @@ from app.modules.cargo.schemas import PORT_CODES
 
 _DIGEST_LEN = 512
 
-SYSTEM_PROMPT = """你是平陆运河"滴滴打船"平台的货源解析助手。任务：把货主的口语化描述解析为结构化货源草稿。
+#: 货源解析系统提示词的**模板**（不是可直接发送的成品）。
+#: ⚠️ 正文里有字面 `{}`（输出格式示例）⇒ 只能用 `str.replace` 填槽，**禁用 `str.format`**。
+#: ⚠️ 必须**每次调用时渲染**，不能 import 时渲染：服务是长驻进程，
+#:    import 期冻结的"今天"跨零点就是错的。
+#: 渲染入口只有一个：`build_cargo_prompt()`。别把这个常量直接丢给模型。
+_CARGO_PROMPT_TEMPLATE = """你是平陆运河"滴滴打船"平台的货源解析助手。任务：把货主的口语化描述解析为结构化货源草稿。
+
+今天是 {today}（{weekday}）。凡口语日期（"明天""下周三""这个月底"）一律**以今天为基准**
+折算成完整的 "YYYY-MM-DD" 再输出；折算不出来的置 null，**不要编造年份**。
 
 输出严格 JSON 对象，字段如下（信息缺失时置 null，不要编造）：
 {
@@ -46,7 +54,7 @@ SYSTEM_PROMPT = """你是平陆运河"滴滴打船"平台的货源解析助手�
   "weight_t": number|null,        // 重量（吨）
   "origin_port": string|null,    // 起运港代码，只能是: NNG/GGU/WUZ/BIN/LZH/BSZ/CHZ/GXL/HEZ/YUL/QNZ/FCG/BHZ
   "dest_port": string|null,      // 目的港代码，同上
-  "expect_date": string|null,    // 期望装货日期 "YYYY-MM-DD"（口语"下周三"等按今天推算）
+  "expect_date": string|null,    // 期望装货日期 "YYYY-MM-DD"（口语"下周三"等按上面给出的今天推算）
   "offer_price": number|null,    // 运费出价（元；"2万5"→25000）
   "field_confidence": {           // 每个字段的置信度 0-1
     "cargo_name": number, "cargo_type": number, "weight_t": number,
@@ -57,8 +65,32 @@ SYSTEM_PROMPT = """你是平陆运河"滴滴打船"平台的货源解析助手�
 规则：
 1. 港口用"城市名→代码"映射：南宁→NNG、贵港→GGU、梧州→WUZ、来宾→BIN、柳州→LZH、百色→BSZ、
    崇左→CHZ、桂林→GXL、贺州→HEZ、玉林→YUL、钦州→QNZ、防城港→FCG、北海→BHZ。
-2. 只输出 JSON，不要任何其他文字。
+2. 日期先按「今天」折算成绝对日期（YYYY-MM-DD）再输出，禁止输出「下周三」这类相对词。
+3. 只输出 JSON，不要任何其他文字。
 """
+
+
+#: 星期几的中文写法，按下标与 `date.weekday()` 对齐（周一=0）。
+_WEEKDAY_CN = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+
+
+def build_cargo_prompt(today: date | None = None) -> str:
+    """渲染货源解析提示词 —— 把「今天」显式告诉模型。
+
+    2026-09-16 H7a 实测暴露的**提示词缺陷**（不是模型质量问题）：原提示词是一个
+    **不含任何日期的模块常量**，却写着「口语"下周三"等按今天推算」——
+    模型缺一个它无法推断的输入，只能瞎猜年份：`expect_date` 准确率仅 **4/24 = 17%**，
+    且模型给错年份时 `field_confidence` 仍报 1.0 ⇒ 置信度校准被拖到 **−0.167**。
+
+    ⚠️ 一般化：凡是要求「以当下为基准」推理的提示词，都必须把当下**显式注入**。
+    模型答不对之前，先检查我们有没有把它推不出来的东西当成它该知道的。
+
+    ⚠️ 用 `str.replace` 而非 `str.format`：模板正文含字面 `{}`（JSON 示例）。
+    """
+    d = today or date.today()
+    return _CARGO_PROMPT_TEMPLATE.replace("{today}", d.isoformat()).replace(
+        "{weekday}", _WEEKDAY_CN[d.weekday()]
+    )
 
 
 class AgentServiceError(Exception):
@@ -99,7 +131,7 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
     )
 
     try:
-        result = await llm_gateway.chat_json(system=SYSTEM_PROMPT, user=text)
+        result = await llm_gateway.chat_json(system=build_cargo_prompt(today), user=text)
     except LLMError as exc:
         record.success = False
         record.error_kind = exc.kind
