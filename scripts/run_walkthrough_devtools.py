@@ -32,6 +32,15 @@
 它偶发回 `CONNECT_ERROR`，而**同一时刻** `open_project_window` / `page_stack` 都正常。
 ⇒ 判据是「**能开窗 + `pageStack` 非空**」，且**要轮询**（实测前几次可能为空）。
 
+**④ 闸门的"轮询"必须带*墙钟预算*，单次探测必须*收窄超时*。**
+客户端默认超时是 150s；早先闸门按**次数**轮询（24 次）× 每次最多两调
+⇒ 一轮最坏 ≈ `24 × 2 × 150s = 120 分钟`。实测一次 `--section 8,8b --pay`：
+**18 次探测烧掉 56 分钟**、页面栈全程为空，而日志只有一行行 `pageStack=[]`
+（**不打印耗时 ⇒ 完全看不出慢在哪**），于是被读成"卡死 / 网络抖动"。
+⇒ 现改为 `GATE_PROBE_S=45`（单次）+ `GATE_BUDGET_S=240`（总预算），
+并打印真实耗时、单次调用耗时、进程数与**回执**：`ok=true` 且栈空 = 窗口没进小程序页；
+`ok=false` = 通道/授权问题 —— **两者处置不同，不能只看空列表**。
+
 用法
 ----
     python scripts/run_walkthrough_devtools.py --section all
@@ -201,26 +210,65 @@ def start_ide(env: Env, wait_s: int = 60):
     return None
 
 
-def wait_ready(env: Env, tries: int = 24) -> bool:
-    """就绪判据：**能开窗 + `pageStack` 非空**，且轮询（见 docstring 坑 ③）。"""
+#: 就绪闸门：**单次探测**超时与**总预算**（秒）。
+#: ⚠️ 都别沿用客户端默认的 150s —— 见 `wait_ready` 的 docstring（实测 18 次探测烧掉 56 分钟）。
+GATE_PROBE_S = 45
+GATE_BUDGET_S = 240
+
+
+def _brief(obj: object) -> str:
+    """把回执压成一行关键信息（`ok` / `errorType` / 截断原文），供日志打印原因。"""
+    if not isinstance(obj, dict):
+        return str(obj)[:140]
+    bits = [f"ok={obj.get('ok')}"]
+    for key in ("errorType", "error", "message"):
+        if obj.get(key):
+            bits.append(f"{key}={str(obj[key])[:70]}")
+    if obj.get("__raw__"):
+        bits.append(f"raw={str(obj['__raw__'])[:90]}")
+    return " ".join(bits)
+
+
+def wait_ready(
+    env: Env,
+    budget_s: int = GATE_BUDGET_S,
+    probe_s: int = GATE_PROBE_S,
+) -> bool:
+    """就绪判据：**能开窗 + `pageStack` 非空**，且轮询（见 docstring 坑 ③）。
+
+    ⚠️ 2026-09-15 实测：早先按**次数**轮询（`tries=24`）且每次调用都吃满默认 150s 超时
+    ⇒ 一轮闸门最坏 `24 × 2 × 150s ≈ 120 分钟`。实际一次 `--section 8,8b --pay`
+    里 **18 次探测耗掉 56 分钟**、页面栈**全程为空**：日志只有一行行 `pageStack=[]`，
+    **耗时不写进去 ⇒ 完全看不出"慢在哪"**，于是被读成"卡死 / 网络抖动"。
+
+    ⇒ 改成**按墙钟预算**轮询 + **收窄单次探测超时**，并打印三件事：
+    真实耗时、单次调用耗时、以及**回执原文**（`ok` / `errorType`）—— 让"为什么空"可见。
+    `pageStack=[]` 且 `ok=true`（窗口没进小程序页）与 `ok=false`（通道/授权问题）
+    处置完全不同，**不能只看空列表**。
+    """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from wechatide_client import Client  # noqa: PLC0415
 
-    client = Client(project=str(env.miniapp), timeout=90)
-    for k in range(tries):
-        try:
-            client.open_window()
-        except Exception as exc:  # noqa: BLE001
-            log(f"    [{k * 5}s] open_window 异常: {str(exc)[:110]}")
-        try:
-            stack = client.page_stack()
-        except Exception as exc:  # noqa: BLE001
-            log(f"    [{k * 5}s] page_stack 异常: {str(exc)[:110]}")
-            stack = []
-        log(f"    [{k * 5}s] pageStack={str(stack)[:160]}")
+    client = Client(project=str(env.miniapp), timeout=probe_s)
+    t0 = time.time()
+    last: dict = {}
+    while time.time() - t0 < budget_s:
+        t1 = time.time()
+        win = client.open_window(timeout=probe_s)
+        t2 = time.time()
+        stack, receipt = client.page_stack_probe(timeout=probe_s)
+        t3 = time.time()
+        last = receipt or {}
+        hit = receipt if not receipt.get("ok") else win
+        log(
+            f"    [{t3 - t0:6.1f}s] pageStack={str(stack)[:110]}"
+            f"  (开窗 {t2 - t1:5.1f}s / 取栈 {t3 - t2:5.1f}s / IDE {len(ide_procs())} 个)"
+            f"  回执 {_brief(hit)}"
+        )
         if stack:
             return True
-        time.sleep(5)
+        time.sleep(3)
+    log(f"    ✗ 闸门预算 {budget_s}s 用尽，页面栈仍为空。最后回执：{_brief(last)}")
     return False
 
 

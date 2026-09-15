@@ -240,14 +240,29 @@ class Client:
         return j
 
     # -------------------------------------------------------------- 窗口/导航
-    def open_window(self) -> dict:
-        """打开（或复用）项目窗口；后续所有页面工具都依赖它。"""
-        return self.call_json("open_project_window", "--project", self.project)
+    def open_window(self, timeout: int | None = None) -> dict:
+        """打开（或复用）项目窗口；后续所有页面工具都依赖它。
 
-    def page_stack(self) -> list:
+        ⚠️ `timeout` 可**按调用点收窄**：就绪闸门里必须给一个小的值 —— 每次探测都用
+        默认 150s 会让"一轮闸门"变成几十次 × 数分钟，实测出现过 **18 次探测耗掉 56 分钟**
+        且日志看起来"像卡死"（见 `run_walkthrough_devtools.py::wait_ready`）。
+        """
+        return self.call_json("open_project_window", "--project", self.project, timeout=timeout)
+
+    def page_stack(self, timeout: int | None = None) -> list:
         """当前页面栈。`--action currentPage` 在本版本会报错，故一律用 pageStack。"""
-        j = self.tool("automation_runtime_info", "--action", "pageStack")
+        j = self.tool("automation_runtime_info", "--action", "pageStack", timeout=timeout)
         return list(j.get("result", {}).get("pageStack") or [])
+
+    def page_stack_probe(self, timeout: int | None = None) -> tuple[list, dict]:
+        """页面栈 + **原始回执**。
+
+        就绪闸门要能回答"为什么空"：`pageStack` 为空到底是**回执 `ok: false`**（通道/授权问题）、
+        还是 **`ok: true` 但栈为空**（窗口没进小程序页）—— 两者处置完全不同，
+        而只返回 `list` 的方法把区别吞掉了（`j.get("result")` 对失败回执同样给 `[]`）。
+        """
+        j = self.tool("automation_runtime_info", "--action", "pageStack", timeout=timeout)
+        return list(j.get("result", {}).get("pageStack") or []), j
 
     def current_path(self) -> str:
         stack = self.page_stack()
