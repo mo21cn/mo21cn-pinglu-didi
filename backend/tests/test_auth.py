@@ -74,6 +74,42 @@ def test_bind_role_then_switch(client):
     assert switched["access_token"] != data["access_token"]  # 重签了 token
 
 
+def test_switch_role_is_account_scope_not_session_scope(client):
+    """`switch-role` 是**账号级**：切一次，**旧 token 的判权结果也跟着变**。
+
+    ⚠️ 这条断言的是**产品本意**、不是缺陷（DR-0017 方案 A，2026-09-15 HO 裁决）：
+    判权读的是 **DB 的 `user.current_role`**（`auth/dependencies.py` 只从 token 取 `sub`），
+    而 `switch-role` 改的正是用户行 ⇒「另一台设备/另一个窗口」的权限会随之变化。
+
+    写这条用例的目的：**把这个语义钉住**，避免有人日后按"每会话独立"的直觉"顺手修好"它 ——
+    真要改成每会话独立（DR-0017 的 C 方案），必须走独立切片并按 AC-01 逐域回归，
+    而不是让这个行为在一次无人注意的重构里悄悄反转。
+    """
+    data = _login(client, code="code-1007")
+    old_headers = _auth_headers(data["access_token"])  # 留着不换，模拟"另一台设备"
+    assert (
+        client.post(
+            "/api/v1/auth/bind-role", json={"role": "owner"}, headers=old_headers
+        ).status_code
+        == 200
+    )
+
+    assert client.get("/api/v1/auth/me", headers=old_headers).json()["current_role"] == "shipper"
+
+    switched = client.post(
+        "/api/v1/auth/switch-role", json={"role": "owner"}, headers=old_headers
+    ).json()
+    assert switched["current_role"] == "owner"
+
+    # ⭐ 关键：**用那张旧 token** 再问一次，角色已经变了 —— 它读的是用户行，不是 token 里的快照
+    assert client.get("/api/v1/auth/me", headers=old_headers).json()["current_role"] == "owner"
+    # 而旧 token 里的留痕仍是签发那一刻的值（这正是「快照」二字的含义）
+    old_payload = jwt.decode(
+        data["access_token"], settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+    )
+    assert old_payload["role_snapshot"] == "shipper"
+
+
 def test_switch_unbound_role_rejected(client):
     data = _login(client, code="code-1004")
     resp = client.post(
@@ -104,14 +140,24 @@ def test_me_with_valid_token(client):
 
 
 def test_token_payload_carries_audit_fields(client):
-    """JWT payload 须携带 user_id/openid/role（留痕底线）。"""
+    """JWT payload 须携带 user_id/openid/role_snapshot（留痕底线）。
+
+    ⚠️ 这条是**留痕**断言，不是判权断言：`role_snapshot` 只记录签发那一刻的角色，
+    判权读的是 **DB 的 `user.current_role`**（DR-0017 方案 A）。
+    字段名 2026-09-15 由 `role` 改为 `role_snapshot` —— 因为旧名会被读成
+    "每会话角色"，而实际语义是**账号级单值**（切一次影响所有设备）。
+    下面额外断言"**没有** `role` 这个键"，把这次裁决钉住：谁要是把旧名加回来就会红。
+    """
     data = _login(client, code="code-1006")
     payload = jwt.decode(
         data["access_token"], settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
     )
     assert payload["sub"] == str(data["user_id"])
     assert payload["openid"] == data["openid"]
-    assert payload["role"] == data["current_role"]
+    assert payload["role_snapshot"] == data["current_role"]
+    assert "role" not in payload, (
+        "旧字段名 `role` 不得回来（DR-0017 方案 A：它是留痕、不是判权依据）"
+    )
     assert payload["jti"]
 
 
