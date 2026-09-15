@@ -150,10 +150,21 @@ def _case_with_artifact(session, env: dict, artifact_id: int, **overrides) -> di
     return exc.raise_case(session, **params)
 
 
-def _approve(session, case_id: int, *, basis_revision_id: int, changes: dict | None = None) -> dict:
+def _approve(
+    session,
+    case_id: int,
+    *,
+    basis_revision_id: int,
+    changes: dict | None = None,
+    category: str | None = "cargo_quantity_category",
+) -> dict:
     """走到 `approved` —— `change_request` 必须先经 `in_review`（两套状态机各自生效）。
 
     返回批准后的案件（带**新的** `revision_no`），调用方据此传 `expected_revision`。
+
+    `category` 默认给一个**具体**类别：A2 五之二起，变更请求没有类别就**不能应用**
+    （无从确定复核范围）。本文件验的是五之一的边界，故默认带上；
+    「没类别 ⇒ 拒绝应用」由 `test_entrust_revalidation.py` 单独覆盖。
     """
     exc.decide(
         session,
@@ -170,6 +181,7 @@ def _approve(session, case_id: int, *, basis_revision_id: int, changes: dict | N
         expected_revision=2,
         basis_revision_id=basis_revision_id,
         approved_changes=changes,
+        change_category=category,
     )
 
 

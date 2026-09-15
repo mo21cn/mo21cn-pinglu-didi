@@ -719,6 +719,11 @@ class ExceptionCaseCreate(BaseModel):
     due_at: datetime | None = None
     proposed_action: str | None = None
     links: list[ExceptionCaseLinkIn] | None = None
+    #: 变更类别（A2 五之二 / DR-0016 五行）。**可空**：登记时可能还没定，
+    #: 但**应用变更时必须已登记** —— 没有类别就无从确定复核范围，
+    #: 而"先应用、后补范围"会让下游照着失效事实干活（见 `apply_case`）。
+    #: 异常案件（`kind='exception'`）不允许带此字段。
+    change_category: str | None = Field(default=None, min_length=1, max_length=32)
     org_id: int | None = Field(default=None, ge=1)
 
 
@@ -737,6 +742,9 @@ class ExceptionCaseDecisionIn(BaseModel):
     #: 只在 `to_status=approved` 时进入批准快照；apply 阶段**只认这份内容**，
     #: 不接受临时替换（A2 五之一前提 P4-A2/A4）。
     approved_changes: dict[str, dict[str, Any]] | None = None
+    #: 补登变更类别（A2 五之二）。批准是**最后一个合理时机**：应用要按它定复核范围。
+    #: 只有变更请求可带；批准后改类别会被 `apply_case` 拒绝（会生成无人批准过的复核清单）。
+    change_category: str | None = Field(default=None, min_length=1, max_length=32)
 
 
 class ExceptionCaseApplyIn(BaseModel):
@@ -817,6 +825,9 @@ class ExceptionCaseOut(BaseModel):
     severity: str
     impact_kind: str
     status: str
+    #: 变更类别（A2 五之二 / DR-0016）。`None` 表示未登记 ——
+    #: 未登记时**不能应用**变更（无从确定复核范围）。异常案件恒为 `None`。
+    change_category: str | None = None
     owner_user_id: int | None
     raised_by_user_id: int
     source: str

@@ -168,6 +168,31 @@ def _require_known_status(status: str) -> str:
     return status
 
 
+def _require_known_change_category(*, kind: str, change_category: str | None) -> None:
+    """变更类别校验（A2 五之二 / DR-0016）。
+
+    **不在这里要求必填**：类别是"应用变更"时才必须有的东西（应用要按它定复核范围），
+    登记时可能还没想清 —— 那时强迫填会逼出一个**猜的值**，而猜错的类别会让复核范围
+    整表选错，且失败是静默的（任务照样生成，只是复查了不相干的对象）。
+    必填检查放在 `apply_case`，那里缺了就直接拒绝应用。
+
+    **异常案件不允许有类别**：DR-0016 管的是"业务变更"，给真实异常套一个变更类别
+    会让复核范围凭空出现一批没有依据的任务。
+    """
+    if change_category is None:
+        return
+    from app.modules.entrust import revalidation as rv  # 局部导入：避免与 tasks 成环
+
+    if kind != KIND_CHANGE_REQUEST:
+        raise ExceptionCaseError(
+            f"只有变更请求（{KIND_CHANGE_REQUEST}）有变更类别，{kind} 案件请勿填写 change_category"
+        )
+    if change_category not in rv.CHANGE_CATEGORIES:
+        raise ExceptionCaseError(
+            f"未知变更类别：{change_category!r}（取值域：{sorted(rv.CHANGE_CATEGORIES)}）"
+        )
+
+
 def allowed_transitions(kind: str, from_status: str) -> frozenset[str]:
     """返回 `kind` 下从 `from_status` 可到达的状态集合（只读查询，供 UI 与用例使用）。"""
     _require_known_kind(kind)
@@ -405,6 +430,9 @@ EVENT_CLOSED: Final = "closed"
 EVENT_REOPENED: Final = "reopened"
 EVENT_APPLIED: Final = "applied"
 EVENT_APPLIED_REJECTED: Final = "applied_rejected"
+#: 变更传播计划（A2 五之二 / 验证 19）：把「哪些成果进入待复核、生成哪些复核任务」
+#: 记为审计事实。**与事件表其余条目同事务** —— 传播是变更的一部分，不是附注。
+EVENT_REVALIDATION_PLANNED: Final = "revalidation_planned"
 
 #: 「应用变更」是否对**正式业务**开放（HO 2026-09-15 裁决）。
 #:
@@ -459,6 +487,7 @@ def build_approval_snapshot(
     exception_id: int,
     basis_revision_id: int | None,
     approved_changes: dict[str, dict[str, Any]] | None = None,
+    change_category: str | None = None,
 ) -> dict[str, Any]:
     """构造批准瞬间的应用目标清单（P4-A1/A2/A5）。
 
@@ -466,6 +495,9 @@ def build_approval_snapshot(
     （成果取 `current_revision_id`，任务取 `revision`）。
     `approved_changes` 是**经过批准的结构化修改内容**，按 `_change_key` 索引；
     应用时**只认它** —— 请求方不得在 apply 时临时替换（P4-A4）。
+
+    `change_category`（五之二）也进快照：复核范围由它决定，若批准后被改动、
+    应用却按新类别算范围，就会得到一份**没人批准过的复核清单**。
     """
     targets: list[dict[str, Any]] = []
     for link in list_links(session, exception_id):
@@ -490,6 +522,7 @@ def build_approval_snapshot(
         "kind": APPROVAL_SNAPSHOT_KIND,
         "version": APPROVAL_SNAPSHOT_VERSION,
         "case_basis_revision_id": basis_revision_id,
+        "change_category": change_category,
         "targets": targets,
         "changes": approved_changes or {},
     }
@@ -575,6 +608,7 @@ _CASE_FIELDS: Final = (
     "raised_at",
     "created_at",
     "updated_at",
+    "change_category",
 )
 _CASE_COLS = "id, " + ", ".join(_CASE_FIELDS)
 _CASE_COLS_PREFIXED = ", ".join(f"c.{name}" for name in ("id", *_CASE_FIELDS))
@@ -1249,6 +1283,7 @@ def raise_case(
     due_at: Any = None,
     proposed_action: str | None = None,
     links: list[dict[str, Any]] | None = None,
+    change_category: str | None = None,
     request_org_id: int | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -1287,6 +1322,7 @@ def raise_case(
     if source not in SOURCES:
         raise ExceptionCaseError(f"未知来源：{source!r}（取值域：{sorted(SOURCES)}）")
     assert_severity_impact_consistent(severity=severity, impact_kind=impact_kind)
+    _require_known_change_category(kind=kind, change_category=change_category)
 
     prepared: list[tuple[str, int]] = []
     for item in links or []:
@@ -1309,10 +1345,10 @@ def raise_case(
                     " owner_user_id, raised_by_user_id, source, due_at, proposed_action, "
                     " decision_note, decided_by, decided_at, basis_revision_id, resolution_note, "
                     " closure_disposition, closed_by, closed_at, revision_no, raised_at, "
-                    " created_at, updated_at) "
+                    " created_at, updated_at, change_category) "
                     "VALUES (:org, :aid, :kind, :title, :cause, :severity, :impact, :status, "
                     " :owner, :raiser, :source, :due, :proposed, NULL, NULL, NULL, NULL, NULL, "
-                    " NULL, NULL, NULL, 1, :raised, :ts, :ts)"
+                    " NULL, NULL, NULL, 1, :raised, :ts, :ts, :category)"
                 ),
                 {
                     "org": org_id,
@@ -1329,6 +1365,7 @@ def raise_case(
                     "due": _parse_ts(due_at),
                     "proposed": proposed_action,
                     "raised": _parse_ts(current),
+                    "category": change_category,
                     "ts": _fmt(current),
                 },
             ),
@@ -1527,6 +1564,7 @@ def decide(
     decision_note: str | None = None,
     basis_revision_id: int | None = None,
     approved_changes: dict[str, dict[str, Any]] | None = None,
+    change_category: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """记录决定（`approved` / `rejected`，以及退回补充类的状态变更）。
@@ -1562,6 +1600,7 @@ def decide(
         raise ExceptionCaseError("approved 必须给出 basis_revision_id（决定所依据的成果版本）")
     if basis_revision_id is not None:
         _assert_basis_revision(session, assignment=assignment, revision_id=basis_revision_id)
+    _require_known_change_category(kind=kind, change_category=change_category)
 
     current = now or utcnow_naive()
     sets = ["status = :to", "decided_by = :actor", "decided_at = :ts"]
@@ -1572,6 +1611,11 @@ def decide(
     if basis_revision_id is not None:
         sets.append("basis_revision_id = :basis")
         params["basis"] = basis_revision_id
+    if change_category is not None:
+        # 批准时刻是补登记变更类别的**最后合理时机**：应用要按它定复核范围，
+        # 而决定人此时正看着这份变更的内容（`kind` 已在上方校验过）。
+        sets.append("change_category = :category")
+        params["category"] = change_category
 
     decided = to_status in (STATUS_APPROVED, STATUS_REJECTED)
     snapshot_payload: dict[str, Any] | None = None
@@ -1581,6 +1625,9 @@ def decide(
             exception_id=exception_id,
             basis_revision_id=basis_revision_id,
             approved_changes=approved_changes,
+            change_category=(
+                change_category if change_category is not None else case.get("change_category")
+            ),
         )
     try:
         _apply_case_update(
@@ -1633,11 +1680,19 @@ def apply_case(
     5. **拒绝事件不因回滚丢失**（P4-A8）：无论"版本过期"还是"应用失败"，
        `applied_rejected` 事件都**独立提交**，它是审计事实，不是业务的一部分。
 
+    **A2 五之二新增（验证 19）**：应用成功后**在同一事务内**做变更传播 ——
+    受影响成果标 `needs_revalidation`、生成复核任务（照抄 DR-0016 五行映射）。
+    为什么不另开一个传播命令：HO 明确否掉了「变更已生效、下游却收不到失效或复核提示」
+    这个中间态（04-A2期切片计划 §6）。**变更类别未登记时拒绝应用** —— 没有类别就
+    无从确定复核范围，而"先应用、后补范围"会让下游短时间照着失效事实干活。
+
     Raises:
-        ExceptionCaseError: 缺少快照 / 快照版本不认识 / 某目标没有批准的修改内容。
+        ExceptionCaseError: 缺少快照 / 快照版本不认识 / 某目标没有批准的修改内容 /
+            变更请求未登记变更类别。
         ExceptionCaseConflictError: 状态不允许、乐观锁过期、或依据版本已变化。
     """
     from app.modules.entrust import artifacts as artifacts_svc  # 局部导入：避免与 artifacts 成环
+    from app.modules.entrust import revalidation as reval_svc
     from app.modules.entrust.artifacts import SOURCE_MANUAL
 
     case = _case_or_404(session, exception_id)
@@ -1648,6 +1703,23 @@ def apply_case(
     assert_transition(kind=kind, from_status=from_status, to_status=STATUS_APPLIED)
 
     current = now or utcnow_naive()
+
+    # ── 变更传播的前置：类别必须已登记（五之二）──────────────────────────────
+    category = case.get("change_category")
+    artifact_targets: list[int] = []
+    if kind == KIND_CHANGE_REQUEST:
+        if category is None or str(category) not in reval_svc.CHANGE_CATEGORIES:
+            # **在任何写入之前拒绝**：这类拒绝不需要（也不该）留下 applied_rejected 事件 ——
+            # 它说的是"请求本身不完整"，不是"这次应用被业务规则挡下"。
+            raise ExceptionCaseError(
+                "变更请求未登记变更类别（change_category），无法确定复核范围，"
+                "不能应用 —— 请先在决定时补登类别（取值域见 DR-0016）"
+            )
+        artifact_targets = [
+            int(link["target_id"])
+            for link in list_links(session, exception_id)
+            if str(link["target_kind"]) == TARGET_ARTIFACT
+        ]
 
     def _reject(reason: str, note: str, payload: dict[str, Any] | None = None) -> None:
         """写拒绝事件并**独立提交**（业务已回滚或尚未开始，审计不能跟着没）。"""
@@ -1674,6 +1746,25 @@ def apply_case(
     if int(snapshot.get("version", 0)) != APPROVAL_SNAPSHOT_VERSION:
         raise ExceptionCaseError(
             f"批准快照版本 {snapshot.get('version')!r} 无法识别（当前 {APPROVAL_SNAPSHOT_VERSION}）"
+        )
+
+    # ── 变更类别在批准后不得被改（五之二）────────────────────────────────────
+    # 复核范围由类别决定。批准后改类别、应用却按新类别算范围 ⇒ 生成一份**没人批准过的
+    # 复核清单**，而且它看起来完全正常（任务有、标记有）。
+    snap_category = snapshot.get("change_category")
+    if (
+        kind == KIND_CHANGE_REQUEST
+        and snap_category is not None
+        and str(snap_category) != str(category)
+    ):
+        _reject(
+            "category_changed",
+            "批准时的变更类别与当前不一致，复核范围会与批准内容不符",
+            {"approved_category": snap_category, "current_category": category},
+        )
+        raise ExceptionCaseConflictError(
+            f"批准时的变更类别是 {snap_category!r}，现在是 {category!r}；"
+            "复核范围会与批准内容不符，请重新批准"
         )
 
     # ── 逐目标核对基础版本（P4-A4）───────────────────────────────────────────
@@ -1761,6 +1852,22 @@ def apply_case(
                 }
             )
 
+        # ── 变更传播（五之二 / 验证 19）：与「应用 + 事件」同一事务 ──────────────
+        # 放在这里而不是另开命令，是为了让"变更生效"与"下游知道要复核"不可能分离。
+        # 只有 change_request 传播：DR-0016 管的是业务变更（见 _require_known_change_category）。
+        revalidation: dict[str, Any] = {"planned": 0, "skipped": 0, "items": [], "unconfirmed": []}
+        if kind == KIND_CHANGE_REQUEST:
+            revalidation = reval_svc.apply_revalidation(
+                session,
+                exception_id=exception_id,
+                assignment_id=int(case["assignment_id"]),
+                category=str(category),
+                actor_id=actor_id,
+                artifact_targets=artifact_targets,
+                now=current,
+                commit=False,  # 与外层同一个事务（P4-A7）
+            )
+
         _apply_case_update(
             session,
             exception_id=exception_id,
@@ -1780,6 +1887,29 @@ def apply_case(
             note="已按批准快照逐目标应用",
             payload={"applied": applied, "snapshot_version": APPROVAL_SNAPSHOT_VERSION},
         )
+        if kind == KIND_CHANGE_REQUEST:
+            # 传播计划单独成事件：它是"下游收到了什么"，与"改了什么"是两件事。
+            # `unconfirmed` 必须落进事件 —— 那是**范围不足、需人工确认**的信号，
+            # 只写在返回值里等于没人看得到（DR-0016 §4.1 要求交经理人确认）。
+            _append_event(
+                session,
+                exception_id=exception_id,
+                event_kind=EVENT_REVALIDATION_PLANNED,
+                actor_user_id=actor_id,
+                now=current,
+                from_status=STATUS_APPLIED,
+                to_status=STATUS_APPLIED,
+                note=(
+                    f"已按变更类别 {category} 生成 {revalidation['planned']} 项复核"
+                    + (
+                        f"；{len(revalidation['unconfirmed'])} 类候选成果未登记受影响项，需确认范围"
+                        if revalidation["unconfirmed"]
+                        else ""
+                    )
+                ),
+                basis_revision_id=None,
+                payload={"category": category, **revalidation},
+            )
         session.commit()
     except Exception:
         session.rollback()
@@ -1990,6 +2120,9 @@ def project_case_internal(
         "severity": str(case["severity"]),
         "impact_kind": str(case["impact_kind"]),
         "status": str(case["status"]),
+        # 变更类别（五之二）：决定**复核范围**的输入。放在投影里是为了让 UI 能回答
+        # "这批复核任务凭什么生成的" —— 只给任务列表、不给类别，复核范围就没法追溯。
+        "change_category": case.get("change_category"),
         "owner_user_id": case["owner_user_id"],
         "raised_by_user_id": int(case["raised_by_user_id"]),
         "source": str(case["source"]),
