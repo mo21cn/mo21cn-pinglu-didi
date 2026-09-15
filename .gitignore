@@ -35,6 +35,13 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+# ⚠️ 轮换 Key 时的**备份形态**也必须排除。2026-09-16 实测踩到：
+#    `.env.local` 被排除了，但 `.env.local.bak-<ts>` **没有** ——
+#    旧 Key 于是变成一个未跟踪文件（`git status` 里显示 `??`），
+#    谁顺手 `git add -A` 就把它提交上去了。备份只在**写盘那一刻**看起来无害。
+.env*.bak
+.env*.bak-*
+.env.local.backup*
 
 # ===== IDE / 编辑器 =====
 .idea/
@@ -58,6 +65,13 @@ temp/
 
 # ===== 真机走查产物（截图 / summary.json，只作过程证据，不入库）=====
 miniapp-device-artifacts/
+
+# ===== 脚本跑分产物（如 artifacts/h7a.json）=====
+# 与上一节同理：机器产出的运行结果不入库，**结论写进文档**
+# （`docs/entrust/H7a-真实模型质量验证包.md` §5 已把这些数字落纸）。
+# 之前 `artifacts/` 既没被忽略也没被跟踪 —— 于是"按文档跑一次"就会让工作区变脏，
+# 而 `git add -A` 会把结果文件一起提交。约定含糊本身就是个坑。
+artifacts/
 
 # ===== SQLite 本地库（开发/测试） =====
 *.db
