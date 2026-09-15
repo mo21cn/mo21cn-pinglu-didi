@@ -54,9 +54,7 @@ def _repo_root() -> str:
         here = parent
 
 
-_DECISION_DOC = os.path.join(
-    _repo_root(), "docs", "entrust", "decisions", "0016-变更影响映射.md"
-)
+_DECISION_DOC = os.path.join(_repo_root(), "docs", "entrust", "decisions", "0016-变更影响映射.md")
 
 OWNER = 1
 MANAGER = 900
@@ -70,7 +68,9 @@ def db():
     from app.models import Base
     from migrate import apply_pending
 
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(bind=engine)
     apply_pending(engine)
     session = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
@@ -463,7 +463,8 @@ def test_scope_is_not_widened_when_linked_set_is_short(db):
     assert unlinked not in marks, "未登记为受影响项的成果**不得**被自动标记（那是整单自动改写）"
 
     planned = [
-        e for e in exc.list_events(db, result["case_id"])
+        e
+        for e in exc.list_events(db, result["case_id"])
         if str(e["event_kind"]) == exc.EVENT_REVALIDATION_PLANNED
     ]
     assert planned, "必须有传播计划事件"
