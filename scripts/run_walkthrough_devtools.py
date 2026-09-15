@@ -26,7 +26,10 @@
 「闸门失败 → 重起一轮」每重试一次就多一个实例。多实例共享同一 `User Data` ⇒
 自动化通道拿不到页面栈：实测 `pageStack` 连续 **95 秒**为空、进程累积到 **16 个**，
 而 `open_window()` 每次都"成功"返回 —— **看起来像网络抖动**。
-⇒ 起 IDE 前、闸门失败重试前、判环境错退出前，都要 `kill_ide_procs()` 清场。
+⇒ 处置（HO 2026-09-15 对 D2 的补充**收窄了作用域**）：
+**只收本轮自己起的实例** —— `kill_owned_ide_procs()`（按 PID + `taskkill /T` 连子进程）。
+起 IDE 前不再"按进程名清光全场"，因为那会**关掉 HO 正在使用的其他窗口**；
+也确实需要全局清理时，必须显式传 `--kill-all-ide`（会先打印影响说明）。
 
 **③ 就绪闸门不能以 `check_wechatide_status().ok` 为判据。**
 它偶发回 `CONNECT_ERROR`，而**同一时刻** `open_project_window` / `page_stack` 都正常。
@@ -180,14 +183,45 @@ def ide_procs() -> list[str]:
     return [line.split('","')[1] for line in text.splitlines() if "微信开发者工具" in line]
 
 
-def kill_ide_procs(wait_s: int = 25) -> int:
-    """杀掉**所有**残留 IDE 进程，返回等待后仍剩的个数（见 docstring 坑 ②）。"""
+#: **本轮明确拥有的** IDE 进程 PID（HO 2026-09-15 D2 的恢复边界）。
+#: 只有这里面的进程才允许被本运行器杀掉；别人的窗口（可能是 HO 正在用的）一律不碰。
+OWNED_IDE_PIDS: set[int] = set()
+
+
+def kill_all_ide_procs(wait_s: int = 25) -> int:
+    """杀掉机器上**所有** `微信开发者工具` 进程。
+
+    ⚠️ **默认不调用**。HO 2026-09-15 对 D2 的补充说得很直接：本运行器原先存在
+    「按进程名清理全部实例」的路径，于是**自动恢复可能关掉 HO 正在使用的其他窗口**。
+    ⇒ 只有操作方**显式**要求（`--kill-all-ide`）时才允许走这里，且必须在调用前
+    说明影响。返回等待后仍剩的个数。
+    """
     subprocess.run(["taskkill", "/F", "/IM", IDE_PROC_NAME], capture_output=True)
     for _ in range(wait_s):
         if not ide_procs():
             return 0
         time.sleep(1)
     return len(ide_procs())
+
+
+def kill_owned_ide_procs(wait_s: int = 25) -> int:
+    """**只**杀掉本轮自己起的 IDE（连子进程），返回仍属于本轮的剩余个数。
+
+    为什么不按进程名一把清（见 `kill_all_ide_procs` 的说明）：Electron 是多进程，
+    `Popen.kill()` 只杀父进程会残留子进程 ⇒ 我们需要 `taskkill /T` 按 **PID** 连子进程
+    一起收；但「按 PID」也天然限定了作用域 —— **只收自己的**。
+    """
+    pids = sorted(OWNED_IDE_PIDS)
+    for pid in pids:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+    for _ in range(wait_s):
+        alive = {int(p) for p in ide_procs()} & OWNED_IDE_PIDS
+        if not alive:
+            OWNED_IDE_PIDS.clear()
+            return 0
+        time.sleep(1)
+    left = {int(p) for p in ide_procs()} & OWNED_IDE_PIDS
+    return len(left)
 
 
 def port_open(port: int = 8000) -> bool:
@@ -219,12 +253,26 @@ def health(timeout: float = 2.0) -> bool:
 # ── 生命周期 ──────────────────────────────────────────────────────────────────
 
 
-def start_ide(env: Env, wait_s: int = 60):
-    """起 IDE 并等它有进程；起不来返回 None（调用方判环境错）。先清场再起。"""
-    left = kill_ide_procs()
-    log(f"    清理残留 IDE：剩下 {left}")
-    if left:
-        log(f"    ⚠️ 仍有 {left} 个进程没清掉 —— 闸门大概率不通")
+def start_ide(env: Env, wait_s: int = 60, kill_all: bool = False):
+    """起 IDE 并等它有进程；起不来返回 None（调用方判环境错）。
+
+    ⚠️ **默认不杀别人的实例**（HO D2 的恢复边界）：本函数只**记录**自己新起的 PID，
+    之后只允许 `kill_owned_ide_procs()` 收自己。需要真的把机器上其它实例也清掉时，
+    必须走 `kill_all=True`（由 `--kill-all-ide` 显式指定）并先打印影响说明。
+    """
+    if kill_all:
+        log("    ⚠️ --kill-all-ide：将按进程名清理**所有**微信开发者工具实例")
+        log("       （会一并关掉人工打开的窗口；仅在你确认没有正在用的窗口时这样做）")
+        left = kill_all_ide_procs()
+        log(f"    全局清理后剩 {left}")
+    else:
+        # 只读观测：别人有几个实例我们**不动**，但要记下来，方便事后判断
+        # "闸门不通是不是因为多实例互抢单实例锁"。
+        others = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+        if others:
+            log(f"    机器上已有 {len(others)} 个非本轮 IDE 进程 {others}（**不清理**，见 HO D2）")
+
+    before = {int(p) for p in ide_procs()}
     try:
         proc = subprocess.Popen(
             [str(env.ide)],
@@ -240,11 +288,19 @@ def start_ide(env: Env, wait_s: int = 60):
         log(f"    启动异常: {str(exc)[:160]}")
         return None
     log(f"    pid {proc.pid}")
+    # ⚠️ **立刻认领 launcher pid 本身**：Electron 的 renderer / GPU / utility 子进程
+    # 是在随后几秒里陆续 spawn 的，早期版本只认"启动后第一次探测到的那几个"
+    # ⇒ 后 spawn 的十几个进程没人认领，`kill_owned` 收不干净、残留下来
+    # 和下一轮的实例互抢单实例锁（2026-09-16 实测：一次跑了 15 个漏网进程，
+    # 下一轮闸门直接恒空）。`taskkill /T` 是**按树**杀，只要根 pid 在手里就够。
+    OWNED_IDE_PIDS.add(int(proc.pid))
     for i in range(wait_s // 3):
         time.sleep(3)
-        n = len(ide_procs())
+        now = {int(p) for p in ide_procs()}
+        OWNED_IDE_PIDS.update(now - before)  # 顺带把已出现的也认领
+        n = len(now)
         if n:
-            log(f"    [{(i + 1) * 3}s] IDE 进程 {n} 个")
+            log(f"    [{(i + 1) * 3}s] IDE 进程 {n} 个（本轮拥有 {len(OWNED_IDE_PIDS)} 个）")
             return proc
         log(f"    [{(i + 1) * 3}s] 还没起来…")
     return None
@@ -452,6 +508,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python", default=None, help="后端解释器（默认 repo/.venv）")
     parser.add_argument("--keep-db", action="store_true", help="跑完保留临时库（便于事后查数据）")
     parser.add_argument("--skip-ide", action="store_true", help="只起后端跑走查（IDE 已在跑时用）")
+    parser.add_argument(
+        "--kill-all-ide",
+        action="store_true",
+        help="⚠️ 允许按进程名清理**所有**微信开发者工具实例（会关掉人工打开的窗口）",
+    )
     args = parser.parse_args(argv)
 
     if os.name != "nt":
@@ -479,24 +540,32 @@ def main(argv: list[str] | None = None) -> int:
             log("    ⇒ 按常规清场重起")
     if not reuse:
         log("\n① 起 IDE（摘掉 ELECTRON_RUN_AS_NODE，且不传本机沙箱代理）")
-        ide = start_ide(env)
+        ide = start_ide(env, kill_all=bool(args.kill_all_ide))
         log("\n② 就绪闸门（open_window + pageStack 非空）")
         ready = bool(ide) and wait_ready(env)
         if not ready:
-            # 先**彻底清场**再重来：只 kill 父进程会残留子进程 ⇒ 直接重起会变成
-            # 两个实例互抢单实例锁，越试越不通（见 docstring 坑 ②）。
-            # ⚠️ 但若失败原因是"automation runtime 未注册"（坑 ⑤），清场重起**不一定**有效
-            #    —— wait_ready 已早退并打印了更优处置（复用已注册的实例）。
-            log("    首次闸门未过，先清场内所有 IDE 实例再试一轮…")
-            log(f"    清理后剩 {kill_ide_procs()}")
+            # **有界恢复**：只收**本轮自己起的**实例再试一轮。
+            # ⚠️ 不再"按进程名清光全场"——那会关掉 HO 正在用的窗口（HO 2026-09-15 对 D2 的补充）。
+            # 只 kill 父进程会残留子进程 ⇒ 重起会变成两个实例互抢单实例锁（坑 ②），
+            # 所以这里用 `kill_owned_ide_procs()`（按 PID + `/T` 连子进程，作用域仅限自己）。
+            log("    首次闸门未过 ⇒ 有界恢复：只收**本轮自己起的**实例，再试一轮…")
+            log(f"    本轮实例清理后剩 {kill_owned_ide_procs()}")
             time.sleep(5)
-            ide = start_ide(env)
+            ide = start_ide(env, kill_all=False)
             ready = bool(ide) and wait_ready(env)
         if not ready:
-            log("模拟器没就绪（pageStack 恒空）—— 环境错误，不是业务结论")
+            others = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+            log("模拟器没就绪（pageStack 恒空）—— **环境阻塞（ENV_BLOCKED）**，不是业务结论")
             log("  处置顺序：① 只读探测**已在运行**的 IDE，能用就 --skip-ide 复用它；")
-            log("            ② 不能用再看 IDE 窗口是否有弹层/网络提示，然后清场重起。")
-            kill_ide_procs()
+            log("            ② 不能用再看 IDE 窗口是否有弹层/网络提示；")
+            log("            ③ 仍不通且确认没有人工窗口在用，才用 --kill-all-ide 显式全局清理。")
+            if others:
+                log(
+                    f"  ⚠️ 机器上还有 {len(others)} 个**非本轮** IDE 进程 {others} —— "
+                    "本运行器**不清理**它们（可能是人工正在用的窗口）。"
+                )
+            log("  退出码 2（环境阻塞）：这条不代表任何业务结论，也不计入通过。")
+            kill_owned_ide_procs()
             return 2
         log("    ✅ 模拟器已就绪")
 
@@ -553,6 +622,12 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         stop_backend(proc)
         log("后端已停止")
+        # 退出时**只收本轮自己起的** IDE（HO D2：不得默认清场）。
+        # 复用模式下 `OWNED_IDE_PIDS` 为空 ⇒ 一个都不动，人工窗口完好。
+        if OWNED_IDE_PIDS:
+            log(f"清理本轮 IDE 实例（{len(OWNED_IDE_PIDS)} 个）：剩 {kill_owned_ide_procs()}")
+        else:
+            log("本轮未起过 IDE（复用模式）⇒ 不触碰任何 IDE 进程")
         if not env.keep_db and env.db.exists():
             with contextlib.suppress(OSError):
                 env.db.unlink()

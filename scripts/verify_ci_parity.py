@@ -57,6 +57,7 @@ EXPECTED: dict[str, Any] = {
         "scripts/wechatide_client.py",
         "scripts/verify_ci_parity.py",
         "scripts/run_walkthrough_devtools.py",
+        "scripts/verify_local_gates.py",
     ],
     "root_scripts.exempt": ["scripts/verify_baseline.py"],
     # 前端静态契约 job：逐个 node 脚本
