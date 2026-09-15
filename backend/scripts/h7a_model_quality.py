@@ -156,13 +156,19 @@ def _grade_sample(sample: dict[str, Any], content: dict[str, Any], today: date) 
     }
 
 
-async def _call(text: str) -> tuple[dict[str, Any] | None, str | None, int]:
-    """调真实模型一次；返回 (content, error_kind, latency_ms)。"""
+async def _call(text: str) -> tuple[dict[str, Any] | None, str | None, str, int]:
+    """调真实模型一次；返回 (content, error_kind, error_message, latency_ms)。
+
+    ⚠️ `error_message` 必须一起返回：2026-09-16 重跑时 S10 两次 `bad_response`，
+    结果文件里只有 `{"kind": "bad_response"}` —— 光看这个查不出原因，
+    只能另写探针复现才看到"答案是 markdown 围栏里的 JSON"。
+    **错误分类用来路由，错误原文用来定位**，两者缺一不可。
+    """
     try:
         res = await llm_gateway.chat_json(system=SYSTEM_PROMPT, user=text)
     except LLMError as exc:
-        return None, exc.kind, 0
-    return res.content, None, res.latency_ms
+        return None, exc.kind, str(exc), 0
+    return res.content, None, "", res.latency_ms
 
 
 async def run(runs: int) -> dict[str, Any]:
@@ -183,10 +189,11 @@ async def run(runs: int) -> dict[str, Any]:
     for run_no in range(1, runs + 1):
         outcomes: dict[str, Any] = {}
         for s in samples:
-            content, kind, latency = await _call(s["text"])
+            content, kind, err_msg, latency = await _call(s["text"])
             if content is None:
-                errors.append({"id": s["id"], "run": run_no, "kind": kind})
+                errors.append({"id": s["id"], "run": run_no, "kind": kind, "message": err_msg})
                 print(f"  ✗ {s['id']} 调用失败: {kind}")
+                print(f"      {err_msg[:300]}")
                 continue
             latencies.append(latency)
             outcomes[s["id"]] = content
@@ -307,8 +314,10 @@ def _report(r: dict[str, Any]) -> None:
     if r["total"] == 0:
         print(
             "\n⚠️ **本次没有产生任何可评分的调用** —— 这是「未执行（NOT_RUN）」，"
-            "\n   不是「模型不达标」，也不得倒推成任何质量结论。常见原因：账户余额不足"
-            "\n   （HTTP 402，本客户端当前归类为 bad_request）/ Key 被限流 / 网络不通。",
+            "\n   不是「模型不达标」，也不得倒推成任何质量结论。按 `errors` 里的 kind 对号入座："
+            "\n   `quota`（402，Key 与计费方式不匹配或余额不足，用 llm_key_doctor.py 定位）"
+            "\n   / `rate_limit`（429）/ `bad_response`（响应体解析不了，看错误里的 content 开头）"
+            "\n   / `network` / `timeout`。",
         )
         return
 
