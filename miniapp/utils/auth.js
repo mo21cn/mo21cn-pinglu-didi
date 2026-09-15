@@ -213,7 +213,14 @@ function bindRole(role, opts) {
   })
 }
 
-/** 切换当前角色（后端重签 token） */
+/**
+ * 切换当前角色（后端重签 token）
+ *
+ * ⚠️ 这是**账号级**切换：后端把 `current_role` 写在**用户行**上，各模块判权读的也是那一行
+ * ⇒ **会影响你在所有设备与会话上的身份**（DR-0017 方案 A 认定这是产品本意）。
+ * 新 token 里的 `role_snapshot` 只是**留痕、不参与判权** —— 所以别指望
+ * "两台设备各自留着 token 就能各自保持角色"：切一次，两边一起变。
+ */
 function switchRole(role, opts) {
   return request({
     url: '/api/v1/auth/switch-role',

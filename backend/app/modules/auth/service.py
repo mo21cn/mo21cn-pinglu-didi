@@ -125,7 +125,14 @@ def upsert_user(db: Session, openid: str, unionid: str, nickname: str, role: str
 
 
 def switch_role(db: Session, user: User, role: str) -> User:
-    """切换当前角色（须已绑定该角色）。"""
+    """切换当前角色（须已绑定该角色）。
+
+    ⚠️ **这是账号级动作**：`current_role` 写在**用户行**上，而各模块判权读的也是用户行
+    ⇒ **会影响该用户在所有设备与会话上的身份**（另一台设备、另一个窗口的权限随之变化）。
+    DR-0017 方案 A 认定这一语义是**产品本意**，因此**不改判权路径**；
+    签发出去的 token 里那份 `role_snapshot` 只是留痕，**不参与判权**
+    （见 `core/security.py` 的模块 docstring）。
+    """
     if role not in (user.roles or []):
         raise ValueError(f"用户未绑定角色 {role}，请先在角色管理中绑定")
     user.current_role = role
