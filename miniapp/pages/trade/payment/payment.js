@@ -58,7 +58,11 @@ Page({
     // 操作态
     canPay: false,
     canCreate: false,
-    barNote: ''
+    barNote: '',
+    // H3 可观测点：最近一次「确认支付」的痕迹（见 `onPayConfirm` 的说明）。
+    // 只作证据，不参与渲染 —— 页面**不得**读它来改变界面，否则"有没有点过"
+    // 会反过来影响界面，证据就污染了被测对象。
+    payConfirmTrace: null
   },
 
   onLoad(options) {
@@ -273,19 +277,57 @@ Page({
       content: '支付金额：¥ ' + Number(p.amount).toFixed(2) + '\n联调期模拟回调，不产生真实资金流',
       confirmText: '确认支付',
       success: (r) => {
+        // 真正的业务动作抽成 `onPayConfirm`：弹层回调只是**触发者**之一。
+        // 原生 wx.showModal 不在渲染树里 ⇒ 工具点不到确认键，但确认**之后**要走的
+        // 这段代码必须有其他可触发入口，否则它就是一条永远拿不到证据的路径。
         if (!r.confirm) return
-        request({
-          url: '/api/v1/payment/payments/' + p.id + '/mock-pay',
-          method: 'POST',
-          data: {}
-        })
-          .then(() => {
-            wx.showToast({ title: '支付成功', icon: 'success' })
-            this.fetch()
-          })
-          .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
+        this.onPayConfirm('modal')
       }
     })
+  },
+
+  /**
+   * 确认支付的**业务动作**（H3 可观测点）。
+   *
+   * @param {'modal'|'auto'} source 触发来源：
+   *   - `modal`：用户点了原生弹层的「确认支付」（人工路径）；
+   *   - `auto` ：走查脚本用 `callMethod` 触发（自动化路径）。
+   *
+   * ⚠️ 两种来源**分别记录、互不覆盖**：自动化那条证明的是「确认回调这段代码
+   * 行为正确」，人工那条证明的是「原生确认键点得动」—— 前者替代不了后者，
+   * 把两条混成一条会让"键可点"这个未验证的事实被自动化证据盖住。
+   */
+  onPayConfirm(source) {
+    const p = this.data.paid
+    if (!p) return
+    const src = source === 'auto' ? 'auto' : 'modal'
+    this._tracePayConfirm(src, p.id)
+    request({
+      url: '/api/v1/payment/payments/' + p.id + '/mock-pay',
+      method: 'POST',
+      data: {}
+    })
+      .then(() => {
+        wx.showToast({ title: '支付成功', icon: 'success' })
+        this.fetch()
+      })
+      .catch((e) => console.warn('[swallowed]', (e && e.message) || e))
+  },
+
+  /** 写两条可观测痕迹：页面 data（页面内可读）+ globalData（跨页面/工具可读）。 */
+  _tracePayConfirm(source, payId) {
+    const trace = { source: source, payId: payId, at: Date.now() }
+    this.setData({ payConfirmTrace: trace })
+    try {
+      const app = getApp()
+      if (app && app.globalData) {
+        const arr = app.globalData.payConfirmTraces || []
+        // 追加而不是覆盖：同一轮里人工与自动化可能各来一次，覆盖会抹掉另一条证据
+        app.globalData.payConfirmTraces = arr.concat([trace])
+      }
+    } catch (e) {
+      // 桩环境下没有 getApp，痕迹缺失不该影响业务动作本身
+    }
   },
 
   onPlaceholder(e) {

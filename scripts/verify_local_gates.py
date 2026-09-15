@@ -4,6 +4,13 @@
 
     .venv/Scripts/python.exe scripts/verify_local_gates.py
     .venv/Scripts/python.exe scripts/verify_local_gates.py --only pytest
+    python scripts/verify_local_gates.py --ci-parity-only      # CI 的 parity 步骤用
+
+`--ci-parity-only` 是**用途标识**，不是又一种过滤：CI 的「门禁范围一致性」步骤
+走的是**同一个入口**（而不是绕过本脚本直接调 `verify_ci_parity.py`）。
+这样本脚本的参数解析、分组与退出码在 CI 里也被真实执行一次 ——
+否则它只被 ruff 检查过语法，本地与 CI 的口径会各自演进（本地改了分组、
+CI 那步浑然不觉），而它恰恰是"防止两边分叉"的那个脚本，自己却没人跑。
 
 为什么不能拿 pytest 的退出码当判据（本机实测，2026-09-15）
 --------------------------------------------------------
@@ -101,13 +108,27 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="本地门禁（pytest 判据取 junitxml）")
     ap.add_argument("--only", default="", help="只跑某一组：backend / pytest / frontend / parity")
     ap.add_argument(
+        "--ci-parity-only",
+        action="store_true",
+        help="用途标识：只跑「范围一致性」一组（CI 的 parity 步骤用）。与 --only 互斥。",
+    )
+    ap.add_argument(
         "--junitxml",
         default=str(Path(tempfile.gettempdir()) / "pl_local_gates_pytest.xml"),
         help="pytest 的 junitxml 落点（判据出处）",
     )
     args = ap.parse_args(argv)
 
-    only = {x.strip() for x in args.only.split(",") if x.strip()}
+    if args.ci_parity_only and args.only.strip():
+        print("✗ --ci-parity-only 与 --only 不能同时给出（两种口径会叠加，结论无法解释）")
+        return 2
+
+    only = (
+        {"parity"}
+        if args.ci_parity_only
+        else {x.strip() for x in args.only.split(",") if x.strip()}
+    )
+    purpose = "CI 范围一致性（--ci-parity-only）" if args.ci_parity_only else "本地全量自检"
     py = sys.executable
     ruff = BACKEND.parent / ".venv" / ("Scripts/ruff.exe" if os.name == "nt" else "bin/ruff")
     mypy = BACKEND.parent / ".venv" / ("Scripts/mypy.exe" if os.name == "nt" else "bin/mypy")
@@ -153,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         rc, out = _run([py, str(ROOT / "scripts" / "verify_ci_parity.py")], ROOT)
         rows.append(("范围一致性 verify_ci_parity", rc == 0, f"rc={rc} {_tail(out, 2)}"))
 
-    print("\n================ 本地门禁 ================")
+    print(f"\n================ 本地门禁（用途：{purpose}）================")
     for label, ok, note in rows:
         print(f"{'PASS' if ok else 'FAIL'} | {label} | {note}")
     bad = [r for r in rows if not r[1]]

@@ -67,6 +67,12 @@
     python scripts/run_walkthrough_devtools.py --section 25 --work D:\\tmp\\walk
     python scripts/run_walkthrough_devtools.py --section 31,32 --skip-ide   # 复用已在跑的 IDE
 
+⚠️ **`--section all` 与 `--pay` 是两个独立开关**（都写进 README 了，此处是原因）：
+`--section`（默认 `all`）决定**排哪些章节**，`--pay` 只决定要不要设 `WALK_PAY=1`。
+所以 `--section all` **不带** `--pay` 时，⑧b 会被排进去但记 **NOT_RUN**（"需显式开关"），
+在汇总里显示为**未执行**、不计入通过 —— 这不是"⑧b 通过"，也不是失败。
+要真跑 ⑧b 必须两个一起给：`--section all --pay`（或 `--section 8b --pay`）。
+
 ⚠️ **不得在沙箱里运行**（`wechatide` 官方硬要求）；仅 Windows。
 ⚠️ 这是**本机工具**，不进 CI（依赖 GUI 模拟器）。
 """

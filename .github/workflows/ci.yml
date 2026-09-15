@@ -84,8 +84,14 @@ jobs:
         # 为什么要在 CI 里查这件事：本项目两次「本地绿、CI 红」都是**范围不一致**
         # （漏 `--config`、只查改过的文件）。本步把范围从本文件读出来与脚本内冻结的
         # 契约比对 —— 任何人调整门禁范围都会被要求同步一次，而不是靠记忆。
+        #
+        # 走 `verify_local_gates.py --ci-parity-only` 而不是直接调 `verify_ci_parity.py`：
+        # 让本地预演与 CI 共用**同一个入口**，于是这个脚本的参数解析、分组与退出码
+        # 在 CI 里也被真实执行一遍。否则它只被 ruff 查过语法、从没被跑过 ——
+        # 一个专门防「本地与 CI 分叉」的脚本，自己却不在任何一侧被执行，
+        # 两边的口径就会各自演进（本地改了分组，CI 这一步毫无察觉）。
         working-directory: .
-        run: python scripts/verify_ci_parity.py
+        run: python scripts/verify_local_gates.py --ci-parity-only
 
       - name: 测试（pytest）
         env:

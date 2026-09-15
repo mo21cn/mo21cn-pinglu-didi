@@ -576,15 +576,22 @@ async def run_job(
         if int(user.id) != int(job["created_by"]):
             raise HTTPException(status_code=403, detail="缺少推进该作业的权限")
 
+    worker_id = f"user:{user.id}"
     claimed = jobs_svc.claim_job(
-        db, job_id=job_id, worker_id=f"user:{user.id}", lease_seconds=jobs_svc.DEFAULT_LEASE_SECONDS
+        db, job_id=job_id, worker_id=worker_id, lease_seconds=jobs_svc.DEFAULT_LEASE_SECONDS
     )
     if claimed is None:
         raise HTTPException(
             status_code=409, detail="作业不可推进（已结束、已被其他 worker 领取或额度用尽）"
         )
     scope = jobs_svc.scope_for_job(db, claimed, operator_user_id=int(user.id))
-    result = await jobs_svc.execute_claimed_job(db, job_id=job_id, scope=scope)
+    result = await jobs_svc.execute_claimed_job(
+        db,
+        job_id=job_id,
+        scope=scope,
+        worker_id=worker_id,
+        attempt_no=int(claimed["attempt_count"]),
+    )
     return AgentJobDetailOut(job=job_out(result), attempts=_attempts_out(db, job_id))
 
 
