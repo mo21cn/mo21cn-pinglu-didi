@@ -123,6 +123,14 @@ def _explain(status: int | None, body: Any) -> str:
     if status is None:
         return f"网络层失败：{body}"
     if status == 200:
+        # ⚠️ 有的端点用「HTTP 200 + body 里的 status_code」表达错误：
+        # 实测 MiniMax 的 /token_plan/remains 拿**无效 Key** 也返 200，
+        # body 是 {"base_resp":{"status_code":2049,"status_msg":"invalid api key"}}。
+        # 只看 HTTP 码会把「Key 无效」报成「200 OK」—— 这是本脚本自查时才发现的。
+        code = _code_of(body)
+        if code:
+            name, action = MINIMAX_CODES.get(code, ("未在对照表内", "查供应商文档"))
+            return f"HTTP 200（body 内报错）/{code} {name} ⇒ {action}"
         return "200 OK"
     code = _code_of(body)
     if code is not None and code in MINIMAX_CODES:
@@ -157,7 +165,7 @@ def _call(
 
 def _verdict(shape: str, chat_status: int | None, chat_body: Any) -> tuple[int, str, list[str]]:
     """给出总判与修复指引，返回 ``(退出码, 一行结论, 指引列表)``。"""
-    if chat_status == 200:
+    if chat_status == 200 and not _code_of(chat_body):
         return 0, "✅ 端到端可调用 —— 这把 Key 能花到资源", []
 
     code = _code_of(chat_body)
@@ -295,7 +303,8 @@ def main(argv: list[str] | None = None) -> int:
         st2, body2 = _call(client, "GET", f"{base_url}/token_plan/remains", headers)
         print(f"③ GET  /token_plan/remains : {_explain(st2, body2)}")
         remains = None
-        if st2 == 200 and isinstance(body2, dict):
+        # 200 也可能是「body 内报错」（见 _explain）：那种情况解析不出套餐，别硬解析
+        if st2 == 200 and isinstance(body2, dict) and not _code_of(body2):
             remains = [
                 {
                     "model_name": m.get("model_name"),
