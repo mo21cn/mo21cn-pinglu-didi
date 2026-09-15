@@ -320,6 +320,77 @@
             <view wx:if="{{reopenHint}}" class="act-hint act-hint-warn">{{reopenHint}}</view>
           </block>
         </block>
+
+        <!-- 应用已批准的变更（A2 五之一；界面接入见五之四）。
+             ⚠️ 页内确认条而不是 `wx.showModal`：原生弹层不在渲染树里、走查点不到
+             确认键（与「记录决定 / 关闭 / 重开」同一理由）。
+             确认条里先摆**批准快照摘要**再说"确认" —— apply 不接受"改成什么"，
+             看不到将发生什么就点，是一次盲操作。 -->
+        <block wx:if="{{canApply}}">
+          <view class="act-label">应用变更</view>
+          <block wx:if="{{!applyOpen}}">
+            <view
+              class="act-btn-wide"
+              data-act-apply="1"
+              bindtap="onToggleApply"
+              hover-class="hover-dim"
+            >查看并应用已批准的变更</view>
+          </block>
+          <block wx:else>
+            <view class="apply-box">
+              <view class="apply-line">
+                <text class="apply-key">变更类别</text>
+                <text class="apply-val">{{approval.categoryLabel}}</text>
+              </view>
+              <view class="apply-note">应用后不可撤销：修改会作为新版本写入成果，并同时生成复核任务。</view>
+              <view wx:for="{{approval.targets}}" wx:key="key" class="apply-target">
+                <view class="apply-key">{{item.targetText}}</view>
+                <view class="apply-val">将改字段：{{item.fieldsText}}</view>
+                <view class="apply-val apply-sub">{{item.basisText}}</view>
+              </view>
+            </view>
+            <view
+              class="act-btn-wide"
+              data-act-apply-submit="1"
+              bindtap="onSubmitApply"
+              hover-class="hover-dim"
+            >确认应用</view>
+            <view
+              class="act-btn-wide act-btn-ghost"
+              data-act-apply-cancel="1"
+              bindtap="onToggleApply"
+              hover-class="hover-dim"
+            >取消</view>
+            <view wx:if="{{applyHint}}" class="act-hint act-hint-warn">{{applyHint}}</view>
+          </block>
+        </block>
+      </view>
+
+      <!-- 复核传播（A2 五之二生成、五之四展示）：回答"这批复核凭什么生成、做完没有"。
+           它是**只读**的 —— 复核任务在任务页完成，标记随之解除（AC-12）。 -->
+      <view wx:if="{{revalidation.length}}" class="card element-card">
+        <view class="element-head">
+          <text class="element-title">复核传播</text>
+          <text class="element-count">共 {{revalidation.length}} 项</text>
+        </view>
+        <view wx:for="{{revalidation}}" wx:key="key" class="rv-item">
+          <view class="row-between">
+            <text class="rv-area">{{item.area}}</text>
+            <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+          </view>
+          <view class="rv-sub">{{item.targetText}} · {{item.revisionText}}</view>
+          <view class="rv-sub">复核任务 #{{item.reviewTaskId}} · {{item.taskTitle}}（{{item.taskStatusLabel}}）</view>
+          <view class="rv-sub">复核区域类型：{{item.taskTypeLabel}}</view>
+          <view wx:if="{{item.note}}" class="rv-note">{{item.note}}</view>
+        </view>
+      </view>
+
+      <!-- DR-0016 §4.1：范围可能不足 ⇒ 交经理人确认。
+           文案必须说"请确认"，**不能说"已自动补上"** —— 自动扩大范围正是 §4.1 禁止的。 -->
+      <view wx:if="{{unconfirmedTypes.length}}" class="card case-note note-warn">
+        <view>以下成果类型在本委托里存在、但未被登记为受影响项，复核范围可能不足：</view>
+        <view class="rv-sub" wx:for="{{unconfirmedTypes}}" wx:key="code">· {{item.label}}（{{item.code}}）</view>
+        <view>请确认是否需要把它们登记为受影响项 —— 系统不会自动扩大复核范围。</view>
       </view>
 
       <!-- 处置能力：只说"这里现在有没有可执行的动作"，**不断言原因** —— 六个能力位

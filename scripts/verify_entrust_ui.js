@@ -1892,12 +1892,166 @@ check(
   }).actionHint === '你有处置这宗案件的权限'
 )
 check(
-  '[案件] `can_apply_change`（A1 恒 false、属 A2）不参与任何界面结论 —— ' +
-    '据它说"你没权限"就是把「功能还没做」说成「你不被允许」',
+  '[案件] `can_apply_change` 参与界面结论（A2 五之四起它不再恒 false）—— ' +
+    '继续排除会让「应用变更」区永远不出现，且看起来像前端没接线',
   E.decorateCase({
     case: { case_id: 1, assignment_id: 1 },
     capabilities: { can_apply_change: true }
-  }).actionHint === capsAllFalse.actionHint
+  }).actionHint !== capsAllFalse.actionHint
+)
+check(
+  '[案件] 只给 `can_apply_change`、没有批准快照 ⇒ `approval` 为 null（渲染条件必须两者都看）',
+  E.decorateCase({
+    case: { case_id: 1, assignment_id: 1 },
+    capabilities: { can_apply_change: true }
+  }).approval === null
+)
+
+// ── A2 五之四：复核传播 / 范围待确认 / 批准快照摘要的投影（ENT-041）─────────
+const caseA2Payload = {
+  case: { case_id: 9, assignment_id: 1, kind: 'change_request', status: 'approved' },
+  capabilities: { can_apply_change: true },
+  revalidation: [
+    {
+      review_key: 'artifact:12',
+      area: '报价复核',
+      task_type: 'quote',
+      target_kind: 'artifact',
+      target_id: 12,
+      target_revision_id: 33,
+      review_task_id: 77,
+      status: 'open',
+      note: null,
+      created_at: '2026-09-15 10:00',
+      resolved_at: null,
+      resolved_by: null,
+      task_title: '复核：报价复核（变更 #9）',
+      task_status: 'pending'
+    },
+    {
+      review_key: 'area:contract',
+      area: '合同复核',
+      task_type: 'contract',
+      target_kind: null,
+      target_id: null,
+      target_revision_id: null,
+      review_task_id: 78,
+      status: 'cancelled',
+      note: '复核任务被取消 ⇒ 本复核要求随之撤销（不等同于已核对）',
+      created_at: '2026-09-15 10:00',
+      resolved_at: '2026-09-15 11:00',
+      resolved_by: 900,
+      task_title: '复核：合同复核（变更 #9）',
+      task_status: 'cancelled'
+    }
+  ],
+  unconfirmed_types: ['procurement_confirm'],
+  approval: {
+    snapshot_version: 1,
+    change_category: 'cargo_quantity_category',
+    case_basis_revision_id: 33,
+    targets: [
+      {
+        target_kind: 'artifact',
+        target_id: 12,
+        basis_revision_id: 33,
+        change_fields: ['currency', 'amount']
+      }
+    ]
+  }
+}
+const caseA2 = E.decorateCase(caseA2Payload, { procurement_confirm: '采购确认' })
+
+check('[案件] 复核清单逐条投影（条数不得被截断）', caseA2.revalidation.length === 2)
+check(
+  '[案件] 复核项①：带目标与**精确版本 id**（不是 revision_no —— 两个是不同的数）',
+  caseA2.revalidation[0].targetText === '成果 #12' &&
+    caseA2.revalidation[0].revisionText === '版本 id 33'
+)
+check(
+  '[案件] 复核项①状态：open ⇒ 「待复核」+ 警示色',
+  caseA2.revalidation[0].statusLabel === '待复核' &&
+    caseA2.revalidation[0].statusClass === 'chip chip-warn'
+)
+// ⚠️ 这一条是本组的重点：`cancelled` **不是** `resolved`。
+// 合成一句「已处理」会让看的人以为复核已经做过了。
+check(
+  '[案件] 复核项②：`cancelled` 说「已撤销」而**不是**「已复核」（撤销 ≠ 核对过）',
+  caseA2.revalidation[1].statusLabel === '已撤销' &&
+    caseA2.revalidation[1].statusLabel !== '已复核'
+)
+check(
+  '[案件] 无具体对象的复核项如实说「无具体对象 / 未绑定版本」（不编造一个目标）',
+  caseA2.revalidation[1].targetText === '无具体对象' &&
+    caseA2.revalidation[1].revisionText === '未绑定版本'
+)
+check(
+  '[案件] 复核任务的状态要翻成中文并带标题（界面不能只拿到一个 #id）',
+  caseA2.revalidation[0].taskStatusLabel === '待开始' &&
+    caseA2.revalidation[0].taskTitle.indexOf('复核：') === 0
+)
+check(
+  '[案件] 撤销原因要显示出来（否则那条 409 无人能解释）',
+  caseA2.revalidation[1].note.indexOf('取消') !== -1
+)
+check(
+  '[案件] 待确认范围用传入的类型表翻成中文（不在前端另存一份类型标签）',
+  caseA2.unconfirmedTypes.length === 1 &&
+    caseA2.unconfirmedTypes[0].label === '采购确认'
+)
+check(
+  '[案件] 拿不到类型表时退回**原始 code**，不编造一个看起来对的中文名',
+  E.decorateCase(caseA2Payload).unconfirmedTypes[0].label === 'procurement_confirm'
+)
+check(
+  '[案件] 批准快照摘要：类别翻中文 + 逐目标列出**将改的字段**（apply 不接受"改成什么"，' +
+    '看不到它就是盲点）',
+  caseA2.approval.categoryLabel === '货物数量与品类' &&
+    caseA2.approval.targets.length === 1 &&
+    caseA2.approval.targets[0].fieldsText === '币种、报价金额' &&
+    caseA2.approval.targets[0].basisText === '版本 id 33'
+)
+check(
+  '[案件] 无批准快照时 `approval` 为 null（不是空摘要 —— 两者在界面上要说不同的话）',
+  E.decorateCase({ case: { case_id: 1 }, capabilities: {} }).approval === null
+)
+check(
+  '[案件] 变更类别表覆盖 DR-0016 五类（少一个键，那一类就只剩英文原值）',
+  Object.keys(E.CHANGE_CATEGORY_LABELS).length === 5
+)
+// 任务状态标签表的键必须覆盖后端 `tasks.STATUS_*` 全部取值 —— 与成果/案件状态同一条纪律；
+// 漏一个只会表现为"那一行是英文"，不会报错。
+check(
+  '[案件] 任务状态标签覆盖 5 个取值（pending/in_progress/waiting/done/cancelled）',
+  Object.keys(E.TASK_STATUS_LABELS).length === 5 &&
+    E.TASK_STATUS_LABELS.cancelled === '已取消'
+)
+
+// 渲染条件写在页面里，投影层断言不到 ⇒ 按源码文本守（与本脚本既有的做法一致）
+const caseJs = read(path.join(MINI, 'pages/entrust/case/case.js'))
+check(
+  '[案件] 「应用变更」的渲染条件是**能力位 + 批准快照**两者都看 —— 只看能力位会渲染出' +
+    '一个注定 400 的按钮',
+  /canApply:\s*!!caps\.can_apply_change && !!detail && !!detail\.approval/.test(caseJs)
+)
+check(
+  '[案件] apply 请求**只**带 `expected_revision`（修改内容只来自批准快照）',
+  /applyCase\([\s\S]{0,200}expected_revision: self\.data\.revisionNo/.test(caseJs) &&
+    !/applyCase\([\s\S]{0,300}payload/.test(caseJs)
+)
+const caseWxmlA2 = read(path.join(MINI, 'pages/entrust/case/case.wxml'))
+check(
+  '[案件] 模板有「应用变更」的页内确认条与锚点（不靠原生弹层：它不在渲染树里、走查点不到）',
+  /data-act-apply="1"/.test(caseWxmlA2) &&
+    /data-act-apply-submit="1"/.test(caseWxmlA2) &&
+    /wx:if="\{\{canApply\}\}"/.test(caseWxmlA2)
+)
+check('[案件] 模板渲染复核传播清单与范围待确认提示', /revalidation\.length/.test(caseWxmlA2))
+const artWxmlA2 = read(path.join(MINI, 'pages/entrust/artifact/artifact.wxml'))
+check(
+  '[成果] 模板按 `needsRevalidation` 渲染待复核徽标（并说明"依赖的事实变了"≠"内容错了"）',
+  /wx:if="\{\{artifact\.needsRevalidation\}\}"/.test(artWxmlA2) &&
+    /confirmBlockedHint/.test(artWxmlA2)
 )
 
 // ── 样式：投影层算出的类必须真的有定义（模板里 `class="{{it.cls}}"` 静态扫不到）

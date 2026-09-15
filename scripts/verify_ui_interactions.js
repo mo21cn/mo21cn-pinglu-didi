@@ -1691,6 +1691,144 @@ section('⑤ 静态防线')
       cleanFlag + ' / ' + dirtyFlag
     )
 
+    // —— 会话屏（UI-03 第二半 / DR-0015）：**契约用法**的回归用例 ——
+    //
+    // ENT-040 抓到的真缺陷：`fetchArtifactTypes()` 给的是接口载荷 `{items: [...]}`，
+    // 页面却把它当裸数组用（`specs.forEach is not a function`），抛错被页面自己的
+    // catch 吞成一个错误态（提示"请确认后端已启动"，与真正原因毫无关系）
+    // ⇒ **该页从落地起在真机上从未可用**。静态断言只核对"源码里有这段分支"，
+    // 抓不到它；真载荷 e2e 才暴露。
+    //
+    // ⚠️ 桩必须按**接口真实形状**给：`{items: [...]}` 包裹 + **扁平**的
+    // `current_revision_no`（清单端点给扁平、详情端点给嵌套，页面侧由
+    // `decorateArtifact` 归一）。在桩里图方便给成裸数组或嵌套字段，
+    // 就等于把这个缺陷重新藏回桩里 —— 那比没有这条用例更糟。
+    const SESS = path.join(MP, 'pages/entrust/session/session.js')
+    const sessionStub = (log) =>
+      Object.assign({}, entrustStub(log), {
+        // ⚠️ 共享桩把 `viewState` **恒**返回 `empty`（那是为了让工作台停在空态）。
+        // 会话屏正是靠它判 ready/empty，所以这里必须换回**真实实现** ——
+        // 否则页面永远进不了 ready，断言实际上是在测桩、不是在测页面。
+        viewState: REAL_ENTRUST.viewState,
+        fetchArtifactCandidates: (id) => {
+          log.push('fetchArtifactCandidates:' + id)
+          return Promise.resolve({
+            items: [
+              {
+                artifact_id: 12,
+                artifact_type: 'customer_quote',
+                status: 'active',
+                current_revision_id: 33,
+                current_revision_no: 3
+              },
+              {
+                artifact_id: 13,
+                artifact_type: 'contract_review',
+                status: 'active',
+                current_revision_id: 34,
+                current_revision_no: 1
+              }
+            ],
+            total: 2
+          })
+        },
+        fetchArtifactTypes: () => {
+          log.push('fetchArtifactTypes')
+          return Promise.resolve({
+            items: [
+              {
+                code: 'customer_quote',
+                label: '对客方案与报价',
+                required_fields: ['amount', 'currency', 'includes'],
+                optional_fields: [],
+                internal_fields: [],
+                evidence_kinds: [],
+                editable: true,
+                field_types: {}
+              },
+              {
+                code: 'contract_review',
+                label: '合同核对稿',
+                required_fields: ['parties'],
+                optional_fields: [],
+                internal_fields: [],
+                evidence_kinds: [],
+                editable: true,
+                field_types: {}
+              }
+            ]
+          })
+        }
+      })
+
+    const sessLog = []
+    const sess = instantiate(
+      loadConfig(SESS, 'page', makeWx(), sessLog, undefined, {
+        'utils/routes': ROUTES,
+        'utils/entrust': sessionStub(sessLog)
+      })
+    )
+    sess.onLoad({ assignment_id: '7' })
+    await tick()
+    check(
+      '会话屏：真载荷形状下进入 ready 态（把 `{items}` 当裸数组读会进错误态 —— ENT-040 的回归点）',
+      sess.data.view === 'ready',
+      sess.data.view + ' / ' + sess.data.viewHint + ' / ' + JSON.stringify(sessLog)
+    )
+    check(
+      '会话屏：成果卡条数与清单一致，且**显示后端给的精确版本号**（AC-05 落在这一行字上）',
+      sess.data.cards.length === 2 &&
+        (sess.data.cards[0] || {}).currentRevisionNo === 3 &&
+        (sess.data.cards[1] || {}).currentRevisionNo === 1,
+      JSON.stringify(sess.data.cards.map((c) => [c.artifactId, c.currentRevisionNo]))
+    )
+    // ⚠️ 用 `(cards[0] || {})` 取值而不是直接下标：缺陷复现时 `cards` 是空的，
+    // 直接取值会**抛异常把脚本打断**，后面几条断言根本不执行 —— 那比红更糟
+    // （看起来像"只有一条用例挂了"，实际是剩下的没跑）。
+    check(
+      '会话屏：类型名走注册表（`{items}` 被正确读出来）—— 读错时这里会退回英文 code',
+      String((sess.data.cards[0] || {}).typeLabel) === '对客方案与报价',
+      String((sess.data.cards[0] || {}).typeLabel)
+    )
+
+    // 类型表失败**不**拖垮整页：没有它只是类型名显示原始 code，内容仍然要看得到
+    const sessLog2 = []
+    const stubNoTypes = (log) =>
+      Object.assign({}, sessionStub(log), {
+        fetchArtifactTypes: () => Promise.reject(new Error('registry down'))
+      })
+    const sess2 = instantiate(
+      loadConfig(SESS, 'page', makeWx(), sessLog2, undefined, {
+        'utils/routes': ROUTES,
+        'utils/entrust': stubNoTypes(sessLog2)
+      })
+    )
+    sess2.onLoad({ assignment_id: '7' })
+    await tick()
+    check(
+      '会话屏：类型表失败不拖垮整页（内容仍可见，只是类型名退回 code）',
+      sess2.data.view === 'ready' &&
+        sess2.data.cards.length === 2 &&
+        sess2.data.cards[0].typeLabel === 'customer_quote',
+      sess2.data.view + ' / ' + String(sess2.data.cards[0] && sess2.data.cards[0].typeLabel)
+    )
+
+    // 缺参 / 非法编号：错误态且**不取数**（与其它 require-params 页同口径）
+    const sessLog3 = []
+    const sess3 = instantiate(
+      loadConfig(SESS, 'page', makeWx(), sessLog3, undefined, {
+        'utils/routes': ROUTES,
+        'utils/entrust': sessionStub(sessLog3)
+      })
+    )
+    sess3.onLoad({})
+    await tick()
+    check(
+      '会话屏：缺 assignment_id → error 态且不取数（错误优先于空）',
+      sess3.data.view === 'error' && sessLog3.length === 0,
+      sess3.data.view + ' / ' + JSON.stringify(sessLog3)
+    )
+
     // 改动内容必须作废上一次提交的幂等键：沿用旧键会让服务端把新内容当成旧提交的重放
     check(
       '登记页：改动内容作废幂等键（否则改了再提交＝服务端按重放处理，内容不生效）',

@@ -86,6 +86,36 @@
   line-height: 1.6;
 }
 
+/* ── 待复核徽标（A2 五之四）─────────────────────────────────────────────
+   底色用警示色：这不是普通说明，而是"这一版依赖的事实变了、下游可能有失效结果"。
+   但同时它**不**说"内容错了" —— 区别写在 `.art-rv-hint` 里。 */
+.art-rv {
+  margin-top: 20rpx;
+  padding: 20rpx;
+  border-radius: 12rpx;
+  background: #FFF7E6;
+}
+
+.art-rv-title {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #8A5A00;
+}
+
+.art-rv-line {
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  color: #8A5A00;
+  line-height: 1.6;
+}
+
+.art-rv-hint {
+  margin-top: 12rpx;
+  font-size: 23rpx;
+  color: #B06A00;
+  line-height: 1.6;
+}
+
 .art-note-inline {
   padding-top: 12rpx;
   font-size: 24rpx;

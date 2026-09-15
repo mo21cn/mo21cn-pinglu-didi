@@ -34,6 +34,7 @@ const {
   VIEW,
   CASE_TARGET_LABELS,
   addCaseLink,
+  applyCase,
   caseClosureOptions,
   caseDecideAvailable,
   caseDecisionOptions,
@@ -56,6 +57,22 @@ const R = require('../../../utils/routes')
 
 /** 本页路径（注册表口径）；`go()` 需要知道"从哪来"才能查到导航边 */
 const SELF = 'pages/entrust/case/case'
+
+/**
+ * 成果类型表（`GET /artifact-types` 的载荷）→ `{code: label}`。
+ *
+ * ⚠️ 载荷是 **`{items: [...]}` 包裹**，不是裸数组 —— 按裸数组读会拿到 `undefined`，
+ * 而那个错误被 `.catch` 吞掉后只表现为"类型名显示成英文 code"，看起来像措辞没翻、
+ * 不像坏了（ENT-040 在会话页踩过同型问题：那里甚至是整页错误态）。
+ */
+function _typeLabels(res) {
+  const items = (res && res.items) || []
+  const out = {}
+  items.forEach(function (s) {
+    if (s && s.code) out[s.code] = s.label || s.code
+  })
+  return out
+}
 
 Page({
   data: {
@@ -82,6 +99,22 @@ Page({
     canDecide: false,
     canClose: false,
     canReopen: false,
+    /**
+     * 「应用变更」（A2 五之一 / 界面接入见五之四）。
+     *
+     * 服务端 `can_apply_change` 自 ENT-041 起**不再恒 false**（`APPLY_OPEN` 已翻 True）。
+     * 界面条件比能力位更窄一层：还要求**拿到批准快照摘要**（`approval`）——
+     * 应用只认快照，没有快照时按下去必然 400。这与本项目既有的
+     * 「`can_decide && options.length > 0`」是同一条纪律：**能力位可能比可执行条件更宽**，
+     * 渲染条件必须两者都看，否则会渲染出一个注定失败的按钮。
+     */
+    canApply: false,
+    applyOpen: false,
+    applyHint: '',
+    /** 复核传播（五之二生成、五之四展示）与范围待确认类型 */
+    revalidation: [],
+    unconfirmedTypes: [],
+    approval: null,
     decisionOptions: [],
     closureOptions: [],
     /**
@@ -151,9 +184,20 @@ Page({
   load() {
     const self = this
     this.setData({ view: VIEW.LOADING, viewTitle: '加载中', viewHint: '' })
-    return fetchCase(this.data.caseId)
+    return Promise.all([
+      fetchCase(this.data.caseId),
+      // 成果类型表**只**用于把 `unconfirmed_types` 里的英文 code 翻成中文（DR-0016 §4.1
+      // 的"请确认范围"要读得懂）。失败不拖垮本页：能显示的正文比一个整齐的错误态有用
+      // —— 与 `session.js` 对类型表的取舍同一口径。
+      fetchArtifactTypes().catch(function () {
+        return null
+      })
+    ])
       .then(function (res) {
-        self.applyState(viewState({ status: 200, total: 1 }), decorateCase(res))
+        self.applyState(
+          viewState({ status: 200, total: 1 }),
+          decorateCase(res[0], _typeLabels(res[1]))
+        )
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -195,9 +239,17 @@ Page({
       canDecide: canDecide,
       canClose: canClose,
       canReopen: !!caps.can_reopen,
+      // 见 `data.canApply` 的说明：能力位 **且** 有批准快照才渲染
+      canApply: !!caps.can_apply_change && !!detail && !!detail.approval,
       decisionOptions: decisionOptions,
       closureOptions: closureOptions,
+      // 复核传播两栏（只读展示，不参与权限判断）
+      revalidation: detail ? detail.revalidation : [],
+      unconfirmedTypes: detail ? detail.unconfirmedTypes : [],
+      approval: detail ? detail.approval : null,
       // 取数即清空处置表单（见 data 里的说明）
+      applyOpen: false,
+      applyHint: '',
       decideForm: { to: '', note: '', basis: '' },
       decideHint: '',
       closeForm: { disp: '', evidence: '', resolution: '' },
@@ -206,7 +258,12 @@ Page({
       reopenHint: '',
       // 处置区整体是否要出现。单独算一个布尔而不是在模板里写四段 `||`：
       // 模板里写布尔表达式，改一处漏一处不会有任何东西报错。
-      canAnyAction: !!caps.can_add_link || canDecide || canClose || !!caps.can_reopen
+      canAnyAction:
+        !!caps.can_add_link ||
+        canDecide ||
+        canClose ||
+        !!caps.can_reopen ||
+        (!!caps.can_apply_change && !!detail && !!detail.approval)
     })
   },
 
@@ -253,6 +310,31 @@ Page({
         // 仍然拿 409（`expected_revision` 还是旧的那个），会以为"重试永远失败"。
         if (w.conflict) self.load()
       })
+  },
+
+  // ── 应用变更（A2 五之一 / 界面接入见五之四）────────────────────────────
+  //
+  // 页内确认条，**不用 `wx.showModal`** —— 与「记录决定 / 关闭 / 重开」同一理由：
+  // 原生弹层不在渲染树里，走查工具点不到它的确认键 ⇒ 这条落点在真机上无法验证。
+  //
+  // 确认条里展示的是**批准快照摘要**（将动哪些目标、各自改哪些字段）。没有它，「应用变更」
+  // 就是一次盲操作：apply **不接受**"改成什么"，改错了只能再追加一版，前一版仍在审计链上。
+
+  onToggleApply() {
+    this.setData({ applyOpen: !this.data.applyOpen, applyHint: '' })
+  },
+
+  onSubmitApply() {
+    const self = this
+    // 只传 `expected_revision`：修改内容由服务端从批准快照取（DR-0013 §3.7 / P4-A4）。
+    // 页面**没有**"改成什么"可填，这不是缺字段，是刻意的边界。
+    return this.submit('应用中', function () {
+      return applyCase(
+        self.data.caseId,
+        { expected_revision: self.data.revisionNo },
+        newIdempotencyKey('case-apply')
+      )
+    })
   },
 
   /** 展开 / 收起候选面板；第一次展开时懒加载本单的任务与成果 */

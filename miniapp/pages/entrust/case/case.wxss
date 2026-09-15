@@ -305,6 +305,101 @@
   color: #3B5BDB;
 }
 
+/* ── 应用变更（A2 五之四）────────────────────────────────────────────── */
+/* 确认条里摆的是**批准快照摘要**：apply 不接受"改成什么"，所以点之前必须看得到
+   将发生什么。摘要只列目标与字段名，值去成果页的版本历史看 —— 这里摆值会排版崩。 */
+.apply-box {
+  margin-top: 16rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 12rpx;
+  background: #F7F9FD;
+}
+
+.apply-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 25rpx;
+  color: #3D4C63;
+}
+
+.apply-key {
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.apply-val {
+  font-size: 24rpx;
+  color: #3D4C63;
+  line-height: 1.6;
+}
+
+.apply-sub {
+  color: #98A6B8;
+}
+
+.apply-note {
+  margin-top: 10rpx;
+  font-size: 23rpx;
+  color: #C92A2A;
+  line-height: 1.6;
+}
+
+.apply-target {
+  margin-top: 14rpx;
+  padding-top: 14rpx;
+  border-top: 1rpx solid #E6ECF5;
+}
+
+/* 取消按钮与「确认应用」分开：两个都是宽按钮，只有取消是虚线的，
+   避免在误触时把"取消"当成确认（它们是相邻的整宽元素）。 */
+.act-btn-ghost {
+  border-style: solid;
+  border-color: #DDE3EC;
+  color: #6B7A8C;
+}
+
+/* ── 复核传播与范围待确认（A2 五之四）────────────────────────────────── */
+
+.rv-item {
+  padding: 18rpx 0;
+  border-top: 1rpx solid #F4F6FB;
+}
+
+.rv-area {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.rv-sub {
+  margin-top: 6rpx;
+  font-size: 23rpx;
+  color: #6B7A8C;
+  line-height: 1.6;
+}
+
+/* `cancelled` 的原因写在这里 —— 它说的是"复核要求被撤销"，与"已核对"是两件事，
+   所以用警示色而非灰色：撤销是需要被看见的。 */
+.rv-note {
+  margin-top: 8rpx;
+  font-size: 23rpx;
+  color: #C92A2A;
+  line-height: 1.6;
+}
+
+/* 范围可能不足：这是**提问**不是结论，用警示底色让它无法被忽略 ——
+   漏看它的后果是复核范围少了几个对象，而那在界面上看不出来。 */
+.note-warn {
+  margin-top: 20rpx;
+  padding: 20rpx;
+  border-radius: 12rpx;
+  background: #FFF7E6;
+  font-size: 24rpx;
+  color: #8A5A00;
+  line-height: 1.7;
+}
+
 /* ---- 本页 hover 反馈 ----
    `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */
