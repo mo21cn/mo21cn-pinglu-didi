@@ -386,6 +386,21 @@ const TASK_TYPE_ORDER = [
 ]
 
 /**
+ * 任务状态 → 中文（后端 `tasks.STATUS_*`）。
+ *
+ * 复核任务的状态要显示在案件页的复核清单上：只给一个 `pending`，读的人得回去翻
+ * 任务页才知道那是什么意思；而"这批复核做完了没有"正是那张清单要回答的问题。
+ * 静默漏一个键的后果是那一行只剩英文原值 —— `verify_entrust_ui.js` 对键集合有断言。
+ */
+const TASK_STATUS_LABELS = {
+  pending: '待开始',
+  in_progress: '进行中',
+  waiting: '等待中',
+  done: '已完成',
+  cancelled: '已取消'
+}
+
+/**
  * 空值四态文案（DR-0010 §3.6）—— **四句话必须不同**。
  *
  * 「暂无记录 / 尚未分配 / 不适用 / 信息缺失」各自回答不同的问题：
@@ -926,6 +941,8 @@ function decorateArtifact(artifact, spec) {
   const internal = s.internal_fields || []
   const fieldTypes = s.field_types || {}
   const status = data.status
+  // 待复核标记（五之四投影）：`undefined`/`null` 都归一成 `null` = 没有待复核项。
+  const mark = data.needs_revalidation || null
 
   function row(name, isRequired, declared) {
     const raw = payload[name]
@@ -1023,7 +1040,36 @@ function decorateArtifact(artifact, spec) {
     canConfirm: status === 'active',
     // 是否可确认**取决于选中的版本**，由页面在拿到选中项后填；这里只给状态前提
     statusHint: status === 'void' ? '已作废的成果不能再编辑或确认（历史版本仍可审计）' : '',
-    registryHint: s.code ? '' : '该成果类型不在当前注册表中，字段契约无从校验：只读'
+    registryHint: s.code ? '' : '该成果类型不在当前注册表中，字段契约无从校验：只读',
+    // ── 待复核标记（A2 五之二派生、五之四处投影）──────────────────────────
+    // `null` = 没有待复核项。**不把它归一成空对象**：`null` 与 `{}` 在模板里
+    // 一个走"没有徽标"、一个走"有徽标但区域为空"，而后者会渲染出一个莫名的空徽标。
+    //
+    // ⚠️ 徽标只说明"这一版**依赖的**事实变了"，**不等于**成果本身错了：
+    //    文案必须留出这个区别，否则看的人会以为内容已经失效、可以不管了。
+    needsRevalidation: mark
+      ? {
+          count: mark.count || 0,
+          areasText: (mark.areas || []).join('、'),
+          caseIds: mark.case_ids || [],
+          caseIdsText: (mark.case_ids || []).map(function (id) {
+            return '#' + id
+          }).join('、'),
+          reviewTaskIds: mark.review_task_ids || [],
+          // 模板里不能调 `.join()`（WXML 表达式受限），所以在这里拼好。
+          // 空数组给 '—'：显示成空串会让那一行看起来像排版漏了内容。
+          reviewTaskIdsText: (mark.review_task_ids || []).length
+            ? (mark.review_task_ids || [])
+                .map(function (id) {
+                  return '#' + id
+                })
+                .join('、')
+            : '—',
+          // 确认按钮的**前置**：有待复核项时后端会 409（AC-12 后半条）。
+          // 这里只是把话说在前面 —— 真正的拒绝在写端，界面不做权限判断。
+          confirmBlockedHint: '该成果有未完成的复核项，设为生效版本会被拒绝：请先完成复核任务'
+        }
+      : null
   }
 }
 
@@ -1269,6 +1315,34 @@ const CASE_SOURCE_LABELS = {
 /** 受影响项目标类型（后端 `exceptions.TARGET_KINDS`）—— 只有这两类，不放任任意目标 */
 const CASE_TARGET_LABELS = { task: '任务', artifact: '成果' }
 
+/**
+ * 变更类别（后端 `revalidation.CHANGE_CATEGORIES`，DR-0016 的五行）。
+ *
+ * 这五个值决定**复核范围**：类别选错，复核就会去查不相干的对象，而任务照样生成、
+ * 看起来完全正常。所以界面上必须把类别**显示出来**（不能只存在库里）——
+ * 这是「这批复核任务凭什么生成的」唯一的可读答案。
+ */
+const CHANGE_CATEGORY_LABELS = {
+  cargo_quantity_category: '货物数量与品类',
+  origin_destination_mode: '起运地、目的地与运输方式',
+  loading_delivery_window: '装卸与交付时间窗',
+  selected_supplier_quote: '选定供应商与报价',
+  approved_extra_charge: '已批准附加费用'
+}
+
+/**
+ * 待复核项状态（后端 `ent_revalidation.status`）。
+ *
+ * `cancelled` **不是** `resolved`：前者是"复核要求被撤销"，后者是"已按当前版本核对过"。
+ * 两者在界面上必须说不同的话 —— 合成一句「已处理」会让看的人以为核对过了。
+ */
+const REVALIDATION_STATUS_LABELS = { open: '待复核', resolved: '已复核', cancelled: '已撤销' }
+const REVALIDATION_STATUS_CLASS = {
+  open: 'chip chip-warn',
+  resolved: 'chip chip-ok',
+  cancelled: 'chip chip-muted'
+}
+
 /** 处置方式（后端 `exceptions.DISPOSITIONS`） */
 const CASE_DISPOSITION_LABELS = {
   resolved: '已解决',
@@ -1465,7 +1539,7 @@ function _caseMove(ev) {
  * 各自的 `can_*` 决定 —— 那是不会判错的用法（有则显示、无则隐藏），
  * 且**权限判定始终在写端**，界面隐藏按钮从来不是权限控制。
  */
-function decorateCase(payload) {
+function decorateCase(payload, typeLabels) {
   const res = payload || {}
   const data = res.case || {}
   const caps = res.capabilities || {}
@@ -1580,8 +1654,19 @@ function decorateCase(payload) {
     )
   })
 
-  // 只取 A1 的**五个写能力**，且**排除 `can_apply_change`**（恒 false，见函数头 ①）。
-  const writeCaps = ['can_add_link', 'can_remove_link', 'can_decide', 'can_close', 'can_reopen']
+  // 六项写能力：A1 的五个处置 + A2 五之四的「应用变更」。
+  // ⚠️ `can_apply_change` 自 ENT-041 起**不再恒 false**（`APPLY_OPEN` 已翻 True，
+  //    前置是五之二传播闭环 + AC-12 阻止确认都已接通）。此前它在这里被排除，
+  //    理由是"它恒 false、据它下任何界面结论都是错的"—— 那个理由现在**已失效**，
+  //    留着就会让「应用变更」区永远不出现，而看起来像前端没接线。
+  const writeCaps = [
+    'can_add_link',
+    'can_remove_link',
+    'can_decide',
+    'can_close',
+    'can_reopen',
+    'can_apply_change'
+  ]
   const hasAction = writeCaps.some(function (k) {
     return !!caps[k]
   })
@@ -1623,6 +1708,75 @@ function decorateCase(payload) {
       { key: 'rev', label: '数据版本', value: 'r' + (data.revision_no || 1) }
     ],
     blocks: blocks,
+    // ── A2 五之四：复核传播与批准快照（界面输入）──────────────────────────
+    // 两项都是**派生展示**，不参与任何权限判断：写端各自独立复核权限与版本。
+    revalidation: (res.revalidation || []).map(function (row) {
+      const hasTarget = !!row.target_kind && row.target_id !== null && row.target_id !== undefined
+      return {
+        key: row.review_key,
+        area: row.area || '',
+        taskTypeLabel: TASK_TYPE_LABELS[row.task_type] || row.task_type || '',
+        // 目标与版本分两行显示：`target_revision_id` 是**成果版本的 id**（不是 `revision_no`），
+        // 缺它时说明这条复核没有具体对象（DR-0016 §4.3 的"无对象区域任务"）。
+        targetText: hasTarget
+          ? (CASE_TARGET_LABELS[row.target_kind] || row.target_kind) + ' #' + row.target_id
+          : '无具体对象',
+        revisionText:
+          row.target_revision_id === null || row.target_revision_id === undefined
+            ? '未绑定版本'
+            : '版本 id ' + row.target_revision_id,
+        reviewTaskId: row.review_task_id,
+        taskTitle: row.task_title || '（复核任务标题缺失）',
+        taskStatusLabel: TASK_STATUS_LABELS[row.task_status] || row.task_status || '',
+        status: row.status,
+        statusLabel: REVALIDATION_STATUS_LABELS[row.status] || row.status || '',
+        statusClass: REVALIDATION_STATUS_CLASS[row.status] || 'chip chip-muted',
+        // note 只在**存在时**才显示：`cancelled` 的原因写在这里（"复核要求被撤销"），
+        // 空字符串会在模板里渲染成一行空白，看起来像排版坏了。
+        note: row.note || ''
+      }
+    }),
+    // DR-0016 §4.1：映射点名、委托里确实存在、却没被登记为受影响项的**成果类型**。
+    // 这是**提问**不是结论 —— 界面上要说"请确认范围"，不能说"已自动补上"。
+    //
+    // 类型中文名从调用方传入的 `typeLabels`（来自 `GET /artifact-types` 的注册表）取。
+    // 前端**不另存一份类型标签表**：注册表的 label 是要给客户看的措辞，抄一份就会漂移，
+    // 而漂移的表现是"复核清单里的类型名和成果页里的不一样"。取不到时**退回原值**，
+    // 不编造一个看起来对的中文名。
+    unconfirmedTypes: (res.unconfirmed_types || []).map(function (code) {
+      const labels = typeLabels || {}
+      return { code: code, label: labels[code] || code }
+    }),
+    approval: res.approval
+      ? {
+          snapshotVersion: res.approval.snapshot_version,
+          categoryLabel:
+            CHANGE_CATEGORY_LABELS[res.approval.change_category] ||
+            res.approval.change_category ||
+            '',
+          targets: (res.approval.targets || []).map(function (t) {
+            const fields = t.change_fields || []
+            return {
+              key: t.target_kind + '#' + t.target_id,
+              targetText:
+                (CASE_TARGET_LABELS[t.target_kind] || t.target_kind) + ' #' + t.target_id,
+              // 字段名翻成中文（复用成果页的字段标签表）—— 直接摆英文键名，
+              // 读的人得回去翻成果页才知道那几个键是什么意思。
+              fieldsText: fields.length
+                ? fields
+                    .map(function (name) {
+                      return artifactFieldLabel(name)
+                    })
+                    .join('、')
+                : '无字段变更（任务类目标由任务状态机承担）',
+              basisText:
+                t.basis_revision_id === null || t.basis_revision_id === undefined
+                  ? '无基础版本'
+                  : '版本 id ' + t.basis_revision_id
+            }
+          })
+        }
+      : null,
     events: events.map(function (ev) {
       // 逐项拼接、缺项不留悬空分隔符：`… + ' · ' + …` 在缺值时会渲染出开头的
       // 「 · 操作人 …」，看起来像排版坏了 —— 而这页最容易缺的恰恰是时间与操作人。
@@ -2075,6 +2229,30 @@ function reopenCase(caseId, body, idempotencyKey) {
 }
 
 /**
+ * 应用已批准的变更（`POST /exceptions/{id}/apply`；A2 五之一，界面接入见五之四）。
+ *
+ * 请求体**只有 `expected_revision`** —— 这是刻意的：修改内容只来自批准快照
+ * （`decided` 事件的 payload），调用方**没有**"改成什么"可填。界面因此必须在
+ * 提交前把将应用的内容显示出来（`decorateCase` 的 `approval` 就是为它准备的），
+ * 否则用户是在**盲操作**，而应用写下去的是 append-only 的版本历史。
+ *
+ * 服务端语义（由 `caseWriteError` 按状态码翻成人话）：
+ *   · **409** —— 依据版本已变化（旧批准不能直接应用）或状态不允许 ⇒ 必须重新取数；
+ *   · **400** —— 缺少批准快照 / 变更类别未登记：这是"请求本身不完整"，
+ *                不是"业务规则挡下"，所以它**不留** `applied_rejected` 事件；
+ *   · **403** —— 没有写权限（界面据 `capabilities` 显隐只是体验层）。
+ */
+function applyCase(caseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/exceptions/' + caseId + '/apply',
+    method: 'POST',
+    data: body,
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
  * 受影响项的**候选**（登记 link 时要选一个具体目标）。
  *
  * 为什么必须去取候选而不是让用户手填编号：`target_id` 必须与案件**同属一张委托单**
@@ -2174,10 +2352,13 @@ module.exports = {
   CASE_STATUS_LABELS,
   CASE_TARGET_LABELS,
   CASE_TRANSITIONS,
+  CHANGE_CATEGORY_LABELS,
   ISSUE_KIND_LABELS,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
   REF_PROJECTORS,
+  REVALIDATION_STATUS_CLASS,
+  REVALIDATION_STATUS_LABELS,
   REVISION_ROLE,
   REVISION_SOURCE_LABELS,
   SLOT_EMPTY_TEXT,
@@ -2186,11 +2367,13 @@ module.exports = {
   STATUS_META,
   STATUS_ORDER,
   STRUCTURED_FIELD_KINDS,
+  TASK_STATUS_LABELS,
   TASK_TYPE_LABELS,
   TASK_TYPE_ORDER,
   VIEW,
   WORKBENCH_SLOTS,
   addCaseLink,
+  applyCase,
   appendRevision,
   artifactFieldLabel,
   artifactStatusClass,

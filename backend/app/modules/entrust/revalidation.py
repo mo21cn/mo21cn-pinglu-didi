@@ -414,13 +414,26 @@ def apply_revalidation(
 
 
 def list_for_case(session: Session, exception_id: int) -> list[dict[str, Any]]:
+    """该案件生成的复核项（含**复核任务的当前状态**）。
+
+    带任务状态与标题，是因为界面上「这批复核做完了没有」必须一眼可见：只给
+    `review_task_id`，读的人得再去任务页逐个查；而复核任务**可以**被取消或重开
+    （见 `cancel_for_task` / `restore_for_task`），状态是会变的。
+
+    LEFT JOIN 而不是 INNER JOIN：任务行理论上不该缺席（同一事务内创建），但
+    缺席时宁可**如实返回空标题**，也不要让这条复核项从列表里凭空消失 ——
+    少一条会读成"范围里本来就没这一项"。
+    """
     rows = (
         session.execute(
             text(
-                "SELECT id, exception_id, review_key, target_kind, target_id, "
-                "target_revision_id, area, task_type, review_task_id, status, note, "
-                "created_at, resolved_at, resolved_by "
-                "FROM ent_revalidation WHERE exception_id = :cid ORDER BY id"
+                "SELECT r.id, r.exception_id, r.review_key, r.target_kind, r.target_id, "
+                "r.target_revision_id, r.area, r.task_type, r.review_task_id, r.status, "
+                "r.note, r.created_at, r.resolved_at, r.resolved_by, "
+                "t.title AS task_title, t.status AS task_status "
+                "FROM ent_revalidation r "
+                "LEFT JOIN ent_workflow_task t ON t.id = r.review_task_id "
+                "WHERE r.exception_id = :cid ORDER BY r.id"
             ),
             {"cid": exception_id},
         )
@@ -428,6 +441,29 @@ def list_for_case(session: Session, exception_id: int) -> list[dict[str, Any]]:
         .all()
     )
     return [dict(r) for r in rows]
+
+
+def scope_hint(
+    session: Session, *, category: str, assignment_id: int, artifact_targets: list[int]
+) -> list[str]:
+    """范围不足的候选成果类型（DR-0016 §4.1：交经理人确认）。
+
+    **复用 `plan_scope` 而不是另写一遍筛选**：`unconfirmed` 的判据（"映射点名了这类成果、
+    它在委托里确实存在、却没被登记为受影响项"）与生成复核范围用的是同一段逻辑。
+    另写一遍就会出现"列表说没问题、生成时却少一条"这类只在某些数据形态下出现的分叉。
+
+    只取 `unconfirmed`，不落任何库、不生成任务 —— 它是**提问**，不是结论。
+    """
+    if category not in IMPACT_MAP:
+        return []
+    return list(
+        plan_scope(
+            session,
+            category=category,
+            assignment_id=assignment_id,
+            artifact_targets=artifact_targets,
+        ).unconfirmed
+    )
 
 
 def open_targets(session: Session, *, artifact_ids: list[int]) -> dict[int, dict[str, Any]]:
@@ -515,6 +551,106 @@ def resolve_for_task(
             "resolved_by = :actor WHERE review_task_id = :tid AND status = 'open'"
         ),
         {"ts": current.strftime("%Y-%m-%d %H:%M:%S"), "actor": actor_id, "tid": task_id},
+    )
+    if commit:
+        session.commit()
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+def cancel_for_task(
+    session: Session,
+    *,
+    task_id: int,
+    actor_id: int,
+    now: datetime | None = None,
+    commit: bool = False,
+) -> int:
+    """复核任务被**取消** ⇒ 对应的待复核项转为 `cancelled`（返回改了几行）。
+
+    为什么必须联动（2026-09-15，ENT-041）
+    ------------------------------------
+    解除路径若只有「完成任务」，那么复核任务一旦被 `cancel`（撤回/作废），标记就
+    **永远停在 `open`** ⇒ 那个成果**再也无法被设为生效版本**，而界面上没有任何解释
+    —— 收到 409 的人只能看到「有未完成的复核项」，可那个复核任务已经不存在了。
+    那不是"保守"，那是一条**看起来像 bug 的业务结论**。
+
+    两条语义上的边界（不能含糊）：
+
+    * `cancelled` **不是** `resolved`。前者说的是"这个复核要求被撤销了"，后者是
+      "已经按当前版本核对过"。混成一个值，`resolved_by` 就会同时表示"谁核对过"
+      与"谁撤销了要求"，事后无法区分（事实必须有来源，且来源要能分辨动作）。
+    * 取消复核任务**是管理动作**（`PERM_TASK_DISPATCH`），有 actor、有任务事件、
+      本行也记 `resolved_by`/`resolved_at` ⇒ 它不是"悄悄绕过"，而是留有痕迹的撤销。
+      **留意**：AC-12 的阻止意图是"不让人在没核对的情况下把它设为生效"，取消复核
+      等于显式声明"不需要核对" —— 这**必须**由有权限的人做出并留名。
+
+    Note:
+        与其它解除路径一样**默认不提交**，由调用方决定事务边界。
+    """
+    current = now or utcnow_naive()
+    # ⚠️ 不写成 `note || :why` 的 SQL 拼接：`||` 在 MySQL 里默认是**逻辑或**（不是拼接），
+    # 在 SQLite 里才是拼接 —— 同一条语句会在两个方言下拿到完全不同的结果，且 SQLite 上
+    # 看起来是对的（本地测试全绿、CI 的 MySQL job 才红）。拼字符串一律在 Python 里做。
+    rows = (
+        session.execute(
+            text(
+                "SELECT id, note FROM ent_revalidation "
+                "WHERE review_task_id = :tid AND status = 'open' ORDER BY id"
+            ),
+            {"tid": task_id},
+        )
+        .mappings()
+        .all()
+    )
+    why = "复核任务被取消 ⇒ 本复核要求随之撤销（不等同于已核对）"
+    for row in rows:
+        old = str(row["note"] or "").strip()
+        session.execute(
+            text(
+                "UPDATE ent_revalidation SET status = 'cancelled', resolved_at = :ts, "
+                "resolved_by = :actor, note = :note WHERE id = :rid"
+            ),
+            {
+                "ts": current.strftime("%Y-%m-%d %H:%M:%S"),
+                "actor": actor_id,
+                "note": f"{old}；{why}" if old else why,
+                "rid": int(row["id"]),
+            },
+        )
+    if commit:
+        session.commit()
+    return len(rows)
+
+
+def restore_for_task(
+    session: Session,
+    *,
+    task_id: int,
+    now: datetime | None = None,
+    commit: bool = False,
+) -> int:
+    """复核任务被**重开** ⇒ 已解除的待复核项**恢复**为 `open`（返回改了几行）。
+
+    为什么重开必须恢复
+    ------------------
+    「某成果需要复核」⇔ 存在一条 `status='open'` 的行（本模块的核心不变式）。
+    任务完成会把行置 `resolved`；若任务之后被 `reopen`（"那次完成不算数"），
+    行却停在 `resolved`，不变式就**静默失效**了 —— 成果看起来已复核完，而实际上
+    那次复核已经作废。⇒ 重开必须把它退回 `open`。
+
+    只恢复 `resolved` 的行：`cancelled` 是"复核要求被撤销"（不是"完成被撤销"），
+    重开任务并不重新提出这个要求，撤销应当仍然有效。
+
+    `resolved_at` / `resolved_by` 清回 NULL：那两个字段说的是"谁在何时解除了本项"，
+    解除已被撤销，留着就是一条**错误的事实**（未知保持未知）。
+    """
+    _ = now or utcnow_naive()  # 保留参数位：本函数不写时间戳，理由见 docstring
+    result = session.execute(
+        text(
+            "UPDATE ent_revalidation SET status = 'open', resolved_at = NULL, "
+            "resolved_by = NULL WHERE review_task_id = :tid AND status = 'resolved'"
+        ),
+        {"tid": task_id},
     )
     if commit:
         session.commit()

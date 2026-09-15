@@ -81,6 +81,22 @@
         </view>
       </view>
 
+      <!-- 待复核（A2 五之二派生、五之四处投影）。
+           ⚠️ 文案必须把两件事分开：它说的是"这一版**依赖的事实**变了"，
+           **不是**"成果内容错了" —— 合成一句"内容已失效"会让看的人以为可以不管它。 -->
+      <view wx:if="{{artifact.needsRevalidation}}" class="card art-rv">
+        <view class="row-between">
+          <text class="art-rv-title">待复核</text>
+          <text class="chip chip-warn">{{artifact.needsRevalidation.count}} 项</text>
+        </view>
+        <view class="art-rv-line">复核区域：{{artifact.needsRevalidation.areasText}}</view>
+        <view wx:if="{{artifact.needsRevalidation.caseIdsText}}" class="art-rv-line">
+          来源变更：{{artifact.needsRevalidation.caseIdsText}}
+        </view>
+        <view class="art-rv-line">复核任务：{{artifact.needsRevalidation.reviewTaskIdsText}}</view>
+        <view class="art-rv-hint">{{artifact.needsRevalidation.confirmBlockedHint}}</view>
+      </view>
+
       <!-- 已作废：说清"为什么现在不能改"，而不是把按钮藏起来让人猜 -->
       <view wx:if="{{artifact.statusHint}}" class="card art-note">{{artifact.statusHint}}</view>
       <!-- 类型不在注册表里：字段契约无从校验，如实说明只读的理由 -->

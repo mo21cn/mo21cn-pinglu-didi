@@ -43,6 +43,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.entrust import exceptions as svc
+from app.modules.entrust import revalidation as revalidation_svc
 from app.modules.entrust._http import (
     guard_or_400,
     map_access_denied,
@@ -56,6 +57,7 @@ from app.modules.entrust.authz import (
 )
 from app.modules.entrust.schemas import (
     ExceptionCaseApplyIn,
+    ExceptionCaseApprovalOut,
     ExceptionCaseCloseIn,
     ExceptionCaseCreate,
     ExceptionCaseDecisionIn,
@@ -65,6 +67,7 @@ from app.modules.entrust.schemas import (
     ExceptionCaseOrgListOut,
     ExceptionCaseOut,
     ExceptionCaseReopenIn,
+    ExceptionCaseRevalidationOut,
     exception_case_capabilities,
     exception_case_list_item,
     exception_case_out,
@@ -377,6 +380,28 @@ def get_exception(
 
     events = svc.list_events(db, exception_id)
     links = svc.list_links(db, exception_id)
+    # ── A2 五之四：把「复核范围与它凭什么生成」「点应用会发生什么」交给界面 ──────
+    # 三条都由**现有事实**派生（复核项表 / 受影响项 / 批准快照），不新增真相：
+    #   · `revalidation`  —— 「这批复核任务凭什么生成的」的答案（含任务当前状态）；
+    #   · `unconfirmed_types` —— DR-0016 §4.1 的"范围可能不足，请经理人确认"；
+    #     只取 `plan_scope` 的 unconfirmed（**范围逻辑只有一份实现**）；
+    #   · `approval` —— 批准快照摘要。apply 不接受"改成什么"，所以界面必须
+    #     在点之前把将发生的事说清楚（否则是盲操作）。
+    reval_items = revalidation_svc.list_for_case(db, exception_id)
+    unconfirmed: list[str] = []
+    category = case.get("change_category")
+    if str(case["kind"]) == svc.KIND_CHANGE_REQUEST and category in revalidation_svc.IMPACT_MAP:
+        unconfirmed = revalidation_svc.scope_hint(
+            db,
+            category=str(category),
+            assignment_id=int(case["assignment_id"]),
+            artifact_targets=[
+                int(link["target_id"])
+                for link in links
+                if str(link["target_kind"]) == svc.TARGET_ARTIFACT
+            ],
+        )
+    approval_summary = svc.approval_summary(db, exception_id)
     return ExceptionCaseDetailOut(
         case=exception_case_out(svc.project_case_internal(case, links=links)),
         # 能力与写命令**同源**（都过 `_assert_can_write` 的判据）。
@@ -385,6 +410,13 @@ def get_exception(
             svc.case_capabilities(db, actor_id=int(user.id), case=case, affected_count=len(links))
         ),
         events=[exception_event_out(item) for item in events],
+        revalidation=[ExceptionCaseRevalidationOut.model_validate(item) for item in reval_items],
+        unconfirmed_types=unconfirmed,
+        approval=(
+            ExceptionCaseApprovalOut.model_validate(approval_summary)
+            if approval_summary is not None
+            else None
+        ),
     )
 
 
