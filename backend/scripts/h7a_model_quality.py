@@ -47,7 +47,7 @@ if _BACKEND not in sys.path:
 from app.core.config import get_settings  # noqa: E402
 from app.modules.agent import llm as llm_gateway  # noqa: E402
 from app.modules.agent.llm import LLMError  # noqa: E402
-from app.modules.agent.service import SYSTEM_PROMPT  # noqa: E402
+from app.modules.agent.service import build_cargo_prompt  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 SAMPLES_PATH = HERE / "h7a_samples.json"
@@ -156,8 +156,12 @@ def _grade_sample(sample: dict[str, Any], content: dict[str, Any], today: date) 
     }
 
 
-async def _call(text: str) -> tuple[dict[str, Any] | None, str | None, str, int]:
+async def _call(prompt: str, text: str) -> tuple[dict[str, Any] | None, str | None, str, int]:
     """调真实模型一次；返回 (content, error_kind, error_message, latency_ms)。
+
+    ``prompt`` 由调用方用 ``build_cargo_prompt(today)`` 渲染好传进来 ——
+    **必须是生产同一个渲染入口**，否则"验证"验的是另一套提示词。
+    参考答案的日期也按同一个 ``today`` 展开，两侧同基准。
 
     ⚠️ `error_message` 必须一起返回：2026-09-16 重跑时 S10 两次 `bad_response`，
     结果文件里只有 `{"kind": "bad_response"}` —— 光看这个查不出原因，
@@ -165,7 +169,7 @@ async def _call(text: str) -> tuple[dict[str, Any] | None, str | None, str, int]
     **错误分类用来路由，错误原文用来定位**，两者缺一不可。
     """
     try:
-        res = await llm_gateway.chat_json(system=SYSTEM_PROMPT, user=text)
+        res = await llm_gateway.chat_json(system=prompt, user=text)
     except LLMError as exc:
         return None, exc.kind, str(exc), 0
     return res.content, None, "", res.latency_ms
@@ -174,12 +178,15 @@ async def _call(text: str) -> tuple[dict[str, Any] | None, str | None, str, int]
 async def run(runs: int) -> dict[str, Any]:
     samples = json.loads(SAMPLES_PATH.read_text(encoding="utf-8"))["samples"]
     today = date.today()
+    # 与生产同一个渲染入口：提示词里带上了"今天"，模型才有基准推算相对日期
+    prompt = build_cargo_prompt(today)
     settings = get_settings()
 
     print(f"供应商   : {settings.LLM_PROVIDER}  模型: {settings.LLM_MODEL}")
     print(f"端点     : {settings.LLM_BASE_URL}")
     print(f"样本/轮次: {len(samples)} × {runs} = {len(samples) * runs} 次调用")
-    print(f"今天     : {today.isoformat()}（相对日期按它推算）\n")
+    print(f"今天     : {today.isoformat()}（相对日期按它推算）")
+    print(f"提示词   : 携带今天={today.isoformat() in prompt}（{len(prompt)} 字符）\n")
 
     per_run: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -189,7 +196,7 @@ async def run(runs: int) -> dict[str, Any]:
     for run_no in range(1, runs + 1):
         outcomes: dict[str, Any] = {}
         for s in samples:
-            content, kind, err_msg, latency = await _call(s["text"])
+            content, kind, err_msg, latency = await _call(prompt, s["text"])
             if content is None:
                 errors.append({"id": s["id"], "run": run_no, "kind": kind, "message": err_msg})
                 print(f"  ✗ {s['id']} 调用失败: {kind}")
@@ -238,6 +245,10 @@ async def run(runs: int) -> dict[str, Any]:
         "runs": runs,
         "samples": len(samples),
         "today": today.isoformat(),
+        # 自证：结果文件本身写明这轮的提示词是否携带了基准日期。
+        # 否则"评分基准假定模型知道年份"这件事只能靠记忆，事后无从复核。
+        "prompt_includes_today": today.isoformat() in prompt,
+        "prompt_chars": len(prompt),
         "thresholds": THRESHOLDS,
         "field_accuracy": round(correct / total, 4) if total else 0.0,
         "correct": correct,
@@ -336,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
 
     samples = json.loads(SAMPLES_PATH.read_text(encoding="utf-8"))["samples"]
     calls = len(samples) * args.runs
-    chars = sum(len(s["text"]) for s in samples) * args.runs + len(SYSTEM_PROMPT) * calls
+    chars = sum(len(s["text"]) for s in samples) * args.runs + len(build_cargo_prompt()) * calls
     print(
         f"样本 {len(samples)} 条 × {args.runs} 轮 = {calls} 次调用；"
         f"提示词约 {chars} 字符（≈{chars // 3} tokens，仅输入侧）"
