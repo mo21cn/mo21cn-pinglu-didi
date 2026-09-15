@@ -59,12 +59,14 @@ jobs:
         working-directory: .
         run: |
           ruff check --config backend/pyproject.toml \
-            scripts/verify_miniapp_devtools.py scripts/wechatide_client.py
+            scripts/verify_miniapp_devtools.py scripts/wechatide_client.py \
+            scripts/verify_ci_parity.py
           ruff format --check --config backend/pyproject.toml \
-            scripts/verify_miniapp_devtools.py scripts/wechatide_client.py
+            scripts/verify_miniapp_devtools.py scripts/wechatide_client.py \
+            scripts/verify_ci_parity.py
 
           # 登记完整性：仓库根每个 .py 必须「已纳入 lint」或「已登记豁免」，二者必居其一。
-          linted="scripts/verify_miniapp_devtools.py scripts/wechatide_client.py"
+          linted="scripts/verify_miniapp_devtools.py scripts/wechatide_client.py scripts/verify_ci_parity.py"
           exempt="scripts/verify_baseline.py"
           for f in scripts/*.py; do
             case " ${linted} ${exempt} " in
@@ -72,7 +74,14 @@ jobs:
               *) echo "✗ ${f} 既未纳入 ruff 门禁、也未登记豁免；请二选一，不要静默漏过"; exit 1 ;;
             esac
           done
-          echo "✓ 仓库根 scripts/*.py 登记完整（linted 2 / exempt 1）"
+          echo "✓ 仓库根 scripts/*.py 登记完整（linted 3 / exempt 1）"
+
+      - name: 门禁范围一致性（本地预演 vs 本文件）
+        # 为什么要在 CI 里查这件事：本项目两次「本地绿、CI 红」都是**范围不一致**
+        # （漏 `--config`、只查改过的文件）。本步把范围从本文件读出来与脚本内冻结的
+        # 契约比对 —— 任何人调整门禁范围都会被要求同步一次，而不是靠记忆。
+        working-directory: .
+        run: python scripts/verify_ci_parity.py
 
       - name: 测试（pytest）
         env:
