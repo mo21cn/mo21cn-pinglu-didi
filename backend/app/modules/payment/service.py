@@ -115,6 +115,24 @@ def get_by_order(db: Session, order_id: int) -> Payment | None:
     return db.execute(select(Payment).where(Payment.order_id == order_id)).scalar_one_or_none()
 
 
+def pay_status_map(db: Session, order_ids: list[int]) -> dict[int, str]:
+    """批量取「订单 ID → 支付单状态」（供订单列表/详情展示，避免 N+1）。
+
+    ⚠️ **没有支付单的订单不会出现在返回值里** —— 调用方据此把「还没有支付单」与
+    「支付单状态是空字符串」区分开（前者在接口上表达为 `pay_status = None`）。
+
+    为什么要这个方法：`Order.status` 是**订单**状态，`matched` 的订单完全可能已经付过款
+    （`mock_pay` 只改支付单、不碰订单）。前端只按 `matched` 渲染「去支付」，会让
+    **已支付的订单仍显示按钮** —— 这就是 ENT-044（真机走查⑧b 首次执行时发现）。
+    """
+    if not order_ids:
+        return {}
+    rows = db.execute(
+        select(Payment.order_id, Payment.status).where(Payment.order_id.in_(order_ids))
+    ).all()
+    return {int(order_id): str(status) for order_id, status in rows}
+
+
 def is_participant(payment: Payment, user_id: int) -> bool:
     """支付单参与方判定（付款方或收款方）。"""
     return user_id in (payment.payer_id, payment.payee_id)

@@ -70,6 +70,13 @@ class OrderOut(BaseModel):
     # 前端无需再按角色拉「我的货源 / 我的船队」做富化。
     cargo: CargoSummary | None = None
     ship: ShipSummary | None = None
+    #: 该订单的**支付单状态**（`pending` / `paid` / `refunded` / `closed`）；
+    #: **`None` 表示还没有支付单**（与"状态为空"是两件事）。
+    #: 由订单端点填充（`payment.service.pay_status_map` 批量查，避免 N+1）。
+    #: ⚠️ 为什么需要它：`status` 是**订单**状态，`matched` 的订单可能已经付过款
+    #: ⇒ 前端只按 `status == 'matched'` 渲染「去支付」，会让**已支付的订单仍显示按钮**
+    #: （ENT-044，真机走查⑧b 首次执行时发现）。
+    pay_status: Literal["pending", "paid", "refunded", "closed"] | None = None
 
 
 class OrderListResponse(BaseModel):

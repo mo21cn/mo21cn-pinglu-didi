@@ -127,6 +127,11 @@ Page({
     const rest = Object.assign({}, o)
     delete rest.cargo
     delete rest.ship
+    // 支付入口的**唯一判据**（ENT-044）：`status` 是**订单**状态，而 `matched` 的订单
+    // 完全可能已经付过款（支付域只改支付单、不碰订单）⇒ 只看 status 会让**已支付的
+    // 订单仍显示「去支付」**（真机走查 ⑧b 首次执行时发现）。无支付单时后端给 null。
+    const payStatus = o.pay_status || ''
+    const canGoPay = o.status === 'matched' && payStatus !== 'paid'
     return {
       ...rest,
       origin_label: originLabel,
@@ -134,7 +139,11 @@ Page({
       cargo_name: c ? c.cargo_name : ('货源 #' + o.cargo_id),
       ship_name: s ? s.ship_name : ('船舶 #' + o.ship_id),
       weight_text: weightText,
-      date_text: dateText
+      date_text: dateText,
+      pay_status: payStatus,
+      canGoPay: canGoPay,
+      // 其余情况都给「支付详情」—— 包括已付款的待承运单，否则它没有任何支付入口
+      showPayInfo: !canGoPay
     }
   },
 

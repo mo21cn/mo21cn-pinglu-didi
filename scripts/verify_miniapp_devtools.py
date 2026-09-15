@@ -403,7 +403,7 @@ def _pct(val: object) -> float:
         return -1.0
 
 
-def simulator_ready(client: Client, tries: int = 6, gap: float = 2.0) -> bool:
+def simulator_ready(client: Client, tries: int = 6, gap: float = 2.0, probe_s: int = 45) -> bool:
     """模拟器里是否真的有页面（`pageStack` 非空）。
 
     为什么必须有这一句（2026-09-15 实测）：`check_wechatide_status` 与
@@ -413,9 +413,23 @@ def simulator_ready(client: Client, tries: int = 6, gap: float = 2.0) -> bool:
 
     和 `backend_ready()` 同一条取向：**环境错要报成环境错**，不能让它在断言里
     伪装成"页面全坏了"。
+
+    ⚠️ `probe_s` 必须**收窄**（默认 45s，别用客户端的 150s）：本函数按**次数**轮询，
+    一次探测吃满默认超时 ⇒ 最坏 `6 × 150s = 15 分钟` 才给结论；而且**耗时没进日志**
+    ⇒ 看起来像"卡死"。2026-09-15 在运行器闸门上实测到同一症状：18 次探测烧掉 56 分钟、
+    页面栈全程为空，日志里只有一行行 `pageStack=[]`，**完全看不出慢在哪**。
+    所以这里把每次探测的**真实耗时**也打出来。
     """
+    t0 = time.time()
     for _ in range(tries):
-        if client.page_stack():
+        t1 = time.time()
+        stack = client.page_stack(timeout=probe_s)
+        t2 = time.time()
+        print(
+            f"    [{t2 - t0:6.1f}s] pageStack={str(stack)[:110]}  (探测 {t2 - t1:5.1f}s)",
+            flush=True,
+        )
+        if stack:
             return True
         time.sleep(gap)
     return False
@@ -2577,30 +2591,33 @@ def sec_8b(w: Walker) -> None:
         f"http={status2} status={now.get('status')} id={now.get('id')}",
     )
 
-    # 订单页：该单的「去支付」入口 —— **记为限制，不是通过**（首次真机执行时查明）
+    # 订单页：该单的「去支付」入口**必须消失**（ENT-044 已修）
     #
-    # ⚠️ 不能断言"入口消失"：**它不会消失**，根因已查清且不是页面的 bug：
-    #   · 订单页的 `data-act-pay` 是**同一属性两处复用**：「去支付」（`status==='matched'`）
-    #     与「支付详情」（`status!=='matched'`）；两者条件互斥 ⇒ 同一时刻只命中一个，
-    #     所以"锚点数"仍能唯一判断是哪一个；
-    #   · 但 `status` 是**订单**状态，而 `OrderOut` **不带支付状态** ⇒ 列表前端无从知道
-    #     "这一单的支付单已经 paid"；`payment.service.mock_pay` 也只改支付单、不碰订单。
-    # ⇒ 已支付的订单在货主列表里**仍显示主按钮「去支付」**（点进去支付页正确显示"已支付"
-    #   且没有可点按钮 ⇒ **不影响资金安全**，属体验/一致性缺口）。
-    # **已登记为缺口 ENT-044**；修法要订单列表带支付状态（订单/支付域改动，不在本轮范围）。
-    # 因此本步**只如实记录现状**，不当通过 —— 与 ㉕D「确认动作未在真机点击」同一写法。
+    # 首次真机执行时它**不会**消失，当时查明根因并登记为缺口 ENT-044：
+    #   · `data-act-pay` 曾在同一文件里**两处复用**（「去支付」`status==='matched'` 与
+    #     「支付详情」`status!=='matched'`）⇒ 锚点数无法区分命中的是哪一个；
+    #   · `status` 是**订单**状态，而 `OrderOut` **不带支付状态** ⇒ 列表前端无从知道
+    #     "这一单的支付单已经 paid"（`mock_pay` 只改支付单、不碰订单）。
+    # 现在订单端点带上了 `pay_status`（`payment.service.pay_status_map`），页面按
+    # `canGoPay` 渲染，两个入口各用**自己的锚点**（`data-act-pay` / `data-act-payinfo`）
+    # ⇒ 本条从"限制记录"升级为**真断言**。
     #
     # ⚠️ 用 `nav` 直进订单页而不是 `back_to`：上面为了重新取数用了 `reLaunch`，
     #    页面栈里已经只有支付页，`back_to` 没有可返回的上一页。
     w.c.nav("reLaunch", "/" + ORDERS, ORDERS)
     w.c.wait_path(ORDERS, 25)
     time.sleep(1.6)
-    n = w.c.count(f'[data-act-pay="{oid}"]')
+    n_pay = w.c.count(f'[data-act-pay="{oid}"]')
     w.rep.rec(
-        "⑧b 订单页「去支付」入口现状（**记为限制，不是通过**；已登记缺口 ENT-044）",
-        True,
-        f'[data-act-pay="{oid}"] n={n} —— n=1 = 仍显示「去支付」；'
-        "根因：订单列表不返回支付状态，入口只按订单状态渲染（mock_pay 不碰订单）",
+        "⑧b 订单页：已支付订单不再显示「去支付」（ENT-044）",
+        n_pay == 0,
+        f'[data-act-pay="{oid}"] n={n_pay}',
+    )
+    n_info = w.c.count(f'[data-act-payinfo="{oid}"]')
+    w.rep.rec(
+        "⑧b 订单页：改为显示「支付详情」（入口不是被藏起来，仍可查这笔支付）",
+        n_info == 1,
+        f'[data-act-payinfo="{oid}"] n={n_info}',
     )
     w.rep.rec(
         "⑧b 弹层确认键未真实点击",

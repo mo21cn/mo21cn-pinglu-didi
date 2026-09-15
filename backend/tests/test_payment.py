@@ -269,3 +269,56 @@ def test_payment_full_trade_loop(owner, port_user, shipper, client):
     assert final["status"] == "paid"
     assert final["amount"] == 25600
     assert final["transaction_no"]
+
+
+# ---- ENT-044：订单端点要带「支付单状态」----
+
+
+def test_order_endpoints_expose_pay_status(owner, port_user, shipper, client):
+    """ENT-044：订单**详情与列表**都要带 `pay_status`，且两者必须一致。
+
+    为什么必需：`status` 是**订单**状态，`matched` 的订单完全可能已经付过款
+    （`mock_pay` 只改支付单、不碰订单）⇒ 前端只按 `status == 'matched'` 渲染「去支付」，
+    会让**已支付的订单仍显示按钮**（真机走查 ⑧b 首次执行时发现，见 DR-0009 §8.3）。
+
+    这条用例钉住三件事：① 无支付单是 `None`（不是 `""` 也不是 `"unpaid"`）；
+    ② 列表与详情同值（同一条数据两个页面显示不同最难查）；
+    ③ 支付成功后订单状态**仍是 `matched`** —— 这正是缺口的成因，写死在断言里。
+    """
+    order = _make_matched_order(client, shipper, owner, port_user, freight_price=12000)
+    oid = order["id"]
+
+    # ① 还没有支付单 ⇒ None
+    detail = client.get(f"{API_ORDER}/{oid}", headers=shipper["_headers"]).json()
+    assert detail["pay_status"] is None, f"无支付单时应为 None，实际 {detail['pay_status']!r}"
+
+    # ② 创建支付单（pending）
+    pay = client.post(API_PAY, json={"order_id": oid}, headers=shipper["_headers"]).json()
+    detail = client.get(f"{API_ORDER}/{oid}", headers=shipper["_headers"]).json()
+    assert detail["pay_status"] == "pending"
+
+    # ③ 列表与详情一致（列表端点必须走同一处填充）
+    listing = client.get(f"{API_ORDER}?size=50", headers=shipper["_headers"]).json()
+    row = next(x for x in listing["items"] if x["id"] == oid)
+    assert row["pay_status"] == detail["pay_status"] == "pending"
+
+    # ④ 支付成功 ⇒ paid；而**订单状态仍是 matched**（缺口的成因）
+    paid = client.post(f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"])
+    assert paid.status_code == 200, paid.text
+    detail = client.get(f"{API_ORDER}/{oid}", headers=shipper["_headers"]).json()
+    assert detail["pay_status"] == "paid"
+    assert detail["status"] == "matched", "订单状态不因支付而变 —— 所以前端不能只看它"
+
+
+def test_order_pay_status_refunded_after_cancel(owner, port_user, shipper, client):
+    """撤单联动退款后，订单端点读到的是 `refunded`（不是把支付单当不存在）。"""
+    order = _make_matched_order(client, shipper, owner, port_user, freight_price=12000)
+    oid = order["id"]
+    pay = client.post(API_PAY, json={"order_id": oid}, headers=shipper["_headers"]).json()
+    client.post(f"{API_PAY}/{pay['id']}/mock-pay", json={}, headers=shipper["_headers"])
+
+    resp = client.post(
+        f"{API_ORDER}/{oid}/cancel", json={"reason": "测试撤单"}, headers=shipper["_headers"]
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["pay_status"] == "refunded"

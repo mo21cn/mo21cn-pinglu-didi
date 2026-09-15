@@ -112,17 +112,18 @@
               catchtap="onContractPage"
             >查看合同</view>
 
+            <!-- 支付详情：非待承运，或**已付款的待承运**（ENT-044）—— 后者原先错显示成「去支付」 -->
             <view
-              wx:if="{{item.status !== 'matched'}}"
+              wx:if="{{item.showPayInfo}}"
               class="act-ghost"
               data-id="{{item.id}}"
-              data-act-pay="{{item.id}}"
+              data-act-payinfo="{{item.id}}"
               catchtap="onPayPage"
             >支付详情</view>
 
             <block wx:if="{{role === 'shipper'}}">
               <view wx:if="{{item.status === 'matched'}}" class="act-ghost" data-id="{{item.id}}" data-act-cancel="{{item.id}}" catchtap="onCancel">撤单</view>
-              <view wx:if="{{item.status === 'matched'}}" class="act-primary" data-id="{{item.id}}" data-act-pay="{{item.id}}" catchtap="onPayPage">去支付</view>
+              <view wx:if="{{item.canGoPay}}" class="act-primary" data-id="{{item.id}}" data-act-pay="{{item.id}}" catchtap="onPayPage">去支付</view>
               <view wx:if="{{item.status === 'shipped'}}" class="act-primary" data-id="{{item.id}}" data-act-complete="{{item.id}}" catchtap="onComplete">确认收货</view>
               <view wx:if="{{item.status === 'completed' || item.status === 'cancelled'}}" class="act-ghost" data-id="{{item.id}}" data-act-detail="{{item.id}}" catchtap="onDetail">查看详情</view>
             </block>

@@ -20,8 +20,29 @@ from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.order import service
 from app.modules.order.schemas import OrderCancel, OrderCreate, OrderListResponse, OrderOut
+from app.modules.payment import service as payment_service
 
 router = APIRouter()
+
+
+def _orders_out(db: Session, orders: list[Any]) -> list[OrderOut]:
+    """订单实体 → `OrderOut`，并补上**支付单状态**（ENT-044）。
+
+    ⚠️ 为什么统一走这里：`OrderOut` 的其余字段能直接从 ORM 实体映射，但 `pay_status`
+    在**另一张表**上；逐个端点各写一遍，早晚会出现"列表带、详情不带"的不一致 ——
+    而那类不一致最难查（同一条数据两个页面显示不同）。列表端点用**一次批量查询**，避免 N+1。
+    """
+    statuses = payment_service.pay_status_map(db, [int(order.id) for order in orders])
+    return [
+        OrderOut.model_validate(order).model_copy(
+            update={"pay_status": statuses.get(int(order.id))}
+        )
+        for order in orders
+    ]
+
+
+def _order_out(db: Session, order: Any) -> OrderOut:
+    return _orders_out(db, [order])[0]
 
 
 def _get_order_or_404(db: Session, order_id: int, user: User) -> Any:
@@ -48,7 +69,7 @@ def create_order(
             detail="该操作仅货主角色可用，请先切换角色",
         )
     try:
-        return service.create_order(db, user.id, data)
+        return _order_out(db, service.create_order(db, user.id, data))
     except service.OrderConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except service.OrderStateError as exc:
@@ -74,9 +95,7 @@ def list_orders(
         )
     except service.OrderStateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return OrderListResponse(
-        total=total, page=page, size=size, items=[OrderOut.model_validate(o) for o in items]
-    )
+    return OrderListResponse(total=total, page=page, size=size, items=_orders_out(db, items))
 
 
 @router.get("/orders/{order_id}", response_model=OrderOut, summary="订单详情（仅参与方）")
@@ -85,7 +104,7 @@ def get_order(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
-    return _get_order_or_404(db, order_id, user)
+    return _order_out(db, _get_order_or_404(db, order_id, user))
 
 
 @router.post(
@@ -107,7 +126,7 @@ def ship_order(
     if order.owner_id != user.id:
         raise HTTPException(status_code=404, detail="订单不存在")
     try:
-        return service.ship_order(db, order)
+        return _order_out(db, service.ship_order(db, order))
     except service.OrderStateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -131,7 +150,7 @@ def complete_order(
     if order.shipper_id != user.id:
         raise HTTPException(status_code=404, detail="订单不存在")
     try:
-        return service.complete_order(db, order)
+        return _order_out(db, service.complete_order(db, order))
     except service.OrderStateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -154,6 +173,6 @@ def cancel_order(
         )
     order = _get_order_or_404(db, order_id, user)
     try:
-        return service.cancel_order(db, order, (data.reason if data else "") or "")
+        return _order_out(db, service.cancel_order(db, order, (data.reason if data else "") or ""))
     except service.OrderStateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
