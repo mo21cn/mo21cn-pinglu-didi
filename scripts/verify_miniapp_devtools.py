@@ -173,42 +173,67 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 _LAST_API_ERROR: str | None = None
 
 
-#: 运行期 console 里**已定位为「开窗 / 连接阶段」噪声**的模式（逐字比对过，不是猜的）。
+#: console 错误的**发生阶段**。白名单豁免只对 `OPEN` 生效（HO D1：白名单绑定阶段）。
+CONSOLE_PHASE_OPEN = "open"
+CONSOLE_PHASE_BIZ = "biz"
+
+#: 运行期 console 里**已定位并给出证据的「开窗 / 连接阶段」噪声**白名单。
 #:
-#: 依据（2026-09-15 实测，实验脚本 `_probe_applaunch.py`）：
-#:   ① **闸门通过后、发出任何导航之前**，console 里就已经有
-#:      `[Page route 错误(system error)] routeDone with a webviewId …`；
-#:   ② 其后连做两次导航，console 内容**逐字不变**（没有新增条目）；
-#:   ③ 页面代码的启动路径里**没有** `reLaunch` —— `app.js.onLaunch` 只做探活，
-#:      `index.js` 只在用户动作后 `switchTab`。
-#: ⇒ 归为**工具/框架侧的页面路由竞态**（WebView 建立期 `routeDone` 找不到 webview、
-#:   或 automation 连接时框架再 `appLaunch` 一次而页面栈已非空），与业务路径无关。
-#:
-#: ⚠️ **只登记逐字比对过、能给出证据的条目**。整族 `[Page route 错误(system error)]`
-#: 里同样包含**真缺陷**（例如 `navigateTo` 到不存在的页）—— 把整族判成噪声，
-#: 会把真缺陷一起藏掉。所以下面只用来**分桶统计**：两个桶都原样打印，
-#: 且**不**自动判失败（是否升级成门禁失败需另行裁定，见 DR-0009 §8.2）。
-ENV_NOISE_PATTERNS = (
-    "appLaunch with non-empty page stack",
-    "routeDone with a webviewId",
+#: HO 裁决（2026-09-15，D1 及其说明）对这张表提了三条硬要求：
+#:   ① **白名单必须绑定发生阶段** —— 「只因错误文字包含某串就永远当开窗噪声」范围过宽；
+#:      同样的文字若在**业务导航**中出现，必须重新判断；
+#:   ② **新增噪声豁免必须有证据**，不得因为影响通过率而扩大白名单；
+#:   ③ **未豁免的 error 阻止整轮判为通过**。
+#: 因此每一项都带 `phase`（只在哪个阶段豁免）与 `evidence`（可复核的出处），
+#: 而不是一个裸字符串集合 —— 没有证据就只能新增不进来。
+ENV_NOISE_WHITELIST: tuple[dict[str, str], ...] = (
+    {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": CONSOLE_PHASE_OPEN,
+        "evidence": (
+            "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**"
+            "console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；"
+            "③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。"
+            "归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+        ),
+    },
+    {
+        "pattern": "routeDone with a webviewId",
+        "phase": CONSOLE_PHASE_OPEN,
+        "evidence": (
+            "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。"
+            "⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里"
+            "包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉"
+            "（HO D1 明确点名这个范围过宽）"
+        ),
+    },
 )
 
 
-def split_console_errors(text: str) -> tuple[list[str], list[str]]:
-    """把 console 原文切成 `(开窗噪声, 其余)` 两桶。
+def split_console_entries(text: str) -> list[str]:
+    """把 console 原文切成**条目**列表。
 
     条目以 `["[error]"` 开头且**自身含换行**（带堆栈），因此按「下一个条目的行首」切；
     按行切会把一条错误拆成十几条，两个计数都失真。
     """
     if not text or text.strip() in ("", "(无)"):
-        return [], []
-    noise: list[str] = []
-    other: list[str] = []
-    for chunk in (x.strip() for x in re.split(r'\n(?=\["\[)', text)):
-        if not chunk:
-            continue
-        (noise if any(k in chunk for k in ENV_NOISE_PATTERNS) else other).append(chunk)
-    return noise, other
+        return []
+    return [x.strip() for x in re.split(r'\n(?=\["\[)', text) if x.strip()]
+
+
+def classify_console(text: str, phase: str) -> tuple[list[str], list[str]]:
+    """把 console 文本按**发生阶段**切成 `(已豁免噪声, 未豁免)`。
+
+    phase 取 `CONSOLE_PHASE_OPEN`（开窗阶段）/ `CONSOLE_PHASE_BIZ`（业务阶段）。
+    **业务阶段一律不豁免**，哪怕文字与白名单逐字相同 —— 这是 HO D1 的明确要求
+    （见 `ENV_NOISE_WHITELIST` 的说明）。
+    """
+    waived: list[str] = []
+    unwaived: list[str] = []
+    for chunk in split_console_entries(text):
+        hit = any(w["pattern"] in chunk and w["phase"] == phase for w in ENV_NOISE_WHITELIST)
+        (waived if hit else unwaived).append(chunk)
+    return waived, unwaived
 
 
 def _http(req: urllib.request.Request, timeout: float = 30.0):
@@ -527,6 +552,7 @@ ARTIFACT = "pages/entrust/artifact/artifact"
 DETAIL = "pages/entrust/detail/detail"
 CASE = "pages/entrust/case/case"
 CASE_CREATE = "pages/entrust/case-create/case-create"
+SESSION = "pages/entrust/session/session"
 
 # ㉖/㉗/㉘ 章（ENT-030 切四之六：登记案件 → 记录决定 → 关闭）依赖的演示数据。
 # 委托 `#1` 是 `seed_entrust_demo.py` 的 `ASSIGNMENT_MAIN`，状态 `claimed`
@@ -564,20 +590,215 @@ DESC_ENTRUST = "您发布货物，委托给船好多平台承运，由平台组�
 
 
 class Reporter:
-    """收集断言结果，同时逐条打印，便于边跑边看。"""
+    """收集断言结果，同时逐条打印，便于边跑边看。
+
+    ## 结果分档（HO 2026-09-15 裁决 D1 及其「立即修正验收报告」）
+
+    | 档 | 含义 | 计入通过 |
+    |---|---|---|
+    | `PASS` | 所选必需检查完成，无未豁免错误 | ✅ |
+    | `FAIL` | 已发现断言失败或产品错误 | ❌ |
+    | `ENV_BLOCKED` | 环境故障导致验证无法完成 | ❌ |
+    | `REVIEW_REQUIRED` | 出现尚未归因的 console error | ❌ |
+    | `NOT_RUN` | 检查未执行 | ❌ |
+    | `LIMITATION` | **`NOT_RUN` 的显式子类**：能跑，但工具不可验证（如原生弹层确认键） | ❌ |
+
+    ⚠️ 后四档**一律不计入通过数** —— 这是 HO 明确点名的修正：
+    此前 `rec(step, True, "not-run：…")` / `rec(step, True, "限制：…")` 把
+    「未执行」和「工具不可验证」写成了通过，最终汇总里与真通过**长得一模一样**。
+    ⇒ 这类记录必须走 `not_run()` / `limitation()`，不能再用 `rec(..., True, ...)`。
+    """
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    ENV_BLOCKED = "ENV_BLOCKED"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    NOT_RUN = "NOT_RUN"
+    LIMITATION = "LIMITATION"
+
+    #: 不计入通过的档位（HO：not-run、限制说明、环境阻塞都不算通过）。
+    NON_PASS = (FAIL, ENV_BLOCKED, REVIEW_REQUIRED, NOT_RUN, LIMITATION)
+    #: 汇报给 HO 的五档归并 —— `LIMITATION` 归入 `NOT_RUN`（都是「该项未取得通过证据」）。
+    ROLLUP = {
+        PASS: PASS,
+        FAIL: FAIL,
+        ENV_BLOCKED: ENV_BLOCKED,
+        REVIEW_REQUIRED: REVIEW_REQUIRED,
+        NOT_RUN: NOT_RUN,
+        LIMITATION: NOT_RUN,
+    }
+    #: 整体判定的优先级（越靠前越严重）。
+    VERDICT_ORDER = (FAIL, ENV_BLOCKED, REVIEW_REQUIRED, NOT_RUN)
 
     def __init__(self) -> None:
         self.results: list[dict] = []
 
-    def rec(self, step: str, ok: bool, note: str = "") -> bool:
-        self.results.append({"step": step, "ok": bool(ok), "note": str(note)})
+    def outcome(self, kind: str, step: str, note: str = "") -> bool:
+        """记一条结果，返回 `kind == PASS`。
+
+        新代码请优先用 `not_run()` / `limitation()` / `env_blocked()` /
+        `review_required()` 这几个语义化入口，而不是裸传 `kind`。
+        """
+        if kind not in (self.PASS, *self.NON_PASS):
+            raise ValueError(f"未知结果档位：{kind}")
+        self.results.append(
+            {"step": step, "ok": kind == self.PASS, "kind": kind, "note": str(note)}
+        )
         tail = f" | {note}" if note else ""
-        print(f"{'PASS' if ok else 'FAIL'} | {step}{tail}", flush=True)
-        return bool(ok)
+        print(f"{kind} | {step}{tail}", flush=True)
+        return kind == self.PASS
+
+    def rec(self, step: str, ok: bool, note: str = "") -> bool:
+        """断言记录（保留原语义）：`ok=True` → `PASS`，`ok=False` → `FAIL`。
+
+        ⚠️ **不要**再用它记「未执行」或「限制」——那是把非通过写成通过的经典错法。
+        """
+        return self.outcome(self.PASS if ok else self.FAIL, step, note)
+
+    def not_run(self, step: str, note: str = "") -> bool:
+        """检查未执行（含需开关而未开、前置缺失）。**不计入通过。**"""
+        return self.outcome(self.NOT_RUN, step, note)
+
+    def limitation(self, step: str, note: str = "") -> bool:
+        """能跑但**工具不可验证**（原生弹层之类）。**不计入通过。**"""
+        return self.outcome(self.LIMITATION, step, note)
+
+    def env_blocked(self, step: str, note: str = "") -> bool:
+        """环境故障导致验证无法完成。**不计入通过。**"""
+        return self.outcome(self.ENV_BLOCKED, step, note)
+
+    def review_required(self, step: str, note: str = "") -> bool:
+        """出现尚未归因的 console error。**不计入通过。**"""
+        return self.outcome(self.REVIEW_REQUIRED, step, note)
 
     @property
     def failures(self) -> list[dict]:
-        return [r for r in self.results if not r["ok"]]
+        return [r for r in self.results if r["kind"] == self.FAIL]
+
+    @property
+    def non_pass(self) -> list[dict]:
+        """所有未取得通过证据的条目（含 FAIL / 环境阻塞 / 待归因 / 未执行 / 限制）。"""
+        return [r for r in self.results if r["kind"] != self.PASS]
+
+    def tally(self) -> dict[str, int]:
+        counts = dict.fromkeys((self.PASS, *self.NON_PASS), 0)
+        for r in self.results:
+            counts[r["kind"]] = counts.get(r["kind"], 0) + 1
+        return counts
+
+    def rollup(self) -> dict[str, int]:
+        """按 HO 的五档归并计数（`LIMITATION` 并入 `NOT_RUN`）。"""
+        out: dict[str, int] = {}
+        for kind, n in self.tally().items():
+            key = self.ROLLUP[kind]
+            out[key] = out.get(key, 0) + n
+        return out
+
+    def verdict(self) -> str:
+        """整体判定：有 FAIL 就是 FAIL，否则按严重度取第一个出现的非通过档。"""
+        roll = self.rollup()
+        for kind in self.VERDICT_ORDER:
+            if roll.get(kind):
+                return kind
+        return self.PASS
+
+    def print_summary(self) -> None:
+        t = self.tally()
+        roll = self.rollup()
+        total = len(self.results)
+        print(
+            f"断言 {total} 项：**通过 {t[self.PASS]}** / 未取得通过证据 {total - t[self.PASS]}",
+            flush=True,
+        )
+        print(
+            "  分档："
+            + " | ".join(
+                f"{k}={t[k]}"
+                for k in (
+                    self.PASS,
+                    self.FAIL,
+                    self.ENV_BLOCKED,
+                    self.REVIEW_REQUIRED,
+                    self.NOT_RUN,
+                    self.LIMITATION,
+                )
+            ),
+            flush=True,
+        )
+        print(
+            "  归并（HO 五档）："
+            + " | ".join(
+                f"{k}={roll.get(k, 0)}"
+                for k in (
+                    self.PASS,
+                    self.FAIL,
+                    self.ENV_BLOCKED,
+                    self.REVIEW_REQUIRED,
+                    self.NOT_RUN,
+                )
+            ),
+            flush=True,
+        )
+        for r in self.non_pass:
+            print(f"  {r['kind']}: {r['step']} | {r['note']}", flush=True)
+
+
+def _errors_safe(client: Client) -> str | None:
+    """采集运行期 console 错误；**采不到就返回 `None`，不返回空串**。
+
+    HO D1 明确要求：**日志无法采集也不能当作「console 无错误」**。
+    返回空串会让「采不到」与「确实没有」在后续判断里同形 —— 这正是本项目
+    反复踩的「不把 not-run 记成通过」的镜像。
+    """
+    try:
+        return client.errors()
+    except Exception as exc:  # noqa: BLE001
+        print(f"    [console 采集失败] {type(exc).__name__}: {str(exc)[:160]}", flush=True)
+        return None
+
+
+def _console_delta(cur: str | None, prev: str | None) -> str:
+    """取 `cur` 相对 `prev` 的增量（IDE 的 console 是**累计**日志）。"""
+    if cur is None:
+        return ""
+    if prev and cur.startswith(prev):
+        return cur[len(prev) :]
+    return cur
+
+
+def _previous_runs(shots: str, wanted: list[str]) -> list[dict]:
+    """同章节组合的历史运行摘要（HO D1：允许恢复后重跑，但保留首次结果与重跑关联）。
+
+    只读同目录下兄弟 `summary.json`；**不修改任何历史产物**。
+    """
+    root = os.path.dirname(os.path.abspath(shots))
+    out: list[dict] = []
+    if not os.path.isdir(root):
+        return out
+    for name in sorted(os.listdir(root)):
+        d = os.path.join(root, name)
+        f = os.path.join(d, "summary.json")
+        if not os.path.isfile(f):
+            continue
+        try:
+            with open(f, encoding="utf-8") as fh:
+                j = json.load(fh)
+        except Exception:  # noqa: BLE001
+            continue
+        if list(j.get("sections") or []) != list(wanted):
+            continue
+        out.append(
+            {
+                "shots": d,
+                "finishedAt": j.get("finishedAt"),
+                "argv": j.get("argv"),
+                "verdict": j.get("verdict")
+                or ("ALL_PASS" if not j.get("failures") else "HAS_FAIL"),
+                "passed": j.get("passed"),
+                "notPassed": j.get("notPassed"),
+            }
+        )
+    return out
 
 
 class Walker:
@@ -1525,9 +1746,9 @@ def sec_25(w: Walker) -> None:
             "设为生效版本" in det,
             det[:100].replace("\n", " "),
         )
-    w.rep.rec(
-        "㉕D 确认动作未在真机点击（记为**限制**，不是通过）",
-        True,
+    # 限制档：能跑，但工具不可验证 ⇒ **不计入通过**。
+    w.rep.limitation(
+        "㉕D 确认动作未在真机点击（能跑，但工具不可验证 ⇒ 不计入通过）",
         "原生 showModal 不在渲染层、工具点不到「确定」；确认的后端语义"
         "由 verify_frontend_e2e.js 读后端事实覆盖",
     )
@@ -2583,10 +2804,11 @@ def sec_8b(w: Walker) -> None:
     if os.environ.get("WALK_PAY") != "1":
         # **显式记 not-run**，不是静默跳过：静默跳过会让"少了一章的证据"
         # 看起来像"那一章通过"。
-        w.rep.rec(
+        # ⚠️ 且必须走 `not_run()` —— 曾写成 `rec(..., True, ...)`，
+        #    汇总里与真通过**长得一模一样**（HO 2026-09-15 点名要求修正）。
+        w.rep.not_run(
             "⑧b 支付状态流转",
-            True,
-            "not-run：需显式开关 WALK_PAY=1（会消耗演示锚点，须在临时库上跑）",
+            "需显式开关 WALK_PAY=1（会消耗演示锚点，须在临时库上跑）",
         )
         return
 
@@ -2691,11 +2913,14 @@ def sec_8b(w: Walker) -> None:
         n_info == 1,
         f'[data-act-payinfo="{oid}"] n={n_info}',
     )
-    w.rep.rec(
-        "⑧b 弹层确认键未真实点击",
-        True,
-        "限制：确认键在原生 wx.showModal 里、工具点不到；本步用真实接口驱动支付，"
-        "支付**后**的渲染由真机断言覆盖",
+    # HO H8（2026-09-15）明确要求这里的措辞与统计口径：
+    #   ⑧b 只能写「**支付后界面已验证，原生确认点击未验证**」，不得写成全部闭环。
+    #   ⇒ 本条**不计入通过**（`LIMITATION` 档），且单独陈述"未验证"的那一半。
+    w.rep.limitation(
+        "⑧b 原生弹层确认键未真实点击（支付后界面已验证，**原生确认点击未验证**）",
+        "确认键在原生 wx.showModal 里、工具点不到；本步用真实接口驱动支付，"
+        "支付**后**的渲染由真机断言覆盖 ⇒ 只证明「支付后界面正确」，"
+        "**不证明**「弹层确认键可点」",
     )
 
 
@@ -3394,18 +3619,27 @@ def sec_33(w: Walker) -> None:
     DR-0011 只在 CI 里证明了「**声明**链深 ≤ `STACK_BUDGET`」，并自己写明
     「**不承诺**『10 层上限在真机上就是这样』」（§5）。本章补的正是运行期那一半：
 
-    一、**实测最深声明链**：`shipper → assistant → publish/cargo → preview`
+    一、**按 URL 压声明链**：`shipper → assistant → publish/cargo → preview`
         （`verify_routes.js` 打印的声明最深链 = **4 层**）—— 逐层压，每层断言
         **深度恰好 +1**（不是 0、不是 +2），且不超过从源码读到的 `STACK_BUDGET`。
         链深"恰好 +1"很重要：若中途被 replace/reLaunch 悄悄清栈，深度会**不增或回退**，
         那样"回到上一级"的行为就跟声明的不一样了。
-    二、**实测平台硬限**：继续 push 到被拒，把**观测到的层数**与源码里的 `MAX_STACK`
-        对账 —— 这正是 DR-0011 §5 明确没承诺过的那一条。
-    三、断言 **预算 < 硬限**（留有余量），否则"预算"没有意义。
+    二、**按 URL 直进压到被拒**：把**观测到的层数**与源码里的 `MAX_STACK` 对账
+        —— 这正是 DR-0011 §5 明确没承诺过的那一条；并断言 **预算 < 硬限**（留有余量）。
+    三、**真实入口导航（HO H2）**：真点击页面自己的入口 / 系统返回键，覆盖
+        **冷启动 / push / replace / 返回 / 复用**，逐步记录实际栈深。
+    四、清栈回起点（`reLaunch` 后栈深必须回到 1）。
 
-    ⚠️ 诚实边界：第二节的压栈用的是 `automation_navigate`（**按 URL 直进**，
-    **不是真实点击**）⇒ 它测的是**平台**的行为，**不能**用来证明 `go()` 的预算策略生效
-    （那需要真实点击到第 8 层，当前可达的真实链只有 4 层）。这一点写进断言备注，不合并声称。
+    ⚠️ 诚实边界（本节内部分清手段，措辞与手段一致）：
+    * **第一节是「按 URL 压声明链」**（`automation_navigate`），**不是真实点击** ——
+      它证明的是「声明链每层恰好 +1」；
+    * **第二节是「按 URL 直进压栈到被拒」** —— 它测的是**平台**的行为，
+      **不能**用来证明 `go()` 的预算策略生效；
+    * **第三节才是真实入口导航**（HO H2）：每一步都 `tap()` 到页面自己的入口
+      （或系统返回键），导航由页面代码的 `go()` 决策，覆盖
+      **冷启动 / push / replace / 返回 / 复用** 五类路径，并记录实际栈深。
+    * **预算耗尽路径用真实入口走不到**（真实可达最深 4 层 < 预算 8）——
+      这一条记为**限制档，不计入通过**，不合并声称已覆盖。
     """
     print("\n== ㉝ 页面栈深度运行期实测（DR-0011）==", flush=True)
 
@@ -3431,17 +3665,21 @@ def sec_33(w: Walker) -> None:
     if budget is None or hard is None:
         return
 
-    w.login_as(CODE_SHIPPER)
+    # 身份用 `seed-owner`：它的工作台队列才有委托卡（见第三节开头的实测对照）。
+    w.login_as(CODE_OWNER)
     if not w.enter_role("shipper", SHIPPER):
         w.rep.rec("㉝ 前置 · 货主工作台进入", False, w.c.current_path())
         return
     time.sleep(1.2)
 
-    # ---- 一、实测最深声明链 ----
+    # ---- 一、按 URL 压声明链（**不是真实入口**，措辞必须与手段一致）----
+    # ⚠️ 这里用 `navigate("navigateTo")` 直压 URL，**不是**「真实点击」——
+    # 早期版本把标签写成「真实点击」，属于**手段与措辞不符**（HO H2 正是要求分清两者）。
+    # 真实入口的覆盖在第三节。
     chain = [
-        ("pages/assistant/assistant", "③ 搜索框进智能搜索页（真实点击）"),
-        ("pages/publish/cargo/cargo", "③ 解析草稿带去发布货源页（真实点击）"),
-        ("pages/preview/preview", "③ 发布页 → 预览（真实点击）"),
+        ("pages/assistant/assistant", "③ 智能搜索页（声明链第 2 层）"),
+        ("pages/publish/cargo/cargo", "③ 发布货源页（声明链第 3 层）"),
+        ("pages/preview/preview", "③ 预览页（声明链第 4 层）"),
     ]
     d0 = len(w.c.page_stack())
     w.rep.rec(
@@ -3493,14 +3731,196 @@ def sec_33(w: Walker) -> None:
         rejected_at is not None and budget < rejected_at,
         f"预算 {budget} < 实测硬限 {rejected_at}",
     )
-    w.rep.rec(
-        "㉝ （限制）本节第二节用**按 URL 直进**压栈 ⇒ 测的是平台行为，"
-        "**不能**据此证明 go() 的预算策略生效",
-        True,
-        "限制：真实可达的链只有 4 层；第 8 层附近的 replace 策略需另设真实入口才能验",
+    # 限制档（不计入通过）：本节第二节按 URL 直进压栈，测的是**平台行为**；
+    # 它**不能**证明 go() 的预算策略在真实入口下生效。
+    # ⚠️ HO H2 要求「通过页面真实入口覆盖 push / replace / 返回 / 复用 / 冷启动 / 预算耗尽」
+    #    ⇒ 真实入口那部分由本函数后面的第三节承担（见 `sec_33` 第三节）。
+    w.rep.limitation(
+        "㉝ 按 URL 直进压栈只能测平台行为，**不能**据此证明 go() 预算策略生效",
+        "真实可达的链只有 4 层；`replace` 策略由**第三节的真实入口**覆盖（页级策略、与层数无关），"
+        "但「栈到预算时改走 fallback」这一支仍走不到（见本节末尾的预算耗尽限制）",
     )
 
-    # ---- 三、清栈回起点 ----
+    # ---- 三、真实入口导航（HO H2）----
+    #
+    # HO H2 原文：「通过页面真实入口覆盖 push、replace、返回、复用、冷启动及预算耗尽路径，
+    # 记录实际栈深。**不能只靠注册表或逐页 reLaunch 证明**」。
+    # ⇒ 本节每一步都是 `tap()` 打到页面自己的入口（或系统返回键），
+    #   导航由页面代码里的 `go()` 决策 —— 而**不是**脚本直接 `navigate()`。
+    print("\n-- 三、真实入口导航（HO H2）--", flush=True)
+    w.c.navigate("reLaunch", "/" + INDEX)
+    time.sleep(1.4)
+
+    # ⚠️ 身份必须是 `seed-owner`（外层 `login_as(CODE_OWNER)` 已设），**不是** `seed-shipper`：
+    # 2026-09-16 用 REST 探针（不依赖 IDE）实测各演示身份的工作台队列：
+    #   seed-shipper   → `GET /entrust/assignments?view=org` n=0  ⇒ **队列为空**
+    #   seed-owner     → n=2 ids=[2, 1]                          ⇒ 有委托卡
+    #   seed-mgr-single→ n=1 ids=[3]；seed-mgr-multi → 400（多组织须带 org_id）
+    # 上一轮误用 seed-shipper，直接导致「委托卡锚点 n=0」，白烧一轮真机。
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.rec("㉝ 第三节前置 · 真点击身份卡进入货主工作台", False, w.c.current_path())
+        return
+    d = len(w.c.page_stack())
+    w.rep.rec(
+        "㉝ 冷启动后真点击身份卡 ⇒ switchTab 归 1（冷启动路径的栈深起点）",
+        d == 1,
+        f"depth={d}",
+    )
+    w.shot("33-真实入口-冷启动-货主")
+
+    # switchTab 到「我的」只是**前置**（tabBar 页无深链入口），真正的入口是被点击的 `.entrust-entry`
+    w.c.nav("switchTab", "/" + MINE, MINE)
+    time.sleep(2.2)
+    mine = w.c.page_data()
+    n_entry = w.c.count(".entrust-entry")
+    if mine.get("showEntrust") is not True or n_entry != 1:
+        w.rep.not_run(
+            "㉝ 第三节前置 · 「我的」页委托入口不可见 ⇒ 真实入口链走不下去",
+            f"showEntrust={mine.get('showEntrust')} n_entry={n_entry}"
+            "（该身份没有委托入口；本节五类路径都要靠它）",
+        )
+        return
+    before = len(w.c.page_stack())
+    w.c.tap(".entrust-entry")
+    ok = w.c.wait_path(WORKBENCH, 25)
+    after = len(w.c.page_stack())
+    w.rep.rec(
+        "㉝ **push（真实入口）**：「我的」→ 经理工作台，栈深 +1",
+        ok and after == before + 1,
+        f"{before} → {after}（{w.c.current_path()}）",
+    )
+    if not ok:
+        w.rep.not_run("㉝ 第三节后续步骤", "未进入工作台，真实入口链断在这里")
+        return
+
+    # 工作台可能先要求选组织（ambiguous）—— 那也是**真实入口**，用真点击解决
+    wb = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    if wb.get("orgReason") == "ambiguous":
+        n_pill = w.c.count(".org-pill")
+        w.rep.rec("㉝ 工作台要求先选组织：真机渲染出组织 pill", n_pill >= 1, f"n={n_pill}")
+        if n_pill >= 1:
+            w.c.tap(".org-pill")
+            time.sleep(2.5)
+            wb = w.c.page_data()
+    items = wb.get("items") or []
+    ids = [it.get("assignmentId") for it in items]
+    if not items:
+        w.rep.not_run(
+            "㉝ 第三节前置 · 工作台委托队列为空 ⇒ 真实入口链走不下去",
+            f"view={wb.get('view')} orgReason={wb.get('orgReason')} items=0"
+            "（需要一个 claimed 的委托才有「登记案件」入口）",
+        )
+        return
+    # 优先种子里的 ASSIGNMENT_MAIN（claimed，才有「登记案件」入口），否则退到第一条
+    aid = ENTRUST_ASSIGNMENT_ID if ENTRUST_ASSIGNMENT_ID in ids else ids[0]
+    w.rep.rec("㉝ 工作台委托队列非空（真实入口链起点）", True, f"ids={ids} ⇒ 选中 #{aid}")
+
+    card = f'[data-id="{aid}"]'
+    w.rep.rec(
+        "㉝ 真实入口锚点唯一（工作台委托卡 data-id）", w.c.count(card) == 1, f"n={w.c.count(card)}"
+    )
+    before = len(w.c.page_stack())
+    w.c.tap(card)
+    ok = w.c.wait_path(DETAIL, 25)
+    after = len(w.c.page_stack())
+    w.rep.rec(
+        "㉝ **push（真实入口）**：委托卡 → 委托详情，栈深 +1",
+        ok and after == before + 1,
+        f"{before} → {after}（{w.c.current_path()}）",
+    )
+
+    detail = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    if detail.get("canCreateCase") is not True:
+        w.rep.not_run(
+            "㉝ 第三节后续步骤（登记表单 / replace / 返回 / 复用）",
+            f"委托 #{aid} 的 canCreateCase={detail.get('canCreateCase')}"
+            "（只有 claimed 的委托才给「登记案件」入口）",
+        )
+        return
+
+    entry = '[data-act-create-case="create-case"]'
+    w.rep.rec("㉝ 真实入口锚点唯一（登记案件入口）", w.c.count(entry) == 1, f"n={w.c.count(entry)}")
+    before = len(w.c.page_stack())
+    w.c.tap(entry)
+    ok = w.c.wait_path(CASE_CREATE, 25)
+    after = len(w.c.page_stack())
+    w.rep.rec(
+        "㉝ **push（真实入口）**：详情页 → 登记表单，栈深 +1",
+        ok and after == before + 1,
+        f"{before} → {after}（{w.c.current_path()}）",
+    )
+
+    # replace 真实入口：表单真提交 → 案件详情。
+    # 这里只注入**表单取值**（模拟器对 input 赋值不触发 bindinput，全项目统一用 setData 注值，
+    # 见 ㉖ 章），**导航本身 100% 走页面自己的 `go()`** —— 断言的是「replace 不 +1」。
+    if w.c.wait_path(CASE_CREATE, 5):
+        w.c.set_data({"form.title": CASE_TITLE + "（栈深）", "form.cause": "走查㉝：验 replace"})
+        time.sleep(1.2)
+        w.rep.rec("㉝ 真实入口锚点唯一（提交按钮）", w.c.count('[data-act-submit-case="1"]') == 1)
+        before = len(w.c.page_stack())
+        w.c.tap('[data-act-submit-case="1"]')
+        ok = w.c.wait_path(CASE, 30)
+        after = len(w.c.page_stack())
+        w.rep.rec(
+            "㉝ **replace（真实入口）**：真点击提交 ⇒ 落到案件页而栈深**不变**（replace 不 +1）",
+            ok and after == before,
+            f"{before} → {after}（{w.c.current_path()}）",
+        )
+        w.shot("33-真实入口-replace后-案件页")
+
+        # 返回键：replace 掉的表单**不在**返回路径上 ⇒ 应回到详情页
+        w.c.back()
+        time.sleep(1.6)
+        back1 = len(w.c.page_stack())
+        w.rep.rec(
+            "㉝ **返回**：案件页返回 ⇒ 回到委托详情（被 replace 掉的表单不在返回路径上）",
+            w.c.current_path() == DETAIL and back1 == 3,
+            f"depth={back1} path={w.c.current_path()}",
+        )
+        w.c.back()
+        time.sleep(1.6)
+        back2 = len(w.c.page_stack())
+        w.rep.rec(
+            "㉝ **返回**：再返回 ⇒ 回到经理工作台，栈深逐层 -1",
+            w.c.current_path() == WORKBENCH and back2 == 2,
+            f"depth={back2} path={w.c.current_path()}",
+        )
+
+        # 复用真实入口：工作台「会话」入口 push 进会话，再从会话返回 ⇒ 应**复用**栈里的工作台
+        sess_act = f'[data-act-session="{ENTRUST_ASSIGNMENT_ID}"]'
+        w.rep.rec(
+            "㉝ 真实入口锚点唯一（委托卡「会话」按钮，catchtap 与卡片 bindtap 分开）",
+            w.c.count(sess_act) == 1,
+            f"n={w.c.count(sess_act)}",
+        )
+        before = len(w.c.page_stack())
+        w.c.tap(sess_act)
+        ok = w.c.wait_path(SESSION, 25)
+        after = len(w.c.page_stack())
+        w.rep.rec(
+            "㉝ **push（真实入口）**：工作台「会话」→ 会话屏，栈深 +1",
+            ok and after == before + 1,
+            f"{before} → {after}（{w.c.current_path()}）",
+        )
+        w.c.tap(".nav-back")
+        time.sleep(2.0)
+        after = len(w.c.page_stack())
+        w.rep.rec(
+            "㉝ **复用（真实入口）**：会话「返回」→ 复用栈中已有的工作台，栈深**回落而不是再 +1**",
+            w.c.current_path() == WORKBENCH and after == 2,
+            f"depth={after} path={w.c.current_path()}（若为 push 会是 4）",
+        )
+        w.shot("33-真实入口-复用回工作台")
+
+    # 预算耗尽：**真实入口到不了预算线**，如实记为限制而不是"已覆盖"。
+    w.rep.limitation(
+        "㉝ **预算耗尽路径**：真实入口可达的最深链实测只有 4 层，到不了预算 8 层",
+        f"真实入口最深 {max(depths)} 层 / STACK_BUDGET={budget} ⇒ "
+        "「栈到预算时 go() 改走 fallback」这一支**无法**用真实入口走到；"
+        "若要用真实入口覆盖，必须先有深度 ≥ 预算的真实业务链（当前产品形态不存在）",
+    )
+
+    # ---- 四、清栈回起点 ----
     w.c.navigate("reLaunch", "/" + INDEX)
     time.sleep(1.0)
     back = len(w.c.page_stack())
@@ -3657,6 +4077,16 @@ def main() -> int:
     print("后端    ：8000 应答正常", flush=True)
 
     w = Walker(client, shots, rep)
+
+    # HO D1：**只统计本轮的日志增量**。IDE 可能被复用（`--skip-ide`），
+    # 其上 console 是累计的 ⇒ 先取基线，再把增量按「开窗阶段 / 业务阶段」切开，
+    # 因为白名单**只对开窗阶段生效**。
+    console_base = _errors_safe(client)
+    if console_base is None:
+        rep.review_required(
+            "console 基线采集失败（采集不到 ⇒ 不能声称 console 无错误）",
+            "client.errors() 抛错；本轮 console 结论为「待归因」，不计入通过",
+        )
     print("\n== 开窗 ==", flush=True)
     client.open_window()
     if not simulator_ready(client):
@@ -3671,6 +4101,8 @@ def main() -> int:
         )
         return 2
     print("模拟器  ：pageStack 非空", flush=True)
+    # 开窗阶段结束的切点：此后产生的 console 条目都算「业务阶段」，**一律不豁免**。
+    console_at_open = _errors_safe(client)
 
     for name in wanted:
         try:
@@ -3680,36 +4112,64 @@ def main() -> int:
             rep.rec(f"章节 {name} 执行异常", False, repr(exc)[:300])
 
     print("\n================ 汇总 ================", flush=True)
-    fails = rep.failures
+    rep.print_summary()
+
+    # ---------------------------------------------------------------- console 门禁
+    # D1 = B：**未豁免的 error 阻止整轮判为通过**。
+    console_final = _errors_safe(client)
+    if console_final is None:
+        collect_failed = True
+        open_delta = biz_delta = ""
+    else:
+        collect_failed = console_base is None
+        open_delta = _console_delta(console_at_open, console_base)
+        biz_delta = _console_delta(console_final, console_at_open)
+
+    open_waived, open_unwaived = classify_console(open_delta, CONSOLE_PHASE_OPEN)
+    biz_waived, biz_unwaived = classify_console(biz_delta, CONSOLE_PHASE_BIZ)
+
     print(
-        f"断言 {len(rep.results)} 项：通过 {len(rep.results) - len(fails)}，失败 {len(fails)}",
+        f"[运行期 console·本轮增量] 开窗阶段：豁免 {len(open_waived)} / 未豁免 {len(open_unwaived)}"
+        f" ｜ 业务阶段：豁免 {len(biz_waived)}(按阶段规则恒为 0) / 未豁免 {len(biz_unwaived)}"
+        f" ｜ 基线采集 {'失败' if collect_failed else '正常'}",
         flush=True,
     )
-    for f in fails:
-        print("  FAIL:", f["step"], "|", f["note"], flush=True)
+    for label, bucket in (
+        ("console·开窗豁免", open_waived),
+        ("console·开窗未豁免", open_unwaived),
+        ("console·业务阶段未豁免", biz_unwaived),
+    ):
+        if bucket:
+            print(
+                f"[{label}] " + " ｜ ".join(x.replace("\n", " ")[:300] for x in bucket), flush=True
+            )
+    if not (open_delta or biz_delta) and not collect_failed:
+        print("[运行期 console error] 本轮增量：(无)", flush=True)
+    print("[console·原文（本轮增量）]", (open_delta + biz_delta)[:900] or "(空)", flush=True)
 
-    errs = client.errors()
-    noise, others = split_console_errors(errs)
-    if not (noise or others):
-        print("[运行期 console error] (无)", flush=True)
-    else:
-        print(
-            f"[运行期 console] 开窗噪声 {len(noise)} 条 / 其余 {len(others)} 条"
-            "（两桶都原样打印，不隐藏，也不自动判失败）",
-            flush=True,
+    unattributed = open_unwaived + biz_unwaived
+    if collect_failed:
+        pass  # 上面已记 review_required
+    elif unattributed:
+        rep.review_required(
+            f"运行期 console 有 {len(unattributed)} 条未豁免 error（D1：阻止整轮判为通过）",
+            " ".join(x.replace("\n", " ")[:160] for x in unattributed[:3]),
         )
-        if noise:
-            print(
-                "[console·开窗噪声] " + " ｜ ".join(x.replace("\n", " ")[:180] for x in noise),
-                flush=True,
-            )
-        if others:
-            print(
-                "[console·其余] " + " ｜ ".join(x.replace("\n", " ")[:400] for x in others),
-                flush=True,
-            )
-        print("[console·原文]", errs[:900], flush=True)
     print("[截图目录]", shots, flush=True)
+
+    # ---------------------------------------------------------------- 落盘
+    verdict = rep.verdict()
+    tally = rep.tally()
+    rollup = rep.rollup()
+    prev_runs = _previous_runs(shots, wanted)
+    print(
+        f"[重跑关联] 同章节历史运行 {len(prev_runs)} 次（首次结果**保留不覆盖**）："
+        + (
+            "；".join(f"{(p.get('finishedAt') or '?')}={p.get('verdict')}" for p in prev_runs)
+            or "无"
+        ),
+        flush=True,
+    )
 
     with open(os.path.join(shots, "summary.json"), "w", encoding="utf-8") as fh:
         json.dump(
@@ -3719,11 +4179,26 @@ def main() -> int:
                 "startedAt": started_at,
                 "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "argv": sys.argv,
+                "verdict": verdict,
+                "tally": tally,
+                "rollup": rollup,
+                "passed": tally[Reporter.PASS],
+                "notPassed": len(rep.results) - tally[Reporter.PASS],
+                "attempt": len(prev_runs) + 1,
+                "previousRuns": prev_runs,
                 "results": rep.results,
-                "consoleError": errs,
-                "consoleErrorDetected": bool(errs.strip()),
-                "consoleNoiseCount": len(noise),
-                "consoleOtherCount": len(others),
+                "console": {
+                    "baselineCaptured": console_base is not None,
+                    "collectFailed": collect_failed,
+                    "openPhaseWaived": open_waived,
+                    "openPhaseUnwaived": open_unwaived,
+                    "bizPhaseUnwaived": biz_unwaived,
+                    "whitelist": [dict(w) for w in ENV_NOISE_WHITELIST],
+                },
+                "consoleError": open_delta + biz_delta,
+                "consoleErrorDetected": bool((open_delta + biz_delta).strip()),
+                "consoleNoiseCount": len(open_waived),
+                "consoleOtherCount": len(open_unwaived) + len(biz_unwaived),
                 "shots": shots,
             },
             fh,
@@ -3731,8 +4206,26 @@ def main() -> int:
             indent=2,
         )
 
-    print("RESULT:", "ALL_PASS" if not fails else "HAS_FAIL", flush=True)
-    return 0 if not fails else 1
+    print(
+        "RESULT:",
+        verdict,
+        "（"
+        + " / ".join(
+            f"{k}={tally[k]}"
+            for k in (
+                Reporter.FAIL,
+                Reporter.ENV_BLOCKED,
+                Reporter.REVIEW_REQUIRED,
+                Reporter.NOT_RUN,
+                Reporter.LIMITATION,
+            )
+            if tally[k]
+        )
+        + ("）" if any(tally[k] for k in Reporter.NON_PASS) else "全为 PASS）"),
+        flush=True,
+    )
+    # 只有**全部为 PASS** 才算通过：FAIL / 环境阻塞 / 待归因 / 未执行 一律非零退出。
+    return 0 if verdict == Reporter.PASS else 1
 
 
 if __name__ == "__main__":
