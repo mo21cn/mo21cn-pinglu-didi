@@ -2913,6 +2913,48 @@ def sec_8b(w: Walker) -> None:
         n_info == 1,
         f'[data-act-payinfo="{oid}"] n={n_info}',
     )
+    # ── H3 证据①：确认回调的**自动化**证据 ──────────────────────────────────
+    # 原生弹层的确认键点不到，但"确认之后要跑的那段代码"必须另有可触发入口，
+    # 否则它是一条永远拿不到证据的路径。页面为此把业务动作抽成 `onPayConfirm(source)`：
+    #   · `modal` = 人点了弹层确认键（人工路径，见 H3 记录模板）；
+    #   · `auto`  = 本步用 `callMethod` 触发（自动化路径）。
+    # 两条**分别记录**，本条只证明「回调这段代码的逻辑正确 + 留痕」，
+    # **不证明**「键可点」—— 后者仍由下面那条 LIMITATION 如实挂着。
+    w.c.nav("reLaunch", f"/{PAYMENT}?order_id={oid}", PAYMENT)
+    w.c.wait_path(PAYMENT, 25)
+    w.wait_data(lambda x: x.get("canPay") is not None, tries=40, gap=0.5)
+    w.c.call_method("onPayConfirm", ["auto"])
+    traced = w.wait_data(
+        lambda x: (x.get("payConfirmTrace") or {}).get("source") == "auto",
+        tries=30,
+        gap=0.5,
+    )
+    trace = traced.get("payConfirmTrace") or {}
+    w.rep.rec(
+        "H3 自动化证据：确认回调可触发且留痕（source=auto）",
+        trace.get("source") == "auto" and int(trace.get("payId") or 0) == int(pay_id),
+        f"trace={trace} 期望 payId={pay_id}",
+    )
+    # 回调触发后仍是同一笔、仍是 paid —— 证明「确认」这一段是**幂等**的，
+    # 不会因为多触发一次就多记一笔账。
+    after_auto = api_get(f"/payment/payments/order/{oid}", a.token_shipper) or {}
+    w.rep.rec(
+        "H3 自动化证据：回调重复触发不重复记账（同一笔、仍 paid）",
+        after_auto.get("status") == "paid" and after_auto.get("id") == pay_id,
+        f"status={after_auto.get('status')} id={after_auto.get('id')} 期望 id={pay_id}",
+    )
+    # globalData 那条痕迹也要在：它是**跨页面**可观测点，人工点击的证据靠它留存
+    # （页面 data 会随页面销毁消失，globalData 不会）。
+    traces = w.c.evaluate(
+        "function(){try{var g=getApp().globalData;return g&&g.payConfirmTraces||[];}catch(e){return null;}}"
+    )
+    sources = [t.get("source") for t in traces] if isinstance(traces, list) else None
+    w.rep.rec(
+        "H3 可观测点：globalData 里能读到确认痕迹（人工点击的证据落点）",
+        isinstance(sources, list) and "auto" in sources,
+        f"sources={sources}（null = evaluate 取不到，不是'没有痕迹'）",
+    )
+
     # HO H8（2026-09-15）明确要求这里的措辞与统计口径：
     #   ⑧b 只能写「**支付后界面已验证，原生确认点击未验证**」，不得写成全部闭环。
     #   ⇒ 本条**不计入通过**（`LIMITATION` 档），且单独陈述"未验证"的那一半。
@@ -2920,7 +2962,9 @@ def sec_8b(w: Walker) -> None:
         "⑧b 原生弹层确认键未真实点击（支付后界面已验证，**原生确认点击未验证**）",
         "确认键在原生 wx.showModal 里、工具点不到；本步用真实接口驱动支付，"
         "支付**后**的渲染由真机断言覆盖 ⇒ 只证明「支付后界面正确」，"
-        "**不证明**「弹层确认键可点」",
+        "**不证明**「弹层确认键可点」。H3 的两类证据分开记："
+        "自动化（source=auto）已拿到，人工点击（source=modal）需按 "
+        "docs/entrust/H3-原生弹层确认键人工验证记录.md 人工执行并留截图。",
     )
 
 
