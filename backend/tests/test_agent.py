@@ -217,7 +217,7 @@ async def test_llm_fenced_json_after_reasoning_is_parsed(monkeypatch):
     """推理块之后是 markdown 围栏里的 JSON —— 也要解析出来。
 
     夹具照录 2026-09-16 重跑 H7a 时 S10 的真实响应体（`_s10_body.json`）：
-    同一份 `SYSTEM_PROMPT`、同一句话，模型**有时**给裸 JSON、**有时**给
+    同一份货源解析提示词（`service.build_cargo_prompt()`）、同一句话，模型**有时**给裸 JSON、**有时**给
     `</think>` + ```` ```json ```` 围栏 —— 所以这不是理论边界情况。
     当时"没观测到就不做兜底"的判断，就是被这一条打回来的。
     """
@@ -349,6 +349,68 @@ def test_audit_row_written_on_success_and_failure():
     assert ok_row.latency_ms >= 0
     assert fail_row.success is False
     assert fail_row.error_kind == "network"
+
+
+# 星期几的中文写法，**在测试里独立写一份**：若直接引用实现里的常量，
+# 表本身写错了（比如周日起算）这条测试就抓不到。
+_WEEKDAY_CN = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+
+
+def test_build_cargo_prompt_renders_placeholders_not_frozen_at_import():
+    """提示词渲染：占位符被真实日期/星期替掉，且随传入日期变化。
+
+    模板正文含字面 `{}`（JSON 示例）⇒ 只能用 `str.replace`。
+    这条同时锁住"不是 import 期渲染"：长驻服务跨零点后，冻结的日期就是错的。
+    """
+    from datetime import date as _date
+
+    p = service.build_cargo_prompt(_date(2026, 9, 16))  # 2026-09-16 是星期三
+    assert "2026-09-16" in p
+    assert "星期三" in p
+    assert "{today}" not in p and "{weekday}" not in p
+    # 模板里的 JSON 示例未被 str.format 之类的操作吃掉
+    assert '"cargo_name"' in p and '"field_confidence"' in p
+    # 不同日期渲染出不同提示词（防"import 期冻死"回归）
+    assert service.build_cargo_prompt(_date(2026, 1, 1)) != p
+
+
+def test_cargo_parse_sends_prompt_that_carries_today(monkeypatch):
+    """真正发给模型的那一份提示词必须携带基准日期。
+
+    2026-09-16 H7a 实测暴露的**提示词缺陷**（不是模型质量问题）：提示词写着
+    「口语'下周三'等按今天推算」，本身却**不含任何日期** ——
+    模型缺一个它无法推断的输入，只能瞎猜年份：`expect_date` 准确率 4/24 = 17%，
+    且错年份时 `field_confidence` 仍报 1.0 ⇒ 置信度校准被拖到 −0.167。
+
+    ⚠️ 断言放在**网关收到的那一份**上，而不是只测 `build_cargo_prompt()`：
+    否则有人绕过渲染入口直接把模板发给模型，测试照样绿。
+    """
+    from datetime import date as _date
+
+    from app.modules.agent.llm import LLMResult
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+
+    seen: dict[str, str] = {}
+
+    async def _capture(*, system: str, user: str, **kwargs: object) -> LLMResult:
+        seen["system"] = system
+        return LLMResult(content={"cargo_name": "水泥"}, raw="{}", latency_ms=0, mocked=False)
+
+    monkeypatch.setattr(service.llm_gateway, "chat_json", _capture)
+    asyncio.run(service.parse_cargo(db, user_id=1, text="下周三装水泥从南宁到贵港"))
+
+    today = _date.today()
+    prompt = seen["system"]
+    assert today.isoformat() in prompt, "提示词没告诉模型今天几号 ⇒ 相对日期只能瞎猜年份"
+    assert _WEEKDAY_CN[today.weekday()] in prompt, "只说日期不够：算'下周三'要知道今天星期几"
+    assert "{today}" not in prompt and "{weekday}" not in prompt
     db.close()
 
 
