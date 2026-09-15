@@ -64,7 +64,8 @@ python scripts/seed_demo.py
 
 > 前四条**已纳入 CI**（`.github/workflows/ci.yml` 的 `frontend-static` + `frontend-e2e` 两个 job），
 > push / 开 PR 即自动执行；真机走查依赖微信开发者工具，无法在 CI 运行，仍由本机执行。
-> 仓库根 `scripts/*.py` 中的**在用工具**（`verify_miniapp_devtools.py` / `wechatide_client.py`）
+> 仓库根 `scripts/*.py` 中的**在用工具**（`verify_miniapp_devtools.py` /
+> `run_walkthrough_devtools.py` / `wechatide_client.py`）
 > 亦已纳入 ruff 门禁（`backend` job 的 `Lint（ruff check，仓库根 scripts/*.py）` 一步）。
 
 ```bash
@@ -81,7 +82,13 @@ node scripts/verify_ui_interactions.js
 node scripts/verify_login_flow.js
 
 # 真机走查（现行轨：IDE 自带 wechatide 工具链；驱动层 scripts/wechatide_client.py）
-# 前置：后端已起 + 已铺演示数据 + IDE 已打开本工程并完成一次人工授权（授权持久）
+# ⭐ 一键跑：起 IDE（先清场）+ 起后端 + 铺种子 + 跑章节 —— 四件事必须同生共死，
+#    因为本环境在命令结束后会回收该命令的所有后代进程（分开跑必然空转）。
+python scripts/run_walkthrough_devtools.py                       # 全部章节
+python scripts/run_walkthrough_devtools.py --section 16          # 只跑指定章节
+python scripts/run_walkthrough_devtools.py --section 8,8b --pay  # 含副作用的支付流转
+
+# 也可以自己把 IDE 与后端起好，只跑章节（前置条件见脚本 docstring）：
 python scripts/verify_miniapp_devtools.py
 python scripts/verify_miniapp_devtools.py --section 16      # 只跑指定章节
 ```
