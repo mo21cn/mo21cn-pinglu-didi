@@ -22,6 +22,7 @@
 | `5` | 发布空船页渲染（船东视角） | ⑤ |
 | `7` | 合同三级页 + 长按弹层 + ⑦b 仿真案例 + ⑦c 已完成订单 | ⑦/⑦b/⑦c |
 | `8` | 支付详情三级页（真实点击「去支付」） | ⑧ |
+| `8b` | 支付**状态流转**（**默认不跑**，须 `WALK_PAY=1`；会消耗演示锚点） | ⑧b |
 | `9` | 船东链路：工作台 → 船队 → 为船找货 + ⑨b 船东合同 | ⑨/⑨b |
 | `10` | 港口：服务网格 → 运营台 → 泊位档期（甘特 + 峰值并发） | ⑩ |
 | `11` | 预约审核详情 + 防超卖（与服务端 409 同口径） | ⑪ |
@@ -35,8 +36,10 @@ DR-0009 记的阻塞点是「按序号点第 i 个同类元素」，解法走它
 锚点由 `scripts/verify_miniapp.js` 的检查 9（`WALK_ANCHORS`）盯住三类静默失效。
 
 **仍有的覆盖缺口（不假装已覆盖）**：
-* ⑧b「模拟支付后转已支付」未做 —— 它会**消耗演示锚点**（支付单状态不可回退），
-  需 `WALK_PAY=1` 之类的显式开关才跑；
+* ⑧b「模拟支付后转已支付」**已实现但默认不跑**（`WALK_PAY=1`）：它会**消耗演示锚点**
+  （支付单一旦 paid 不可回退，同库再跑 ⑧ 章就取不到 pending 锚点）。
+  ⚠️ 且它有一处**已知限制**：支付确认键在原生 `wx.showModal` 里、工具点不到
+  ⇒ 该步用**真实接口**驱动支付、只断言**支付之后**的渲染，**不等于**「确认键可点」；
 * ⑬/⑭ 的「7 字段解析卡」依赖真实 LLM 解析结果，mock 与真模型的字段数可能不同；
 * 真机页面栈深度（DR-0011 的 `STACK_BUDGET = 8`）仍未做运行期验证。
 
@@ -2324,6 +2327,103 @@ def sec_08(w: Walker) -> None:
     w.back_to(ORDERS)
 
 
+def sec_8b(w: Walker) -> None:
+    """⑧b 支付状态流转 —— **默认不跑**，须显式开关（`WALK_PAY=1`）。
+
+    为什么默认不跑：本步会**消耗演示锚点**。支付单一旦变成 `paid` 就不可回退，
+    同一个库上再跑 ⑧ 章就取不到 `pending` 锚点 —— 那一轮会以「前置锚点缺失」失败，
+    看起来像第 ⑧ 章坏了，实际是自己把数据改了。⇒ 只在**显式开关 + 临时库**上跑。
+
+    ⚠️ 已知限制（**记在结论里，不当通过**）：「模拟支付成功」的确认键在
+    **原生 `wx.showModal`** 里，该弹层不进渲染树、元素工具点不到（本项目铁律）。
+    ⇒ 本步用**真实接口**触发支付，再回真机断言**支付之后的渲染**：
+    按钮态、状态文案、时间轴、以及订单页的支付入口消失。
+    它证明的是「支付后界面正确」，**不是**「弹层确认键可点」。
+    """
+    print("\n== ⑧b 支付状态流转（WALK_PAY）==", flush=True)
+    if os.environ.get("WALK_PAY") != "1":
+        # **显式记 not-run**，不是静默跳过：静默跳过会让"少了一章的证据"
+        # 看起来像"那一章通过"。
+        w.rep.rec(
+            "⑧b 支付状态流转",
+            True,
+            "not-run：需显式开关 WALK_PAY=1（会消耗演示锚点，须在临时库上跑）",
+        )
+        return
+
+    a = _anchors(w)
+    if a.pay_order_id is None or not a.token_shipper:
+        w.rep.rec("⑧b 前置锚点", False, "无待支付订单或未取到 shipper token")
+        return
+    oid = a.pay_order_id
+    pay = api_get(f"/payment/payments/order/{oid}", a.token_shipper) or {}
+    pay_id = pay.get("id")
+    w.rep.rec(
+        "⑧b 支付单仍为 pending（开关打开时锚点未被消耗）",
+        pay.get("status") == "pending" and bool(pay_id),
+        f"pay_id={pay_id} status={pay.get('status')}",
+    )
+    if not pay_id:
+        return
+
+    _goto_orders(w)
+    if not w.tap_order_act(oid, "pay"):
+        w.scroll_into(f'[data-order-id="{oid}"]')
+        w.tap_order_act(oid, "pay")
+    w.c.wait_path(PAYMENT, 25)
+    time.sleep(1.6)
+    before = w.c.page_data()
+    w.rep.rec(
+        "⑧b 支付前：底栏可支付 + 状态为未支付",
+        before.get("canPay") is True and str(before.get("statusLabel")) != "已支付",
+        f"canPay={before.get('canPay')} statusLabel={before.get('statusLabel')}",
+    )
+
+    # 真实接口触发（弹层确认键点不到 —— 见本函数 docstring 的限制说明）
+    status, _data = api_post(f"/payment/payments/{pay_id}/mock-pay", a.token_shipper, {})
+    w.rep.rec("⑧b 模拟支付回调成功", status == 200, f"http={status}")
+
+    # 回真机看渲染：刷新（走真实取数，不是本地改 data）
+    w.c.refresh()
+    after = w.wait_data(lambda x: str(x.get("statusLabel")) == "已支付", tries=30, gap=0.5)
+    w.shot("08b-支付后")
+    w.rep.rec(
+        "⑧b 支付后：状态文案变为已支付（渲染层）",
+        str(after.get("statusLabel")) == "已支付",
+        f"statusLabel={after.get('statusLabel')}",
+    )
+    w.rep.rec(
+        "⑧b 支付后：可支付按钮消失（不能让同一笔再付一次）",
+        after.get("canPay") is False and after.get("canCreate") is False,
+        f"canPay={after.get('canPay')} canCreate={after.get('canCreate')}",
+    )
+    w.rep.rec(
+        "⑧b 支付后：底栏说明随之更新",
+        str(after.get("barNote") or "") != str(before.get("barNote") or ""),
+        f"before={before.get('barNote')!r} after={after.get('barNote')!r}",
+    )
+
+    # 幂等：重复回调不重复记账（接口是幂等的），状态仍是 paid
+    status2, _d2 = api_post(f"/payment/payments/{pay_id}/mock-pay", a.token_shipper, {})
+    now = api_get(f"/payment/payments/order/{oid}", a.token_shipper) or {}
+    w.rep.rec(
+        "⑧b 重复回调幂等：仍为 paid，且接口不报错",
+        status2 == 200 and now.get("status") == "paid" and now.get("id") == pay_id,
+        f"http={status2} status={now.get('status')} id={now.get('id')}",
+    )
+
+    # 订单页：该单的「去支付」入口必须消失（渲染层）
+    w.back_to(ORDERS)
+    n = w.c.count(f'[data-act-pay="{oid}"]')
+    w.rep.rec("⑧b 订单页：该单的「去支付」入口已消失", n == 0, f'[data-act-pay="{oid}"] n={n}')
+    w.rep.rec(
+        "⑧b 弹层确认键未真实点击",
+        True,
+        "限制：确认键在原生 wx.showModal 里、工具点不到；本步用真实接口驱动支付，"
+        "支付**后**的渲染由真机断言覆盖",
+    )
+
+
 def sec_09(w: Walker) -> None:
     """⑨ 船东链路：工作台 → 船队 → 为船找货 + ⑨b 船东侧智能合同。"""
     print("\n== ⑨ 船东链路 ==", flush=True)
@@ -2760,6 +2860,7 @@ SECTIONS = {
     "5": sec_05,
     "7": sec_07,
     "8": sec_08,
+    "8b": sec_8b,
     "9": sec_09,
     "10": sec_10,
     "11": sec_11,
@@ -2795,6 +2896,7 @@ DEFAULT_ORDER = [
     "5",
     "7",
     "8",
+    "8b",
     "9",
     "10",
     "11",
