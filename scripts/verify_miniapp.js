@@ -175,6 +175,10 @@ const WALK_ANCHORS = [
   { kind: 'row', file: 'pages/trade/orders/orders.wxml', class: 'order-card', attr: 'data-order-id', value: '{{item.id}}' },
   { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-contract', handler: 'onContractPage', value: '{{item.id}}' },
   { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-pay', handler: 'onPayPage', value: '{{item.id}}' },
+  // ENT-044：`data-act-pay` 曾在同一文件里被**两处复用**（「去支付」与「支付详情」）
+  // ⇒ 走查按它取数时会同时命中两个入口（曾经据此得出过错误结论）。拆成两个属性：
+  // 「去支付」= `data-act-pay`，「支付详情」= `data-act-payinfo`。
+  { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-payinfo', handler: 'onPayPage', value: '{{item.id}}' },
   { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-cancel', handler: 'onCancel', value: '{{item.id}}' },
   { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-complete', handler: 'onComplete', value: '{{item.id}}' },
   { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-detail', handler: 'onDetail', value: '{{item.id}}' },
