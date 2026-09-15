@@ -10,6 +10,10 @@
   调用方可据此降级（返回 503 提示稍后重试）。
   ⚠️ `quota` **不可重试**（重试不会让账户有钱）：它单独成一类，就是为了不被
   笼统归进 `bad_request` —— 那样运维看到的是"请求被拒绝"，而真正要做的动作是充值。
+- **推理模型**：`content` 里可能夹着思维链（`<think>…</think>`），答案在其后，
+  且 `response_format` 常被忽略、答案还可能包在 markdown 围栏里 ⇒ 解析前先剥推理块、
+  再从文本里取第一个完整的顶层 JSON 对象，见 `_split_reasoning` / `_first_json_object`。
+  ⚠️ 别用"整段 `json.loads`"去兼容它 —— H7a 首跑 24 次全因此记 `bad_response`。
 """
 
 from __future__ import annotations
@@ -34,12 +38,118 @@ class LLMError(Exception):
 
 @dataclass(slots=True)
 class LLMResult:
-    """一次 LLM 调用的结果（content 为解析后的 dict；raw 保留原始文本供审计）。"""
+    """一次 LLM 调用的结果。
+
+    - ``content``：解析后的 dict（业务只认它）。
+    - ``raw``：**参与解析的那段文本**（推理模型的内联思维链已被剥掉）。
+      审计与 ``response_digest`` 用它 —— 否则摘要会退化成几千字的思维链，
+      而"模型到底答了什么"反而读不到。
+    - ``reasoning``：推理模型的思维链原文（非推理模型为空串）。**不参与任何判分**，
+      留着只为满足"事实有来源"：否则我们主动要求模型思考，却把它的思考直接丢掉。
+    - ``latency_ms`` / ``mocked``：语义与既有实现一致。
+    """
 
     content: dict[str, Any]
     raw: str
     latency_ms: int
     mocked: bool
+    reasoning: str = ""
+
+
+# ---------------------------------------------------------------------------
+# 推理模型的输出清洗（2026-09-16 实测）
+# ---------------------------------------------------------------------------
+# 背景：H7a 首跑 24 次调用**全部** `bad_response`，一条可评分结果都没产生。
+# 另写探针把真实响应体照录后才看清：MiniMax-M2.7 是**推理模型**，它把思维链
+# 直接内联进 `message.content`（`<think>…</think>`），答案跟在后面；
+# 并且**无视** `response_format={"type":"json_object"}`。
+# 于是 `json.loads(content)` 在 char 0 就抛 JSONDecodeError。
+# 实测（同一请求，带/不带 response_format、带 max_tokens）四次全是这个形态，
+# 剥掉推理块后每一次都能解析出合法对象。
+#
+# 供应商官方另给了一个对策：请求里带 `reasoning_split=true`，把推理挪进
+# `reasoning_content`（实测有效）。本网关**不采用**：那是供应商专有参数，
+# 而"content 里可能夹推理块"在 OpenAI 兼容生态里是普遍现象（DeepSeek-R1 系同形），
+# 在客户端剥一次就能覆盖全部供应商，也让网关保持中立。
+_THINK_CLOSE_RE = re.compile(r"</think\s*>", re.IGNORECASE)
+
+
+def _split_reasoning(content: str) -> tuple[str, str]:
+    """把 `content` 拆成 ``(答案文本, 推理文本)``。
+
+    以**最后一个** ``</think>`` 切分：推理过程自身可能引用该字面量。
+    没有 ``</think>`` 时视作"没有推理块"，答案即全文 —— 对非推理模型
+    （content 本来就是纯 JSON）这是个**无副作用的空操作**。
+    """
+    closes = list(_THINK_CLOSE_RE.finditer(content))
+    if not closes:
+        return content, ""
+    last = closes[-1]
+    answer = content[last.end() :]
+    head = content[: last.start()]
+    # 去掉推理块的开标签（推不出开标签就原样保留）
+    head = re.sub(r"^\s*<think\b[^>]*>", "", head, count=1, flags=re.IGNORECASE)
+    return answer, head.strip()
+
+
+def _first_json_object(text: str) -> str | None:
+    """取第一个**完整**的顶层 ``{…}`` 片段（按括号深度配对，字符串内的括号不计）。
+
+    为什么需要它：模型常把 JSON 包在 markdown 代码围栏里（`` ```json … ``` ``）。
+    2026-09-16 实测：同一个 `SYSTEM_PROMPT` 下，S10 样本**有时**返回裸 JSON、
+    **有时**返回 `</think>` + 围栏 —— 也就是说这不是"理论上的边界情况"。
+    （当时先按"没观测到就不做"跳过它，重跑 H7a 立刻被 S10 打了回来。）
+    取"第一个顶层对象"而不是"整段"：整段可能含多个对象而解析失败。
+    """
+    depth = 0
+    start = -1
+    in_str = False
+    escaped = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _parse_json_answer(text: str) -> tuple[dict[str, Any] | None, str, str]:
+    """把答案文本解析成 JSON 对象。
+
+    Returns:
+        ``(对象, 实际用于解析的文本, 失败原因)`` —— 解析成功时失败原因为空串。
+        第二个返回值是"真正被 ``json.loads`` 吃下去的那段"，交给 ``LLMResult.raw``，
+        这样审计看到的和判分用的是同一段文本。
+    """
+    candidates = [text]
+    if (span := _first_json_object(text)) is not None and span != text:
+        candidates.append(span)
+
+    reason = "未找到 JSON 对象"
+    for cand in candidates:
+        try:
+            value = json.loads(cand)
+        except ValueError as exc:
+            reason = str(exc)
+            continue
+        if isinstance(value, dict):
+            return value, cand, ""
+        reason = f"解析结果是 {type(value).__name__}，不是对象"
+    return None, text, reason
 
 
 async def chat_json(
@@ -117,18 +227,36 @@ async def chat_json(
 
     try:
         body = resp.json()
-        raw: str = body["choices"][0]["message"]["content"]
-        content = json.loads(raw)
-    except (KeyError, IndexError, ValueError) as exc:
-        raise LLMError("bad_response", "LLM 输出无法解析为 JSON") from exc
-    if not isinstance(content, dict):
-        raise LLMError("bad_response", "LLM 输出 JSON 不是对象")
+    except ValueError as exc:
+        raise LLMError(
+            "bad_response", f"LLM 响应不是 JSON（HTTP {resp.status_code}）：{resp.text[:200]}"
+        ) from exc
+    try:
+        content_raw = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        head = json.dumps(body, ensure_ascii=False)[:200]
+        raise LLMError("bad_response", f"LLM 响应缺少 choices[0].message.content：{head}") from exc
+    if not isinstance(content_raw, str):
+        raise LLMError("bad_response", f"LLM content 不是字符串：{type(content_raw).__name__}")
+
+    answer, reasoning = _split_reasoning(content_raw)
+    answer = answer.strip()
+    content, raw, reason = _parse_json_answer(answer)
+    if content is None:
+        # ⚠️ 必须把 content 开头带出来：干巴巴一句"无法解析为 JSON"，让人只能
+        #    另写探针去猜根因 —— H7a 首跑就是为此白花了几十分钟。
+        raise LLMError(
+            "bad_response",
+            f"LLM 输出无法解析为 JSON 对象：{reason}；"
+            f"剥离推理块后 {len(answer)} 字符，开头 {answer[:120]!r}",
+        )
 
     return LLMResult(
         content=content,
         raw=raw,
         latency_ms=int((time.monotonic() - started) * 1000),
         mocked=False,
+        reasoning=reasoning,
     )
 
 
