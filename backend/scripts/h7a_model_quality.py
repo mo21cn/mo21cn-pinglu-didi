@@ -156,8 +156,8 @@ def _grade_sample(sample: dict[str, Any], content: dict[str, Any], today: date) 
     }
 
 
-async def _call(prompt: str, text: str) -> tuple[dict[str, Any] | None, str | None, str, int]:
-    """调真实模型一次；返回 (content, error_kind, error_message, latency_ms)。
+async def _call(prompt: str, text: str) -> tuple[dict[str, Any] | None, str | None, str, int, bool]:
+    """调真实模型一次；返回 (content, error_kind, error_message, latency_ms, mocked)。
 
     ``prompt`` 由调用方用 ``build_cargo_prompt(today)`` 渲染好传进来 ——
     **必须是生产同一个渲染入口**，否则"验证"验的是另一套提示词。
@@ -167,12 +167,18 @@ async def _call(prompt: str, text: str) -> tuple[dict[str, Any] | None, str | No
     结果文件里只有 `{"kind": "bad_response"}` —— 光看这个查不出原因，
     只能另写探针复现才看到"答案是 markdown 围栏里的 JSON"。
     **错误分类用来路由，错误原文用来定位**，两者缺一不可。
+
+    ⚠️ `mocked` 必须一起返回（见 ``run()`` 里的逐条断言）：HO 的要求是
+    「正式质量测试必须确认实际响应 ``mocked=false``」—— **配置层的检查不够**。
+    ``main()`` 只在入口看 ``LLM_MOCK`` 与 ``LLM_API_KEY``，那证明的是"配置声称要发真实请求"；
+    真正要证明的是"这一条响应确实不是桩"。两者不是一回事：
+    桩可能由别的开关、别的注入路径产生，入口检查看不见。
     """
     try:
         res = await llm_gateway.chat_json(system=prompt, user=text)
     except LLMError as exc:
-        return None, exc.kind, str(exc), 0
-    return res.content, None, "", res.latency_ms
+        return None, exc.kind, str(exc), 0, False
+    return res.content, None, "", res.latency_ms, bool(res.mocked)
 
 
 async def run(runs: int) -> dict[str, Any]:
@@ -190,17 +196,26 @@ async def run(runs: int) -> dict[str, Any]:
 
     per_run: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    mock_incidents: list[dict[str, Any]] = []
     latencies: list[int] = []
     stable_ids: list[str] = []
 
     for run_no in range(1, runs + 1):
         outcomes: dict[str, Any] = {}
         for s in samples:
-            content, kind, err_msg, latency = await _call(prompt, s["text"])
+            content, kind, err_msg, latency, mocked = await _call(prompt, s["text"])
             if content is None:
                 errors.append({"id": s["id"], "run": run_no, "kind": kind, "message": err_msg})
                 print(f"  ✗ {s['id']} 调用失败: {kind}")
                 print(f"      {err_msg[:300]}")
+                continue
+            # ---- 逐条断言：必须是真实响应 ----
+            # HO 口径：正式质量测试必须确认实际响应 mocked=false；
+            # 请求真模型但缺凭据时应报资源阻塞，**不得**自动降级后继续产出"真模型"结论。
+            # 因此这条桩响应既不计数、也不参与判分 —— 直接丢弃，并单独留痕。
+            if mocked:
+                mock_incidents.append({"id": s["id"], "run": run_no})
+                print(f"  ⛔ {s['id']} 响应 mocked=true：非真实模型输出，已丢弃、不计分")
                 continue
             latencies.append(latency)
             outcomes[s["id"]] = content
@@ -256,6 +271,9 @@ async def run(runs: int) -> dict[str, Any]:
         "hallucinations": hallucination,
         "parse_failures": len(errors),
         "errors": errors,
+        # 逐条断言的汇总：应为 0。>0 表示拿到过桩响应 ⇒ 本轮**不构成**真实模型质量证据。
+        "mocked_responses": len(mock_incidents),
+        "mock_incidents": mock_incidents,
         "calibration_gap": round(gap, 4),
         "mean_confidence_correct": round(statistics.fmean(ok_conf), 4) if ok_conf else None,
         "mean_confidence_wrong": round(statistics.fmean(bad_conf), 4) if bad_conf else None,
@@ -282,8 +300,15 @@ async def run(runs: int) -> dict[str, Any]:
 
 
 def _verdict(r: dict[str, Any]) -> dict[str, Any]:
-    """按**跑之前定死的**阈值逐条判定；返回每条的达标情况与总评。"""
+    """按**跑之前定死的**阈值逐条判定；返回每条的达标情况与总评。
+
+    注意 ``real_response`` 与其余四条**性质不同**：它不衡量模型质量，
+    而是衡量**这轮结果能不能算数**。桩响应出现一次，整轮就不能被引用为
+    "真实模型质量"证据 —— 所以它必须进 ``all_met``，否则一条被丢弃的桩响应
+    会让"数值看着还不错"的结论被当成真的。
+    """
     checks = {
+        "real_response": r["mocked_responses"] == 0,
         "field_accuracy": r["field_accuracy"] >= THRESHOLDS["field_accuracy_min"],
         "hallucination": r["hallucinations"] <= THRESHOLDS["hallucination_max"],
         "calibration": r["calibration_gap"] > THRESHOLDS["calibration_gap_min"],
@@ -294,6 +319,10 @@ def _verdict(r: dict[str, Any]) -> dict[str, Any]:
 
 def _report(r: dict[str, Any]) -> None:
     print("\n================ H7a 真实模型质量 ================")
+    n_mock = r["mocked_responses"]
+    print(
+        f"真实响应   : 桩响应 {n_mock} 条  {'✅ 全部 mocked=false' if n_mock == 0 else '⛔ 出现过 mocked=true'}"
+    )
     print(
         f"字段准确率 : {r['field_accuracy']:.2%}  ({r['correct']}/{r['total']})"
         f"  阈值 ≥ {THRESHOLDS['field_accuracy_min']:.0%}"
@@ -372,6 +401,19 @@ def main(argv: list[str] | None = None) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\n结果已写入: {out}")
+    if result["mocked_responses"] > 0:
+        # 资源阻塞，不是"模型不达标"。与 402/缺 Key 同类：**没跑成**（NOT_RUN）。
+        print(
+            f"\n⛔ 本轮出现 {result['mocked_responses']} 条 `mocked=true` 的响应。"
+            "\n   这意味着**至少有一条输出不是真模型给的**，本轮结果不得作为真实模型质量证据："
+            '\n   · 该条已丢弃、未参与判分；但"其余条是真模型"这件事本身也没被证明。'
+            "\n   · 按 HO 口径，此时应报**资源阻塞**（配置声称发真请求、实际拿到桩），"
+            '\n     不得自动降级后继续产出"真模型"结论。'
+            "\n   · 排查方向：`LLM_MOCK` 的实际取值来源、是否有别的注入路径覆盖了网关"
+            "\n     （用 scripts/llm_key_doctor.py 先确认 Key 与计费方式）。",
+            file=sys.stderr,
+        )
+        return 2
     if result["total"] == 0:
         # 退出码区分三态：0=达标 / 1=未达标 / 2=**没跑成**（NOT_RUN，不是失败）
         return 2
