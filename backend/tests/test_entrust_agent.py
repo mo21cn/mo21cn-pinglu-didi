@@ -1050,3 +1050,17 @@ def test_job_requires_specialty(env):
         headers=_headers(manager, uuid.uuid4().hex),
     )
     assert job.status_code == 400
+
+
+def test_quota_error_is_not_retryable():
+    """`llm_quota`（余额/配额耗尽）**不可重试** —— 重试不会让账户有钱。
+
+    与 `llm_timeout` / `llm_rate_limit` 对照：那些是外部抖动，重试有意义。
+    """
+    assert jobs.is_retryable("llm_quota") is False
+    assert jobs.is_retryable("llm_bad_request") is False
+    assert jobs.is_retryable("llm_timeout") is True
+    assert jobs.is_retryable("llm_rate_limit") is True
+    # 未分类的一律不重试（宁可停下来人工看，也不要盲目重试掩盖问题）
+    assert jobs.is_retryable(None) is False
+    assert jobs.is_retryable("llm_unknown") is False

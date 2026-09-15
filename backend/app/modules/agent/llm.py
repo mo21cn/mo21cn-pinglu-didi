@@ -6,7 +6,10 @@
 - 供应商协议：OpenAI 兼容 ``/chat/completions``（DeepSeek 起步，可平移 Qwen 等）。
 - ``LLM_MOCK=true``：规则模板模式，供 CI / 无 Key 开发；不发起任何网络请求。
 - 错误分类（LLMError.kind）：timeout / network / auth / rate_limit / bad_request /
-  bad_response（JSON 解析失败）/ unknown，调用方可据此降级（返回 503 提示稍后重试）。
+  **quota**（HTTP 402 余额或配额耗尽）/ bad_response（JSON 解析失败）/ unknown，
+  调用方可据此降级（返回 503 提示稍后重试）。
+  ⚠️ `quota` **不可重试**（重试不会让账户有钱）：它单独成一类，就是为了不被
+  笼统归进 `bad_request` —— 那样运维看到的是"请求被拒绝"，而真正要做的动作是充值。
 """
 
 from __future__ import annotations
@@ -93,6 +96,11 @@ async def chat_json(
         raise LLMError("auth", "LLM API Key 无效或无权限")
     if resp.status_code == 429:
         raise LLMError("rate_limit", "LLM 限流，请稍后重试")
+    if resp.status_code == 402:
+        # 2026-09-16 H7a 实测撞到：MiniMax 余额不足返回 402
+        # `{"type":"insufficient_balance_error"}`。此前落进 bad_request ⇒
+        # 报出来是"请求被拒绝"，掩盖了"该充值"这个**真正要做的动作**。
+        raise LLMError("quota", "LLM 账户余额或配额不足（HTTP 402），需充值后重试")
     if resp.status_code >= 500:
         raise LLMError("network", f"LLM 服务端错误 {resp.status_code}")
     if resp.status_code != 200:

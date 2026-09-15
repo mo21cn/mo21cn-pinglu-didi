@@ -106,6 +106,42 @@ def test_cargo_parse_llm_failure_degrades(shipper, client, monkeypatch):
     assert "稍后重试" in resp.json()["detail"]
 
 
+async def test_llm_402_is_quota_not_bad_request(monkeypatch):
+    """HTTP 402（余额/配额耗尽）必须单独成 `quota` 类。
+
+    2026-09-16 H7a 首跑实测撞到：MiniMax 余额不足返回
+    `{"type":"insufficient_balance_error"}` + 402，被落进通用的 `bad_request`。
+    报出来就变成「请求被拒绝」—— 掩盖了「该充值」这个**真正要做的动作**。
+    """
+    import httpx
+
+    from app.core.config import get_settings
+    from app.modules.agent import llm as llm_gw
+
+    class _StubClient:
+        """只用来回一个 402；不发起任何真实网络请求。"""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return
+
+        async def __aenter__(self) -> _StubClient:
+            return self
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+        async def post(self, url: str, **kwargs: object) -> httpx.Response:
+            return httpx.Response(402, json={"error": {"message": "insufficient balance (1008)"}})
+
+    monkeypatch.setattr(llm_gw.httpx, "AsyncClient", _StubClient)
+    monkeypatch.setattr(get_settings(), "LLM_MOCK", False)
+    monkeypatch.setattr(get_settings(), "LLM_API_KEY", "test-key")
+
+    with pytest.raises(LLMError) as excinfo:
+        await llm_gw.chat_json(system="s", user="u")
+    assert excinfo.value.kind == "quota"
+
+
 # ---------- F10 客服导购 ----------
 
 
