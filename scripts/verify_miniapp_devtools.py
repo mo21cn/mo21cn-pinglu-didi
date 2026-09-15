@@ -3124,6 +3124,11 @@ def main() -> int:
     ap.add_argument("--skill-version", default="", help="传入则校验 agent skill 版本关系")
     ap.add_argument("--timeout", type=int, default=150, help="单次工具调用超时（秒）")
     args = ap.parse_args()
+    #: 落进 `summary.json`：事后能回答「这次明细是哪条命令、什么时候跑的」。
+    #: 明细目录本身带时间戳、不会被覆盖；这里补的是**可检索的元数据** ——
+    #: 本轮对比「首轮 357 项 / 复跑 361 项」时，靠的就是两轮的 `summary.json`，
+    #: 而没有时间与命令行就只能靠目录名猜。
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
     wanted = (
         list(DEFAULT_ORDER)
@@ -3221,6 +3226,9 @@ def main() -> int:
             {
                 "sections": wanted,
                 "project": os.path.abspath(args.project),
+                "startedAt": started_at,
+                "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "argv": sys.argv,
                 "results": rep.results,
                 "consoleError": errs,
                 "consoleErrorDetected": bool(errs.strip()),
