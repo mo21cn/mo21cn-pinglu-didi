@@ -1,0 +1,183 @@
+{
+  "_comment": "H7a 真实模型质量验证样本集（cargo_parse）。expect 为参考答案，评分为机器判定，不需要人工逐条看。",
+  "_grading": {
+    "cargo_name": "参考答案 keywords 任一出现在模型输出里（去空格、忽略大小写）",
+    "cargo_type": "枚举精确匹配",
+    "weight_t": "数值相对容差 0.5%；null 与非 null 不一致即判错",
+    "origin_port": "13 个港口代码精确匹配",
+    "dest_port": "13 个港口代码精确匹配",
+    "expect_date": "字符串完全相等；{ymd} 按运行年份展开；{next_weekday} 按运行日期推算",
+    "offer_price": "数值相对容差 0.5%；null 与非 null 不一致即判错",
+    "hallucination": "期望 null 却给出非 null，单独计数（硬指标，不折算成分数）"
+  },
+  "samples": [
+    {
+      "id": "S01",
+      "note": "完整信息·散货",
+      "text": "帮我发一车散装水泥，30吨，南宁到贵港，10月8号装货，运费我出八千",
+      "expect": {
+        "cargo_name": { "keywords": ["水泥"] },
+        "cargo_type": "bulk",
+        "weight_t": 30,
+        "origin_port": "NNG",
+        "dest_port": "GGU",
+        "expect_date": { "ymd": "10-08" },
+        "offer_price": 8000
+      }
+    },
+    {
+      "id": "S02",
+      "note": "缺目的港 + 缺价格",
+      "text": "梧州发一批煤炭，大概500吨，10月12号要走，价格好说",
+      "expect": {
+        "cargo_name": { "keywords": ["煤"] },
+        "cargo_type": "bulk",
+        "weight_t": 500,
+        "origin_port": "WUZ",
+        "dest_port": null,
+        "expect_date": { "ymd": "10-12" },
+        "offer_price": null
+      }
+    },
+    {
+      "id": "S03",
+      "note": "缺重量·件杂",
+      "text": "柳州到北海有批钢材，10月20号装，出价一万二",
+      "expect": {
+        "cargo_name": { "keywords": ["钢"] },
+        "cargo_type": "general",
+        "weight_t": null,
+        "origin_port": "LZH",
+        "dest_port": "BHZ",
+        "expect_date": { "ymd": "10-20" },
+        "offer_price": 12000
+      }
+    },
+    {
+      "id": "S04",
+      "note": "集装箱 + 万元口语（两万五）",
+      "text": "钦州到防城港，两个集装箱的化肥，10月25号，运费两万五",
+      "expect": {
+        "cargo_name": { "keywords": ["化肥"] },
+        "cargo_type": "container",
+        "weight_t": null,
+        "origin_port": "QNZ",
+        "dest_port": "FCG",
+        "expect_date": { "ymd": "10-25" },
+        "offer_price": 25000
+      }
+    },
+    {
+      "id": "S05",
+      "note": "液货",
+      "text": "有一船液碱从贵港运到梧州，1200吨，11月2号装，报价五万",
+      "expect": {
+        "cargo_name": { "keywords": ["液碱", "碱"] },
+        "cargo_type": "tanker",
+        "weight_t": 1200,
+        "origin_port": "GGU",
+        "dest_port": "WUZ",
+        "expect_date": { "ymd": "11-02" },
+        "offer_price": 50000
+      }
+    },
+    {
+      "id": "S06",
+      "note": "件杂·设备 + 中文大写数字（八十吨）",
+      "text": "桂林发往南宁一批工程设备，大概八十吨，11月5号，运费三万八",
+      "expect": {
+        "cargo_name": { "keywords": ["设备"] },
+        "cargo_type": "general",
+        "weight_t": 80,
+        "origin_port": "GXL",
+        "dest_port": "NNG",
+        "expect_date": { "ymd": "11-05" },
+        "offer_price": 38000
+      }
+    },
+    {
+      "id": "S07",
+      "note": "相对日期（下周三）—— 考察系统提示词有没有把「今天」告诉模型",
+      "text": "下周三从百色发六十吨玉米到来宾，运费九千",
+      "expect": {
+        "cargo_name": { "keywords": ["玉米"] },
+        "cargo_type": "bulk",
+        "weight_t": 60,
+        "origin_port": "BSZ",
+        "dest_port": "BIN",
+        "expect_date": { "next_weekday": 2 },
+        "offer_price": 9000
+      }
+    },
+    {
+      "id": "S08",
+      "note": "不编造·完全无关输入",
+      "text": "今天天气怎么样？",
+      "expect": {
+        "cargo_name": null,
+        "cargo_type": null,
+        "weight_t": null,
+        "origin_port": null,
+        "dest_port": null,
+        "expect_date": null,
+        "offer_price": null
+      }
+    },
+    {
+      "id": "S09",
+      "note": "不编造·信息不足",
+      "text": "我想发点货",
+      "expect": {
+        "cargo_name": null,
+        "cargo_type": null,
+        "weight_t": null,
+        "origin_port": null,
+        "dest_port": null,
+        "expect_date": null,
+        "offer_price": null
+      }
+    },
+    {
+      "id": "S10",
+      "note": "域外港口（上海/广州不在 13 个枚举内）—— 正确行为是置 null，不得自创代码",
+      "text": "上海到广州一批瓷砖，200吨，10月9号，两万",
+      "expect": {
+        "cargo_name": { "keywords": ["瓷砖"] },
+        "cargo_type": "general",
+        "weight_t": 200,
+        "origin_port": null,
+        "dest_port": null,
+        "expect_date": { "ymd": "10-09" },
+        "offer_price": 20000
+      }
+    },
+    {
+      "id": "S11",
+      "note": "中文数字（三百五十吨 / 四万二）",
+      "text": "玉林到钦州，三百五十吨砂石，10月15号，运费四万二",
+      "expect": {
+        "cargo_name": { "keywords": ["砂石", "砂"] },
+        "cargo_type": "bulk",
+        "weight_t": 350,
+        "origin_port": "YUL",
+        "dest_port": "QNZ",
+        "expect_date": { "ymd": "10-15" },
+        "offer_price": 42000
+      }
+    },
+    {
+      "id": "S12",
+      "note": "长句 + 干扰（先提贵港→南宁的老线路，真实线路是崇左→贺州）",
+      "text": "你好，我是老客户了，之前走过贵港到南宁的线。这次有一批散装水泥，大概是45吨左右吧，想10月18号在崇左装船运到贺州，价钱的话我这边可以给到六千五，麻烦帮我看看能安排不",
+      "expect": {
+        "cargo_name": { "keywords": ["水泥"] },
+        "cargo_type": "bulk",
+        "weight_t": 45,
+        "origin_port": "CHZ",
+        "dest_port": "HEZ",
+        "expect_date": { "ymd": "10-18" },
+        "offer_price": 6500
+      }
+    }
+  ]
+}
