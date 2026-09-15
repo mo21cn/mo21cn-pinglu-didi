@@ -41,11 +41,28 @@
 并打印真实耗时、单次调用耗时、进程数与**回执**：`ok=true` 且栈空 = 窗口没进小程序页；
 `ok=false` = 通道/授权问题 —— **两者处置不同，不能只看空列表**。
 
+**⑤ 闸门恒空时：先探测，再用 `--skip-ide`，别急着重启 IDE。**
+2026-09-15 实证（同一个 IDE）：运行器**新起**的实例上，闸门两次 240s 预算内恒为
+`MCP_TOOL_ERROR: timeout waiting for automator response`；而对**当时已在运行**的
+那一个做只读探测，`check_wechatide_status` ok、`open_project_window` 回
+`{type: "reuse", winId: "s0"}`、`automation_runtime_info` **直接返回 `pageStack`**。
+⇒ 现在把处置固化成三步：**① 先只读探测**（`probe_existing_ide()`，不启不停）
+→ **② 能用就复用**（`--skip-ide`；实测 31/32 两章 1 分 43 秒跑完）
+→ **③ 不能用才清场重起**，且重起后仍要按 ② 复检。
+配套还加了两条：
+* `wait_ready` 命中「automation runtime 未注册」签名**连续 `AUTOMATION_DEAD_MAX` 次即早退**
+  （不再空等满预算），并打印上面那套处置；
+* 起 IDE 的环境**不再传本机沙箱代理**（`ide_env()`）—— 那个代理指向每会话换端口的
+  沙箱网关，服务的是命令行；实测由本项目起的 IDE 界面会反复闪「网络故障」。
+  ⚠️ **但要诚实**：这**不是**已证实的根因（反证：同一次探测里 CLI 带着同一个代理也成功了），
+  本改动只是**拆掉一个没有正当理由的耦合**，逐条证据见 DR-0009 §8.5⑨。
+
 用法
 ----
     python scripts/run_walkthrough_devtools.py --section all
     python scripts/run_walkthrough_devtools.py --section 8,8b --pay
     python scripts/run_walkthrough_devtools.py --section 25 --work D:\\tmp\\walk
+    python scripts/run_walkthrough_devtools.py --section 31,32 --skip-ide   # 复用已在跑的 IDE
 
 ⚠️ **不得在沙箱里运行**（`wechatide` 官方硬要求）；仅 Windows。
 ⚠️ 这是**本机工具**，不进 CI（依赖 GUI 模拟器）。
@@ -122,8 +139,31 @@ class Env:
         return env
 
     def ide_env(self) -> dict[str, str]:
-        """起 IDE 用的环境：**摘掉 `ELECTRON_RUN_AS_NODE`**（见模块 docstring 坑 ①）。"""
-        return {k: v for k, v in os.environ.items() if k.upper() != "ELECTRON_RUN_AS_NODE"}
+        """起 IDE 用的环境：摘掉 `ELECTRON_RUN_AS_NODE`，**并且不把本机沙箱代理传给它**。
+
+        ⚠️ ① `ELECTRON_RUN_AS_NODE`（见模块 docstring 坑 ①）：Electron 会**以 Node 模式启动**
+        —— 不建窗口、不写 GUI 日志、3 秒内 `rc=0` 主动退出。
+
+        ⚠️ ② 代理是**显式决定，不是顺手删**：本机 `http_proxy` 指向一个**每个会话都换端口**的
+        沙箱网关（实测 …→ 56351 → 61242），它服务的是**沙箱里的命令行**；而 IDE 是 GUI 程序，
+        自己也要联网（登录态校验、扩展清单、资源拉取）。把一个"给命令行用"的代理塞给 GUI
+        程序没有正当理由 —— 而且**实测由本项目起的 IDE，界面上会反复闪「网络故障」**。
+
+        ⚠️ **诚实边界（有对照实测）**：这**不是**"闸门恒空"的原因 —— 2026-09-15 做了
+        带/不带代理各起一次 IDE 的对照实测，**两边都没注册 automator**
+        （各 1 样本，不构成因果证明，但足以否掉"代理是主因"这个猜测；
+        反证还有一条：同一次只读探测里 CLI 带着同一个代理也成功了）。
+        ⇒ 保留本改动的理由是**拆掉一个没有正当理由的耦合**（GUI 程序不该继承
+        为沙箱命令行准备的代理），并顺带消掉界面上的「网络故障」闪提示，
+        **而不是**宣称修好了闸门。
+
+        ⚠️ 另有一条**踩过**的坑：Windows 上 `os.environ.get("http_proxy")` 是**大小写
+        不敏感**的（实际存的键是 `HTTP_PROXY`），但 `dict(os.environ)` 拿到的是**原样**
+        的键名 —— 用 `dict` 里查小写拼法会得到 `None`，于是"看起来没传代理"。
+        所以这里一律用 `k.upper()` 比对，别用精确键名。
+        """
+        drop = {"ELECTRON_RUN_AS_NODE", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
+        return {k: v for k, v in os.environ.items() if k.upper() not in drop}
 
 
 def log(msg: str = "") -> None:
@@ -215,6 +255,21 @@ def start_ide(env: Env, wait_s: int = 60):
 GATE_PROBE_S = 45
 GATE_BUDGET_S = 240
 
+#: IDE 侧「automation runtime 未注册」的签名（回执里出现任一条即命中）。
+#: 实测原文长这样（同一个 IDE 上连续 12+ 次都一样）：
+#:   `errorType=MCP_TOOL_ERROR message=timeout waiting for automator response`
+#:   `errorType=MCP_TOOL_ERROR message=cant find runtimeid by projectpath <项目路径>`
+AUTOMATION_DEAD_SIGNS = (
+    "timeout waiting for automator response",
+    "cant find runtimeid by projectpath",
+)
+#: 连续命中多少次就**早退**（不再等满 `GATE_BUDGET_S`）。
+#: 取 4 是有依据的，不是拍脑袋：两次**成功**的实测里，命中次数分别是
+#: 「2 次命中后第 3 次成功」与「1 次命中 + 1 次 ok-empty 后第 4 次成功」；
+#: 而失败的那两次是**连续 12～13 次**全命中。⇒ 4 不会误杀会自愈的冷启动，
+#: 又能把失败判定从 240s 压到约 40～60s。
+AUTOMATION_DEAD_MAX = 4
+
 
 def _brief(obj: object) -> str:
     """把回执压成一行关键信息（`ok` / `errorType` / 截断原文），供日志打印原因。"""
@@ -252,6 +307,7 @@ def wait_ready(
     client = Client(project=str(env.miniapp), timeout=probe_s)
     t0 = time.time()
     last: dict = {}
+    dead = 0
     while time.time() - t0 < budget_s:
         t1 = time.time()
         win = client.open_window(timeout=probe_s)
@@ -267,9 +323,50 @@ def wait_ready(
         )
         if stack:
             return True
+        # ⚠️ **早退**：命中"automation runtime 未注册"的签名时，等满预算也不会好 ——
+        #    同一个 IDE 重试不会自愈（实测连续 12+ 次全命中），正确动作是**换一个
+        #    已经注册好的实例**（`--skip-ide`），见 docstring 坑 ⑤ / DR-0009 §8.5⑨。
+        if any(s in str(hit) for s in AUTOMATION_DEAD_SIGNS):
+            dead += 1
+            if dead >= AUTOMATION_DEAD_MAX:
+                log(
+                    f"    ✗ 连续 {dead} 次命中「automation runtime 未注册」"
+                    f"（{_brief(hit)}）⇒ 早退，不再等满 {budget_s}s 预算。"
+                )
+                log("      ⇒ 处置：① 只读探测**已在运行**的 IDE，能用就 `--skip-ide` 复用它；")
+                log("              ② 不能用再看 IDE 窗口是否有弹层/网络提示，然后清场重起。")
+                return False
+        else:
+            dead = 0
         time.sleep(3)
     log(f"    ✗ 闸门预算 {budget_s}s 用尽，页面栈仍为空。最后回执：{_brief(last)}")
     return False
+
+
+def probe_existing_ide(env: Env, probe_s: int = 25) -> tuple[bool, str]:
+    """**只读**探测：当前**已在运行**的 IDE 能不能给出 `pageStack`？
+
+    ⚠️ 本函数**不启动、不杀**任何进程 —— 这正是它的价值：在"清场重起"之前，
+    先问一句"现成的那个能不能用"。实测（2026-09-15）：同一个 IDE 上运行器起的实例
+    闸门恒空，而对**已在运行**的那一个只读探测立刻拿到 `pageStack`
+    ⇒ 该 IDE 是可用的、**应该复用它**（`--skip-ide`），省掉"起 IDE + 闸门"两段
+    （那一次 31/32 两章 **1 分 43 秒**跑完 24 项断言）。
+
+    返回 `(是否可用, 一句话原因)`；原因要能区分"没有 IDE"、"探测异常"与"回执说不行"。
+    """
+    if not ide_procs():
+        return False, "没有正在运行的 IDE 进程"
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from wechatide_client import Client  # noqa: PLC0415
+
+    try:
+        client = Client(project=str(env.miniapp), timeout=probe_s)
+        stack, receipt = client.page_stack_probe(timeout=probe_s)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"探测异常：{str(exc)[:120]}"
+    if stack:
+        return True, f"pageStack={str(stack)[:90]}"
+    return False, f"回执 {_brief(receipt)}"
 
 
 def start_backend(env: Env, wait_s: int = 45):
@@ -369,14 +466,27 @@ def main(argv: list[str] | None = None) -> int:
     log(f"python  : {env.python}")
 
     ide = None
-    if not args.skip_ide:
-        log("\n① 起 IDE（摘掉 ELECTRON_RUN_AS_NODE）")
+    reuse = bool(args.skip_ide)
+    if not reuse:
+        # ⚠️ 先问一句"现成的能不能用"，再决定要不要清场重起 —— 见 docstring 坑 ⑤。
+        log("\n⓪ 先探一次：现成的 IDE 能用吗？（只读探测，**不启不停**任何进程）")
+        ok, why = probe_existing_ide(env)
+        log(f"    {'✅ 能用' if ok else '✗ 不能用'}：{why}")
+        if ok:
+            log("    ⇒ 自动改用**复用**模式（等价 --skip-ide）：省掉「起 IDE + 闸门」两段")
+            reuse = True
+        else:
+            log("    ⇒ 按常规清场重起")
+    if not reuse:
+        log("\n① 起 IDE（摘掉 ELECTRON_RUN_AS_NODE，且不传本机沙箱代理）")
         ide = start_ide(env)
         log("\n② 就绪闸门（open_window + pageStack 非空）")
         ready = bool(ide) and wait_ready(env)
         if not ready:
             # 先**彻底清场**再重来：只 kill 父进程会残留子进程 ⇒ 直接重起会变成
             # 两个实例互抢单实例锁，越试越不通（见 docstring 坑 ②）。
+            # ⚠️ 但若失败原因是"automation runtime 未注册"（坑 ⑤），清场重起**不一定**有效
+            #    —— wait_ready 已早退并打印了更优处置（复用已注册的实例）。
             log("    首次闸门未过，先清场内所有 IDE 实例再试一轮…")
             log(f"    清理后剩 {kill_ide_procs()}")
             time.sleep(5)
@@ -384,6 +494,8 @@ def main(argv: list[str] | None = None) -> int:
             ready = bool(ide) and wait_ready(env)
         if not ready:
             log("模拟器没就绪（pageStack 恒空）—— 环境错误，不是业务结论")
+            log("  处置顺序：① 只读探测**已在运行**的 IDE，能用就 --skip-ide 复用它；")
+            log("            ② 不能用再看 IDE 窗口是否有弹层/网络提示，然后清场重起。")
             kill_ide_procs()
             return 2
         log("    ✅ 模拟器已就绪")
