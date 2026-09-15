@@ -65,7 +65,9 @@ def map_artifact_error(exc: Exception) -> HTTPException | None:
         return mapped
     if isinstance(exc, art.ArtifactNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, (art.ArtifactVoidError, art.ManualTakeoverError)):
+    if isinstance(
+        exc, (art.ArtifactVoidError, art.ManualTakeoverError, art.ArtifactRevalidationError)
+    ):
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, art.ArtifactError):
         return HTTPException(status_code=400, detail=str(exc))

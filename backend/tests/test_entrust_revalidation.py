@@ -155,6 +155,17 @@ def _current_revision(session, artifact_id: int) -> int | None:
     return None if row is None or row[0] is None else int(row[0])
 
 
+def _current_revision_no(session, artifact_id: int) -> int | None:
+    """**生效版本的版本号**。
+
+    与 `_current_revision`（那返回的是 `current_revision_id`，即**行 id**）不是同一个数 ——
+    项目铁律「`id` 与编号是两个不同的数」在这里同样成立，混用会让"版本是否推进"的断言失真。
+    """
+    art = art_svc.get_artifact(session, artifact_id)
+    cur = art.get("current_revision") or {}
+    return None if cur.get("revision_no") is None else int(cur["revision_no"])
+
+
 def _revisions(session, artifact_id: int) -> list[tuple[int, str]]:
     rows = session.execute(
         text(
@@ -612,3 +623,111 @@ def test_exception_kind_may_not_carry_a_category(db):
         )
     assert "change_category" in str(info.value)
     assert art_id  # 仅为保持播种路径一致
+
+
+# ── 第 4 组：AC-12 后半条「阻止失效成果被确认或执行」─────────────────────────
+
+
+def test_confirm_is_blocked_while_revalidation_is_open(db):
+    """有待复核项时**不得静默成为生效版本**（PRD 第 297 行）。
+
+    这是 AC-12 里另一半要求：验证 19 只到"标出来 + 生成任务"，
+    而"标了却照旧能被设为生效版本"等于没有约束。
+    """
+    env = _env(db)
+    art_id = _artifact(db, env, atype="customer_quote")
+    _apply_change(
+        db,
+        env,
+        category=rv.CHANGE_CARGO,
+        targets=[{"target_kind": exc.TARGET_ARTIFACT, "target_id": art_id}],
+        changes={f"artifact#{art_id}": {"freight": 13000, "currency": "CNY"}},
+    )
+    assert rv.open_for_artifact(db, art_id), "前置：应用后应留下待复核项"
+    current_before = _current_revision(db, art_id)
+
+    # 再编辑一版（这是合法动作：草稿可以有），但**设为生效版本**必须被拒
+    draft = art_svc.append_revision(
+        db,
+        artifact_id=art_id,
+        payload={"freight": 14000, "currency": "CNY"},
+        actor_id=MANAGER,
+        source="manual",
+    )
+    with pytest.raises(art_svc.ArtifactRevalidationError) as info:
+        art_svc.confirm_revision(
+            db,
+            artifact_id=art_id,
+            revision_no=int(draft["revision_no"]),
+            actor_id=MANAGER,
+        )
+    assert "复核" in str(info.value)
+    assert _current_revision(db, art_id) == current_before, "被拒时生效版本**不得**被改动"
+
+
+def test_completing_review_task_unblocks_confirm(db):
+    """完成复核任务 ⇒ 标记转 resolved ⇒ 确认恢复可用（解除路径只有这一条）。"""
+    env = _env(db)
+    art_id = _artifact(db, env, atype="customer_quote")
+    _apply_change(
+        db,
+        env,
+        category=rv.CHANGE_CARGO,
+        targets=[{"target_kind": exc.TARGET_ARTIFACT, "target_id": art_id}],
+        changes={f"artifact#{art_id}": {"freight": 13000, "currency": "CNY"}},
+    )
+    rows = rv.open_for_artifact(db, art_id)
+    assert rows, "前置：应有待复核项"
+    review_task_id = int(rows[0]["review_task_id"])
+
+    # 未完成复核前：确认被拒
+    draft = art_svc.append_revision(
+        db,
+        artifact_id=art_id,
+        payload={"freight": 15000, "currency": "CNY"},
+        actor_id=MANAGER,
+        source="manual",
+    )
+    with pytest.raises(art_svc.ArtifactRevalidationError):
+        art_svc.confirm_revision(
+            db, artifact_id=art_id, revision_no=int(draft["revision_no"]), actor_id=MANAGER
+        )
+
+    # 完成复核任务
+    task_svc.start_task(db, task_id=review_task_id, actor_id=MANAGER)
+    task_svc.complete_task(db, task_id=review_task_id, actor_id=MANAGER)
+
+    resolved = rv.list_for_case(db, int(rows[0]["exception_id"]))
+    done = [r for r in resolved if int(r["review_task_id"]) == review_task_id]
+    assert done and all(str(r["status"]) == "resolved" for r in done), (
+        "完成复核任务必须把对应标记转为 resolved（否则成果被永久锁死）"
+    )
+    assert done[0]["resolved_by"] == MANAGER, "解除者必须是**完成复核任务的人**（事实有来源）"
+
+    # 解除后可确认
+    art_svc.confirm_revision(
+        db, artifact_id=art_id, revision_no=int(draft["revision_no"]), actor_id=MANAGER
+    )
+    assert _current_revision_no(db, art_id) == int(draft["revision_no"])
+
+
+def test_apply_is_not_blocked_by_its_own_marker(db):
+    """**顺序保证**：变更应用先 confirm、后写传播标记，所以不会被自己刚生成的标记挡住。
+
+    这一条是"阻止确认"能安全上线的**前提** —— 若顺序反了，五之二的传播会
+    把五之一的应用直接打死，而且失败点看起来像"应用坏了"。
+    """
+    env = _env(db)
+    art_id = _artifact(db, env, atype="customer_quote")
+    result = _apply_change(
+        db,
+        env,
+        category=rv.CHANGE_CARGO,
+        targets=[{"target_kind": exc.TARGET_ARTIFACT, "target_id": art_id}],
+        changes={f"artifact#{art_id}": {"freight": 16000, "currency": "CNY"}},
+    )
+    assert result["applied"]["status"] == exc.STATUS_APPLIED
+    assert rv.open_for_artifact(db, art_id), "应用本身必须成功，且同时留下待复核项"
+    # 生效版本是**应用写入的那一版**（不是被复核挡住的原版本）
+    revs = _revisions(db, art_id)
+    assert _current_revision_no(db, art_id) == max(r[0] for r in revs)

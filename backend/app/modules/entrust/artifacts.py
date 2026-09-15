@@ -67,6 +67,17 @@ class ManualTakeoverError(ArtifactError):
     """人工接管中，Agent 不得替换生效版本。HTTP 层应转 409。"""
 
 
+class ArtifactRevalidationError(ArtifactError):
+    """成果有待复核项，不得设为生效版本。HTTP 层应转 409。
+
+    PRD 第 297 行：「Before acceptance/execution, revalidate against current versions.」
+    以及「a late Agent result … cannot **silently** become the current confirmed result」
+    —— 所以这里不是"禁止修改"，而是**禁止静默成为生效版本**：
+    解除路径是完成对应的复核任务（`ent_revalidation.status → resolved`），
+    或让变更应用把它一并处理掉。
+    """
+
+
 class ArtifactPayloadError(ArtifactError):
     """成果内容不符合该类型的字段契约（未知字段 / 未知类型）。HTTP 层应转 400。"""
 
@@ -476,6 +487,9 @@ def confirm_revision(
     Raises:
         ArtifactNotFoundError: 成果或版本不存在。
         ArtifactVoidError: 成果已作废（失效成果不可确认，AC-12 前置）。
+        ArtifactRevalidationError: 成果有未完成的复核项（AC-12 后半条）——
+            "确认"正是"成为生效版本"的那一步，而 PRD 第 297 行要求
+            执行/接受**之前**必须按当前版本复核过。解除路径见该异常类说明。
         ManualTakeoverError: 人工接管中，Agent 不得替换生效版本。
     """
     if as_source not in (SOURCE_AGENT, SOURCE_MANUAL):
@@ -485,6 +499,20 @@ def confirm_revision(
         raise ArtifactNotFoundError(f"成果 {artifact_id} 不存在")
     if str(row["status"]) == STATUS_VOID:
         raise ArtifactVoidError(f"成果 {artifact_id} 已作废，不能确认任何版本")
+
+    # ── AC-12 后半条：有待复核项时不得**静默**成为生效版本 ──────────────────
+    # ⚠️ 与 `apply_case` 的顺序是安全的：那里先 confirm、**之后**才写传播标记
+    # （同一事务内），所以"变更应用"不会被自己刚生成的标记挡住。
+    from app.modules.entrust import revalidation as reval_svc  # 局部导入：避免成环
+
+    blockers = reval_svc.open_for_artifact(session, artifact_id)
+    if blockers:
+        cases = sorted({int(b["exception_id"]) for b in blockers})
+        areas = sorted({str(b["area"]) for b in blockers})
+        raise ArtifactRevalidationError(
+            f"成果 {artifact_id} 有未完成的复核项（案件 {cases}；区域：{'、'.join(areas)}），"
+            "不能设为生效版本 —— 请先完成对应复核任务，或由变更应用一并处理"
+        )
 
     rev = (
         session.execute(
