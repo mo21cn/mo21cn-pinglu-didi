@@ -415,6 +415,110 @@ def list_my_orgs(
     return result
 
 
+# ── 货主侧：我授权出去的组织（UI-07 的提交目标）──────────────────────────────
+
+
+def _in_window(*, valid_from: datetime | None, valid_until: datetime | None, now: datetime) -> bool:
+    """授权时间窗判定 —— **与提交门禁逐字一致**。
+
+    ## 为什么单独抽出来，而不是复用 `_active_delegations` 的窗口
+
+    `_active_delegations` 把 `valid_until` 当**闭区间**（`valid_until + 1s`，
+    "到点当天仍视为有效"）。本函数按 `now > valid_until` 判失效 —— 比它**严 1 秒**。
+
+    这个差是**有意的**，因为两者服务的场景不同：
+
+    * `_active_delegations` 回答"你**能不能**操作"，宽 1 秒的代价是多放行 1 秒；
+    * 本函数回答"界面该不该把某个组织**列成可选项**"。它必须**不大于**真正的门禁
+      （`assignments.owner_has_active_entrustment`），否则界面会给出一个
+      **"点了就 403"** 的选项 —— 那正是 DR-0012「归属 ≠ 权限边界」要防的那类错误。
+
+    ⚠️ 因此本函数的口径**以 `owner_has_active_entrustment` 为准**，不是以
+    `_active_delegations` 为准。两者若再改窗口，`test_entrust_my_entrustments.py`
+    里的交叉断言会失败 —— 那是把它拉回一致的手段，**不要绕过它**。
+    """
+    if valid_from is not None and now < valid_from:
+        return False
+    return not (valid_until is not None and now > valid_until)
+
+
+def list_my_entrustments(
+    session: Session, *, user_id: int, now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """列出「**我**把委托授权给了哪些组织」—— 货主侧的提交目标清单。
+
+    ## 为什么需要它（不是 `/my-orgs` 能顶替的）
+
+    提交委托**必须**带 `org_id`，且服务端校验"货主对该组织存在生效委托授权"
+    （`assignments.submit_assignment` → `owner_has_active_entrustment`）。
+    但 `ent_entrustment` 此前**没有任何 HTTP 面**，货主无从知道"可以委托给谁"。
+
+    `GET /my-orgs` 顶不上：它的语义是「**我所在**的组织」（`ent_org_member`），
+    而提交校验读的是「**我授权出去**的组织」（`ent_entrustment`）。
+    两者是两张表、两件事 —— DR-0012：**归属 ≠ 权限边界**。
+    拿成员关系渲染提交目标，会产出"能选但必然 403"的选项。
+
+    ## 只投影授权本身（白名单）
+
+    返回的每一条只含授权行**自己**的字段，外加该授权指向的组织**名称**：
+
+    * **不含**组织成员、任务、成果、案件等任何组织内部数据；
+    * `permissions` 走 `_load_permissions`（白名单：未知代码一律丢弃），
+      因此这里**不可能**成为"把库里任意字符串透给前端"的通道。
+
+    ## 与门禁同口径的两个条件（缺一就会出现必然 403 的选项）
+
+    1. **组织必须 active**（`o.status = 'active'`）；
+    2. **当前时间在窗口内**（`_in_window`，与门禁逐字一致）。
+
+    ## 排序
+
+    按 `(org_name, entrustment_id)` 升序，且**在 Python 里排**：MySQL 的
+    `utf8mb4_unicode_ci` 与 SQLite 的二进制比较对中文名的顺序不同，交给数据库排
+    会让两侧顺序不一致；而按契约**前端不做二次排序**，顺序即契约。
+
+    ## 空态
+
+    返回 `[]` ⇔ "你还没有把委托授权给任何组织"。调用方据此**禁用**提交入口
+    并给出去处说明 —— 不是报错、不是 404，也不区分"从未授权"与"授权已撤回/过期"。
+    """
+    current = now or utcnow_naive()
+    rows = session.execute(
+        text(
+            "SELECT e.id AS entrustment_id, e.org_id AS org_id, e.permissions AS permissions, "
+            "e.status AS status, e.valid_from AS valid_from, e.valid_until AS valid_until, "
+            "e.created_at AS granted_at, o.name AS org_name "
+            "FROM ent_entrustment e "
+            "JOIN ent_organization o ON o.id = e.org_id "
+            "WHERE e.entrust_user_id = :user_id AND e.status = :e_status "
+            "  AND o.status = :o_status"
+        ),
+        {"user_id": user_id, "e_status": STATUS_ACTIVE, "o_status": STATUS_ACTIVE},
+    ).mappings()
+
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        if not _in_window(
+            valid_from=_parse(row["valid_from"]),
+            valid_until=_parse(row["valid_until"]),
+            now=current,
+        ):
+            continue
+        granted = _parse(row["granted_at"])
+        items.append(
+            {
+                "entrustment_id": int(row["entrustment_id"]),
+                "org_id": int(row["org_id"]),
+                "org_name": str(row["org_name"]),
+                "permissions": sorted(_load_permissions(row["permissions"])),
+                "status": str(row["status"]),
+                "granted_at": _fmt(granted) if granted is not None else "",
+            }
+        )
+    items.sort(key=lambda item: (item["org_name"], item["entrustment_id"]))
+    return items
+
+
 def assert_can(
     session: Session,
     *,

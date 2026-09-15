@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（60 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（62 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -162,6 +162,14 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         GUARD_AUTHENTICATED,
         note="只列调用者自己的 active 成员关系（org_id / name / member_role / permissions）；"
         "不含他人数据，故登录即可 —— 要求业务权限反而会让新加入组织的人看不到自己的组织",
+    ),
+    _r(
+        "GET",
+        "/my-entrustments",
+        GUARD_AUTHENTICATED,
+        note="只列调用者**自己授权出去**的生效委托（entrustment_id / org_id / org_name / "
+        "permissions / status / granted_at）；读 ent_entrustment 而非 ent_org_member"
+        "（DR-0012 归属≠权限边界），只投影授权本身、不含组织内部数据，故登录即可",
     ),
     # ── 成果版本与类型注册表（artifacts_api.py）──────────────────────────
     _r(

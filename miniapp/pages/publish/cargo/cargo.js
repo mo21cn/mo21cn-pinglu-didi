@@ -6,6 +6,8 @@ const { PORTS, portLabel } = require('../../../utils/ports')
 // 合规预检结论展示（F17 → 与统一入口共用同一套渲染）
 const { runComplianceCheck } = require('../../../utils/agent-entry')
 const { fmtDate, fmtDateOffset } = require('../../../utils/dates')
+// 「委托发货」这条**新增的导航边**要落进路由注册表（页面栈预算 + 深链参数契约）
+const R = require('../../../utils/routes')
 
 // 货源解析草稿的会话键（解析页 / 统一入口写入，本页读取后即清除）
 const DRAFT_KEY = 'cargo_draft_v1'
@@ -81,12 +83,32 @@ Page({
     this.setData({ showChannel: false })
   },
 
-  /** 委托发货：平台承运模式尚未开放 → 通用「功能预览，即将开放」占位页（无接口调用） */
+  /**
+   * 委托发货：进入**真实**的客户受理屏（UI-07 · S1 / DEMO-1 §3.3）。
+   *
+   * 此前这里跳的是通用占位页 `pages/preview/preview`（一行小灰字「功能预览，即将开放」），
+   * **没有任何接口调用** —— 也就是说这个入口当时只是"看起来有"。
+   *
+   * 只带**货名 / 货量 / 单位**当草稿初值，**不带标题**：`title` 是"要办什么"，
+   * 本页根本没有这个信息。用货名冒充标题等于替用户说了一句他没说过的话。
+   *
+   * 走 `R.go()` 而不是裸 `wx.navigateTo`：本页不在 `MIGRATED_PAGES` 里
+   * （HO 第 4 条不要求改造旧页面），但**新增的这条边**必须落进注册表 ——
+   * 否则页面栈预算与深链参数契约对它无效，`verify_routes.js` 会直接报未声明边。
+   */
   pickEntrustDelivery() {
     this.setData({ showChannel: false })
-    wx.navigateTo({
-      url: '/pages/preview/preview',
-      fail: (e) => console.warn('[channel] 打开功能预览页失败', (e && e.errMsg) || e)
+    const f = this.data.form || {}
+    const qs = []
+    if (f.cargo_name) qs.push('cargo_name=' + encodeURIComponent(f.cargo_name))
+    if (f.weight_t) {
+      qs.push('quantity=' + encodeURIComponent(f.weight_t))
+      // 本页的货量字段 `weight_t` 口径是**吨**（见 utils/constants）。带量不带量纲，
+      // 受理屏上就会出现一个没有单位的数字。
+      qs.push('quantity_unit=' + encodeURIComponent('吨'))
+    }
+    R.go('/pages/entrust/intake/intake' + (qs.length ? '?' + qs.join('&') : ''), {
+      from: 'pages/publish/cargo/cargo'
     })
   },
 

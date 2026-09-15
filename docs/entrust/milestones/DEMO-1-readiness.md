@@ -187,6 +187,27 @@ S1 第一条分支：`feature/DEMO1-S1-customer-intake`（从 `60a94b3` 切出�
 
 PR 描述按计划 §1 P20 的五项写；S0-6（`DEMO-1-interface-delta.md`）随第一处 schema 变更产出。
 
+### 8.1 S1 第一切片：落地状态（2026-09-16）
+
+分支 `feature/DEMO1-S1-customer-intake` 已从 `60a94b3` 切出，**两个起步工作项已写码**：
+
+| # | 工作项 | 落地内容 | 证据等级 |
+| --- | --- | --- | --- |
+| 1 | 真实发布入口接受理实现 | `miniapp/pages/publish/cargo/cargo.js` 的 `pickEntrustDelivery()` 由"功能预览，即将开放"占位跳转改为经 `R.go()` 进入 UI-07，带货名 / 货量 / 单位（**不带标题** —— 源页没有"要办什么"这个信息） | 静态契约（`verify_ui_interactions.js` 第 ⑨ 章已同步改写断言） |
+| 1′ | 只读端点 `GET /api/v1/entrust/my-entrustments` | 服务层 `list_my_entrustments` + `MyEntrustmentOut` / `MyEntrustmentListOut` + `scope_matrix`（**61 → 62 条**）；前端 `fetchMyEntrustments()` | 后端用例 **14 条全过**，含"选项集合 ≡ 提交门禁放行集合"的**交叉断言** |
+| 2 | UI-07 客户委托草稿 / 提交屏 | `miniapp/pages/entrust/intake/intake.{js,json,wxml,wxss}`，**五处登记齐全** | 前端静态 8 项全过；**未做真机走查** |
+
+门禁：**13/13 PASS**（`scripts/verify_local_gates.py`）；
+pytest **705**（通过 694 / 跳过 11 / 失败 0 / 错误 0）；mypy 98 文件无问题。
+
+⚠️ **三条不得算作已完成**（须进余量台账）：
+
+1. **S1 出口判据一条都还没验证** —— "survives reload / 出现在正确的队列 / 只能被认领一次 /
+   B 组织不可见"这四条都要求**真机 + 真载荷**，本切片只做到"静态契约 + 后端用例"层；
+2. **UI-07 未做真机走查** —— 五态渲染与提交链路都还没有设备证据；
+3. **幂等键只活在页面实例里** —— "响应丢失 + 杀掉小程序重进"会再建一张草稿
+   （已在 `intake.js` 文件头如实登记；修复需按用户隔离持久化）。
+
 ## §9 收尾执行记录（2026-09-16，HO 授权 1–5）
 
 HO 于 2026-09-16 授权"下一步建议 **1–5 全部执行**（含进入 S1 的入口）"，

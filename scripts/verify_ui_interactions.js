@@ -1165,20 +1165,40 @@ section('⑤ 静态防线')
       /\.ch-card-entrust\s*\{[^}]*#3584FD[^}]*#4A81FF/.test(cargoWxss))
 
     // —— 行为 ——
+    // ⚠️ 判定必须看**代码**、不看注释：本页注释里会自然写到 `wx.navigateTo`
+    //    （"此前这里是裸 navigateTo"这类说明），把注释算进判断会把一次正确的
+    //    改写判成失败。剥成等长空白，保持后续按方法名切片的下标语义
+    //    （与 `verify_routes.js` 的 stripComments 同一手法）。
+    const stripComments = (s) =>
+      String(s)
+        .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
+        .replace(/^([ \t]*)\/\/[^\n]*/gm, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
+    const cargoCode = stripComments(cargoJs)
+
     check('进入本页默认弹出（data 初值 true 且在 onLoad 复位）',
-      /showChannel:\s*true/.test(cargoJs) &&
-      /onLoad\(\)[\s\S]{0,300}showChannel:\s*true/.test(cargoJs))
-    const selfBody = cargoJs.slice(cargoJs.indexOf('pickSelfDelivery'), cargoJs.indexOf('pickEntrustDelivery'))
+      /showChannel:\s*true/.test(cargoCode) &&
+      /onLoad\(\)[\s\S]{0,300}showChannel:\s*true/.test(cargoCode))
+    const selfBody = cargoCode.slice(cargoCode.indexOf('pickSelfDelivery'), cargoCode.indexOf('pickEntrustDelivery'))
     check('自主发货只关弹窗、留在本页（不跳转）',
       /showChannel:\s*false/.test(selfBody) && !/navigateTo/.test(selfBody) && !/redirectTo/.test(selfBody))
-    const entBody = cargoJs.slice(cargoJs.indexOf('pickEntrustDelivery'), cargoJs.indexOf('closeChannelModal'))
-    check('委托发货跳「功能预览」占位页', /navigateTo/.test(entBody) && /\/pages\/preview\/preview/.test(entBody))
+    const entBody = cargoCode.slice(cargoCode.indexOf('pickEntrustDelivery'), cargoCode.indexOf('closeChannelModal'))
+    // S1 / DEMO-1 §3.3：委托发货**不再是**占位跳转 —— 它进入真实的客户受理屏（UI-07），
+    // 并把已填的货名 / 货量 / 单位带过去当草稿初值。这条断言必须跟着产品行为走：
+    // 留着旧断言（"跳 preview 占位页"）等于把"入口只是看起来有"钉成契约。
+    check('委托发货进入真实受理屏（UI-07），并带上已填的货名 / 货量 / 单位',
+      /R\.go\(/.test(entBody) && /\/pages\/entrust\/intake\/intake/.test(entBody) &&
+      /cargo_name=/.test(entBody) && /quantity=/.test(entBody) && /quantity_unit=/.test(entBody))
+    check('委托发货不再跳占位预览页（该入口曾经是「无接口调用的看起来有」）',
+      !/\/pages\/preview\/preview/.test(entBody))
     check('本功能纯前端：发货方式相关代码零接口调用',
       !/request\(/.test(selfBody) && !/request\(/.test(entBody))
     check('遮罩可关闭（再次点 tabBar 中间「+发货」可重新唤起）',
-      /bindtap="closeChannelModal"/.test(cargoWxml) && /closeChannelModal\(\)/.test(cargoJs))
+      /bindtap="closeChannelModal"/.test(cargoWxml) && /closeChannelModal\(\)/.test(cargoCode))
 
     // —— 占位页 ——
+    // ⚠️ 该页**仍是**通用占位页（支持 `?title=` 覆写文案），只是从 S1 起
+    //    **不再是**委托发货的落点。下面三条断言因此依然成立，保留它们是为了
+    //    看住"这个页还在、还是纯静态" —— 而不是在说"委托发货会到这里"。
     const previewJs = read('pages/preview/preview.js')
     const previewWxml = read('pages/preview/preview.wxml')
     check('占位页文案为「功能预览，即将开放」',

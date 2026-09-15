@@ -103,18 +103,49 @@ S1 就是第一处。计划里那条备注应当按此修正（已在 §5 提出
 
 ---
 
-## 5. 由此产生的两处修正（待办）
+## 5. 由此产生的两处修正
 
-1. `DEMO-1-plan.md` 的 S0-6 备注"随 S3/S4 的迁移一起产出（现在写会是空壳）"
-   ⇒ 应改为"**随第一处接口面变更产出**（S1 即触发）"。
-2. `DEMO-1-readiness.md` §4 的 **U-9** 把 `interface-delta` 列在"尚未落位"里
-   ⇒ 本文件产出后该行应收窄为"其余 4 份仍未落位"。
+1. ✅ **已办**：`DEMO-1-plan.md` 的 S0-6 备注"随 S3/S4 的迁移一起产出（现在写会是空壳）"
+   ⇒ 已改为"**随第一处接口面变更产出**（S1 即触发）"。
+2. ✅ **已办**：`DEMO-1-readiness.md` §4 的 **U-9** 把 `interface-delta` 列在"尚未落位"里
+   ⇒ 已收窄为"**其余 4 份**仍未落位"（`runbook` / `walkthrough` / `acceptance` / `evidence-index`）。
 
 ---
 
-## 6. 本文件**没有**做的事（如实交代）
+## 6. 本文件写作时**没有**做的事（如实交代）
+
+> ⚠️ **本节描述的是 2026-09-16 写文件那一刻的状态，不是当前状态。** 同日实现已落地 ⇒ 见 §7。
+> **原句保留、不改写** —— 让"登记在先、实现于后"这件事本身留痕，这正是本文件存在的意义。
 
 - 上述端点、前端文件**一行代码都还没写**；本文件是**契约登记**，不是完成证明。
 - 未跑任何门禁、未开实现 PR。
 - 未定义 UI-07 的视觉细节（沿用现有页面级类与组件；实现时按 `verify_entrust_ui.js` 的
   类名存在性检查走）。
+
+---
+
+## 7. 落地状态（2026-09-16 补 —— 同日实现的逐条对照）
+
+分支 `feature/DEMO1-S1-customer-intake`：
+
+| 契约条目 | 状态 |
+| --- | --- |
+| §3.1 `GET /api/v1/entrust/my-entrustments` | ✅ 已实现（`access.list_my_entrustments` + `MyEntrustmentOut` / `MyEntrustmentListOut` + `scope_matrix` **61 → 62**） |
+| §3.2 受理主链复用 | ✅ 签名与语义均未改（`POST /assignments` / `{id}/submit` / `{id}/cancel`） |
+| §3.3 前端 3 项 | ✅ `fetchMyEntrustments` / `createAssignment` / `submitAssignment` / `assignmentDraftBody` 已加；UI-07 四文件已建；`cargo.js` 已接线 |
+| §3.4 五处登记 | ✅ 五处齐全（`app.json` **22 页** / `ROUTES` / `NAV_EDGES` / `MIGRATED_PAGES` / `verify_entrust_ui.js`） |
+| §4 不新增状态与取值域 | ✅ 确未引入新枚举 ⇒ 无需新增镜像表比对 |
+| §3.1 排序 `org_name` 升序 | ⚠️ **在 Python 侧排序，不在 SQL** —— MySQL `utf8mb4_unicode_ci` 与 SQLite 对中文名的比较顺序不同，交给数据库会造出"本地一个顺序、CI 另一个顺序" |
+
+**两处与本文档条目不同的实现决定（如实登记，不是笔误）**：
+
+1. **`cargo → preview` 的导航边没有删，标了 `pending`**：撤销调用后若把声明一并删掉，
+   `pages/preview/preview`（`kind='detail'`）会违反注册表"detail 页必须有 push 入边"这条约束，
+   且真机走查 ㉝ 章按声明链深断言。⚠️ 这是对 `pending` 语义的一次**挪用**：它原本表示"声明先行、
+   实现未接"，此处表示"**调用已撤销、声明须留**"。已在 `routes.js` 注释里写明，
+   **不得被后来者误读成"将来会接"**。
+2. **UI-07 未声明 `keyContext:['org']`**：本屏的"组织"来自服务端探测结果，不来自本地
+   `current_role` ⇒ 不参与 key 复用判定。
+
+**仍未做到的两条**（与 `DEMO-1-plan.md` §4 S1 的余量台账一致）：① UI-07 未做真机走查；
+② 幂等键只活在页面实例里（"响应丢失 + 杀掉小程序重进"会重复提交）。

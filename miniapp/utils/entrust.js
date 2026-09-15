@@ -2326,6 +2326,226 @@ function decorateCaseLinkTargets(tasks, artifacts, types) {
   return taskRows.concat(artRows)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 客户受理（写路径 · S1 / DEMO-1 §3.1–3.3）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ── 本切片补的是什么 ────────────────────────────────────────────────────
+// 「发布货源」页的「委托发货」此前只跳到一个占位预览页（`pages/preview/preview`），
+// **没有任何接口调用** —— 货主根本没能把委托交出去。本切片把它接上：
+//
+//     cargo --push--> intake --POST /assignments--> 草稿 --submit--> 待受理（submitted）
+//
+// ── 为什么提交目标不能拿 `/my-orgs` 顶上 ────────────────────────────────
+// 提交校验读的是 `ent_entrustment`（我把委托授权给了谁），而 `/my-orgs` 读的是
+// `ent_org_member`（我在谁那里有身份）。DR-0012：**归属 ≠ 权限边界**。
+// 用成员关系渲染提交目标，就会给出一个"能选但必然 403"的选项。
+// 所以本切片先补了只读端点 `GET /my-entrustments`（见 `DEMO-1-interface-delta.md` §3.1）。
+//
+// ── 幂等键为什么是**两把** ──────────────────────────────────────────────
+// "创建 + 提交"是两个独立的写命令，各自需要一个键：一次网络抖动若让创建重发，
+// 只带一把键会让第二次创建变成**另一张草稿**（键不同 = 新意图），库里就多出一张
+// 没人认领的空壳。两把键由页面持有、各自绑定各自的意图，失败重试各自复用；
+// 内容一旦改动，创建那一把必须作废（用户改了内容 = 新的草稿意图）。
+
+/**
+ * 拉取「我**授权出去**的组织」（UI-07 的**提交目标**数据源）。
+ *
+ * ⚠️ 与 `fetchMyOrgs()` **不是同一件事**，两者不可互相顶替：
+ *   · `/my-orgs`         读 `ent_org_member` —— 「我**所在**的组织」；
+ *   · `/my-entrustments` 读 `ent_entrustment` —— 「我**授权出去**的组织」。
+ * 提交委托（`POST /assignments/{id}/submit`）校验的是后者。
+ *
+ * 服务端只返回**生效中**的授权（组织 active + 状态 active + 在时间窗内，
+ * 且与提交门禁同口径），所以本清单**就是**可提交目标的全集 ——
+ * 前端不得再自己过滤、补充或按 `current_role` 猜。
+ */
+function fetchMyEntrustments() {
+  return request({ url: BASE + '/my-entrustments', method: 'GET' })
+}
+
+/**
+ * 委托授权清单投影。
+ *
+ * ⚠️ 这里**不映射 `status` 的取值域**：服务端只返回生效中的授权，
+ * 界面上那句"有效"是一个**常量**而不是一张映射表。若将来改为同时返回失效授权，
+ * 必须先把 `ent_entrustment.status` 的镜像表登记进 CI（AGENTS.md §3.5），
+ * **不得只在前端写一份**。
+ */
+function decorateEntrustment(row) {
+  const data = row || {}
+  const labels = (data.permissions || []).map(function (p) {
+    return ORG_PERMISSION_LABELS[p] || p
+  })
+  return {
+    entrustmentId:
+      data.entrustment_id === null || data.entrustment_id === undefined
+        ? ''
+        : String(data.entrustment_id),
+    orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id),
+    orgName: data.org_name || '未命名组织',
+    permissions: labels,
+    permissionText: labels.join(' · '),
+    grantedAt: data.granted_at || ''
+  }
+}
+
+function decorateEntrustments(rows) {
+  return (rows || []).map(decorateEntrustment)
+}
+
+/**
+ * 决定「默认选中哪个提交目标」。
+ *
+ * 与 `pickOrg` 同一条纪律：**唯一选项直接选中，多个不猜**。
+ * 猜错的后果是把委托提交到**另一个组织** —— 货主在界面上几乎不可能自己发现，
+ * 远不如让用户明确选一次。
+ *
+ * @returns {{orgId:string, needPick:boolean}}
+ */
+function pickEntrustment(rows) {
+  const list = rows || []
+  if (!list.length) return { orgId: '', needPick: false }
+  if (list.length === 1) return { orgId: String(list[0].orgId), needPick: false }
+  return { orgId: '', needPick: true }
+}
+
+/**
+ * 委托草稿请求体（`POST /assignments`）+ 前置校验。
+ *
+ * ## 数量**留空就是未知**，不是 0
+ * PRD 5.1 要求"未知保持未知"。静默补 0 会让经理按"0 吨货"去报价 ——
+ * 那是一个凭空造出来的事实，而且没人会怀疑它。所以空串一律**省略字段**，
+ * 交给服务端存 NULL。
+ *
+ * ## 为什么字段级上限在这里也写一遍
+ * 上限是服务端的（`AssignmentCreate`），这里写是为了**在发请求之前**给出可读提示；
+ * 两侧不一致时的权威判定仍是服务端的 422，不会被这一层掩盖。
+ *
+ * @returns {{ok:boolean, errors:string[], body:object}}
+ */
+function assignmentDraftBody(form) {
+  const f = form || {}
+  const title = String(f.title || '').trim()
+  const summary = String(f.cargo_summary || '').trim()
+  const unit = String(f.quantity_unit || '').trim()
+  const rawQty = f.quantity === null || f.quantity === undefined ? '' : String(f.quantity).trim()
+
+  const errors = []
+  if (!title) errors.push('请填一句话说明（例如：大连→上海 5 万吨煤炭，需代订舱）')
+  else if (title.length > 128) errors.push('一句话说明超过 128 字')
+  if (summary.length > 512) errors.push('货物说明超过 512 字')
+  if (unit.length > 24) errors.push('数量单位不超过 24 字')
+
+  let quantity = null
+  if (rawQty) {
+    // 与后端一致：非负、最多 3 位小数（`Decimal` 落库，不用浮点）
+    if (!/^\d+(\.\d{1,3})?$/.test(rawQty)) {
+      errors.push('数量只能填非负数字（最多 3 位小数），不确定就留空')
+    } else {
+      quantity = rawQty
+    }
+  }
+
+  const body = { title: title }
+  if (summary) body.cargo_summary = summary
+  if (quantity !== null) body.quantity = quantity
+  if (unit) body.quantity_unit = unit
+  return { ok: errors.length === 0, errors: errors, body: body }
+}
+
+/**
+ * 创建委托草稿（`POST /assignments`，幂等）。
+ *
+ * 草稿允许不完整（PRD §2.1 第 1 步）—— 本页把它当作"创建 + 提交"两步的第一步，
+ * 而不是两个按钮：货主的心智是"把这张委托交出去"，中间那个纯草稿态对他没有意义。
+ * 但**技术上**它确实是两条写命令，因此页面必须处理"建成了、提交没成"的中间态
+ * （见 `intake.js` 的 `createdId`）。
+ */
+function createAssignment(body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments',
+    method: 'POST',
+    data: body,
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 提交委托到服务经营主体（`POST /assignments/{id}/submit`，幂等）。
+ *
+ * `expectedRevision` 必填：并发保护靠**乐观锁**（服务端条件更新），不靠界面禁点 ——
+ * 界面禁点只能防同一台设备上的连点，防不住另一个终端。
+ */
+function submitAssignment(assignmentId, orgId, expectedRevision, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/submit',
+    method: 'POST',
+    data: { org_id: Number(orgId), expected_revision: Number(expectedRevision) },
+    silent: true,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 委托写失败 → **可执行的结论**（与 `caseWriteError` 同构，话术按"委托"改）。
+ *
+ * 逐码分流而不是把服务端 `detail` 转手抛给用户：
+ *   · **409** 状态/版本已变（草稿已被提交、或 `revision` 过期）→ 唯一正确的下一步是
+ *     **重新取数**，所以话术必须包含"已重新读取"，而这句话只有页面能兑现；
+ *   · **403** 对该组织没有生效授权 → 刷新**能**改变结论（授权可能刚被撤回），
+ *     所以要说清"重新选择服务主体"，而不是让用户反复点同一个按钮；
+ *   · **400** 字段/规则校验 → 服务端 `detail` 本身就是最准的说明，原样带上；
+ *   · **404** 与读路径同码（开关关闭 / 不存在 / 非参与方**刻意同码**）→
+ *     只能说"功能未开放"，**不能**替服务端下"这张委托不存在"这个结论；
+ *   · **0**（无 httpStatus）→ 网络层，复用请求层的诊断文案。
+ *
+ * @returns {{kind:string, title:string, hint:string, conflict:boolean}}
+ */
+function assignmentWriteError(err) {
+  const status = (err && err.httpStatus) || 0
+  const detail = err && err.detail ? String(err.detail) : ''
+  if (status === 409) {
+    return {
+      kind: 'conflict',
+      title: '状态或版本已变化',
+      conflict: true,
+      hint: detail || '这张委托的当前状态已经变了。已重新读取，请确认后重来。'
+    }
+  }
+  if (status === 403) {
+    return {
+      kind: 'denied',
+      title: '当前不能提交到这个服务主体',
+      conflict: false,
+      hint: detail || '你对这个组织的委托授权可能已撤回或已过期。请重新选择服务主体。'
+    }
+  }
+  if (status === 400) {
+    return {
+      kind: 'invalid',
+      title: '按当前信息不能提交',
+      conflict: false,
+      hint: detail || '服务端校验未通过，请按提示修改后重试。'
+    }
+  }
+  if (status === 404) {
+    return {
+      kind: 'notfound',
+      title: '功能未开放或无权查看',
+      conflict: false,
+      hint: detail || '委托发货功能可能未开放，或这张委托不在你的可见范围内。'
+    }
+  }
+  return {
+    kind: 'network',
+    title: '提交失败',
+    conflict: false,
+    hint: '网络层异常：请确认后端已启动、且没有代理拦截请求。已保留你填的内容，可直接重试。'
+  }
+}
+
 module.exports = {
   BASE,
   ARTIFACT_FIELD_KINDS,
@@ -2375,6 +2595,8 @@ module.exports = {
   addCaseLink,
   applyCase,
   appendRevision,
+  assignmentDraftBody,
+  assignmentWriteError,
   artifactFieldLabel,
   artifactStatusClass,
   artifactStatusLabel,
@@ -2394,6 +2616,7 @@ module.exports = {
   coerceLike,
   confirmArtifact,
   confirmCard,
+  createAssignment,
   createCase,
   createTask,
   decideCase,
@@ -2404,6 +2627,8 @@ module.exports = {
   decorateCaseList,
   decorateCaseRow,
   decorateDetail,
+  decorateEntrustment,
+  decorateEntrustments,
   decorateList,
   decorateOrg,
   decorateOrgs,
@@ -2417,6 +2642,7 @@ module.exports = {
   fetchAssignment,
   fetchCase,
   fetchCaseOrgList,
+  fetchMyEntrustments,
   fetchMyOrgs,
   fetchQueue,
   fetchRevisions,
@@ -2428,6 +2654,7 @@ module.exports = {
   isDispositionWithoutApplication,
   newIdempotencyKey,
   pageHint,
+  pickEntrustment,
   pickOrg,
   probeEntry,
   removeCaseLink,
@@ -2435,5 +2662,6 @@ module.exports = {
   revisionSourceLabel,
   statusClass,
   statusLabel,
+  submitAssignment,
   viewState
 }

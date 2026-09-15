@@ -10,6 +10,8 @@ R1 最小接口集（计划 §3.3「委托」组）中的受理部分：
 - POST   /api/v1/entrust/assignments/{id}/submit     货主提交（需生效授权，幂等）
 - POST   /api/v1/entrust/assignments/{id}/claim      经理认领（原子，幂等）
 - POST   /api/v1/entrust/assignments/{id}/cancel     货主撤回（幂等）
+- GET    /api/v1/entrust/my-orgs                     我所在的组织（组织选择器）
+- GET    /api/v1/entrust/my-entrustments             **我授权出去的组织**（UI-07 提交目标）
 
 横切约束：
 * **特性开关**（AC-22）：`ENTRUST_ENABLED=false` 时整组端点 404 —— 开关只是隐藏
@@ -40,6 +42,7 @@ from app.modules.entrust import workbench as wb
 from app.modules.entrust.access import (
     PERM_VIEW,
     AccessDeniedError,
+    list_my_entrustments,
     list_my_orgs,
     resolve_context,
 )
@@ -50,6 +53,8 @@ from app.modules.entrust.schemas import (
     AssignmentOut,
     AssignmentSubmit,
     AssignmentUpdate,
+    MyEntrustmentListOut,
+    MyEntrustmentOut,
     MyOrgListOut,
     MyOrgOut,
     WorkbenchOut,
@@ -430,3 +435,43 @@ def my_orgs(
     """
     items = list_my_orgs(db, user_id=int(user.id))
     return MyOrgListOut(total=len(items), items=[MyOrgOut(**item) for item in items])
+
+
+@router.get(
+    "/my-entrustments",
+    response_model=MyEntrustmentListOut,
+    summary="我的委托授权清单（我授权出去的组织，货主侧；UI-07 提交目标）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def my_entrustments(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """**货主侧**：列出"我把委托授权给了哪些组织"，供 UI-07 选择提交目标。
+
+    与 `GET /my-orgs` 是**两张表、两件事**（DR-0012「归属 ≠ 权限边界」）：
+
+    * `/my-orgs` 读 `ent_org_member` —— 「我**所在**的组织」；
+    * 本端点读 `ent_entrustment` —— 「我**授权出去**的组织」。
+
+    提交委托校验的是后者（`assignments.submit_assignment` →
+    `owner_has_active_entrustment`）。若拿前者渲染提交目标，界面就会给出
+    **"能选但必然 403"** 的选项 —— 这正是本端点存在的理由。
+    详见 `access.list_my_entrustments`。
+
+    ## 为什么守卫只是 `authenticated`
+
+    只返回**调用者自己**授权出去的记录（`WHERE e.entrust_user_id = :user_id`），
+    不含他人数据；字段也只投影授权本身，不含任何组织内部数据。
+    与 `/my-orgs` 同理：**要求业务权限反而会制造新的死局** ——
+    一个还没在目标组织里获得任何角色的人，照样有权知道"我把委托授给了谁"。
+
+    ## 空清单不是错误
+
+    `total = 0` ⇔ "你还没有把委托授权给任何组织"。UI 据此**禁用**提交并给出
+    去处说明，而不是把它当成异常。
+    """
+    items = list_my_entrustments(db, user_id=int(user.id))
+    return MyEntrustmentListOut(
+        total=len(items), items=[MyEntrustmentOut(**item) for item in items]
+    )

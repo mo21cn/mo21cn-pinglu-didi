@@ -98,6 +98,33 @@ class MyOrgListOut(BaseModel):
     items: list[MyOrgOut]
 
 
+# ── 我的委托授权清单（S1 / DEMO-1 §3.1） ─────────────────────────────────────
+# 与 `/my-orgs` 是**两张表**：那边是 `ent_org_member`（我所在的组织），
+# 这边是 `ent_entrustment`（我授权出去的组织）。DR-0012：归属 ≠ 权限边界。
+# 字段刻意与 `ent_entrustment` 行一一对应，便于"事实有来源"回溯。
+
+
+class MyEntrustmentOut(BaseModel):
+    """一条「我授权出去」的生效委托授权。
+
+    ⚠️ **只投影授权本身**：不含该组织的成员、任务、成果、案件等任何内部数据。
+    """
+
+    entrustment_id: int
+    org_id: int
+    org_name: str
+    #: 授权动作代码（白名单投影后的结果，未知代码已在服务层丢弃）
+    permissions: list[str]
+    status: str
+    #: 授权创建时间；无法解析时为空串（**不编造**）
+    granted_at: str
+
+
+class MyEntrustmentListOut(BaseModel):
+    total: int
+    items: list[MyEntrustmentOut]
+
+
 # ── 任务（ENT-008） ──────────────────────────────────────────────────────────
 # 固定前置条件与循环检查在服务层（数据库约束表达不了传递闭包），
 # 因此这里只做字段级校验：类型/证据取值域的领域校验由服务层给出可读的 400。
