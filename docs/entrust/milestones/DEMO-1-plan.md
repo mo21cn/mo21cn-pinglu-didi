@@ -104,6 +104,10 @@
 三态定义：**已有** = 可直接复用；**缺连接** = 基础设施在、缺关键接线或门禁；**缺失** = 不存在。
 （本节结论来自对本仓库的只读走查，路径均为相对 `E:\pinglu-didi`。）
 
+> ⚠️ 本表是 **S0 时点的基线快照，不回写** —— 它的用途是回答"开工前差在哪"。
+> 某项后来做了不等于当初没缺。当前进度一律看 §4 各切片的**进度**行。
+> （例：§3.1 里 UI-07 记"缺失"、入口记"缺连接"，而 S1 已经把这两条做出来了。）
+
 ### 3.1 BP-01 客户入口与经理认领
 
 | 项 | 状态 | 依据 |
@@ -217,7 +221,7 @@
 | S0-3 | 工作项映射 BP / D1（本文件 §4） | **本轮完成** |
 | S0-4 | 估算区间与依赖路径（本文件 §4 / §5） | **本轮完成** |
 | S0-5 | R1 余量台账（`DEMO-1-r1-remainder.md`，AC-01～26 + P-01～13 逐行） | **本轮完成** |
-| S0-6 | API/schema 变更清单（`DEMO-1-interface-delta.md`） | 待补——随 S3/S4 的迁移一起产出（现在写会是空壳） |
+| S0-6 | API/schema 变更清单（`DEMO-1-interface-delta.md`） | **已产出（2026-09-16）** —— 触发条件由"S3/S4 的迁移"修正为"**第一处接口面变更**"：S1 第一个工作项即撞到缺口（货主侧无任何接口能列出自己的生效委托授权），见该文件 §2 |
 
 **出口判据**：对「必须做的演示动作」与「结案规则」**不存在未解歧义**。
 估算：文档级，**S**。外部等待：**无**。
@@ -236,6 +240,22 @@
 **出口判据（合同原文）**：`A fresh UI-created assignment survives reload, appears in the
 correct queue, can be claimed once, and remains inaccessible to unrelated organization B.`
 估算：**M**（新增 1 屏 + 3 处接线 + 1 个并发测试）。外部等待：**无**。
+
+**进度（2026-09-16，分支 `feature/DEMO1-S1-customer-intake`，未合并）**：工作项 **1、2** 已写码，
+工作项 3～6 未动。**出口判据一条都还没验证** —— 尤其"survives reload / 出现在正确的队列 /
+只能被认领一次 / B 组织不可见"这四条都要求**真机 + 真载荷**，本分支只做到了静态契约与
+后端用例层（`tests/test_entrust_my_entrustments.py`，14 条）。
+
+| 项 | 落地内容 | 证据等级 |
+| --- | --- | --- |
+| 1 | `cargo.js:pickEntrustDelivery()` 由占位跳转改为经 `go()` 进入 UI-07，并带货名/货量/单位 | 静态契约（`verify_ui_interactions.js` 第 ⑨ 章已同步断言） |
+| 1′ | 新增只读端点 `GET /api/v1/entrust/my-entrustments`（`DEMO-1-interface-delta.md` §3.1 的【计划】项） | 后端用例 14 条全过（含与提交门禁的**交叉断言**） |
+| 2 | 新建 UI-07 `pages/entrust/intake/intake.{js,json,wxml,wxss}` | 前端静态 8 项全过；**未做真机走查** |
+| 3～6 | 未开始 | — |
+
+⚠️ 两处必须记进余量台账、不得算作已完成：① UI-07 **未做真机走查**（五态渲染与提交链路
+都还没有设备证据）；② 提交的**幂等键只活在页面实例里**，"响应丢失 + 杀掉小程序重进"会
+再建一张草稿（详见 `intake.js` 文件头的如实登记）。
 
 ### S2 — 报价会话（BP-02）
 
@@ -311,7 +331,7 @@ a blocking case, and unresolved financial conditions each prevent the applicable
 | Milestone contract | `docs/entrust/milestones/DEMO-1-contract-v1.0.md` | 本轮登记 |
 | Execution plan | `docs/entrust/milestones/DEMO-1-plan.md` | 本文件 |
 | R1 remainder ledger | `docs/entrust/milestones/DEMO-1-r1-remainder.md` | 本轮登记 |
-| API/data delta | `docs/entrust/milestones/DEMO-1-interface-delta.md` | 待补（S0-6） |
+| API/data delta | `docs/entrust/milestones/DEMO-1-interface-delta.md` | **已产出（S0-6，2026-09-16）**；其 §3.1 的唯一新增端点已于 S1 落地（见 §4 S1 进度行） |
 | Runbook | `docs/entrust/milestones/DEMO-1-runbook.md` | 待补（S1 起步、S5 收口） |
 | Walkthrough | `docs/entrust/milestones/DEMO-1-walkthrough.md` | 待补（S5） |
 | Acceptance report | `docs/entrust/milestones/DEMO-1-acceptance.md` | 待补（S5） |
@@ -386,7 +406,13 @@ S0 基线
    采纳记录已写入 `DEMO-1-contract-v1.0.md` 登记本（日期 + 依据 + 范围），本文状态升为**生效**。
    ⚠️ 采纳的是**执行节奏**；合同 §13 验收记录表**仍留空**，未声称任何完成或验收。顺带说明：
    S0 的另一处自述（「这是 S0 的唯一未闭环项」）也随之不再成立，见 `DEMO-1-readiness.md` §7 PR-1。
-2. **开 S1 的第一条分支**（`feature/DEMO1-S1-customer-intake`）：先做「真实发布入口接受理实现 + UI-07 草稿屏」两个工作项，PR 描述按 §1 P20 的五项写。
-3. **补 S0-6**：随 S1 的第一处 schema 变更一起产出 `DEMO-1-interface-delta.md`（现在写会是空壳，合同也不许写空适配器）。
+2. ~~**开 S1 的第一条分支**（`feature/DEMO1-S1-customer-intake`）：先做「真实发布入口接受理实现 + UI-07 草稿屏」两个工作项，PR 描述按 §1 P20 的五项写。~~
+   ⇒ ✅ **已于 2026-09-16 落地**（分支已开、两个工作项已写码、门禁全绿），**但尚未合并**；
+   出口判据与真机走查见 §4 S1 的**进度**行。**PR #115**（base `develop`），**待 HO 授权后才能合并。**
+3. ~~**补 S0-6**：随 S1 的第一处 schema 变更一起产出 `DEMO-1-interface-delta.md`（现在写会是空壳，合同也不许写空适配器）。~~
+   ⇒ ✅ **已于 2026-09-16 产出**：触发条件修正为「**第一处接口面变更**」——S1 第一个工作项
+   即撞到缺口（货主侧无任何接口能列出自己授权出去的组织），因此**不需要**等 schema 变更。
+   ⚠️ 该文件 §3.1 的端点此后已实现，但**文件里"【计划】"的标注保留原样**：它记录的是
+   "写这份清单时它还没实现"，回改成【已实现】会让"清单 → 实现"这条链失去可追溯性。
 4. **把 H3「人手点击」收口**：这条不在 DEMO-1 的 13 步主脚本内（属遗留运费支付、已由 P-02 暂停），但作为**既有证据债**仍需闭环——做法是把「弹层弹出」之前的所有步骤自动化，**只把最后一下点击留给人**，人点完由脚本自动取证并回填记录表。
 5. **H7a 的 `calibration` 判据重设计**：先写进 `THRESHOLDS` 再跑（补 3～5 条易错样本使错答组 n≥5，或换 AUC/ECE）；它是**内部质量门禁**，不阻塞 DEMO-1，但**也不等于** D1-03 通过。

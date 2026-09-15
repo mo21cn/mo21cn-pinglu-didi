@@ -143,7 +143,19 @@ const NAV_EDGES = [
     strategy: 'replace',
     reason: '发布成功后的「自动跳转」是 redirectTo：刻意替换发布页，不让返回键回到已提交的表单'
   },
-  { from: 'pages/publish/cargo/cargo', to: 'pages/preview/preview', strategy: 'push' },
+  {
+    // ⚠️ S1 / DEMO-1 起这条边**没有代码证据了**：`cargo.js` 的「委托发货」已改接真实受理
+    //    （`cargo --push--> pages/entrust/intake/intake`），占位预览页只剩外部深链可达。
+    //    标 `pending` 是**闸门唯一认可的"声明暂留"方式**，但这里的含义与别处不同 ——
+    //    它不是"将来会接"，而是"调用已撤销、而删掉声明又会让 `preview` 违反
+    //    `kind=detail 必须至少有一条 push 入边`（该页仍在 app.json、仍是可深链的页，
+    //    且走查 ㉝ 章按**声明链深**断言 3→4 层）。
+    //    所以这是一处**有意保留的持仓**：等 preview 页整体下线时一并删除。
+    from: 'pages/publish/cargo/cargo',
+    to: 'pages/preview/preview',
+    strategy: 'push',
+    pending: '应用内调用已撤销（委托发货改接真实受理）；保留声明是为了维持 preview 的 detail 入边与 ㉝ 章链深口径，待该页整体下线时一并删除'
+  },
   { from: 'pages/trade/orders/orders', to: 'pages/trade/payment/payment', strategy: 'push' },
   { from: 'pages/trade/orders/orders', to: 'pages/trade/contract/contract', strategy: 'push' },
 
@@ -212,6 +224,25 @@ const NAV_EDGES = [
     reason: '登记成功后替换掉表单，落到这宗案件的详情'
   },
 
+  // ── 客户受理（UI-07 / S1 · DEMO-1 §3.3）────────────────────────────
+  // 「自主发货 / 委托发货」是**同一个决策的两个分支**，入口落在同一处
+  // （`cargo.js` 的 `pickEntrustDelivery()`），货名/数量/单位作为草稿初值带过来。
+  {
+    from: 'pages/publish/cargo/cargo',
+    to: 'pages/entrust/intake/intake',
+    strategy: 'push',
+    reason: '「发布货源」页选择「委托发货」→ 进入客户受理屏（带已填的货名/数量/单位当草稿初值）'
+  },
+  {
+    // 提交成功后落到这张委托的详情。**replace 而不是 push**：与
+    // `case-create --replace--> case` 同一条口径 —— 返回键不该把用户带回
+    // 一张已经提交过的表单。
+    from: 'pages/entrust/intake/intake',
+    to: 'pages/entrust/detail/detail',
+    strategy: 'replace',
+    reason: '提交成功后替换掉表单，落到这张委托的详情（待受理）'
+  },
+
   // ── 重置栈（回首页重走身份链路）────────────────────────────────────
   { from: 'pages/mine/mine', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/workbench/workbench', to: 'pages/index/index', strategy: 'reset' },
@@ -219,6 +250,7 @@ const NAV_EDGES = [
   { from: 'pages/entrust/artifact/artifact', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/case/case', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/case-create/case-create', to: 'pages/index/index', strategy: 'reset' },
+  { from: 'pages/entrust/intake/intake', to: 'pages/index/index', strategy: 'reset' },
 
   // ── 工作台 ↔ 会话：产品要求「经理人可在会话/工作台/成果之间反复切换」────
   //    HO 明确指出：有循环的业务导航不一定无限压栈，不能把所有循环判成错误。
@@ -436,6 +468,43 @@ const ROUTES = {
     // ⚠️ 与案件详情页同理，**不**声明 `keyContext: ['org']`：
     //    所登记的委托由 `assignment_id` 唯一决定，它不是"当前选中的组织"。
     note: '登记案件（异常 / 变更；从委托详情页进入，成功后转到案件详情）'
+  },
+  'pages/entrust/intake/intake': {
+    kind: 'detail',
+    // ⚠️ 与其余委托页不同，这里声明 `allow` 而**不是** `require-params`：
+    //    本页的三个参数（货名 / 数量 / 单位）都只是"从发布货源页带过来的草稿初值"，
+    //    全部可选 —— 不带参数进来同样成立（用户自己从头填）。
+    //    若声明 require-params，就必须强行编一个"必需参数"出来，而那个参数
+    //    在业务上并不必需，纯属为了满足契约而造。
+    deepLink: 'allow',
+    domain: 'entrust',
+    paramSchema: {
+      cargo_name: {
+        type: 'string',
+        maxLength: 64,
+        required: false,
+        note: '来自「发布货源」的货物名称，作为草稿初值'
+      },
+      quantity: {
+        // ⚠️ 刻意**不**声明 `int`：`paramSchema` 的 int 只接受非负**整数**，
+        //    而货量允许小数（后端 `Decimal`）。类型收紧会把一个合法初值判成非法深链。
+        //    是否为合法数量由表单校验（`assignmentDraftBody`）判定 —— 那一层才是权威。
+        type: 'string',
+        maxLength: 24,
+        required: false,
+        note: '来自「发布货源」的货量初值（可带小数，故不收紧为 int）'
+      },
+      quantity_unit: {
+        type: 'string',
+        maxLength: 24,
+        required: false,
+        note: '来自「发布货源」的货量单位，作为草稿初值'
+      }
+    },
+    // ⚠️ 不声明 `keyContext: ['org']`：本页的"当前组织"是**提交目标**，
+    //    它是用户在本页选出来的（不是全局上下文），算进复用键会让同一张受理屏
+    //    在换目标后被当成两个页面、白压一层栈（与 case / session 同理）。
+    note: '客户委托草稿 / 提交（UI-07；从「发布货源」的「委托发货」进入）'
   }
 }
 
@@ -481,7 +550,11 @@ const MIGRATED_PAGES = [
   'pages/entrust/case-create/case-create',
   // DR-0015 / ENT-033：会话屏（UI-03 的成果卡一半）从落地起接入 ——
   // 它是**被 push 进入**的三级页、还会跳成果页，正是最容易绕过页面栈预算的一类
-  'pages/entrust/session/session'
+  'pages/entrust/session/session',
+  // S1 客户受理屏（UI-07）：它是**带未保存状态的表单页**，而且有一条
+  // 「已建草稿但没提交」的中间态（见 intake.js 文件头）—— 脱离 go() 直接
+  // navigateTo 会让那条中间态的保护变成只写在注释里的声明
+  'pages/entrust/intake/intake'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */

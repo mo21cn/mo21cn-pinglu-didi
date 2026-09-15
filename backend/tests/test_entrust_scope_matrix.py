@@ -69,7 +69,7 @@ def test_matrix_keys_are_unique():
 
 
 def test_matrix_size_matches_baseline():
-    """条目数锁定为 60。
+    """条目数锁定为 62。
 
     数量变化本身不是错误，但**必须是有意的**：增删端点时同时改这里，
     强制在 PR 里显式说明"为什么端点集合变了"。
@@ -84,8 +84,12 @@ def test_matrix_size_matches_baseline():
     登记案件、列案件、案件详情、登记/移除受影响项、记录决定、关闭、重开。
     `exceptions` 槽位此前是本支线**唯一**仍「本期未开放」的槽位，这 8 条是它开放的结构前提。
     60 → 61（ENT-033 A2 五之一）：新增 `POST /exceptions/{exception_id}/apply`（应用已批准变更）。
+    61 → 62（S1 客户受理 / DEMO-1 §3.1）：新增 `GET /my-entrustments` ——
+    货主侧"我授权出去的组织"，是 UI-07 选择**提交目标**的唯一合法数据源。
+    `ent_entrustment` 此前无任何 HTTP 面，`/my-orgs` 读的是 `ent_org_member`，
+    两者不是一回事（DR-0012），拿后者顶上会产出"能选但必然 403"的选项。
     """
-    assert len(sm.SCOPE_MATRIX) == 61
+    assert len(sm.SCOPE_MATRIX) == 62
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

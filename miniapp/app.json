@@ -20,7 +20,8 @@
     "pages/entrust/artifact/artifact",
     "pages/entrust/case/case",
     "pages/entrust/case-create/case-create",
-    "pages/entrust/session/session"
+    "pages/entrust/session/session",
+    "pages/entrust/intake/intake"
   ],
   "window": {
     "navigationBarTitleText": "船好多",

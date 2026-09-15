@@ -1,0 +1,150 @@
+<!--
+  委托发货 · 客户委托草稿 / 提交（UI-07 · S1 / DEMO-1 §3.3）
+  五态分支（loading / expired / denied / error / empty）一个都不能少：
+  少一个分支就少一种表现，失败会被渲染成空白（verify_entrust_ui.js 有专门断言）。
+  业务判断一律在 JS 侧（`assignmentDraftBody` 做前置校验），本模板只做渲染。
+
+  ⚠️ `wx:if` 与 `wx:for` **不得出现在同一元素上**：紧随的 `wx:else` 会绑不到
+      `wx:if`，整页被错误覆盖层替换（四条前端门禁都抓不到，只有
+      verify_wxml_directives.js 能拦）。所以条件与循环一律分两层。
+-->
+<view class="page-sub">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">委托发货</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub" wx:if="{{orgName}}">委托给：{{orgName}}</view>
+    <view class="head-sub" wx:else>把货交给服务经营主体去办</view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期 -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 无权限 / 功能未开放（服务端对这几类刻意同码 404，不区分） -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <!-- 空态：**没有可提交的服务主体**。它与"加载失败"的下一步动作完全不同，
+         所以单独一态并说清去哪儿解决，而不是笼统地报"没有数据"。 -->
+    <view wx:elif="{{view === 'empty'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <block wx:else>
+      <!-- ① 提交目标。来自 `GET /my-entrustments`（我授权出去的组织），
+           不是 `GET /my-orgs`（我所在的组织）—— 后者会给出"能选但必然 403"的选项。 -->
+      <view class="card form-card">
+        <view class="row-between">
+          <text class="form-label">委托给谁</text>
+          <text class="form-tip-inline">共 {{targets.length}} 个可用</text>
+        </view>
+        <view class="pick-row">
+          <view
+            wx:for="{{targets}}"
+            wx:key="entrustmentId"
+            class="pick-pill {{orgId === item.orgId ? 'pick-pill-on' : ''}}"
+            data-org-id="{{item.orgId}}"
+            bindtap="onPickOrg"
+            hover-class="hover-dim"
+          >{{item.orgName}}</view>
+        </view>
+        <view class="form-tip" wx:if="{{needPick && !orgId}}">你授权了多个组织，请先选择这一单交给谁 —— 平台不替你猜。</view>
+        <view class="form-tip" wx:elif="{{orgId}}">该组织在此委托上的授权：{{orgPermText}}</view>
+        <view class="form-tip" wx:else>唯一可用目标已为你选中。</view>
+      </view>
+
+      <!-- ② 委托内容。草稿建立后整块锁定 —— 改内容再提交会多建一张草稿，
+           而那张草稿在界面上再也找不到（见 intake.js 文件头第 1 条）。 -->
+      <view class="card form-card">
+        <view class="draft-note" wx:if="{{createdId}}">
+          草稿 #{{createdId}} 已保存在服务端。内容已锁定，请继续完成提交；若要改内容请返回后重新发起。
+        </view>
+
+        <view class="form-label">一句话说明（要办什么）</view>
+        <input
+          class="form-input"
+          value="{{form.title}}"
+          data-field="title"
+          bindinput="onInput"
+          disabled="{{locked}}"
+          maxlength="128"
+          placeholder="例如：大连→上海 5 万吨煤炭，需代订舱并安排拖车"
+          placeholder-class="input-ph"
+        />
+
+        <view class="form-label form-gap">货物说明（可选）</view>
+        <textarea
+          class="form-textarea"
+          value="{{form.cargo_summary}}"
+          data-field="cargo_summary"
+          bindinput="onInput"
+          disabled="{{locked}}"
+          maxlength="512"
+          placeholder="品名、包装、特殊要求"
+          placeholder-class="input-ph"
+        />
+
+        <view class="form-label form-gap">数量（可选）</view>
+        <input
+          class="form-input"
+          value="{{form.quantity}}"
+          data-field="quantity"
+          bindinput="onInput"
+          disabled="{{locked}}"
+          type="digit"
+          maxlength="24"
+          placeholder="不确定就留空 —— 留空表示未知，不会被当成 0"
+          placeholder-class="input-ph"
+        />
+
+        <view class="form-label form-gap">数量单位（可选）</view>
+        <input
+          class="form-input"
+          value="{{form.quantity_unit}}"
+          data-field="quantity_unit"
+          bindinput="onInput"
+          disabled="{{locked}}"
+          maxlength="24"
+          placeholder="吨 / TEU / 件"
+          placeholder-class="input-ph"
+        />
+
+        <view class="form-tip" wx:if="{{carryHint}}">{{carryHint}}</view>
+      </view>
+
+      <!-- ③ 提交 -->
+      <view class="card form-card submit-card">
+        <view
+          class="btn-primary submit-btn"
+          data-act-submit-intake="1"
+          bindtap="onSubmit"
+          hover-class="hover-dim"
+        >{{submitting ? '提交中…' : (createdId ? '重试提交' : '提交委托')}}</view>
+        <view class="form-tip">提交后进入「待受理」，由服务经营主体受理；受理前你可以随时撤回。</view>
+      </view>
+    </block>
+  </view>
+</view>

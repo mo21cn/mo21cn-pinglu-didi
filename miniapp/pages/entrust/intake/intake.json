@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "委托发货",
+  "enablePullDownRefresh": false,
+  "backgroundTextStyle": "dark"
+}
