@@ -827,6 +827,33 @@ def complete_task(
     return done
 
 
+def _cancel_revalidation_for_task(session: Session, *, task_id: int, actor_id: int) -> int:
+    """取消/重开复核任务时同步 `ent_revalidation` 的标记（ENT-041）。
+
+    **为什么必须联动**：解除路径若只有"完成任务"，复核任务一旦被 `cancel`，标记就
+    永远停在 `open` ⇒ 那个成果再也无法被设为生效版本，而界面上没有任何解释
+    （收到的 409 说"有未完成的复核项"，可那个任务已经不存在了）。语义与边界写在
+    `revalidation.cancel_for_task` 的 docstring 里。
+
+    ⚠️ 与其它挂钩一样，这一步与任务状态流转**不是同一个事务**（`_transition` 自带提交），
+    但失败方向是保守的：任务已取消/重开，而标记仍停在原状态 ⇒ 成果继续不可设生效版本。
+    """
+    from app.modules.entrust import revalidation as reval_svc  # 局部导入：避免成环
+
+    return reval_svc.cancel_for_task(session, task_id=task_id, actor_id=actor_id, commit=True)
+
+
+def _restore_revalidation_for_task(session: Session, *, task_id: int) -> int:
+    """重开复核任务 ⇒ 把此前 `resolved` 的复核项退回 `open`（ENT-041）。
+
+    不恢复就会**静默破坏核心不变式**：「成果需要复核 ⇔ 存在 open 行」——
+    任务被重开意味着"那次完成不算数"，而标记停在 `resolved` 会让成果看起来已复核完。
+    """
+    from app.modules.entrust import revalidation as reval_svc  # 局部导入：避免成环
+
+    return reval_svc.restore_for_task(session, task_id=task_id, commit=True)
+
+
 def reopen_task(
     session: Session,
     *,
@@ -842,7 +869,7 @@ def reopen_task(
     if not cleaned:
         raise TaskValidationError("reopen 必须给出原因")
     current = now or utcnow_naive()
-    return _transition(
+    reopened = _transition(
         session,
         task_id=task_id,
         from_statuses=(STATUS_DONE,),
@@ -855,6 +882,11 @@ def reopen_task(
         params={"to": STATUS_PENDING, "reason": cleaned},
         now=current,
     )
+    # 重开 = "那次完成不算数" ⇒ 此前被它解除的复核标记必须**退回 open**（ENT-041）。
+    # 不恢复就静默破坏了「需要复核 ⇔ 存在 open 行」这条不变式：成果看起来已复核完，
+    # 而实际上那次复核已经作废。
+    _restore_revalidation_for_task(session, task_id=task_id)
+    return reopened
 
 
 def cancel_task(
@@ -868,7 +900,7 @@ def cancel_task(
     task, _ = authorize(session, task_id=task_id, user_id=actor_id, permission=PERM_TASK_DISPATCH)
     _assert_assignment_active(task)
     current = now or utcnow_naive()
-    return _transition(
+    cancelled = _transition(
         session,
         task_id=task_id,
         from_statuses=OPEN_STATUSES,
@@ -876,6 +908,10 @@ def cancel_task(
         params={"to": STATUS_CANCELLED},
         now=current,
     )
+    # 若这是复核任务，它挂的待复核项随之作废（ENT-041）。不联动的话该成果会**永久**
+    # 卡在"不可设生效版本"，而那个复核任务已经不存在了 —— 界面上无法解释。
+    _cancel_revalidation_for_task(session, task_id=task_id, actor_id=actor_id)
+    return cancelled
 
 
 def _bump_lease(

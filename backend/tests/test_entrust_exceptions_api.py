@@ -1485,7 +1485,10 @@ def test_capabilities_for_writer_follow_the_state_machine(env):
         "can_decide": True,
         "can_close": True,
         "can_reopen": False,
-        "can_apply_change": False,  # A2 未实现 ⇒ 恒 false
+        # 开放态**不可应用**：要应用得先走到 approved（状态维取状态机，
+        # 不是"这个能力没做" —— 五之四已把它对正式业务开放，见
+        # `test_can_apply_change_opens_only_after_approval`）。
+        "can_apply_change": False,
     }
     # 能力说 true，写请求就必须真能成（否则能力位是在骗界面）
     added = env.client.post(
@@ -1580,14 +1583,61 @@ def test_capabilities_false_when_the_grant_lacks_dispatch(env):
 def test_capabilities_shape_is_frozen(env):
     """能力位的字段集合被**冻结**：多一个少一个都是改了契约。
 
-    `can_apply_change` 恒 `false` 是刻意的：它属 A2，本片未实现。
-    不按状态机推算它，否则会让人以为「满足条件就能用」。
+    `can_apply_change` 在这里是 `false`，但理由**不是**"能力没做"（五之四已开放），
+    而是这一宗案件处在**开放态**：应用只发生在 `approved → applied`。
+    正面情形见 `test_can_apply_change_opens_only_after_approval`。
     """
     s = _seed(env)
     cid = _service_case(env, s)
     _, caps = _caps(env, s.manager, cid)
     assert set(caps) == set(_CAPS_ALL_FALSE)
     assert caps["can_apply_change"] is False
+
+
+def test_can_apply_change_opens_only_after_approval(env):
+    """`can_apply_change` 随状态机走：**只有 `approved` 才为真**（ENT-041 翻 `APPLY_OPEN`）。
+
+    这条用例存在的理由：翻开关是一个**具名常量的一行改动**，若不测正面情形，把
+    `APPLY_OPEN` 改回 `False`（或把状态维写错）不会有任何用例报红 ——
+    界面则表现为"按钮永远不出现"，且看起来像前端没接线。
+    """
+    s = _seed(env)
+    case = _raise_req(env, s).json()
+    cid = case["case_id"]
+    _, revision_id = _artifact(s)
+
+    # ① 开放态：不可应用（应用的前提是已批准）
+    view, caps = _caps(env, s.manager, cid)
+    assert caps["can_apply_change"] is False
+
+    # ② 走到 approved 才打开
+    approved = _decide(env, s, view, to_status=exc.STATUS_IN_REVIEW)
+    assert approved.status_code == 200, approved.text
+    approved = _decide(
+        env,
+        s,
+        approved.json(),
+        to_status=exc.STATUS_APPROVED,
+        basis_revision_id=revision_id,
+    )
+    assert approved.status_code == 200, approved.text
+    _, caps = _caps(env, s.manager, cid)
+    assert caps["can_apply_change"] is True
+
+    # ③ 已驳回**不给**该能力（它是"批准后执行"，不是"随便应用"）
+    rejected_env = _seed(env)
+    rejected_case = _raise_req(env, rejected_env).json()
+    r_view, _ = _caps(env, rejected_env.manager, rejected_case["case_id"])
+    rejected = _decide(
+        env,
+        rejected_env,
+        r_view,
+        to_status=exc.STATUS_REJECTED,
+        decision_note="不予采纳",
+    )
+    assert rejected.status_code == 200, rejected.text
+    _, r_caps = _caps(env, rejected_env.manager, rejected_case["case_id"])
+    assert r_caps["can_apply_change"] is False
 
 
 def test_capabilities_are_absent_from_the_list_views(env):
@@ -1602,3 +1652,39 @@ def test_capabilities_are_absent_from_the_list_views(env):
 
     org_view = _org_list(env, s.manager, org_id=s.org).json()
     assert "capabilities" not in org_view["items"][0]
+
+
+# ────────────────────────────── 8b. A2 五之四的界面输入（ENT-041）
+
+
+def test_detail_exposes_the_a2_surface_even_when_empty(env):
+    """A2 五之四的三个界面输入必须**在响应里**（没有内容时给空值，而不是不给字段）。
+
+    ⚠️ 这条防的是"代码里全都有、接口上一个都没有"那类静默缺口：pydantic 默认丢弃
+    未声明字段，漏声明时接口照样 200。此处断言的是**字段的存在性**，
+    非空形态由服务层用例（`test_entrust_revalidation.py` 第 5 组）覆盖。
+    """
+    s = _seed(env)
+    cid = _service_case(env, s)
+    body = env.client.get(_DETAIL_URL.format(cid=cid), headers=_headers(s.manager)).json()
+
+    assert {"revalidation", "unconfirmed_types", "approval"} <= set(body)
+    assert body["revalidation"] == [], "没应用过变更 ⇒ 复核清单为空（不是缺字段）"
+    assert body["unconfirmed_types"] == [], "异常案件没有变更类别 ⇒ 无待确认范围"
+    assert body["approval"] is None, "没批准过 ⇒ 摘要缺席（不是空摘要）"
+
+
+def test_assignment_artifact_list_exposes_needs_revalidation(env):
+    """成果清单的每一项都要带 `needs_revalidation`（徽标数据源，五之四）。"""
+    s = _seed(env)
+    art_id, _revision_id = _artifact(s)
+    resp = env.client.get(
+        f"/api/v1/entrust/assignments/{s.assignment_id}/artifacts",
+        params={"size": 50},
+        headers=_headers(s.manager),
+    )
+    assert resp.status_code == 200, resp.text
+    items = {int(x["artifact_id"]): x for x in resp.json()["items"]}
+    assert art_id in items
+    assert "needs_revalidation" in items[art_id], "字段必须在（无标记时为 null）"
+    assert items[art_id]["needs_revalidation"] is None

@@ -195,6 +195,9 @@ def get_artifact(session: Session, artifact_id: int) -> dict[str, Any]:
                 artifact["missing_fields"] = []
                 artifact["unknown_fields"] = []
                 artifact["registry_status"] = "unknown_type"
+    # 待复核标记（A2 五之二派生）：与清单走同一个批量函数 —— 两处各算一遍必然漂移，
+    # 而"列表说待复核、详情说没有"恰好是最难查的一类不一致。
+    attach_needs_revalidation(session, [artifact])
     return artifact
 
 
@@ -236,6 +239,32 @@ def _row_to_assignment_item(row: Any) -> dict[str, Any]:
     }
 
 
+def attach_needs_revalidation(
+    session: Session, items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """就地补 `needs_revalidation`（A2 五之二派生，五之四投影给界面）。
+
+    **一次查完**（`open_targets` 已按该目的写成批量版本）：逐条查询会让成果列表
+    变成 N+1 —— 每个成果再查一次复核表，列表越长越慢，而这条路径是**列表页**每次
+    进入都会走的。
+
+    取值两种：`None` = 没有待复核项（**不是** `{}`，"没有标记"与"有个空标记"是两件
+    不同的事，界面据此显示徽标或什么都不显示）；否则形如
+    `{"count": 2, "areas": [...], "review_task_ids": [...], "case_ids": [...]}`。
+
+    ⚠️ 缺席时**补 `None` 而不是删 key**：字段不存在会让"这一版后端没这个能力"与
+    "这个成果不需要复核"在界面侧长得一模一样，结果是**该显示的徽标静默消失**。
+    """
+    if not items:
+        return items
+    from app.modules.entrust import revalidation as reval_svc  # 局部导入：避免成环
+
+    marks = reval_svc.open_targets(session, artifact_ids=[int(x["artifact_id"]) for x in items])
+    for item in items:
+        item["needs_revalidation"] = marks.get(int(item["artifact_id"]))
+    return items
+
+
 def list_by_assignment(
     session: Session, *, assignment_id: int, page: int = 1, size: int = 20
 ) -> tuple[int, list[dict[str, Any]]]:
@@ -267,7 +296,7 @@ def list_by_assignment(
         ),
         {"aid": assignment_id, "limit": size, "offset": (page - 1) * size},
     ).mappings()
-    return total, [_row_to_assignment_item(r) for r in rows]
+    return total, attach_needs_revalidation(session, [_row_to_assignment_item(r) for r in rows])
 
 
 def count_unassigned(session: Session, *, owner_user_id: int, org_id: int | None) -> int:

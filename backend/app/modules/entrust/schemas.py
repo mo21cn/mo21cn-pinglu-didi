@@ -513,6 +513,10 @@ class AssignmentArtifactItem(BaseModel):
     current_revision_no: int | None
     created_at: str
     updated_at: str
+    #: 待复核标记（A2 五之二派生、五之四处投影）。`None` = 没有待复核项。
+    #: ⚠️ 必须在此**显式声明**：pydantic 默认丢弃未声明字段，漏了它会让徽标的
+    #: 数据在响应层被静默剥掉 —— 界面拿到的永远是"没有待复核"，且不报错。
+    needs_revalidation: dict[str, Any] | None = None
 
 
 class AssignmentArtifactListOut(BaseModel):
@@ -910,16 +914,63 @@ class ExceptionCaseCapabilities(BaseModel):
     can_apply_change: bool
 
 
+class ExceptionCaseRevalidationOut(BaseModel):
+    """一条复核项（A2 五之二生成、五之四展示）。
+
+    带 `task_title` / `task_status` 是为了让"这批复核做完了没有"能一眼回答；
+    ⚠️ 两者**可空**（任务行缺席时必须如实为空，不能让这一项从列表里消失）。
+    """
+
+    review_key: str
+    area: str
+    task_type: str
+    target_kind: str | None = None
+    target_id: int | None = None
+    target_revision_id: int | None = None
+    review_task_id: int
+    #: open=待复核 / resolved=已复核 / cancelled=复核要求被撤销（取消任务时联动）
+    status: str
+    note: str | None = None
+    created_at: str
+    resolved_at: str | None = None
+    resolved_by: int | None = None
+    task_title: str | None = None
+    task_status: str | None = None
+
+
+class ExceptionCaseApprovalOut(BaseModel):
+    """批准快照的界面摘要（A2 五之一前提 P4）。
+
+    只给"将动哪些目标、各自改哪些字段"，**不给字段值** —— 值的形状随成果类型而变，
+    要看精确值应当去成果页的版本历史。界面据此在点「应用变更」**之前**把要发生的事
+    写清楚（apply 只认快照，不给人改写的机会，所以更不能盲点）。
+    """
+
+    snapshot_version: int
+    change_category: str | None = None
+    case_basis_revision_id: int | None = None
+    targets: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ExceptionCaseDetailOut(BaseModel):
     """案件详情：投影 + 完整事件链（重开再关闭的两轮历史在此可判定）。
 
     `capabilities` **必填**（不给默认值）：它缺席时界面只能靠猜按钮可用性，
     而「猜」正是 DR-0014 §3.4 要消除的东西。
+
+    `revalidation` / `unconfirmed` / `approval` 都是 **A2 五之四**新增的界面输入：
+    前两个回答"这批复核任务凭什么生成的、还差什么要人工确认"，后一个回答
+    "点『应用变更』会发生什么"。三者缺席都不会让详情不可用，故给默认值。
     """
 
     case: ExceptionCaseOut
     capabilities: ExceptionCaseCapabilities
     events: list[ExceptionCaseEventOut] = Field(default_factory=list)
+    revalidation: list[ExceptionCaseRevalidationOut] = Field(default_factory=list)
+    #: DR-0016 §4.1：映射点名、委托里**确实存在**、却没被登记为受影响项的成果类型
+    #: ⇒ 范围可能不足，**交经理人确认**（不是让代码自动扩大范围）。
+    unconfirmed_types: list[str] = Field(default_factory=list)
+    approval: ExceptionCaseApprovalOut | None = None
 
 
 def exception_case_out(data: dict[str, Any]) -> ExceptionCaseOut:

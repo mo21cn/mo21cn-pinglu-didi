@@ -32,6 +32,7 @@ from app.modules.entrust import artifacts as art_svc  # noqa: E402
 from app.modules.entrust import assignments as assign_svc  # noqa: E402
 from app.modules.entrust import exceptions as exc  # noqa: E402
 from app.modules.entrust import revalidation as rv  # noqa: E402
+from app.modules.entrust import schemas as sch  # noqa: E402
 from app.modules.entrust import tasks as task_svc  # noqa: E402
 from app.modules.entrust.access import utcnow_naive  # noqa: E402
 
@@ -731,3 +732,250 @@ def test_apply_is_not_blocked_by_its_own_marker(db):
     # 生效版本是**应用写入的那一版**（不是被复核挡住的原版本）
     revs = _revisions(db, art_id)
     assert _current_revision_no(db, art_id) == max(r[0] for r in revs)
+
+
+# ── 第 5 组：五之四（界面输入）与「标记三态一致」（ENT-041）───────────────────
+
+
+def _open_mark(db, env: dict, *, atype: str = "customer_quote") -> tuple[int, int, int]:
+    """应用一次变更，返回 (成果 id, 案件 id, 复核任务 id)。"""
+    art_id = _artifact(db, env, atype=atype)
+    result = _apply_change(
+        db,
+        env,
+        category=rv.CHANGE_CARGO,
+        targets=[{"target_kind": exc.TARGET_ARTIFACT, "target_id": art_id}],
+        changes={f"artifact#{art_id}": {"freight": 13000, "currency": "CNY"}},
+    )
+    rows = rv.open_for_artifact(db, art_id)
+    assert rows, "前置：应用后应留下待复核项"
+    return art_id, int(result["case_id"]), int(rows[0]["review_task_id"])
+
+
+def test_artifact_projection_exposes_needs_revalidation(db):
+    """成果**详情**与**清单**都要带 `needs_revalidation`（徽标的数据来源）。
+
+    两处都测，是因为它们走的是两个不同的取数函数（`get_artifact` /
+    `list_by_assignment`）；只测一处的话，另一处漏加字段会**静默**表现为
+    "列表页没有徽标、详情页有"。
+    """
+    env = _env(db)
+    art_id, case_id, task_id = _open_mark(db, env)
+    untouched = _artifact(db, env, atype="contract_review")
+
+    detail = art_svc.get_artifact(db, art_id)
+    mark = detail["needs_revalidation"]
+    assert mark is not None, "有待复核项时详情必须带标记"
+    assert mark["count"] >= 1
+    assert mark["case_ids"] == [case_id], "标记要能指回来源变更（否则无法回答「为什么」）"
+    assert task_id in mark["review_task_ids"], "标记要能指到复核任务（否则界面点不进去）"
+    assert mark["areas"], "标记要带复核区域（AC-12 要求显示原因）"
+
+    clean = art_svc.get_artifact(db, untouched)
+    assert clean["needs_revalidation"] is None, (
+        "没有待复核项时必须是 None（不是 {}）—— 「没有标记」与「有个空标记」是两件事"
+    )
+
+    _total, items = art_svc.list_by_assignment(db, assignment_id=env["assignment_id"], size=50)
+    by_id = {int(x["artifact_id"]): x for x in items}
+    assert by_id[art_id]["needs_revalidation"] is not None
+    assert by_id[untouched]["needs_revalidation"] is None
+    assert by_id[art_id].get("current_revision_no") is not None, "原有字段不得被这次改动挤掉"
+
+
+def test_case_surface_fields_survive_the_response_model(db):
+    """五之四新增的三个字段必须在**响应模型**里显式声明。
+
+    ⚠️ 这条用例防的是一类静默缺陷：pydantic 默认**丢弃未声明字段**。漏声明时
+    接口照样 200、也不报错，只是界面永远拿不到 —— 表现成"徽标/复核清单/批准摘要
+    都没做"，而代码里明明全都在。⇒ 服务层返回字典对不对**不足以**证明接口给得出来。
+    """
+    assert "needs_revalidation" in sch.AssignmentArtifactItem.model_fields
+    for field in ("revalidation", "unconfirmed_types", "approval"):
+        assert field in sch.ExceptionCaseDetailOut.model_fields, field
+    assert "targets" in sch.ExceptionCaseApprovalOut.model_fields
+    assert "task_status" in sch.ExceptionCaseRevalidationOut.model_fields
+
+
+def test_approval_summary_lists_targets_and_changed_fields(db):
+    """批准快照摘要：说清"将动哪些目标、各自改哪些字段"。
+
+    apply **不接受**"改成什么"，所以界面只能在点之前把将发生的事说清楚；
+    摘要给错（例如把 `changes[key]` 当成 `{"payload": {...}}` 的包裹去读）
+    会让界面显示"这次应用什么都不改"，而实际上会改 —— 一次盲操作的点击。
+    """
+    env = _env(db)
+    art_id, case_id, _task_id = _open_mark(db, env)
+
+    summary = exc.approval_summary(db, case_id)
+    assert summary is not None, "批准过就必须有摘要（否则界面无法提示将发生什么）"
+    assert summary["snapshot_version"] == exc.APPROVAL_SNAPSHOT_VERSION
+    assert summary["change_category"] == rv.CHANGE_CARGO
+    targets = {f"{t['target_kind']}#{t['target_id']}": t for t in summary["targets"]}
+    assert f"artifact#{art_id}" in targets
+    fields = targets[f"artifact#{art_id}"]["change_fields"]
+    assert fields == ["currency", "freight"], f"要列出将改的字段，实际 {fields}"
+    assert targets[f"artifact#{art_id}"]["basis_revision_id"] is not None
+
+    # 没有批准过的案件：`None`，不是空摘要（两者在界面上要说不同的话）
+    fresh = exc.raise_case(
+        db,
+        assignment_id=env["assignment_id"],
+        actor_id=MANAGER,
+        kind=exc.KIND_EXCEPTION,
+        title="尚未批准",
+        severity="medium",
+        impact_kind=exc.IMPACT_INFORMATIONAL,
+    )
+    assert exc.approval_summary(db, int(fresh["id"])) is None
+
+
+def test_scope_hint_reports_the_same_unconfirmed_as_the_plan(db):
+    """`scope_hint` 与真实计划必须给出**同一份** unconfirmed（范围逻辑只有一份实现）。
+
+    若各写一遍筛选，就会出现"清单说没问题、生成时却少一条"这类只在特定数据形态下
+    出现的分叉 —— 而那种分叉在界面上看起来完全正常。
+    """
+    env = _env(db)
+    linked = _artifact(db, env, atype="customer_quote")
+    unlinked = _artifact(db, env, atype="procurement_confirm")  # 候选之一，未登记
+
+    hint = rv.scope_hint(
+        db,
+        category=rv.CHANGE_CARGO,
+        assignment_id=env["assignment_id"],
+        artifact_targets=[linked],
+    )
+    plan = rv.plan_scope(
+        db,
+        category=rv.CHANGE_CARGO,
+        assignment_id=env["assignment_id"],
+        artifact_targets=[linked],
+    )
+    assert hint == list(plan.unconfirmed)
+    assert "procurement_confirm" in hint, "确实存在却没登记的候选类型要提示确认"
+    assert unlinked  # 播种路径一致
+
+    # 类别未知（不该发生的输入）⇒ 空列表，**不猜一个默认行**
+    assert (
+        rv.scope_hint(db, category="nope", assignment_id=env["assignment_id"], artifact_targets=[])
+        == []
+    )
+
+
+def test_cancelling_review_task_releases_the_marker(db):
+    """取消**复核任务** ⇒ 标记转 `cancelled` ⇒ 成果恢复可设生效版本。
+
+    为什么必须这样：若标记永远停在 `open`，而那个复核任务已经不存在了，成果会被
+    **永久**锁死，且界面上无法解释（409 说"有未完成的复核项"，可它已经被取消）。
+    `cancelled` 与 `resolved` 分开，是为了让"谁核对过"与"谁撤销了要求"事后能分辨。
+    """
+    env = _env(db)
+    art_id, case_id, review_task_id = _open_mark(db, env)
+    current_before = _current_revision(db, art_id)
+
+    draft = art_svc.append_revision(
+        db,
+        artifact_id=art_id,
+        payload={"freight": 21000, "currency": "CNY"},
+        actor_id=MANAGER,
+        source="manual",
+    )
+    with pytest.raises(art_svc.ArtifactRevalidationError):
+        art_svc.confirm_revision(
+            db, artifact_id=art_id, revision_no=int(draft["revision_no"]), actor_id=MANAGER
+        )
+
+    task_svc.cancel_task(db, task_id=review_task_id, actor_id=MANAGER)
+
+    rows = [r for r in rv.list_for_case(db, case_id) if int(r["review_task_id"]) == review_task_id]
+    assert rows and all(str(r["status"]) == "cancelled" for r in rows), (
+        "取消复核任务必须把标记转 cancelled（否则成果被永久锁死且无法解释）"
+    )
+    assert rows[0]["resolved_by"] == MANAGER, "撤销者必须留名（管理动作要可追溯）"
+    assert "取消" in str(rows[0]["note"] or ""), "要写清为什么解除"
+    assert not rv.open_for_artifact(db, art_id)
+
+    # 解除后可确认；**取消不是"已核对"** —— 它只是撤销了这个复核要求
+    art_svc.confirm_revision(
+        db, artifact_id=art_id, revision_no=int(draft["revision_no"]), actor_id=MANAGER
+    )
+    assert _current_revision(db, art_id) != current_before
+
+    # 幂等：再取消一次不改变已解除的行（也不报错）
+    assert rv.cancel_for_task(db, task_id=review_task_id, actor_id=MANAGER) == 0
+
+
+def test_reopening_review_task_restores_the_marker(db):
+    """重开复核任务 ⇒ 标记**退回 `open`** ⇒ 成果再次不可设生效版本。
+
+    重开意味着"那次完成不算数"。若标记停在 `resolved`，核心不变式
+    「需要复核 ⇔ 存在 open 行」就被**静默**破坏了：成果看起来已复核完，
+    而实际上那次复核已经作废。
+    """
+    env = _env(db)
+    art_id, case_id, review_task_id = _open_mark(db, env)
+
+    task_svc.start_task(db, task_id=review_task_id, actor_id=MANAGER)
+    task_svc.complete_task(db, task_id=review_task_id, actor_id=MANAGER)
+    assert not rv.open_for_artifact(db, art_id), "完成复核后标记应已解除"
+
+    task_svc.reopen_task(
+        db, task_id=review_task_id, actor_id=MANAGER, reason="复核结论有误，重新核对"
+    )
+    back = rv.open_for_artifact(db, art_id)
+    assert back, "重开复核任务必须把标记退回 open（否则不变式静默失效）"
+    row = [r for r in rv.list_for_case(db, case_id) if int(r["review_task_id"]) == review_task_id][
+        0
+    ]
+    assert row["resolved_at"] is None and row["resolved_by"] is None, (
+        "解除已被撤销 ⇒ 解除时间与人必须清回未知，留着就是一条错误的事实"
+    )
+
+    draft = art_svc.append_revision(
+        db,
+        artifact_id=art_id,
+        payload={"freight": 22000, "currency": "CNY"},
+        actor_id=MANAGER,
+        source="manual",
+    )
+    with pytest.raises(art_svc.ArtifactRevalidationError):
+        art_svc.confirm_revision(
+            db, artifact_id=art_id, revision_no=int(draft["revision_no"]), actor_id=MANAGER
+        )
+
+
+def test_cancelling_a_plain_task_does_not_touch_revalidation(db):
+    """取消**普通任务**不得动任何标记（联动只针对挂着复核项的那个任务）。
+
+    这是负例：把联动写成"取消任何任务都清标记"，会让复核约束可以被一个
+    毫不相干的操作绕过，而且看起来完全正常。
+    """
+    env = _env(db)
+    art_id, case_id, _review_task_id = _open_mark(db, env)
+
+    plain = task_svc.create_task(
+        db,
+        assignment_id=env["assignment_id"],
+        actor_id=MANAGER,
+        task_type=task_svc.TASK_TYPE_EXECUTION,
+        title="普通执行任务",
+    )
+    task_svc.cancel_task(db, task_id=int(plain["task_id"]), actor_id=MANAGER)
+
+    assert rv.open_for_artifact(db, art_id), "普通任务被取消不得解除复核标记"
+    rows = rv.list_for_case(db, case_id)
+    assert all(str(r["status"]) == "open" for r in rows), "标记应全部仍为 open"
+
+
+def test_review_task_status_is_visible_on_the_case_surface(db):
+    """复核任务的状态与标题要能在案件面读到（界面不能只拿到一个 id）。"""
+    env = _env(db)
+    _art_id, case_id, review_task_id = _open_mark(db, env)
+    row = [r for r in rv.list_for_case(db, case_id) if int(r["review_task_id"]) == review_task_id][
+        0
+    ]
+    assert row["task_title"], "复核任务标题要带出来（否则列表只能显示 #id）"
+    assert str(row["task_status"]) == task_svc.STATUS_PENDING
+    assert str(row["target_kind"]) == exc.TARGET_ARTIFACT
+    assert row["target_revision_id"] is not None, "摘要要带目标版本（复核针对的是哪一版）"

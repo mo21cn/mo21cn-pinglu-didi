@@ -440,7 +440,13 @@ EVENT_REVALIDATION_PLANNED: Final = "revalidation_planned"
 #: 下游报价与合同却收不到失效提示 —— 那不是"少一个提示"，是**静默交付错误结果**。
 #: 写成一个具名常量（而不是散在代码里的 `False`），是为了让"何时开放"这件事
 #: 有**唯一一个**可翻的点，也能被用例直接钉住。
-APPLY_OPEN: Final = False
+#:
+#: **2026-09-15 已翻 `True`（ENT-041 / 五之四）** —— 三个前置逐条核对过，缺一不可：
+#: ① 五之二传播已接通（`apply_case` 同事务生成标记与复核任务，验证 19 通过）；
+#: ② AC-12 后半条已落地（`confirm_revision` 有未完成复核项时 409，ENT-040）；
+#: ③ 界面与入口已具备（案件页「应用变更」区 + 成果页「待复核」徽标，五之四）。
+#: ⚠️ 翻它**不等于**"应用变更这件事已经验收"：S3 的结案校验（验证 20/10）仍未上线。
+APPLY_OPEN: Final = True
 
 #: **批准快照**（A2 五之一前提 P4，HO 2026-09-15 裁决）。
 #:
@@ -549,6 +555,50 @@ def _load_approval_snapshot(session: Session, exception_id: int) -> dict[str, An
         if isinstance(data, dict) and data.get("kind") == APPROVAL_SNAPSHOT_KIND:
             return cast("dict[str, Any]", data)
     return None
+
+
+def approval_summary(session: Session, exception_id: int) -> dict[str, Any] | None:
+    """批准快照的**界面摘要**（`None` = 没有快照，即"没批准过 / 批准时没给内容"）。
+
+    为什么界面必须拿到它：`apply` 只认批准快照，**不接受**"改成什么"的入参
+    （P4-A4）。如果界面不展示将应用什么，点「应用变更」就是一次**盲操作** ——
+    应用之后才发现改错了，而历史已经写进去了（revision 是 append-only，
+    改错只能再追加一版，前一次仍在审计链上）。
+
+    只投影"将动哪些目标、各自改哪些字段"，**不投影字段值**：
+    值的形状随成果类型而变（金额、日期、枚举），塞进界面要么排版崩、要么误导；
+    要看精确值应当去成果页的版本历史（那里有完整的 `payload` 与来源）。
+
+    ⚠️ 这不是权限边界：能读案件详情的人本来就能读事件链里的原始快照。
+    """
+    snapshot = _load_approval_snapshot(session, exception_id)
+    if snapshot is None:
+        return None
+    changes = snapshot.get("changes") or {}
+    targets: list[dict[str, Any]] = []
+    for item in snapshot.get("targets", []):
+        target_kind = str(item["target_kind"])
+        target_id = int(item["target_id"])
+        key = _change_key(target_kind, target_id)
+        change = changes.get(key)
+        # `changes[key]` **就是**该目标的新 payload 本身（apply 直接把它交给
+        # `append_revision(payload=...)`），不是 `{"payload": {...}}` 的包裹 ——
+        # 按包裹读会拿到空字段列表，界面上表现为"这次应用什么都不改"。
+        fields = sorted(str(k) for k in change) if isinstance(change, dict) else []
+        targets.append(
+            {
+                "target_kind": target_kind,
+                "target_id": target_id,
+                "basis_revision_id": item.get("basis_revision_id"),
+                "change_fields": fields,
+            }
+        )
+    return {
+        "snapshot_version": int(snapshot.get("version", 0)),
+        "change_category": snapshot.get("change_category"),
+        "case_basis_revision_id": snapshot.get("case_basis_revision_id"),
+        "targets": targets,
+    }
 
 
 #: 对客投影**绝不允许**出现的字段（§3.2）。
@@ -1099,10 +1149,13 @@ def case_capabilities(
         "can_decide": can_write and open_case and bool(allowed_transitions(kind, status)),
         "can_close": can_write and bool(allowed_closure_dispositions(kind, status)),
         "can_reopen": can_write and status == STATUS_CLOSED,
-        # 「应用变更」（A2 五之一）。仍遵守第 2 条纪律：状态维取状态机，不硬编码状态名。
-        # 但**开放开关** `APPLY_OPEN` 在五之二（复核传播）接通前**保持 False** ——
-        # HO 2026-09-15 裁决：变更已生效、下游报价与合同却收不到失效或复核提示，
-        # 是不可接受的；内部测试可先验证 17/18，**业务开放必须包含传播闭环**。
+        # 「应用变更」（A2 五之一）。
+        # 状态维照旧取状态机（不硬编码状态名）：`approved → applied` 两个 kind 都有，
+        # 也就是"批准之后要执行/应用"这件事对异常与变更都存在。
+        #
+        # ⚠️ 翻 `APPLY_OPEN`（五之四，2026-09-15）的前提是**传播闭环已接通**，不是
+        # "界面做完了"。界面只是让这个能力**能被用到**；能不能开，取决于开了之后
+        # 下游能不能同时收到失效与复核提示 —— 那是五之二的事，与前端无关。
         "can_apply_change": (
             can_write and APPLY_OPEN and STATUS_APPLIED in allowed_transitions(kind, status)
         ),
