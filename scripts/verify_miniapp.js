@@ -259,6 +259,16 @@ const WALK_ANCHORS = [
     attr: 'data-disp', value: '{{item.key}}', handler: 'onPickDisposition' },
   { kind: 'row', file: 'pages/entrust/case/case.wxml', class: 'cand-row',
     attr: 'data-id', value: '{{item.target_id}}' },
+  // ENT-041（第 ㉛ 章）：案件页「应用变更」的三段式。确认条必须是**页内 DOM**
+  // （`wx.showModal` 不在渲染树里、工具点不到，这正是条件 4 原先只能记 not-run 的原因）。
+  // 三个属性名两两不同：`onToggleApply` 被两个元素共用，若都写 `data-act-apply`
+  // 就会让「展开」与「取消」在断言里同形（登记表也按 file|attr 去重，只能登记一个）。
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-apply',
+    value: '1', handler: 'onToggleApply' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-apply-submit',
+    value: '1', handler: 'onSubmitApply' },
+  { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-apply-cancel',
+    value: '1', handler: 'onToggleApply' },
 ]
 
 // 把 wxml 切成「标签」块：先剥掉注释（注释里的撇号会被当成引号，导致整个标签块

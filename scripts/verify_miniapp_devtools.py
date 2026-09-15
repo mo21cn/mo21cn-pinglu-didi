@@ -18,6 +18,13 @@
 | `15` | 发货方式选择（自主 / 委托）+ 几何对齐设计稿 | ⑮ |
 | `16` | 委托发货 · 组织选择器（AC-02 / DR-0008） | ⑯ |
 | `25` | 成果详情：字段类型的**渲染层**证据 + AC-05（ENT-025） | —（新增章节） |
+| `26` | 登记异常 / 变更案件（界面登记 → 案件详情入口） | —（新增章节） |
+| `27` | 记录决定（`open → in_review`，含必填项拦截负例） | —（新增章节） |
+| `28` | 关闭案件（钉一条状态机事实 + 合法路径 `in_review → rejected → closed`） | —（新增章节） |
+| `29` | UI-04 组织级队列（队列切换 / 两行筛选 / 点行进详情） | —（新增章节） |
+| `30` | 「批准」完整正例（依据版本 id 从界面取到 → 填对能过） | —（新增章节） |
+| `31` | 案件页「应用变更」正例（**真写**造 `approved` 形态 → 应用 → 复核传播） | —（新增章节） |
+| `32` | 成果页「待复核」徽标（依赖 ㉛ 应用后留下的复核项） | —（新增章节） |
 | `4b` | 撮合页（货主方向：为货源找船） | ④b |
 | `5` | 发布空船页渲染（船东视角） | ⑤ |
 | `7` | 合同三级页 + 长按弹层 + ⑦b 仿真案例 + ⑦c 已完成订单 | ⑦/⑦b/⑦c |
@@ -40,7 +47,16 @@ DR-0009 记的阻塞点是「按序号点第 i 个同类元素」，解法走它
   （支付单一旦 paid 不可回退，同库再跑 ⑧ 章就取不到 pending 锚点）。
   ⚠️ 且它有一处**已知限制**：支付确认键在原生 `wx.showModal` 里、工具点不到
   ⇒ 该步用**真实接口**驱动支付、只断言**支付之后**的渲染，**不等于**「确认键可点」；
-* ⑬/⑭ 的「7 字段解析卡」依赖真实 LLM 解析结果，mock 与真模型的字段数可能不同；
+* ~~⑬/⑭ 的「7 字段解析卡」依赖真实 LLM 解析结果，mock 与真模型的字段数可能不同~~
+  —— **该表述的前提不成立，已核实并改写**（2026-09-15）：
+  ① `assistant.js` 的 `buildRows()` 是对前端 `FIELD_LABELS` 的**全量投影**
+  （7 个 key 一律出行、未识别的行标「未识别」）⇒ **行数与 provider 无关**，
+  `len(rows) == 7` 钉的是**界面契约**而不是模型输出；
+  ② `agent/llm.py` 在 `LLM_MOCK` 或**没有 API Key** 时**显式降级**到 mock 规则模板，
+  而本机**既无 `.env` 也无 `LLM_API_KEY`** ⇒ 本机**不存在**「跑一次真解析」这条通道
+  （不是"没跑"，是环境里没有）。
+  真正随模型变化的是**有几行落到「未识别」**（`needs_review` 命中数），
+  已据此把 ⑬ 的断言补成「7 行 + 每行带 label/value/missing + 至少一行被识别」。
 * 真机页面栈深度（DR-0011 的 `STACK_BUDGET = 8`）仍未做运行期验证。
 
 换轨带来的能力差异（实测）
@@ -156,6 +172,44 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 _LAST_API_ERROR: str | None = None
 
 
+#: 运行期 console 里**已定位为「开窗 / 连接阶段」噪声**的模式（逐字比对过，不是猜的）。
+#:
+#: 依据（2026-09-15 实测，实验脚本 `_probe_applaunch.py`）：
+#:   ① **闸门通过后、发出任何导航之前**，console 里就已经有
+#:      `[Page route 错误(system error)] routeDone with a webviewId …`；
+#:   ② 其后连做两次导航，console 内容**逐字不变**（没有新增条目）；
+#:   ③ 页面代码的启动路径里**没有** `reLaunch` —— `app.js.onLaunch` 只做探活，
+#:      `index.js` 只在用户动作后 `switchTab`。
+#: ⇒ 归为**工具/框架侧的页面路由竞态**（WebView 建立期 `routeDone` 找不到 webview、
+#:   或 automation 连接时框架再 `appLaunch` 一次而页面栈已非空），与业务路径无关。
+#:
+#: ⚠️ **只登记逐字比对过、能给出证据的条目**。整族 `[Page route 错误(system error)]`
+#: 里同样包含**真缺陷**（例如 `navigateTo` 到不存在的页）—— 把整族判成噪声，
+#: 会把真缺陷一起藏掉。所以下面只用来**分桶统计**：两个桶都原样打印，
+#: 且**不**自动判失败（是否升级成门禁失败需另行裁定，见 DR-0009 §8.2）。
+ENV_NOISE_PATTERNS = (
+    "appLaunch with non-empty page stack",
+    "routeDone with a webviewId",
+)
+
+
+def split_console_errors(text: str) -> tuple[list[str], list[str]]:
+    """把 console 原文切成 `(开窗噪声, 其余)` 两桶。
+
+    条目以 `["[error]"` 开头且**自身含换行**（带堆栈），因此按「下一个条目的行首」切；
+    按行切会把一条错误拆成十几条，两个计数都失真。
+    """
+    if not text or text.strip() in ("", "(无)"):
+        return [], []
+    noise: list[str] = []
+    other: list[str] = []
+    for chunk in (x.strip() for x in re.split(r'\n(?=\["\[)', text)):
+        if not chunk:
+            continue
+        (noise if any(k in chunk for k in ENV_NOISE_PATTERNS) else other).append(chunk)
+    return noise, other
+
+
 def _http(req: urllib.request.Request, timeout: float = 30.0):
     with _OPENER.open(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", "replace")
@@ -210,15 +264,32 @@ def api_get(path: str, token: str, tries: int = 3) -> dict | None:
     return None
 
 
-def api_post(path: str, token: str, payload: dict) -> tuple[int, dict | None]:
+def api_post(
+    path: str,
+    token: str,
+    payload: dict,
+    idem_key: str | None = None,
+) -> tuple[int, dict | None]:
+    """写接口。
+
+    ⚠️ **委托的写端点强制要求 `Idempotency-Key` 请求头**（ENT-002 幂等服务）——
+    不带会被后端以 **400** 拒掉，回执是
+    `{"detail":"写操作必须提供 Idempotency-Key 请求头"}`。
+    实测（2026-09-15）：`/entrust/...` 的写命令都要；而 `/auth/switch-role`
+    （`ensure_role` 用）不要，所以这个参数**可选**。
+    键要**每次唯一**：同一个键重放会命中幂等记录、返回**首次的响应**，而不是再写一次。
+    """
     body = json.dumps(payload or {}).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token,
+    }
+    if idem_key:
+        headers["Idempotency-Key"] = idem_key
     req = urllib.request.Request(
         API_BASE + path,
         data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + token,
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -2919,7 +2990,21 @@ def sec_13(w: Walker) -> None:
     card = parsed[-1] if parsed else {}
     w.shot("15-Ai解析结果卡片")
     rows = card.get("rows") or []
-    w.rep.rec("⑬ 解析结果渲染为结构化卡片（7 字段）", len(rows) == 7, str(len(rows)))
+    w.rep.rec("⑬ 解析结果渲染为结构化卡片（7 行）", len(rows) == 7, str(len(rows)))
+    # ⚠️ 这里**故意不把「7」与「模型输出字段数」绑在一起**：`assistant.js` 的
+    #    `buildRows()` 是对前端 `FIELD_LABELS` 的**全量投影**（7 个 key 一律出行，
+    #    未识别的行标「未识别」），所以**行数与 provider 无关**；
+    #    真正随模型变化的只是**有几行落到「未识别」**。
+    #    ⇒ 断言写成「形状 + 至少一行识别到」，而不是去钉模型行为。
+    #    （旧表述「mock 与真模型的字段数可能不同」经核代码不成立，见 DR-0009 §8.2。）
+    w.rep.rec(
+        "⑬ 卡片每行都有 label/value/missing（模板不会读到空字段）",
+        bool(rows)
+        and all(isinstance(r, dict) and {"label", "value", "missing"} <= set(r) for r in rows),
+        str(rows[:1])[:120],
+    )
+    n_id = sum(1 for r in rows if not r.get("missing"))
+    w.rep.rec("⑬ 至少一行被识别（草稿确实解析出了内容）", n_id >= 1, f"识别 {n_id}/{len(rows)}")
     w.rep.rec(
         "⑬ 卡片含草稿（可带去发布页，Agent 未直写）",
         bool(card.get("draft")),
@@ -3063,6 +3148,245 @@ def sec_14(w: Walker) -> None:
     )
 
 
+def sec_31(w: Walker) -> None:
+    """㉛ 案件页「应用变更」正例（A2 五之四 / ENT-041）—— **真写**造出 `approved` 形态。
+
+    为什么必须真写：`approval.targets[*]` 与 `revalidation[*]` 这两类字段**只**
+    在「已批准」与「已应用」两种形态下产出，而演示种子**没有**这类案件
+    （`seed_entrust_demo` 造的两宗都是 open）。不造数据，模板核对只会得到
+    「数据没覆盖」—— 那是**数据问题、不是页面缺陷**（正确修法是补数据，
+    往豁免名单里加字段是错的，加完就再也抓不到真·没产出的字段了）。
+
+    四个写命令的顺序本身就是契约（与 `verify_frontend_e2e.js` 的 ⑯-d 同口径）：
+      登记（**必须带 `change_category`**，否则应用会被拒）→ 进入复核 →
+      批准（带**依据版本的精确 id** 与**结构化修改内容**）→ 应用。
+    ⚠️ 改动**真落库**（写新版本 + 生成复核任务），所以只在运行器建的临时库上跑。
+    """
+    print("\n== ㉛ 案件页「应用变更」（真写造 approved 形态）==", flush=True)
+    a = _anchors(w)  # ⚠️ 别写 `w.a` —— 锚点挂在模块级 `_STATE`，取法是这个 helper
+    if not a.token_owner:
+        w.rep.rec("㉛ 前置 · owner token 可用", False, "未取到")
+        return
+
+    items = (
+        (
+            api_get(f"/entrust/assignments/{ENTRUST_ASSIGNMENT_ID}/artifacts", a.token_owner) or {}
+        ).get("items")
+    ) or []
+    # 必须挑**在该变更类别的复核候选里**的成果类型，否则复核范围为空、revalidation 仍没数据
+    target = next(
+        (
+            x
+            for x in items
+            if x.get("artifact_type") == "customer_quote" and x.get("current_revision_id")
+        ),
+        None,
+    )
+    w.rep.rec(
+        "㉛ 前置 · 有带生效版本的 customer_quote 成果（复核候选里的类型）",
+        target is not None,
+        f"artifacts={len(items)}",
+    )
+    if not target:
+        return
+    art_id = int(target["artifact_id"])
+    basis_rev_id = int(target["current_revision_id"])
+    # ⚠️ 三个写命令各带**唯一**幂等键：委托写端点不带 `Idempotency-Key` 会直接 400
+    #    （实测回执 `{"detail":"写操作必须提供 Idempotency-Key 请求头"}`）。
+    tag = str(time.time_ns())
+
+    st1, r1 = api_post(
+        f"/entrust/assignments/{ENTRUST_ASSIGNMENT_ID}/exceptions",
+        a.token_owner,
+        {
+            "kind": "change_request",
+            "title": "走查㉛·变更：货量调整",
+            "severity": "medium",
+            "impact_kind": "review-required",
+            "change_category": "cargo_quantity_category",
+            "links": [{"target_kind": "artifact", "target_id": art_id}],
+        },
+        idem_key=f"walk31-case-{tag}",
+    )
+    cid = int((r1 or {}).get("case_id") or 0)
+    rev = int((r1 or {}).get("revision_no") or 0)
+    w.rep.rec(
+        "㉛ 前置 · 登记变更案件（带 change_category）",
+        st1 == 200 and cid > 0,
+        f"HTTP {st1} case_id={cid} {str(r1)[:140]}",
+    )
+    if not cid:
+        return
+
+    st2, r2 = api_post(
+        f"/entrust/exceptions/{cid}/decision",
+        a.token_owner,
+        {"expected_revision": rev, "to_status": "in_review"},
+        idem_key=f"walk31-review-{tag}",
+    )
+    rev = int((r2 or {}).get("revision_no") or rev)
+    w.rep.rec("㉛ 前置 · 进入复核（open → in_review）", st2 == 200, f"HTTP {st2}")
+
+    base = (
+        (
+            (api_get(f"/entrust/artifacts/{art_id}", a.token_owner) or {}).get("current_revision")
+            or {}
+        ).get("payload")
+    ) or {}
+    st3, r3 = api_post(
+        f"/entrust/exceptions/{cid}/decision",
+        a.token_owner,
+        {
+            "expected_revision": rev,
+            "to_status": "approved",
+            "decision_note": "走查㉛ 批准",
+            "basis_revision_id": basis_rev_id,
+            "approved_changes": {f"artifact#{art_id}": {**base, "note": "走查㉛：变更应用"}},
+        },
+        idem_key=f"walk31-approve-{tag}",
+    )
+    rev = int((r3 or {}).get("revision_no") or rev)
+    w.rep.rec(
+        "㉛ 前置 · 批准（依据版本 id + 结构化修改内容）",
+        st3 == 200,
+        f"HTTP {st3} {str(r3)[:100]}",
+    )
+
+    _STATE["apply_case_id"] = cid
+    _STATE["apply_rev"] = rev
+    _STATE["apply_artifact_id"] = art_id
+
+    # ---- 页面：approved 形态 ----
+    w.login_as(CODE_OWNER)
+    if not w.enter_role("owner", OWNER):
+        w.rep.rec("㉛ 前置 · 组织经理工作台进入", False, w.c.current_path())
+        return
+    w.c.nav("reLaunch", f"/{CASE}?case_id={cid}", CASE)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    w.rep.rec("㉛ approved 态案件页 ready", d.get("view") == "ready", str(d.get("view")))
+    w.shot("31-案件页-已批准")
+
+    appr = d.get("approval") or {}
+    n_tg = len(appr.get("targets") or [])
+    w.rep.rec(
+        "㉛ 批准快照摘要到位（先看清将发生什么，再点确认）",
+        bool(appr.get("categoryLabel")) and n_tg == 1,
+        f"categoryLabel={appr.get('categoryLabel')} targets={n_tg}",
+    )
+    n_apply = w.c.count('[data-act-apply="1"]')
+    w.rep.rec("㉛ 「查看并应用已批准的变更」锚点唯一命中", n_apply == 1, f"n={n_apply}")
+    w.rep.rec(
+        "㉛ 未应用时「复核传播」为空（顺序契约：先应用、再传播）",
+        w.c.count(".rv-item") == 0,
+        f"n={w.c.count('.rv-item')}",
+    )
+
+    w.c.tap('[data-act-apply="1"]')
+    time.sleep(1.0)
+    w.shot("31-案件页-应用确认条")
+    n_box = w.c.count(".apply-box")
+    n_sub = w.c.count('[data-act-apply-submit="1"]')
+    n_can = w.c.count('[data-act-apply-cancel="1"]')
+    w.rep.rec(
+        "㉛ 真点击展开**页内确认条**（不是 wx.showModal —— 弹层不在渲染树里、工具点不到）",
+        n_box == 1 and n_sub == 1 and n_can == 1,
+        f"box={n_box} submit={n_sub} cancel={n_can}",
+    )
+    n_key = w.c.count(".apply-target .apply-key")
+    w.rep.rec("㉛ 确认条列出受影响项（不是只给一个空按钮）", n_key >= 1, f"n={n_key}")
+
+    w.c.tap('[data-act-apply-cancel="1"]')
+    time.sleep(0.8)
+    n_box2 = w.c.count(".apply-box")
+    w.rep.rec(
+        "㉛ 「取消」能收回确认条（点错了回得去）",
+        n_box2 == 0 and w.c.count('[data-act-apply="1"]') == 1,
+        f"box={n_box2}",
+    )
+
+    # ---- 真正应用：apply 只带 expected_revision，改什么只来自批准快照 ----
+    w.c.tap('[data-act-apply="1"]')
+    time.sleep(0.8)
+    w.c.tap('[data-act-apply-submit="1"]')
+    d2 = w.wait_data(
+        lambda x: (x.get("revalidation") or []) or x.get("canApply") is False,
+        tries=50,
+        gap=0.6,
+    )
+    w.shot("31-案件页-应用后-复核传播")
+    rv = d2.get("revalidation") or []
+    w.rep.rec("㉛ 真点击「确认应用」后出现「复核传播」清单", len(rv) >= 1, f"n={len(rv)}")
+    w.rep.rec(
+        "㉛ 应用后不再给「应用变更」入口（已应用不可重复应用）",
+        d2.get("canApply") is False,
+        str(d2.get("canApply")),
+    )
+    w.rep.rec(
+        "㉛ 复核清单每项带复核任务号与区域（不是空壳）",
+        bool(rv) and all(x.get("reviewTaskId") and x.get("area") for x in rv),
+        str(rv[:1])[:140],
+    )
+    n_item = w.c.count(".rv-item")
+    w.rep.rec(
+        "㉛ 「复核传播」卡片真的渲染出来（DOM 条目数与数据一致）",
+        n_item == len(rv) and n_item >= 1,
+        f"dom={n_item} data={len(rv)}",
+    )
+
+
+def sec_32(w: Walker) -> None:
+    """㉜ 成果页「待复核」徽标（A2 五之四 / ENT-041）—— 依赖 ㉛ 应用后留下的复核项。
+
+    ⚠️ 这是**只读**视图：复核任务在任务页完成、标记随之解除（AC-12）
+    ⇒ 本节的正确断言是「徽标出现且带区域与任务号」，
+    **不是**「能在这里把它消掉」（那会去验一个不存在的入口）。
+    """
+    print("\n== ㉜ 成果页「待复核」徽标 ==", flush=True)
+    a = _anchors(w)
+    cid = _STATE.get("apply_case_id")
+    if not (cid and a.token_owner):
+        w.rep.rec("㉜ 前置 · ㉛ 已应用并留下复核项", False, "㉛ 未产出 case_id")
+        return
+
+    detail = api_get(f"/entrust/exceptions/{cid}", a.token_owner) or {}
+    rv = detail.get("revalidation") or []
+    art_id = next(
+        (
+            int(x["target_id"])
+            for x in rv
+            if x.get("target_kind") == "artifact" and x.get("target_id")
+        ),
+        None,
+    )
+    w.rep.rec(
+        "㉜ 前置 · 从 REST 复核项拿到它指向的成果 id",
+        art_id is not None,
+        f"art_id={art_id} rv={len(rv)}",
+    )
+    if not art_id:
+        return
+
+    w.login_as(CODE_OWNER)
+    w.enter_role("owner", OWNER)
+    w.c.nav("reLaunch", f"/{ARTIFACT}?artifact_id={art_id}", ARTIFACT)
+    d = w.wait_data(
+        lambda x: (x.get("artifact") or {}).get("id") or x.get("view") not in (None, "", "loading"),
+        tries=40,
+        gap=0.5,
+    )
+    w.shot("32-成果页-待复核徽标")
+    nr = ((d.get("artifact") or {}).get("needsRevalidation")) or {}
+    w.rep.rec("㉜ 成果页带上 needsRevalidation（派生自复核项）", bool(nr), str(nr)[:120])
+    n_title = w.c.count(".art-rv-title")
+    n_line = w.c.count(".art-rv-line")
+    w.rep.rec("㉜ 徽标标题真的渲染出「待复核」（有元素、不是空白）", n_title == 1, f"n={n_title}")
+    w.rep.rec(
+        "㉜ 徽标给出复核区域与复核任务号（不是空壳）",
+        bool(nr.get("areasText")) and bool(nr.get("reviewTaskIdsText")) and n_line >= 2,
+        f"areas={nr.get('areasText')} tasks={nr.get('reviewTaskIdsText')} lines={n_line}",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -3079,6 +3403,8 @@ SECTIONS = {
     "28": sec_28,
     "29": sec_29,
     "30": sec_30,
+    "31": sec_31,
+    "32": sec_32,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -3114,6 +3440,10 @@ DEFAULT_ORDER = [
     "28",
     "29",
     "30",
+    # A2 五之四（ENT-041）：㉛ 真写造 approved 形态 → 应用；㉜ 依赖 ㉛ 留下的复核项。
+    # ⚠️ 31 → 32 是一条链（32 从 REST 复原核项指向的成果），单跑 32 会明确失败。
+    "31",
+    "32",
     # ENT-035 补齐的未迁移章节（旧轨有、换轨后一直记 not-run 的 12 章）
     "4b",
     "5",
@@ -3235,7 +3565,26 @@ def main() -> int:
         print("  FAIL:", f["step"], "|", f["note"], flush=True)
 
     errs = client.errors()
-    print("[运行期 console error]", (errs[:900] if errs else "(无)"), flush=True)
+    noise, others = split_console_errors(errs)
+    if not (noise or others):
+        print("[运行期 console error] (无)", flush=True)
+    else:
+        print(
+            f"[运行期 console] 开窗噪声 {len(noise)} 条 / 其余 {len(others)} 条"
+            "（两桶都原样打印，不隐藏，也不自动判失败）",
+            flush=True,
+        )
+        if noise:
+            print(
+                "[console·开窗噪声] " + " ｜ ".join(x.replace("\n", " ")[:180] for x in noise),
+                flush=True,
+            )
+        if others:
+            print(
+                "[console·其余] " + " ｜ ".join(x.replace("\n", " ")[:400] for x in others),
+                flush=True,
+            )
+        print("[console·原文]", errs[:900], flush=True)
     print("[截图目录]", shots, flush=True)
 
     with open(os.path.join(shots, "summary.json"), "w", encoding="utf-8") as fh:
@@ -3249,6 +3598,8 @@ def main() -> int:
                 "results": rep.results,
                 "consoleError": errs,
                 "consoleErrorDetected": bool(errs.strip()),
+                "consoleNoiseCount": len(noise),
+                "consoleOtherCount": len(others),
                 "shots": shots,
             },
             fh,
