@@ -158,8 +158,13 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
     check('已进入船东工作台', h.log.indexOf('switchTab /pages/owner/owner') !== -1)
     check('没有弹任何失败提示', !h.log.some((l) => /MODAL|TOAST/.test(l)),
       JSON.stringify(h.log.filter((l) => /MODAL|TOAST/.test(l))))
-    check('token 里的角色已是 owner（不是登录默认的 shipper）',
-      jwtPayload(h.token()).role === 'owner', String(jwtPayload(h.token()).role))
+    check('token 里的角色快照已是 owner（不是登录默认的 shipper）',
+      jwtPayload(h.token()).role_snapshot === 'owner', String(jwtPayload(h.token()).role_snapshot))
+    // ⚠️ 快照字段名 2026-09-15 由 `role` 改为 `role_snapshot`（DR-0017 方案 A）：
+    //    旧名会被读成"每会话角色"，而实际语义是**账号级单值**（判权读 DB 的 user.current_role）。
+    //    这条反向断言把裁决钉住 —— 谁把旧名加回来就红。
+    check('token 里不得再有旧字段名 role（它是留痕、不是判权依据）',
+      !('role' in jwtPayload(h.token())), JSON.stringify(Object.keys(jwtPayload(h.token()))))
     check('loading 遮罩已复位（不会吞掉点击）', h.self.data.logging === false)
     check('链路顺序 login → bind-role → switch-role 全部命中',
       ['/auth/login', '/auth/bind-role', '/auth/switch-role'].every((u) => h.log.some((l) => l.indexOf(u) !== -1)))
@@ -185,7 +190,8 @@ const bullet = (log) => log.forEach((l) => console.log('   · ' + l))
     bullet(h.log)
     check('已进入货主工作台', h.log.indexOf('switchTab /pages/shipper/shipper') !== -1)
     check('没有弹任何失败提示', !h.log.some((l) => /MODAL|TOAST/.test(l)))
-    check('token 里的角色是 shipper', jwtPayload(h.token()).role === 'shipper', String(jwtPayload(h.token()).role))
+    check('token 里的角色快照是 shipper',
+      jwtPayload(h.token()).role_snapshot === 'shipper', String(jwtPayload(h.token()).role_snapshot))
     check('身份已换到货主演示账号（seed-shipper）',
       h.storage.dev_device_code === 'seed-shipper', JSON.stringify(h.storage.dev_device_code))
     const od = await apiGet('/api/v1/order/orders?size=100', h.token())
