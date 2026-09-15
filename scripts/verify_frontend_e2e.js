@@ -1868,6 +1868,148 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
       }
     }
 
+    // ── ⑯-d A2 五之四（ENT-041）：真写造一个变更案件，走查「应用变更 / 复核传播」──
+    //
+    // 为什么必须**真写**：`approval.targets[*]` 与 `revalidation[*]` 的字段**只在这两种形态下**
+    // 产出（批准快照 / 复核项），而演示种子**没有**这类案件。不造数据，模板核对就会报
+    // 「模板读取但数据与静态配置均未产出」—— 那是**数据没覆盖**，不是页面缺陷；
+    // 正确的修法是**补数据**，往豁免名单里加字段是错的（加完之后这套核对就再也抓不到
+    // 真·没产出的字段了）。
+    //
+    // 四个写命令的顺序本身就是契约：登记（必须带变更类别，否则应用会被拒）→ 进入复核 →
+    // 批准（带依据版本的精确 id 与结构化修改内容）→ 应用。缺任一步，后面的字段都不会出现。
+    //
+    // 走查**两次**，因为两个形态要覆盖的东西不同：
+    //   · `approved`：能点「应用变更」，`approval` 摘要有内容、复核清单**为空**；
+    //   · `applied` ：不能应用，「复核传播」有内容。
+    // 只走一种，另一种形态的模板字段永远拿不到运行时值。
+    if (!WRITE_ENABLED) {
+      const targetAid = Number(caseRows.length ? caseRows[0].assignment_id : firstAid)
+      const arts = ((entrustAssignmentArtifacts[targetAid] || {}).items) || []
+      // 必须挑**在该类别复核候选里**的成果类型，否则复核范围为空、`revalidation` 仍没数据
+      const target = arts.filter(function (x) { return x.artifact_type === 'customer_quote' })[0]
+      if (!target || !target.current_revision_id) {
+        note('⑯-d · 该委托没有带生效版本的 customer_quote 成果，A2 五之四 真数据走查跳过')
+      } else {
+        const nk = () => 'e2e-a2-' + Date.now() + '-' + Math.floor(Math.random() * 1e6)
+        const P4 = '⑯-d A2 五之四'
+        let cid = 0
+        let caseNo = 0
+        let step = '登记'
+        try {
+          WRITE_ENABLED = true
+          const r1 = await pageWrite('POST', '/entrust/assignments/' + targetAid + '/exceptions', {
+            kind: 'change_request',
+            title: 'e2e 变更：货量调整',
+            severity: 'medium',
+            impact_kind: 'review-required',
+            change_category: 'cargo_quantity_category',
+            links: [{ target_kind: 'artifact', target_id: target.artifact_id }]
+          }, nk())
+          if (r1.status !== 200) throw new Error('登记 ' + r1.status + ' ' + JSON.stringify(r1.data).slice(0, 140))
+          cid = Number(r1.data.case_id)
+          caseNo = Number(r1.data.revision_no)
+
+          step = '进入复核'
+          const r2 = await pageWrite('POST', '/entrust/exceptions/' + cid + '/decision', {
+            expected_revision: caseNo, to_status: 'in_review'
+          }, nk())
+          if (r2.status !== 200) throw new Error('进入复核 ' + r2.status + ' ' + JSON.stringify(r2.data).slice(0, 140))
+          caseNo = Number(r2.data.revision_no)
+
+          step = '批准'
+          // `approved_changes` 必须**一次给对**：应用只认批准快照，而某条受影响项若没有
+          // 经过批准的修改内容，应用会直接 400。键格式 `artifact#<id>` 是 `_change_key`
+          // 的口径；值就是该目标的**新 payload**（不是 `{payload:{…}}` 的包裹）。
+          // 以当前生效版本的 payload 为底改一个字段 —— 这样字段契约必然合法。
+          const ad = await api('GET', '/entrust/artifacts/' + target.artifact_id, { token: ownerToken })
+          const basePayload = ((((ad || {}).data || {}).current_revision || {}).payload) || {}
+          const approvedChanges = {}
+          approvedChanges['artifact#' + target.artifact_id] =
+            Object.assign({}, basePayload, { note: 'e2e 变更应用' })
+          const r3 = await pageWrite('POST', '/entrust/exceptions/' + cid + '/decision', {
+            expected_revision: caseNo,
+            to_status: 'approved',
+            decision_note: 'e2e 批准',
+            basis_revision_id: Number(target.current_revision_id),
+            approved_changes: approvedChanges
+          }, nk())
+          if (r3.status !== 200) throw new Error('批准 ' + r3.status + ' ' + JSON.stringify(r3.data).slice(0, 140))
+          caseNo = Number(r3.data.revision_no)
+        } catch (e) {
+          fail(P4 + ' · ' + step + ' 失败（后续走查无法进行）', e.message)
+          cid = 0
+        } finally {
+          WRITE_ENABLED = false
+        }
+
+        if (cid) {
+          const detail = await api('GET', '/entrust/exceptions/' + cid, { token: ownerToken })
+          if (detail.status === 200) entrustCaseDetails[String(cid)] = detail.data
+          const s1 = await walk(P4 + ' · 已批准 · #' + cid, 'pages/entrust/case/case', null,
+            { role: 'owner', arg: { case_id: String(cid) } }, ['onLoad'])
+          if (s1) {
+            const d = s1._final()
+            if (d.view !== 'ready') {
+              fail(P4 + ' · 已批准态未落 ready', String(d.view) + ' / ' + String(d.viewHint))
+            } else if (d.canApply !== true) {
+              fail(P4 + ' · 已批准却点不到「应用变更」（能力位或批准快照没到位）',
+                JSON.stringify({ canApply: d.canApply, approval: !!d.approval, caps: (d.capabilities || {}).can_apply_change }))
+            } else if (!(d.approval || {}).targets || (d.approval.targets || []).length !== 1) {
+              fail(P4 + ' · 批准快照摘要的目标数与批准内容不符',
+                JSON.stringify((d.approval || {}).targets))
+            } else if ((d.revalidation || []).length !== 0) {
+              fail(P4 + ' · 未应用就有复核项（顺序错了：应该先应用再传播）',
+                String((d.revalidation || []).length))
+            } else {
+              ok()
+            }
+            collect('pages/entrust/case/case', path.join(ROOT, 'miniapp/pages/entrust/case/case.js'), d)
+          }
+
+          // 应用（只带 `expected_revision`：修改内容只来自批准快照）
+          let appliedOk = false
+          try {
+            WRITE_ENABLED = true
+            const cur =
+              ((entrustCaseDetails[String(cid)] || {}).case || {}).revision_no
+            const r4 = await pageWrite('POST', '/entrust/exceptions/' + cid + '/apply',
+              { expected_revision: Number(cur) }, nk())
+            appliedOk = r4.status === 200
+            if (!appliedOk) {
+              fail(P4 + ' · 应用被拒 ' + r4.status + '：' + JSON.stringify(r4.data).slice(0, 160))
+            }
+          } finally {
+            WRITE_ENABLED = false
+          }
+
+          const d2r = await api('GET', '/entrust/exceptions/' + cid, { token: ownerToken })
+          if (d2r.status === 200) entrustCaseDetails[String(cid)] = d2r.data
+          const s2 = await walk(P4 + ' · 已应用 · #' + cid, 'pages/entrust/case/case', null,
+            { role: 'owner', arg: { case_id: String(cid) } }, ['onLoad'])
+          if (s2) {
+            const d = s2._final()
+            if (d.view !== 'ready') {
+              fail(P4 + ' · 已应用态未落 ready', String(d.view) + ' / ' + String(d.viewHint))
+            } else if (appliedOk) {
+              if ((d.revalidation || []).length === 0) {
+                fail(P4 + ' · 已应用却没有复核项（变更传播没生成，或详情没投影）')
+              } else if (d.canApply === true) {
+                fail(P4 + ' · 已应用仍可再次应用（状态维没生效）', String(d.canApply))
+              } else {
+                ok()
+              }
+              const r0 = (d.revalidation || [])[0] || {}
+              if (!r0.area || !r0.targetText || !r0.revisionText || !r0.taskTitle || !r0.taskStatusLabel) {
+                fail(P4 + ' · 复核项字段不全（界面会显示空白）', JSON.stringify(r0).slice(0, 160))
+              } else ok()
+            }
+            collect('pages/entrust/case/case', path.join(ROOT, 'miniapp/pages/entrust/case/case.js'), d)
+          }
+        }
+      }
+    }
+
     // ⑯-a 登记案件页：非法入参被守卫拦下（且**不发起取数**）
     for (const [tag, arg] of [['缺参', {}], ['非法编号', { assignment_id: '../../x' }]]) {
       const s = await walk('⑯ 登记案件 · ' + tag, 'pages/entrust/case-create/case-create', null,
