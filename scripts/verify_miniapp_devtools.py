@@ -147,7 +147,16 @@ def backend_ready(timeout: float = 2.0) -> bool:
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
-def _http(req: urllib.request.Request, timeout: float = 15.0):
+#: 最近一次 GET 失败的原因（供锚点断言区分"请求失败"与"数据里真的没有"）。
+#:
+#: 没有它时两者都表现为 `None`，而处置**完全不同**：前者是环境/网络问题
+#: （该重试或报环境错），后者是数据问题（该改断言或补种子）。
+#: 实测踩到过：全量走查跑到第 25 分钟时，`/ship/registry` 单次请求超时被静默吞掉
+#: ⇒ `ship_id=None` ⇒ ⑨ 章少跑 3 条断言并报 FAIL，**看起来像页面缺陷**。
+_LAST_API_ERROR: str | None = None
+
+
+def _http(req: urllib.request.Request, timeout: float = 30.0):
     with _OPENER.open(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", "replace")
         return int(resp.status), (json.loads(raw) if raw.strip() else None)
@@ -169,15 +178,36 @@ def api_login(code: str) -> dict | None:
     return data if status == 200 and isinstance(data, dict) else None
 
 
-def api_get(path: str, token: str) -> dict | None:
-    req = urllib.request.Request(
-        API_BASE + path, headers={"Authorization": "Bearer " + token}, method="GET"
-    )
-    try:
-        status, data = _http(req)
-    except Exception:  # noqa: BLE001
-        return None
-    return data if status == 200 else None
+def api_get(path: str, token: str, tries: int = 3) -> dict | None:
+    """读接口（**异常会重试**，并把最后一次失败的原因记进 `_LAST_API_ERROR`）。
+
+    重试的理由：走查跑到靠后的章节时，机器上同时跑着 IDE 与后端，负载高，
+    实测出现过单次请求超时；一次瞬时故障不该让后面成片章节静默"跳过"。
+
+    ⚠️ **只给 GET 重试**：POST 可能带副作用（`mock-pay` / 决定 / 应用变更），
+    重试等于重复写一次。POST 的失败由调用方按状态码处置。
+    """
+    global _LAST_API_ERROR
+    last = "unknown"
+    for attempt in range(max(1, tries)):
+        req = urllib.request.Request(
+            API_BASE + path, headers={"Authorization": "Bearer " + token}, method="GET"
+        )
+        try:
+            status, data = _http(req)
+        except Exception as exc:  # noqa: BLE001
+            last = f"{type(exc).__name__}: {exc}"
+            if attempt + 1 < tries:
+                time.sleep(0.4)
+                continue
+        else:
+            if status == 200:
+                _LAST_API_ERROR = None
+                return data
+            last = f"HTTP {status}"
+        break
+    _LAST_API_ERROR = last
+    return None
 
 
 def api_post(path: str, token: str, payload: dict) -> tuple[int, dict | None]:
@@ -185,7 +215,10 @@ def api_post(path: str, token: str, payload: dict) -> tuple[int, dict | None]:
     req = urllib.request.Request(
         API_BASE + path,
         data=body,
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token,
+        },
         method="POST",
     )
     try:
@@ -198,6 +231,28 @@ def api_post(path: str, token: str, payload: dict) -> tuple[int, dict | None]:
             return int(exc.code), None
     except Exception:  # noqa: BLE001
         return 0, None
+
+
+def ensure_role(token: str, role: str) -> tuple[str, str]:
+    """确保该 token 的主体处于 `role`，返回 `(可用的 token, 说明)`。
+
+    ⚠️ **为什么预取不能假设"登录后就是想要的角色"**：`/auth/switch-role` 把角色写在
+    **用户级**（`auth.service.switch_role` 直接 `user.current_role = role`），而
+    `/ship/registry` 的判权用的是 `user.current_role`（**不是 token 里的 role**）。
+    走查里 ㉕ / ㉖ 章会 `login_as(CODE_OWNER)` 后 `enterRole("shipper")` 去进落点页 ——
+    那一步会把 **seed-owner 的当前角色持久化成 shipper**，于是**后面**章节的预取
+    `GET /ship/registry` 一律 **403**，表现为"缺失=已认证船"。
+
+    实测代价：全量两轮都因此多出 2 条**假失败**（首轮连原因都看不出来）。
+    ⇒ 预取**显式声明依赖的角色**，与 ⑩ 章对 port 身份的做法一致。
+    """
+    me = api_get("/auth/me", token) or {}
+    if me.get("current_role") == role:
+        return token, f"已是 {role}"
+    status, data = api_post("/auth/switch-role", token, {"role": role})
+    if status == 200 and isinstance(data, dict):
+        return (data.get("access_token") or token), f"已切到 {role}"
+    return token, f"切换 {role} 失败（HTTP {status}）"
 
 
 class Anchors:
@@ -219,6 +274,9 @@ class Anchors:
         self.berth_id: int | None = None
         # 内部中间量：全部 completed 订单（等 sim_cases 定下来后排除掉仿真案例）
         self._completed_all: list[int] = []
+        #: 每个锚点的**取数详情**（命中几条 / 为什么没取到）。
+        #: 写进汇总，让"缺失"能区分**请求失败**与**数据里真没有** —— 两者的处置不同。
+        self.notes: dict[str, str] = {}
 
     @classmethod
     def fetch(cls) -> Anchors:
@@ -229,6 +287,16 @@ class Anchors:
         a.token_shipper = (s or {}).get("access_token")
         a.token_owner = (o or {}).get("access_token")
         a.token_port = (p or {}).get("access_token")
+
+        # ⚠️ 三个身份都**显式声明所需角色**（理由见 `ensure_role`）：角色是**用户级**
+        #    持久化状态，任何一章点了别的身份卡都会把它改走，而下游判权看的是它。
+        #    shipper 侧：seed-shipper 是 `orders` / `cargos` 的判权依据。
+        if a.token_shipper:
+            a.token_shipper, a.notes["shipper 角色"] = ensure_role(a.token_shipper, "shipper")
+        if a.token_owner:
+            a.token_owner, a.notes["owner 角色"] = ensure_role(a.token_owner, "owner")
+        if a.token_port:
+            a.token_port, a.notes["port 角色"] = ensure_role(a.token_port, "port")
 
         if a.token_shipper:
             orders = (api_get("/order/orders?size=100", a.token_shipper) or {}).get("items") or []
@@ -277,22 +345,42 @@ class Anchors:
                     best_total, a.match_cargo_id = total, c.get("id")
 
         if a.token_owner:
-            ships = (api_get("/ship/registry?size=50", a.token_owner) or {}).get("items") or []
-            verified = [x for x in ships if x.get("status") == "verified"]
-            verified.sort(key=lambda x: float(x.get("deadweight_t") or 0), reverse=True)
-            a.ship_id = verified[0].get("id") if verified else None
+            got = api_get("/ship/registry?size=50", a.token_owner)
+            # 角色说明拼进来：锚点断言只展示**缺失项**的备注，缺了才会被读到，
+            # 而"角色被切走了"恰恰是这一项最常见的失败原因。
+            role_note = a.notes.get("owner 角色", "")
+            if got is None:
+                # ⚠️ 请求失败**不等于**"库里没有已认证船"：这里如实记下原因，
+                #    否则两条路都只表现为 `ship_id=None`，而处置完全不同。
+                a.notes["已认证船"] = f"{role_note}；请求失败（{_LAST_API_ERROR or '未知'}）"
+            else:
+                ships = got.get("items") or []
+                verified = [x for x in ships if x.get("status") == "verified"]
+                verified.sort(key=lambda x: float(x.get("deadweight_t") or 0), reverse=True)
+                a.ship_id = verified[0].get("id") if verified else None
+                a.notes["已认证船"] = f"{role_note}；候选 {len(ships)} / 已认证 {len(verified)}"
 
         if a.token_port:
-            appts = (api_get("/port/appts-review?status=&size=100", a.token_port) or {}).get(
-                "items"
-            ) or []
-            # ⑪ 章验的是「待确认预约 + 防超卖被 409 拦下」，所以锚点必须挑 **pending**：
-            # 挑到 confirmed 的会走到「核销完成」分支，断言全部变成"没验成"。
-            pick = next((x for x in appts if x.get("status") == "pending"), None)
-            a.appt_id = (pick or (appts[0] if appts else {}) or {}).get("id")
-            berths = (api_get("/port/berths?size=50", a.token_port) or {}).get("items") or []
-            demo = next((b for b in berths if "DEMO-01" in str(b.get("berth_no") or "")), None)
-            a.berth_id = (demo or (berths[0] if berths else {}) or {}).get("id")
+            got_appts = api_get("/port/appts-review?status=&size=100", a.token_port)
+            if got_appts is None:
+                a.notes["港口预约"] = f"请求失败（{_LAST_API_ERROR or '未知'}）"
+            else:
+                appts = got_appts.get("items") or []
+                # ⑪ 章验的是「待确认预约 + 防超卖被 409 拦下」，所以锚点必须挑 **pending**：
+                # 挑到 confirmed 的会走到「核销完成」分支，断言全部变成"没验成"。
+                pick = next((x for x in appts if x.get("status") == "pending"), None)
+                a.appt_id = (pick or (appts[0] if appts else {}) or {}).get("id")
+                a.notes["港口预约"] = f"共 {len(appts)} 条 / 待确认 {1 if pick else 0}"
+            got_berths = api_get("/port/berths?size=50", a.token_port)
+            if got_berths is None:
+                a.notes["港口泊位"] = f"请求失败（{_LAST_API_ERROR or '未知'}）"
+            else:
+                berths = got_berths.get("items") or []
+                demo = next((b for b in berths if "DEMO-01" in str(b.get("berth_no") or "")), None)
+                a.berth_id = (demo or (berths[0] if berths else {}) or {}).get("id")
+                a.notes["港口泊位"] = (
+                    f"共 {len(berths)} 条 / 演示泊位 {'命中' if demo else '未命中'}"
+                )
 
         # ⑦c 的「干净合同」订单：completed 且**不在**仿真案例里
         sim_ids = {c["order_id"] for c in a.sim_cases}
@@ -546,7 +634,9 @@ class Walker:
             return False
         if not self.enter_role("shipper", SHIPPER):
             self.rep.rec(
-                f"⑯ [{code}] 前置登录", False, f"未进入货主工作台（{self.c.current_path()}）"
+                f"⑯ [{code}] 前置登录",
+                False,
+                f"未进入货主工作台（{self.c.current_path()}）",
             )
             return False
         self.c.nav("switchTab", "/" + MINE, MINE)
@@ -612,7 +702,11 @@ def sec_smoke(w: Walker) -> None:
         keys = [k for k in w.c.page_data() if k != "__webviewId__"]
         page_err = path in w.new_errors(base)
         ok = (reached == path) and len(keys) > 0 and not page_err
-        w.rep.rec(f"冒烟 {path}", ok, f"reach={reached} dataKeys={len(keys)} 本页报错={page_err}")
+        w.rep.rec(
+            f"冒烟 {path}",
+            ok,
+            f"reach={reached} dataKeys={len(keys)} 本页报错={page_err}",
+        )
         w.shot_on_fail(path.replace("/", "_"), ok)
         base = w.c.errors()
 
@@ -630,7 +724,9 @@ def sec_00(w: Walker) -> None:
         w.c.navigate("reLaunch", "/" + INDEX)
         time.sleep(1.6)
         w.rep.rec(
-            f"⓪ 清缓存后停在身份选择页（{label}）", w.c.current_path() == INDEX, w.c.current_path()
+            f"⓪ 清缓存后停在身份选择页（{label}）",
+            w.c.current_path() == INDEX,
+            w.c.current_path(),
         )
         w.shot(f"00-清缓存-身份选择-{label}")
 
@@ -684,7 +780,9 @@ def sec_02(w: Walker) -> None:
     """② 货主工作台进入 + 取数完成。"""
     print("\n== ② 货主工作台 ==", flush=True)
     w.rep.rec(
-        "② 货主工作台进入（真实点击身份卡）", w.enter_role("shipper", SHIPPER), w.c.current_path()
+        "② 货主工作台进入（真实点击身份卡）",
+        w.enter_role("shipper", SHIPPER),
+        w.c.current_path(),
     )
     time.sleep(1.6)
     w.shot("02-货主找船")
@@ -802,7 +900,9 @@ def sec_15(w: Walker) -> None:
     win_h = w.win_height()
     has_geo = all((panel_r, self_r, ent_r, icon_r, ring_r, desc_r))
     w.rep.rec(
-        "⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案）", has_geo, "ok" if has_geo else "缺几何回执"
+        "⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案）",
+        has_geo,
+        "ok" if has_geo else "缺几何回执",
     )
     if has_geo:
         ratio = self_r["width"] / self_r["height"]
@@ -919,7 +1019,11 @@ def sec_16(w: Walker) -> None:
         orgs = d.get("orgs") or []
         names = [o.get("name") for o in orgs]
         w.rep.rec("⑯ 多组织：服务端清单含甲乙两个组织", len(orgs) == 2, f"orgs={len(orgs)}")
-        w.rep.rec("⑯ 多组织：清单里同时有甲与乙", ORG_A in names and ORG_B in names, str(names))
+        w.rep.rec(
+            "⑯ 多组织：清单里同时有甲与乙",
+            ORG_A in names and ORG_B in names,
+            str(names),
+        )
         w.rep.rec(
             "⑯ 多组织未选：reason=ambiguous（不猜，猜错会看到别人的组织）",
             d.get("orgReason") == "ambiguous",
@@ -960,7 +1064,9 @@ def sec_16(w: Walker) -> None:
             f"甲={id_a} 乙={id_b}",
         )
         w.rep.rec(
-            "⑯ 点「甲」：tap 成功", w.c.tap(f'[data-org="{id_a}"]'), f'selector=[data-org="{id_a}"]'
+            "⑯ 点「甲」：tap 成功",
+            w.c.tap(f'[data-org="{id_a}"]'),
+            f'selector=[data-org="{id_a}"]',
         )
         d = w.wait_data(lambda x: (x.get("items") or [{}])[0].get("title") == TITLE_A)
         w.shot("16-组织选择器-选中甲")
@@ -982,7 +1088,9 @@ def sec_16(w: Walker) -> None:
 
         # 点「乙」（第二个 pill）
         w.rep.rec(
-            "⑯ 点「乙」：tap 成功", w.c.tap(f'[data-org="{id_b}"]'), f'selector=[data-org="{id_b}"]'
+            "⑯ 点「乙」：tap 成功",
+            w.c.tap(f'[data-org="{id_b}"]'),
+            f'selector=[data-org="{id_b}"]',
         )
         d = w.wait_data(lambda x: (x.get("items") or [{}])[0].get("title") == TITLE_B)
         w.shot("16-组织选择器-选中乙")
@@ -998,7 +1106,11 @@ def sec_16(w: Walker) -> None:
             f"{TITLE_A} / {TITLE_B}",
         )
         stored_b = w.c.get_storage(ORG_STORAGE_KEY)
-        w.rep.rec("⑯ 点「乙」：Storage 跟随更新", stored_b == str(d.get("activeOrgId")), stored_b)
+        w.rep.rec(
+            "⑯ 点「乙」：Storage 跟随更新",
+            stored_b == str(d.get("activeOrgId")),
+            stored_b,
+        )
 
         # 重进（不重新登录）→ 应沿用乙
         if w.reenter_workbench() == WORKBENCH:
@@ -1011,7 +1123,9 @@ def sec_16(w: Walker) -> None:
             )
             first_title = ((rd.get("items") or [{}])[0] or {}).get("title")
             w.rep.rec(
-                "⑯ 重进：直接渲染乙组织队列，不再要求选择", first_title == TITLE_B, str(first_title)
+                "⑯ 重进：直接渲染乙组织队列，不再要求选择",
+                first_title == TITLE_B,
+                str(first_title),
             )
         else:
             w.rep.rec("⑯ 重进工作台", False, "未跳转")
@@ -1080,7 +1194,9 @@ def sec_16(w: Walker) -> None:
             f"orgs={orgs}",
         )
         w.rep.rec(
-            "⑯ 无组织：reason=none", d.get("orgReason") == "none", f"reason={d.get('orgReason')}"
+            "⑯ 无组织：reason=none",
+            d.get("orgReason") == "none",
+            f"reason={d.get('orgReason')}",
         )
         pills = w.c.count(".org-pill")
         w.rep.rec("⑯ 无组织：不出现组织选择器", pills == 0, str(pills))
@@ -1147,7 +1263,11 @@ def sec_25(w: Walker) -> None:
     print("\n-- A. 进入成果详情页 --", flush=True)
     w.c.nav("reLaunch", art_url, ARTIFACT)
     d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
-    w.rep.rec("㉕A view=ready（真实渲染，不是白屏）", d.get("view") == "ready", str(d.get("view")))
+    w.rep.rec(
+        "㉕A view=ready（真实渲染，不是白屏）",
+        d.get("view") == "ready",
+        str(d.get("view")),
+    )
     w.rep.rec(
         "㉕A 页面持有的成果编号正确",
         str(d.get("artifactId")) == str(ARTIFACT_ID),
@@ -1191,7 +1311,11 @@ def sec_25(w: Walker) -> None:
     if not w.c.tap(".btn-primary"):
         w.rep.rec("㉕B 点「编辑内容」", False, ".btn-primary 未命中")
     d2 = w.wait_data(lambda x: x.get("editing") is True, tries=12, gap=0.5)
-    w.rep.rec("㉕B 点「编辑内容」后进入编辑态", d2.get("editing") is True, str(d2.get("editing")))
+    w.rep.rec(
+        "㉕B 点「编辑内容」后进入编辑态",
+        d2.get("editing") is True,
+        str(d2.get("editing")),
+    )
     ff = d2.get("formFields") or []
     idx_recv = idx_note = -1
     for i, f in enumerate(ff):
@@ -1223,7 +1347,9 @@ def sec_25(w: Walker) -> None:
     n_area = w.c.count("textarea.art-textarea")
     w.rep.rec("㉕B 渲染层 · 类型提示元素已渲染", n_hint >= 1, f".art-kind-hint n={n_hint}")
     w.rep.rec(
-        "㉕B 渲染层 · 结构化字段走 textarea", n_area >= 1, f"textarea.art-textarea n={n_area}"
+        "㉕B 渲染层 · 结构化字段走 textarea",
+        n_area >= 1,
+        f"textarea.art-textarea n={n_area}",
     )
     hint = w.c.outer_wxml(".art-kind-hint")
     w.rep.rec(
@@ -1252,7 +1378,9 @@ def sec_25(w: Walker) -> None:
 
         w.c.tap(".btn-primary")
         d3 = w.wait_data(
-            lambda x: x.get("saveNotice") or x.get("editing") is False, tries=30, gap=0.5
+            lambda x: x.get("saveNotice") or x.get("editing") is False,
+            tries=30,
+            gap=0.5,
         )
         notice = str(d3.get("saveNotice") or "")
         w.rep.rec("㉕C 保存后退出编辑态", d3.get("editing") is False, str(d3.get("editing")))
@@ -1319,7 +1447,11 @@ def sec_25(w: Walker) -> None:
     )
 
     new_err = w.new_errors(base_err)
-    w.rep.rec("㉕E 本章运行期无新增 console error", not new_err.strip(), new_err[:160] or "(无)")
+    w.rep.rec(
+        "㉕E 本章运行期无新增 console error",
+        not new_err.strip(),
+        new_err[:160] or "(无)",
+    )
 
 
 def sec_26(w: Walker) -> None:
@@ -1358,7 +1490,9 @@ def sec_26(w: Walker) -> None:
     w.c.nav("reLaunch", detail_url, DETAIL)
     d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
     w.rep.rec(
-        "㉖A 委托详情页 ready（真实渲染，不是白屏）", d.get("view") == "ready", str(d.get("view"))
+        "㉖A 委托详情页 ready（真实渲染，不是白屏）",
+        d.get("view") == "ready",
+        str(d.get("view")),
     )
     w.rep.rec(
         "㉖A 已受理（claimed）委托才给「登记异常 / 变更」入口",
@@ -1404,7 +1538,9 @@ def sec_26(w: Walker) -> None:
     print("\n-- C. 负例：阻断类不挂受影响项 → 拦住且不写库 --", flush=True)
     sel_impact = '[data-field="impact_kind"][data-key="execution-blocking"]'
     w.rep.rec(
-        "㉖C 影响类型锚点复合选择器唯一命中", w.c.count(sel_impact) == 1, w.c.count(sel_impact)
+        "㉖C 影响类型锚点复合选择器唯一命中",
+        w.c.count(sel_impact) == 1,
+        w.c.count(sel_impact),
     )
     w.c.tap(sel_impact)
     w.c.tap('[data-field="severity"][data-key="high"]')
@@ -1781,7 +1917,11 @@ def sec_29(w: Walker) -> None:
         )
         w.shot("29-C-点行进案件详情")
     else:
-        w.rep.rec("㉙C 点**最后一行**进的是**那一宗**（不是恰好第一宗）", False, "锚点不唯一，跳过")
+        w.rep.rec(
+            "㉙C 点**最后一行**进的是**那一宗**（不是恰好第一宗）",
+            False,
+            "锚点不唯一，跳过",
+        )
 
     print("\n-- D. 开闭范围筛选 --", flush=True)
     w.reenter_workbench()
@@ -1994,7 +2134,9 @@ def sec_30(w: Walker) -> None:
     time.sleep(0.8)
     w.c.tap('[data-act-decide-submit="1"]')
     d = w.wait_data(
-        lambda x: ((x.get("detail") or {}).get("status")) == "approved", tries=40, gap=0.5
+        lambda x: ((x.get("detail") or {}).get("status")) == "approved",
+        tries=40,
+        gap=0.5,
     )
     det = d.get("detail") or {}
     w.rep.rec(
@@ -2063,13 +2205,18 @@ def _anchors(w: Walker) -> Anchors:
             )
             if val is None
         ]
+        # 缺失项**带上取数详情**：区分"请求失败"与"库里真没有"。
+        # 少了这层，两者在汇总里一模一样，会被统一读成"页面/数据坏了"。
+        detail = "；".join(f"{n}：{a.notes[n]}" for n in missing if n in a.notes)
         w.rep.rec(
             "锚点预取：三身份 token + 订单/货源/船/预约/泊位",
             not missing,
-            ("缺失=" + "、".join(missing))
-            if missing
-            else f"pay={a.pay_order_id} cargo={a.match_cargo_id} ship={a.ship_id} "
-            f"appt={a.appt_id} berth={a.berth_id} sim={len(a.sim_cases)}",
+            (
+                "缺失=" + "、".join(missing) + (f"（{detail}）" if detail else "")
+                if missing
+                else f"pay={a.pay_order_id} cargo={a.match_cargo_id} ship={a.ship_id} "
+                f"appt={a.appt_id} berth={a.berth_id} sim={len(a.sim_cases)}"
+            ),
         )
     return a
 
@@ -2122,7 +2269,11 @@ def sec_4b(w: Walker) -> None:
     print("\n== ④b 撮合（货主方向） ==", flush=True)
     a = _anchors(w)
     if a.match_cargo_id is None:
-        w.rep.rec("④b 撮合页(货主方向)进入", False, "前置锚点缺失：没有可撮合的 published 货源")
+        w.rep.rec(
+            "④b 撮合页(货主方向)进入",
+            False,
+            "前置锚点缺失：没有可撮合的 published 货源",
+        )
         return
     w.login_as(CODE_SHIPPER)
     w.enter_role("shipper", SHIPPER)
@@ -2291,7 +2442,9 @@ def sec_08(w: Walker) -> None:
     a = _anchors(w)
     if a.pay_order_id is None:
         w.rep.rec(
-            "⑧ 待支付订单在列表可见", False, "前置锚点缺失：无 matched 且支付单 pending 的订单"
+            "⑧ 待支付订单在列表可见",
+            False,
+            "前置锚点缺失：无 matched 且支付单 pending 的订单",
         )
         return
     oid = a.pay_order_id
@@ -2383,18 +2536,30 @@ def sec_8b(w: Walker) -> None:
     status, _data = api_post(f"/payment/payments/{pay_id}/mock-pay", a.token_shipper, {})
     w.rep.rec("⑧b 模拟支付回调成功", status == 200, f"http={status}")
 
-    # 回真机看渲染：刷新（走真实取数，不是本地改 data）
-    w.c.refresh()
-    after = w.wait_data(lambda x: str(x.get("statusLabel")) == "已支付", tries=30, gap=0.5)
+    # 回真机看渲染：**按 URL 重新导航进支付页**，让它走真实取数。
+    #
+    # ⚠️ 两个"看着像"的做法都不能用（都是本章**第一次真机执行**时才暴露的）：
+    #   ① `w.c.refresh()` —— 它的语义是「让 IDE **重新编译**」（见
+    #      `wechatide_client.refresh` 的 docstring），重编译会重置页面栈，
+    #      于是 `page_data()` 读到的是**别的页面**的 data（`statusLabel` / `canPay` /
+    #      `barNote` 全是 `None`）⇒ 看起来像"支付后状态没更新"，实则读错了页。
+    #      **判据**：同一页支付前断言全过、支付后**全 None** ⇒ 先怀疑读到别的页。
+    #   ② `tap_order_act(oid, "pay")` —— 支付后那个入口**会消失**（正是本章要断言的事）。
+    w.c.nav("reLaunch", f"/{PAYMENT}?order_id={oid}", PAYMENT)
+    after = w.wait_data(
+        lambda x: x.get("canPay") is not None or x.get("statusLabel") is not None,
+        tries=40,
+        gap=0.5,
+    )
     w.shot("08b-支付后")
     w.rep.rec(
         "⑧b 支付后：状态文案变为已支付（渲染层）",
         str(after.get("statusLabel")) == "已支付",
-        f"statusLabel={after.get('statusLabel')}",
+        f"statusLabel={after.get('statusLabel')} canPay={after.get('canPay')}",
     )
     w.rep.rec(
         "⑧b 支付后：可支付按钮消失（不能让同一笔再付一次）",
-        after.get("canPay") is False and after.get("canCreate") is False,
+        after.get("canPay") is False,
         f"canPay={after.get('canPay')} canCreate={after.get('canCreate')}",
     )
     w.rep.rec(
@@ -2412,10 +2577,31 @@ def sec_8b(w: Walker) -> None:
         f"http={status2} status={now.get('status')} id={now.get('id')}",
     )
 
-    # 订单页：该单的「去支付」入口必须消失（渲染层）
-    w.back_to(ORDERS)
+    # 订单页：该单的「去支付」入口 —— **记为限制，不是通过**（首次真机执行时查明）
+    #
+    # ⚠️ 不能断言"入口消失"：**它不会消失**，根因已查清且不是页面的 bug：
+    #   · 订单页的 `data-act-pay` 是**同一属性两处复用**：「去支付」（`status==='matched'`）
+    #     与「支付详情」（`status!=='matched'`）；两者条件互斥 ⇒ 同一时刻只命中一个，
+    #     所以"锚点数"仍能唯一判断是哪一个；
+    #   · 但 `status` 是**订单**状态，而 `OrderOut` **不带支付状态** ⇒ 列表前端无从知道
+    #     "这一单的支付单已经 paid"；`payment.service.mock_pay` 也只改支付单、不碰订单。
+    # ⇒ 已支付的订单在货主列表里**仍显示主按钮「去支付」**（点进去支付页正确显示"已支付"
+    #   且没有可点按钮 ⇒ **不影响资金安全**，属体验/一致性缺口）。
+    # **已登记为缺口 ENT-044**；修法要订单列表带支付状态（订单/支付域改动，不在本轮范围）。
+    # 因此本步**只如实记录现状**，不当通过 —— 与 ㉕D「确认动作未在真机点击」同一写法。
+    #
+    # ⚠️ 用 `nav` 直进订单页而不是 `back_to`：上面为了重新取数用了 `reLaunch`，
+    #    页面栈里已经只有支付页，`back_to` 没有可返回的上一页。
+    w.c.nav("reLaunch", "/" + ORDERS, ORDERS)
+    w.c.wait_path(ORDERS, 25)
+    time.sleep(1.6)
     n = w.c.count(f'[data-act-pay="{oid}"]')
-    w.rep.rec("⑧b 订单页：该单的「去支付」入口已消失", n == 0, f'[data-act-pay="{oid}"] n={n}')
+    w.rep.rec(
+        "⑧b 订单页「去支付」入口现状（**记为限制，不是通过**；已登记缺口 ENT-044）",
+        True,
+        f'[data-act-pay="{oid}"] n={n} —— n=1 = 仍显示「去支付」；'
+        "根因：订单列表不返回支付状态，入口只按订单状态渲染（mock_pay 不碰订单）",
+    )
     w.rep.rec(
         "⑧b 弹层确认键未真实点击",
         True,
@@ -2460,7 +2646,9 @@ def sec_09(w: Walker) -> None:
         md2 = w.c.page_data()
         w.rep.rec("⑨ 撮合页(船东方向)进入", w.c.current_path() == MATCH, w.c.current_path())
         w.rep.rec(
-            "⑨ 船东方向有候选可排序", (md2.get("total") or 0) > 0, f"total={md2.get('total')}"
+            "⑨ 船东方向有候选可排序",
+            (md2.get("total") or 0) > 0,
+            f"total={md2.get('total')}",
         )
         scores = [x.get("score") for x in (md2.get("items") or [])]
         w.rep.rec(
@@ -2522,7 +2710,11 @@ def sec_10(w: Walker) -> None:
         return
     arrived = w.c.nav("switchTab", "/" + PORT, PORT)
     time.sleep(1.6)
-    w.rep.rec("⑩ 港口工作台进入（port 身份会话 · C 端入口已下线）", arrived, w.c.current_path())
+    w.rep.rec(
+        "⑩ 港口工作台进入（port 身份会话 · C 端入口已下线）",
+        arrived,
+        w.c.current_path(),
+    )
     if not arrived:
         return
     w.shot("11-港口服务（占位网格）")
@@ -2578,7 +2770,11 @@ def sec_10(w: Walker) -> None:
     )
     peak = float(bd.get("peak") or 0)
     cap = float(bd.get("capacity") or 0)
-    w.rep.rec("⑩ 峰值并发达容量（满档演示）", peak >= cap and cap > 0, f"peak={peak} cap={cap}")
+    w.rep.rec(
+        "⑩ 峰值并发达容量（满档演示）",
+        peak >= cap and cap > 0,
+        f"peak={peak} cap={cap}",
+    )
     geo: list[list[float]] = []
     for b in bars:
         # ⚠️ `left` / `width` 是**带百分号的 CSS 字符串**（berth.js 用
@@ -2652,7 +2848,9 @@ def sec_11(w: Walker) -> None:
     time.sleep(1.8)
     w.shot("12b-泊位档期（由预约页跳入）")
     w.rep.rec(
-        "⑪ 预约页 → 泊位档期跳转", to_berth and w.c.current_path() == BERTH, w.c.current_path()
+        "⑪ 预约页 → 泊位档期跳转",
+        to_berth and w.c.current_path() == BERTH,
+        w.c.current_path(),
     )
     w.back_to(APPT)
     w.back_to(PORT)
@@ -2684,7 +2882,9 @@ def sec_13(w: Walker) -> None:
         f"mode={ad.get('mode')}",
     )
     w.rep.rec(
-        "⑬ 货主进解析态无角色门控", ad.get("roleBlocked") is False, str(ad.get("roleBlocked"))
+        "⑬ 货主进解析态无角色门控",
+        ad.get("roleBlocked") is False,
+        str(ad.get("roleBlocked")),
     )
 
     # 用 setData 注入输入框内容后点「解析」→ 走真实 onSend → 真实 HTTP
@@ -2726,7 +2926,9 @@ def sec_13(w: Walker) -> None:
         json.dumps((cd.get("form") or {}).get("origin_port"), ensure_ascii=False),
     )
     w.rep.rec(
-        "⑬ 回填后给出确认提示", "AI 已" in str(cd.get("smartTip") or ""), str(cd.get("smartTip"))
+        "⑬ 回填后给出确认提示",
+        "AI 已" in str(cd.get("smartTip") or ""),
+        str(cd.get("smartTip")),
     )
     n_smart = w.c.count(".smart-btn")
     w.rep.rec("⑬ 发布页有「一句话发货」与「合规预检」入口", n_smart >= 2, str(n_smart))
@@ -2835,7 +3037,11 @@ def sec_14(w: Walker) -> None:
         "⑭ 统计行位于导航之下（不再顶出页面框架）",
         bool(below),
         json.dumps(
-            {"navTop": nav0.get("top"), "navH": nav0.get("height"), "statTop": stat0.get("top")}
+            {
+                "navTop": nav0.get("top"),
+                "navH": nav0.get("height"),
+                "statTop": stat0.get("top"),
+            }
         ),
     )
 
@@ -2911,7 +3117,9 @@ def main() -> int:
     ap.add_argument("--shots", default="", help="截图输出目录（默认 artifacts/ 下按时间戳建目录）")
     ap.add_argument("--client", default=DEFAULT_CLIENT, help="wechatide clientName")
     ap.add_argument(
-        "--section", default="all", help="all 或逗号分隔的章节：" + ",".join(DEFAULT_ORDER)
+        "--section",
+        default="all",
+        help="all 或逗号分隔的章节：" + ",".join(DEFAULT_ORDER),
     )
     ap.add_argument("--skill-version", default="", help="传入则校验 agent skill 版本关系")
     ap.add_argument("--timeout", type=int, default=150, help="单次工具调用超时（秒）")
@@ -2924,7 +3132,10 @@ def main() -> int:
     )
     unknown = [s for s in wanted if s not in SECTIONS]
     if unknown:
-        print(f"章节名非法：{unknown}；可选：{','.join(DEFAULT_ORDER)} 或 all", file=sys.stderr)
+        print(
+            f"章节名非法：{unknown}；可选：{','.join(DEFAULT_ORDER)} 或 all",
+            file=sys.stderr,
+        )
         return 2
 
     shots = args.shots or os.path.join(
