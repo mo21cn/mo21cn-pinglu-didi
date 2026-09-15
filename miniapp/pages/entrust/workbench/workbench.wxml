@@ -162,7 +162,17 @@
           <view class="card-line card-line-weak">{{item.quantityText}}</view>
           <view class="card-foot row-between">
             <text class="card-meta">#{{item.assignmentId}} · {{item.createdAt}}</text>
-            <text class="card-caret">›</text>
+            <!-- 「打开会话」（DR-0015 / AC-05 的聊天侧入口）：
+                 用 `catchtap` 而不是 `bindtap` —— 卡片整体已 bindtap="onOpen"，
+                 用 bindtap 会**同时**跳详情与会话（两个动作都跑，看起来像"点一次跳了两页"）。
+                 锚点 `data-act-session` 与卡片自己的 `data-id` 分开，才能让走查
+                 **唯一命中**这个动作（同名属性复用会让"点第 i 个动作"失去意义）。 -->
+            <view
+              class="card-act"
+              data-act-session="{{item.assignmentId}}"
+              catchtap="onOpenSession"
+              hover-class="hover-dim"
+            >会话 ›</view>
           </view>
         </view>
       </block>

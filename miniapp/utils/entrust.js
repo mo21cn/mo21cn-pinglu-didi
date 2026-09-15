@@ -987,7 +987,18 @@ function decorateArtifact(artifact, spec) {
     statusClass: artifactStatusClass(status),
     voided: status === 'void',
     currentRevisionId: data.current_revision_id,
-    currentRevisionNo: current.revision_no === undefined ? null : current.revision_no,
+    // 版本号有两个来源，**顺序不能反**：
+    //  · 详情端点（`GET /artifacts/{id}`）把版本嵌在 `current_revision` 里；
+    //  · 单委托清单（`GET /assignments/{id}/artifacts`）给的是**扁平**的
+    //    `current_revision_no` —— 后端注释写明这一对值就是"工作台与聊天卡引用精确版本"的依据。
+    // 这里做一次归一，是为了让**同一份成果在两个端点上拿到同一个版本号**；
+    // 若只认嵌套字段，会话卡会显示成空（`v` 后面什么都没有），而"没版本号"与
+    // "版本号是空的"在界面上分不出来 —— AC-05 要的正是这一行字。
+    currentRevisionNo: current.revision_no === undefined
+      ? (data.current_revision_no === undefined || data.current_revision_no === null
+        ? null
+        : data.current_revision_no)
+      : current.revision_no,
     currentNote: current.note || '',
     currentCreatedAt: current.created_at || '',
     updatedAt: data.updated_at || '',

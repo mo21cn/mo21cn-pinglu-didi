@@ -127,6 +127,16 @@
   color: #C2CCDA;
 }
 
+/* 卡片上的行内动作（如「会话 ›」）。
+   内边距是**必须的**：没有它命中区只有文字本身（几十 rpx），
+   真机上很难点中；走查里也会变成"点了没反应"的偶发失败。 */
+.card-act {
+  font-size: 26rpx;
+  color: #2B6DE5;
+  padding: 8rpx 16rpx;
+  border-radius: 8rpx;
+}
+
 .empty-hint {
   margin-top: 8rpx;
   font-size: 24rpx;

@@ -408,6 +408,27 @@ Page({
     R.go('/pages/index/index', { from: SELF })
   },
 
+  /**
+   * 打开该委托的**专业会话屏**（DR-0015 / AC-05 的聊天侧入口）。
+   *
+   * 为什么落在**每张委托卡片**上而不是页面级一个入口：会话的语义是
+   * 「某张委托的会话」——`session` 页的 `assignment_id` 是必填参数，
+   * 没有"全局会话"这个对象。放在卡片上，`assignment_id` 天然带着，不必再让用户选一次。
+   *
+   * ⚠️ 必须用 `catchtap` 绑定：卡片整体已有 `bindtap="onOpen"`，
+   * 用 `bindtap` 会**同时**触发两者（跳详情 + 跳会话），表现为"点一次跳了两页"。
+   */
+  onOpenSession(e) {
+    const id = e.currentTarget.dataset.actSession
+    if (!id) return
+    R.go('/pages/entrust/session/session?assignment_id=' + encodeURIComponent(String(id)), {
+      from: SELF,
+      fail: function () {
+        wx.showToast({ title: '打开会话失败', icon: 'none' })
+      }
+    })
+  },
+
   onOpen(e) {
     const id = e.currentTarget.dataset.id
     if (!id) return

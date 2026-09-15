@@ -798,7 +798,7 @@ def complete_task(
         )
 
     current = now or utcnow_naive()
-    return _transition(
+    done = _transition(
         session,
         task_id=task_id,
         from_statuses=COMPLETABLE_STATUSES,
@@ -814,6 +814,17 @@ def complete_task(
         },
         now=current,
     )
+
+    # ── AC-12 后半条：完成**复核任务**即解除对应的待复核标记 ──────────────────
+    # 放在 `_transition` 之后（它是自带提交的），因此这两步不是同一个事务。
+    # 失败的方向是**保守**的：任务已完成但标记仍 `open` ⇒ 成果继续不能被设为生效版本。
+    # 反过来（标记解了、复核其实没做）才是危险的，而那种情况在这里不可能出现。
+    from app.modules.entrust import revalidation as reval_svc  # 局部导入：避免成环
+
+    reval_svc.resolve_for_task(
+        session, task_id=task_id, actor_id=actor_id, now=current, commit=True
+    )
+    return done
 
 
 def reopen_task(

@@ -467,3 +467,55 @@ def open_targets(session: Session, *, artifact_ids: list[int]) -> dict[int, dict
 def revalidation_payload(case_id: int, result: dict[str, Any]) -> str:
     """传播结果 → 事件 `payload_json` 文本。"""
     return json.dumps({"case_id": case_id, **result}, ensure_ascii=False)
+
+
+def open_for_artifact(session: Session, artifact_id: int) -> list[dict[str, Any]]:
+    """该成果的**未完成**复核项（AC-12 后半条的判据）。
+
+    返回空列表表示"没有待复核项" ⇒ 可以设为生效版本。
+    """
+    rows = (
+        session.execute(
+            text(
+                "SELECT id, exception_id, area, task_type, review_task_id "
+                "FROM ent_revalidation "
+                "WHERE status = 'open' AND target_kind = 'artifact' AND target_id = :aid "
+                "ORDER BY id"
+            ),
+            {"aid": artifact_id},
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(r) for r in rows]
+
+
+def resolve_for_task(
+    session: Session,
+    *,
+    task_id: int,
+    actor_id: int,
+    now: datetime | None = None,
+    commit: bool = False,
+) -> int:
+    """复核任务完成 ⇒ 对应的待复核项转为 `resolved`（返回改了几行）。
+
+    **为什么把解除路径挂在任务完成上**（而不是另开一个"标记已复核"命令）：
+
+    * 复核任务就是那个待办本身 —— 它被完成，意味着"已经按当前版本核对过"；
+    * 「事实有来源」：`resolved_by` 记的是**完成该任务的人**，不是另一个可以随手点的按钮；
+    * 不新增端点 = 不扩大权限面（谁有权完成该任务，谁就能解除这条标记）。
+
+    ⚠️ **必须幂等**：任务可以被 reopen 再完成，重复调用只应影响仍为 `open` 的行。
+    """
+    current = now or utcnow_naive()
+    result = session.execute(
+        text(
+            "UPDATE ent_revalidation SET status = 'resolved', resolved_at = :ts, "
+            "resolved_by = :actor WHERE review_task_id = :tid AND status = 'open'"
+        ),
+        {"ts": current.strftime("%Y-%m-%d %H:%M:%S"), "actor": actor_id, "tid": task_id},
+    )
+    if commit:
+        session.commit()
+    return int(getattr(result, "rowcount", 0) or 0)
