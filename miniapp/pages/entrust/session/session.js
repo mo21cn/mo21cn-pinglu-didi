@@ -86,7 +86,13 @@ Page({
     ])
       .then(function (res) {
         const list = (res[0] && res[0].items) || []
-        const specs = res[1] || []
+        // ⚠️ `fetchArtifactTypes()` 返回的是**接口载荷**（`{items: [...]}`），不是数组 ——
+        // 这里曾经写成 `res[1] || []` 再 `.forEach`，于是真机上一进本页就抛
+        // `specs.forEach is not a function`，被下面的 catch 吞成一个错误态
+        // （提示"请确认后端已启动"，与真正的原因毫无关系）。
+        // 静态断言只核对"源码里有这段分支"，抓不到它；由 `verify_frontend_e2e.js`
+        // 的会话段用真载荷驱动才暴露出来。
+        const specs = (res[1] && res[1].items) || []
         const byCode = {}
         specs.forEach(function (s) {
           byCode[s.code] = s

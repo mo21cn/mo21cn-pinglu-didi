@@ -225,13 +225,13 @@ const NAV_EDGES = [
   //    这里 push 一次进会话，从会话回工作台走 reuse（复用栈中已有的工作台），
   //    于是 push 图仍然无环，双向切换合法。
   {
-    // DR-0015 §4.3：改指向委托支线自己的会话屏。**仍保留 `pending`** ——
-    // 工作台的「打开会话」入口尚未接线（本轮不改工作台）。
+    // ⚠️ **`pending` 已移除（ENT-040）** —— 工作台委托卡片的「会话」入口已接线
+    // （`workbench.js` 的 `onOpenSession` → `R.go(.../session?assignment_id=…)`），
+    // 代码证据成立。留着 pending 会被 `verify_routes.js` 报"过期 pending"。
     from: 'pages/entrust/workbench/workbench',
     to: 'pages/entrust/session/session',
     strategy: 'push',
-    pending: '工作台「打开会话」入口尚未接入；当前无代码证据',
-    reason: '工作台内发起会话'
+    reason: '工作台内发起会话（委托卡片上的「会话」入口）'
   },
   {
     // DR-0015 §4.3：改指向。⚠️ **`pending` 已移除** —— `session.js` 的 `onBack()`

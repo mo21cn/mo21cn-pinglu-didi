@@ -212,6 +212,12 @@ const WALK_ANCHORS = [
   // 本页的筛选 pill 已经占用了 `data-key`，共用会让选择器歧义（也登记不进这张表）。
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', class: 'link-remove',
     attr: 'data-rm-key', value: '{{item.key}}', handler: 'onRemoveLink' },
+  // ENT-040：工作台委托卡片的「会话」入口（DR-0015 workflow → session 边的代码证据）。
+  // ⚠️ 属性名用 `data-act-session` 而不是复用 `data-id`：卡片自身已用 `data-id` 作为
+  //    "打开详情"的载荷，共用会让"点第 i 张卡的会话"与"点第 i 张卡"分不开 ——
+  //    同一文件同一属性只能登记一次（登记表按 file|attr 去重）。
+  { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'card-act',
+    attr: 'data-act-session', value: '{{item.assignmentId}}', handler: 'onOpenSession' },
   // 受影响项候选行（任务 / 成果共用一份候选表，靠 `target_kind` 区分）
   { kind: 'row', file: 'pages/entrust/case-create/case-create.wxml', class: 'cand-row',
     attr: 'data-id', value: '{{item.target_id}}' },

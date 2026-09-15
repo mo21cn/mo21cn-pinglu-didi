@@ -1758,6 +1758,86 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     }
   }
 
+  // ── 11 会话屏 ·「对话与工作台引用同一成果 ID 与版本」（AC-05 的核心判据）──────
+  // 为什么必须**真载荷**：AC-05 要的是"同一"，不是"两页都能显示一个版本号"。
+  // 若会话页自己另读一份投影（或读"最新版本"而不是"生效版本"），
+  // 两边的数字会在一些时刻偶然相等 —— 只有拿后端事实逐条比对才判得出来。
+  {
+    const aid = entrustWriteProof.assignmentId
+    if (!aid) {
+      note('11 会话屏 · 无委托锚点（成果段没挑到成果），跳过')
+    } else {
+      const beRes = await api('GET',
+        '/entrust/assignments/' + aid + '/artifacts?page=1&size=50', { token: ownerToken })
+      // ⚠️ 这里必须用**模块级**的 `api` / `ownerToken`：`get` 与 `tok` 都是
+      // bootstrap 内的局部闭包，在这一层不可见（写成 `get(...)` / `tok.owner`
+      // 都会在运行期直接 ReferenceError 崩掉，而崩点在最后一段、前面的断言全绿，
+      // 很容易被读成"新增那段只是没跑"）。
+      if (beRes.status !== 200) {
+        fail('11 会话屏 · 取后端成果清单失败', 'GET /assignments/' + aid + '/artifacts → '
+          + beRes.status)
+      }
+      const beItems = ((beRes.data || {}).items) || []
+      // 灌进桩的快照：本 harness 的既有做法就是"先用真接口拉、再把真载荷喂给页面"。
+      // 不灌的话页面只会拿到 `{err: '未拉取委托 N 的成果清单'}` ⇒ 卡片为空，
+      // 而错误信息会被读成"会话页取不到数据"（页面其实没错）。
+      if (beRes.status === 200) entrustAssignmentArtifacts[aid] = beRes.data
+      const s = await walk('11 会话屏 · 委托 #' + aid, 'pages/entrust/session/session', null,
+        { role: 'owner', arg: { assignment_id: String(aid) } }, ['onLoad'])
+
+      if (!beItems.length) {
+        // 与成果段同一取向：有锚点却读不到成果 = 种子/归属出了问题，**显式失败**，
+        // 不静默跳过（静默跳过等于整段没验，而"全绿但什么都没验"比红更难发现）。
+        fail('11 会话屏 · 后端该委托下没有任何成果（seed_entrust_demo.py 未生效？）',
+          'assignment #' + aid)
+      } else if (s) {
+        const P = '11 会话屏 #' + aid + ' · '
+        const d = s._final()
+        const cards = d.cards || []
+        if (cards.length !== beItems.length) {
+          // 失败信息里带上面页状态：卡片为空时，"view=denied / error" 与"取到了空清单"
+          // 是两件完全不同的事，而只看条数分不出来。
+          fail(P + '成果卡条数与后端不符', cards.length + ' vs ' + beItems.length
+            + '（view=' + String(d.view) + '；hint=' + String(d.viewHint || '') + '）')
+        } else ok()
+        const beBy = {}
+        beItems.forEach(function (x) { beBy[String(x.artifact_id)] = x })
+        let bad = null
+        for (const c of cards) {
+          const b = beBy[String(c.artifactId)]
+          if (!b) { bad = '后端没有成果 #' + c.artifactId; break }
+          // ⚠️ 比对基准取**清单端点的扁平字段**（`current_revision_no`），
+          // 而不是 `current_revision.revision_no` —— 后者只有**详情**端点才有，
+          // 用它当基准会让"两边都是空"被当成一致（假绿），而 AC-05 要的正是版本号。
+          const no = b.current_revision_no
+          if (c.currentRevisionNo !== no) {
+            bad = '#' + c.artifactId + ' 会话显示 v' + c.currentRevisionNo + '，清单端点 v' + no
+            break
+          }
+        }
+        if (bad) fail(P + '会话卡的版本不是后端事实', bad)
+        else ok()
+
+        // **三处同源**：会话卡 / 工作台槽位（同一 artifacts 清单）/ 成果页所读的那一份，
+        // 必须是同一个 artifact_id 且同一个 revision_no。
+        if (entrustArtifact) {
+          const want = String(entrustArtifact.artifact_id)
+          const wantNo = (entrustArtifact.current_revision || {}).revision_no
+          const hit = cards.filter(function (c) { return String(c.artifactId) === want })
+          if (!hit.length) {
+            fail(P + '成果 #' + want + ' 在会话卡里不存在（对话看不到工作台的那一份）',
+              'cards=' + cards.map(function (c) { return c.artifactId }).join(','))
+          } else if (hit[0].currentRevisionNo !== wantNo) {
+            fail(P + '同一成果在两处的版本不同（AC-05 的直接反例）',
+              '会话 v' + hit[0].currentRevisionNo + ' vs 成果页/工作台 v' + wantNo)
+          } else ok()
+        } else {
+          note('11 会话屏 · 成果段未取到参照成果，只做了"与后端一致"的比对')
+        }
+      }
+    }
+  }
+
   // ⑯ 案件登记与处置（切片四之六 / ENT-030）────────────────────────────
   //
   // 这一节在**真载荷**下钉三件：
