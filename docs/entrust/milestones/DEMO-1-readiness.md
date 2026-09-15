@@ -164,6 +164,10 @@ can be claimed once, and remains inaccessible to unrelated organization B.`
 
 ## §8 下一步（进入 S1 的入口）
 
+**收口头（本文件的载体）**：PR **#113**（分支 `docs/DEMO1-S0-prereq-closure`），含本文件 +
+合同采纳记录 + 三处陈旧订正 + `AGENTS.md` 镜像表规范 + 走查脚本头部注释。
+本地门禁 **13/13 PASS**、pytest **691（通过 680 / 跳过 11 / 失败 0）**。**未合并，等授权**。
+
 S1 第一条分支：`feature/DEMO1-S1-customer-intake`，两个工作项起步：
 
 1. 把真实发布流程里的「委托发货」入口接上受理实现（现状 `miniapp/pages/publish/cargo/cargo.js:84`
