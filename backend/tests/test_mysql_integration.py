@@ -15,7 +15,10 @@ MySQL 8.0 验证三条并发正确性锚点：
    （外键两侧类型必须一致）—— SQLite 类型宽松，只有 MySQL 拦得住。
 5. **API 层时间列方言**（BASE-002 / R14）：MySQL 的 DATETIME 由驱动取回 `datetime`，
    而响应模型声明 `str | None` —— 只有真实 MySQL 才能证明 API 层不因类型不符而降级
-   （委托接口一条、会话与作业接口一条）。
+   （委托接口一条、会话与作业接口一条）；
+6. **Agent 作业的三条并发锚点**（H7b，R1 前必须闭合）：双 worker 竞争同一作业、
+   租约过期接管、旧 worker 迟到写入作废。胜负由**条件 UPDATE 命中几行**裁决，
+   是 InnoDB 行锁语义 —— SQLite 整库一把写锁，怎么跑都只有一个赢家，证明不了。
 
 运行方式
 --------
@@ -533,6 +536,186 @@ def test_session_and_job_api_timestamps_render_on_mysql(mysql):
         settings.ENTRUST_ENABLED = previous_enabled
         settings.LLM_MOCK = previous_mock
         settings.LLM_API_KEY = previous_key
+
+
+# ── H7b：Agent 作业的三条并发正确性锚点 ──────────────────────────────────────
+#
+# 为什么这三条必须落在真实 MySQL 上（不能只用 SQLite 用例顶替）：
+#   * 「双 worker 竞争」的胜负由**条件 UPDATE 命中几行**裁决 —— 这是 InnoDB 行锁
+#     的语义，SQLite 整个库一把写锁，怎么跑都只有一个赢家，证明不了任何事；
+#   * 「租约过期接管」比较的是 DATETIME 列与文本参数（`lease_expires_at < :now`），
+#     MySQL 与 SQLite 对「DATETIME 存成什么、怎么比」的实现不同；
+#   * 「旧 worker 迟到写入」要的是"两个连接各自持租约"的并发形状。
+# 这三条同时也是 H7b 的**闭合证据**：守卫写错时它们在 CI 里会红。
+
+
+def _seed_job(db, *, max_attempts: int = 3) -> int:
+    """造一个无会话的 queued 作业，返回 job_id。"""
+    from app.modules.entrust import agentjobs as jobs
+
+    job = jobs.submit_job(
+        db,
+        session_id=None,
+        entrustment_id=None,
+        assignment_id=None,
+        specialty="agent_01",
+        created_by=1,
+        max_attempts=max_attempts,
+    )
+    return int(job["job_id"])
+
+
+def _run(coro):
+    """在同步用例里跑协程（线程里没有事件循环，各自 `asyncio.run`）。"""
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+def test_agent_job_two_workers_race_exactly_one_claim(mysql):
+    """H7b①：双 worker 竞争**同一**作业，每轮恰好一个领到，尝试计数只 +1。
+
+    领取的裁决点是 `UPDATE ... WHERE id=:jid AND status=:expected_status
+    AND attempt_count=:expected_attempt`（乐观锁）。守卫缺失时两位 worker 都会
+    领到 —— 同一份作业被跑两遍，attempt 日志与终局都会自相矛盾。
+    """
+    from app.modules.entrust import agentjobs as jobs
+
+    for round_no in range(_ROUNDS):
+        db = mysql()
+        job_id = _seed_job(db)
+        db.close()
+
+        start = threading.Barrier(2)
+        outcomes: list[str | None] = []
+        lock = threading.Lock()
+
+        def claim(
+            worker: str,
+            *,
+            start=start,
+            job_id=job_id,
+            lock=lock,
+            outcomes=outcomes,
+        ) -> None:
+            # 循环内闭包显式绑定本轮变量（B023），避免读到下一轮的值
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                got = jobs.claim_job(session, job_id=job_id, worker_id=worker)
+                with lock:
+                    outcomes.append(None if got is None else str(got["lease_owner"]))
+            finally:
+                session.close()
+
+        t1 = threading.Thread(target=claim, args=("w1",))
+        t2 = threading.Thread(target=claim, args=("w2",))
+        t1.start()
+        t2.start()
+        t1.join(timeout=30)
+        t2.join(timeout=30)
+
+        assert len(outcomes) == 2, f"第 {round_no} 轮有线程未完成: {outcomes}"
+        winners = [o for o in outcomes if o is not None]
+        assert len(winners) == 1, f"第 {round_no} 轮赢家数错误（应为 1）: {outcomes}"
+        assert winners[0] in ("w1", "w2")
+
+        verify = mysql()
+        row = jobs.get_job(verify, job_id)
+        verify.close()
+        assert row["status"] == "running"
+        assert row["attempt_count"] == 1, f"尝试计数被重复消耗: {row['attempt_count']}"
+        assert row["lease_owner"] == winners[0]
+
+
+def test_agent_job_expired_lease_is_taken_over(mysql):
+    """H7b②：租约过期后作业可被接管，且未过期时**抢不到**。
+
+    两条断言缺一不可：只测"过期能接管"会放过「租约形同虚设、随时可抢」，
+    只测"未过期抢不到"会放过「过期后没人能接、作业永远卡在 running」。
+    """
+    from datetime import timedelta
+
+    from app.modules.entrust import agentjobs as jobs
+
+    db = mysql()
+    job_id = _seed_job(db, max_attempts=3)
+    now = jobs.utcnow_naive()
+
+    w1 = jobs.claim_job(db, job_id=job_id, worker_id="w1", lease_seconds=30, now=now)
+    assert w1 is not None and w1["lease_owner"] == "w1"
+
+    # 未过期：w2 抢不到（租约必须在有效期内被尊重）
+    assert (
+        jobs.claim_job(db, job_id=job_id, worker_id="w2", now=now + timedelta(seconds=10)) is None
+    )
+
+    # 过期：w2 接手，尝试计数继续累加（崩溃 worker 的任务不会丢）
+    w2 = jobs.claim_job(
+        db, job_id=job_id, worker_id="w2", lease_seconds=30, now=now + timedelta(seconds=31)
+    )
+    assert w2 is not None and w2["lease_owner"] == "w2"
+    assert w2["attempt_count"] == 2
+    db.close()
+
+
+def test_agent_job_stale_worker_write_is_discarded(mysql):
+    """H7b③：旧 worker 的迟到写入**不得**覆盖接管者的终局。
+
+    形状：w1 领到 → 租约过期 → w2 接手并成功 → w1 带着自己的结果迟到写入。
+    期望：w1 的写入被拒（`lease_lost`），终局仍是 w2 的成功结果，
+    且"跑过但没生效"这件事在尝试日志里留痕（`abandoned` / `lease_lost`）——
+    静默丢弃会让事后查「为什么没结果」无从下手。
+    """
+    from datetime import timedelta
+
+    from app.modules.entrust import agentjobs as jobs
+
+    db = mysql()
+    job_id = _seed_job(db, max_attempts=3)
+    now = jobs.utcnow_naive()
+
+    c1 = jobs.claim_job(db, job_id=job_id, worker_id="w1", lease_seconds=30, now=now)
+    assert c1 is not None
+
+    # 租约过期 → w2 接手并跑完
+    c2 = jobs.claim_job(
+        db, job_id=job_id, worker_id="w2", lease_seconds=30, now=now + timedelta(seconds=31)
+    )
+    assert c2 is not None
+    scope2 = jobs.scope_for_job(db, c2, operator_user_id=1)
+    done = _run(
+        jobs.execute_claimed_job(
+            db,
+            job_id=job_id,
+            scope=scope2,
+            worker_id="w2",
+            attempt_no=int(c2["attempt_count"]),
+        )
+    )
+    assert done["status"] == "succeeded", done
+
+    # w1 迟到写入（它以为自己还持有租约）
+    stale_db = mysql()
+    scope1 = jobs.scope_for_job(stale_db, c1, operator_user_id=1)
+    stale = _run(
+        jobs.execute_claimed_job(
+            stale_db,
+            job_id=job_id,
+            scope=scope1,
+            worker_id="w1",
+            attempt_no=int(c1["attempt_count"]),
+        )
+    )
+    stale_db.close()
+    assert stale.get("lease_lost") is True, stale
+
+    final = jobs.get_job(db, job_id)
+    db.close()
+    assert final["status"] == "succeeded", "迟到写入改掉了接管者的终局"
+    assert final["lease_owner"] is None
+    kinds = [(a["status"], a["error_kind"]) for a in final["attempts"]]
+    assert ("abandoned", "lease_lost") in kinds, f"作废未留痕: {kinds}"
 
 
 def _seed_org_with_entrustment(db, owner_id: int) -> int:

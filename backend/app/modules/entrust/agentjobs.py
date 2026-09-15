@@ -81,6 +81,15 @@ RETRYABLE_KINDS: frozenset[str] = frozenset(
 
 ATTEMPT_SUCCEEDED = "succeeded"
 ATTEMPT_FAILED = "failed"
+#: 执行完了但结果被作废（租约已被接管者领走，见 `execute_claimed_job`）。
+#: 单独一个值而不是复用 `failed`：这次尝试**不是失败**，是"跑完了但没人要" ——
+#: 混进 `failed` 会让"失败分类决定是否重试"那条规则被误用（`lease_lost` 不在
+#: RETRYABLE_KINDS 里，一旦被当成 failed 就可能触发不该有的重排）。
+ATTEMPT_ABANDONED = "abandoned"
+
+#: 租约被接管的失败分类。故意**不进** `RETRYABLE_KINDS`：作业已经有人接手在跑，
+#: 再回队列只会制造第二个赢家（H7b「旧 worker 迟到写入」）。
+ERROR_LEASE_LOST = "lease_lost"
 
 
 class AgentJobError(RuntimeError):
@@ -394,7 +403,8 @@ def claim_next(
     candidates = (
         session.execute(
             text(
-                "SELECT id, attempt_count, max_attempts FROM ent_agent_job "
+                # `status` 必须在列里：领取的乐观锁守卫要用它做期望值（H7b）。
+                "SELECT id, status, attempt_count, max_attempts FROM ent_agent_job "
                 "WHERE status = :queued "
                 "   OR (status = :running AND lease_expires_at IS NOT NULL "
                 "       AND lease_expires_at < :now) "
@@ -434,7 +444,9 @@ def claim_next(
                     "UPDATE ent_agent_job SET status = :running, "
                     " attempt_count = attempt_count + 1, lease_owner = :worker, "
                     " lease_expires_at = :lease, started_at = COALESCE(started_at, :ts), "
-                    " updated_at = :ts WHERE id = :jid"
+                    " updated_at = :ts "
+                    "WHERE id = :jid AND status = :expected_status "
+                    " AND attempt_count = :expected_attempt"
                 ),
                 {
                     "running": STATUS_RUNNING,
@@ -442,11 +454,18 @@ def claim_next(
                     "lease": lease_until,
                     "ts": ts,
                     "jid": job_id,
+                    "expected_status": str(row["status"]),
+                    "expected_attempt": int(row["attempt_count"]),
                 },
             ),
         )
         session.commit()
         if int(result.rowcount or 0) == 0:
+            # 读到与写入之间被别的 worker 领走了（或状态已变）：这一行不再是可领取的
+            # 那一行。继续找下一个候选，而不是把它当成自己领到的。
+            # 守卫条件是**乐观锁**：`status` + `attempt_count` 必须与刚才读到的完全一致，
+            # 否则 UPDATE 命中 0 行 —— 无条件 `WHERE id = :jid` 会让两个 worker 同时领到
+            # 同一个作业（H7b，真实 MySQL 上可复现）。
             continue
         return get_job(session, job_id)
     return None
@@ -506,20 +525,25 @@ def claim_job(
                 "UPDATE ent_agent_job SET status = :running, "
                 " attempt_count = attempt_count + 1, lease_owner = :worker, "
                 " lease_expires_at = :lease, started_at = COALESCE(started_at, :ts), "
-                " updated_at = :ts WHERE id = :jid AND status IN (:queued, :running)"
+                " updated_at = :ts "
+                "WHERE id = :jid AND status = :expected_status "
+                " AND attempt_count = :expected_attempt"
             ),
             {
                 "running": STATUS_RUNNING,
-                "queued": STATUS_QUEUED,
                 "worker": worker_id,
                 "lease": _fmt(current + timedelta(seconds=lease_seconds)),
                 "ts": ts,
                 "jid": job_id,
+                "expected_status": str(row["status"]),
+                "expected_attempt": int(row["attempt_count"]),
             },
         ),
     )
     session.commit()
     if int(result.rowcount or 0) == 0:
+        # 与 claim_next 同一条乐观锁守卫：这一段是「读到的那一行」才认。
+        # 并发下输掉的一方**不重试**本作业（返回 None），把选择权交回调用方。
         return None
     return get_job(session, job_id)
 
@@ -807,16 +831,38 @@ async def execute_claimed_job(
     *,
     job_id: int,
     scope: AgentScope,
+    worker_id: str | None = None,
+    attempt_no: int | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """执行一个**已被领取**的作业（调用方已完成 `claim_next`）。
+    """执行一个**已被领取**的作业（调用方已完成 `claim_next` / `claim_job`）。
 
     成功 → `succeeded` + `envelope_json`；失败 → 按分类决定回队列还是 `failed`。
     **任何分支都不写成果**（AC-09）。
+
+    租约归属守卫（H7b「旧 worker 迟到写入」）
+    ----------------------------------------
+    终局写入带 `AND lease_owner = <本次领取者>`：租约若已被接管者领走，条件不成立、
+    更新 0 行，本次执行的**结果整份作废** —— 迟到的旧 worker 不能把新持有者的作业
+    改回自己的结局。作废不是静默丢弃：尝试日志留一行 `abandoned` / `lease_lost`，
+    让"跑过但没生效"这件事可追溯。返回的作业字典带 `lease_lost = True`，
+    调用方可据此区分「我做完了」与「我白做了」。
+
+    `worker_id` 省略时退化为「以进入本函数时读到的 `lease_owner` 为准」，
+    与既有调用点（先 `claim_*` 再立即 `execute_claimed_job`）语义一致。
+
+    `attempt_no` 同理应由领取方传入（它知道自己领的是第几次尝试）。省略时按
+    库里的 `attempt_count` 取 —— 正常路径两者相同；只有**租约被接管的旧 worker**
+    才会不一致，而它恰好需要的是自己那一次，不是接管者的那一次。
     """
     started = now or utcnow_naive()
     job = get_job(session, job_id)
-    attempt_no = int(job["attempt_count"])
+    attempt_no = int(attempt_no) if attempt_no is not None else int(job["attempt_count"])
+    lease_owner = job.get("lease_owner")
+    # 没在租约下的作业（未领取却被直接执行）不加守卫 —— 保持既有行为，
+    # 也不该在这里悄悄放宽"必须先领取"的契约。
+    guard_owner = worker_id if worker_id is not None else lease_owner
+    lease_guard = " AND lease_owner = :owner" if guard_owner is not None else ""
     context = collect_context(session, job)
     job_input = job.get("input") or {}
     known_refs = build_source_catalog(context, job_input)
@@ -843,6 +889,32 @@ async def execute_claimed_job(
     if error is None and outcome is not None and validation is not None:
         envelope = project_envelope_for_operator(validation)
         envelope["scope"] = {**scope.to_dict(), **scope_report}
+        result = cast(
+            "CursorResult[Any]",
+            session.execute(
+                text(
+                    "UPDATE ent_agent_job SET status = :ok, envelope_json = :env, "
+                    " error_kind = NULL, error_message = NULL, requires_review = 1, "
+                    " lease_owner = NULL, lease_expires_at = NULL, finished_at = :ts, "
+                    f" updated_at = :ts WHERE id = :jid{lease_guard}"
+                ),
+                {
+                    "ok": STATUS_SUCCEEDED,
+                    "env": _dump_json(envelope),
+                    "ts": ts,
+                    "jid": job_id,
+                    "owner": guard_owner,
+                },
+            ),
+        )
+        if int(result.rowcount or 0) == 0:
+            return _abandon_lost_lease(
+                session,
+                job_id=job_id,
+                attempt_no=attempt_no,
+                started=started,
+                outcome=outcome,
+            )
         _record_attempt(
             session,
             job_id=job_id,
@@ -854,26 +926,50 @@ async def execute_claimed_job(
             mocked=outcome.mocked,
             raw_output=outcome.raw_text,
         )
-        session.execute(
-            text(
-                "UPDATE ent_agent_job SET status = :ok, envelope_json = :env, "
-                " error_kind = NULL, error_message = NULL, requires_review = 1, "
-                " lease_owner = NULL, lease_expires_at = NULL, finished_at = :ts, "
-                " updated_at = :ts WHERE id = :jid"
-            ),
-            {
-                "ok": STATUS_SUCCEEDED,
-                "env": _dump_json(envelope),
-                "ts": ts,
-                "jid": job_id,
-            },
-        )
         session.commit()
         return get_job(session, job_id)
 
     assert error is not None  # 走到这里必定是失败分支
     kind = classify_error(error)
     message = describe_error(error)
+    requeue = is_retryable(kind) and attempt_no < int(job["max_attempts"])
+    result = cast(
+        "CursorResult[Any]",
+        session.execute(
+            text(
+                (
+                    "UPDATE ent_agent_job SET status = :queued, error_kind = :kind, "
+                    " error_message = :msg, lease_owner = NULL, lease_expires_at = NULL, "
+                    f" updated_at = :ts WHERE id = :jid{lease_guard}"
+                )
+                if requeue
+                else (
+                    "UPDATE ent_agent_job SET status = :failed, error_kind = :kind, "
+                    " error_message = :msg, lease_owner = NULL, lease_expires_at = NULL, "
+                    f" finished_at = :ts, updated_at = :ts WHERE id = :jid{lease_guard}"
+                )
+            ),
+            {
+                "queued": STATUS_QUEUED,
+                "failed": STATUS_FAILED,
+                "kind": kind,
+                "msg": message,
+                "ts": ts,
+                "jid": job_id,
+                "owner": guard_owner,
+            },
+        ),
+    )
+    if int(result.rowcount or 0) == 0:
+        return _abandon_lost_lease(
+            session,
+            job_id=job_id,
+            attempt_no=attempt_no,
+            started=started,
+            outcome=outcome,
+            error_kind=kind,
+            error_message=message,
+        )
     _record_attempt(
         session,
         job_id=job_id,
@@ -887,28 +983,46 @@ async def execute_claimed_job(
         mocked=bool(getattr(outcome, "mocked", False)) if outcome else False,
         raw_output=getattr(outcome, "raw_text", None) if outcome else None,
     )
-
-    if is_retryable(kind) and attempt_no < int(job["max_attempts"]):
-        # 外部抖动：回队列，等下一次领取（租约释放，谁都可以捡）
-        session.execute(
-            text(
-                "UPDATE ent_agent_job SET status = :queued, error_kind = :kind, "
-                " error_message = :msg, lease_owner = NULL, lease_expires_at = NULL, "
-                " updated_at = :ts WHERE id = :jid"
-            ),
-            {"queued": STATUS_QUEUED, "kind": kind, "msg": message, "ts": ts, "jid": job_id},
-        )
-    else:
-        session.execute(
-            text(
-                "UPDATE ent_agent_job SET status = :failed, error_kind = :kind, "
-                " error_message = :msg, lease_owner = NULL, lease_expires_at = NULL, "
-                " finished_at = :ts, updated_at = :ts WHERE id = :jid"
-            ),
-            {"failed": STATUS_FAILED, "kind": kind, "msg": message, "ts": ts, "jid": job_id},
-        )
     session.commit()
     return get_job(session, job_id)
+
+
+def _abandon_lost_lease(
+    session: Session,
+    *,
+    job_id: int,
+    attempt_no: int,
+    started: datetime,
+    outcome: Any = None,
+    error_kind: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, Any]:
+    """租约已被接管：本次执行**不产生任何终局**，只留一行可追溯的 `abandoned`。
+
+    为什么还要记一行：静默丢弃会让"跑了但没生效"这件事在库里完全不存在，
+    事后查「这个作业为什么没结果」时无从下手。记 `abandoned` 而不是
+    `failed`，是因为这次尝试并没有失败 —— 它只是不再被需要。
+    """
+    finished = utcnow_naive()
+    _record_attempt(
+        session,
+        job_id=job_id,
+        attempt_no=attempt_no,
+        status=ATTEMPT_ABANDONED,
+        started=started,
+        finished=finished,
+        error_kind=ERROR_LEASE_LOST,
+        error_message="租约已被其他 worker 接管，本次执行结果作废",
+        latency_ms=getattr(outcome, "latency_ms", None) if outcome else None,
+        mocked=bool(getattr(outcome, "mocked", False)) if outcome else False,
+        raw_output=getattr(outcome, "raw_text", None) if outcome else None,
+    )
+    session.commit()
+    abandoned = get_job(session, job_id)
+    abandoned["lease_lost"] = True
+    abandoned["discarded_error_kind"] = error_kind
+    abandoned["discarded_error_message"] = error_message
+    return abandoned
 
 
 async def tick(
@@ -927,13 +1041,23 @@ async def tick(
     if claimed is None:
         return None
     scope = scope_for_job(session, claimed, operator_user_id=int(claimed["created_by"]))
-    return await execute_claimed_job(session, job_id=int(claimed["job_id"]), scope=scope)
+    return await execute_claimed_job(
+        session,
+        job_id=int(claimed["job_id"]),
+        scope=scope,
+        worker_id=worker_id,
+        attempt_no=int(claimed["attempt_count"]),
+    )
 
 
 __all__ = [
     "ACTIVE_STATUSES",
+    "ATTEMPT_ABANDONED",
+    "ATTEMPT_FAILED",
+    "ATTEMPT_SUCCEEDED",
     "DEFAULT_LEASE_SECONDS",
     "DEFAULT_MAX_ATTEMPTS",
+    "ERROR_LEASE_LOST",
     "RETRYABLE_KINDS",
     "STATUS_CANCELLED",
     "STATUS_FAILED",
