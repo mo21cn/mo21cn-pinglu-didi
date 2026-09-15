@@ -30,16 +30,24 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import statistics
 import sys
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from app.core.config import get_settings
-from app.modules.agent import llm as llm_gateway
-from app.modules.agent.llm import LLMError
-from app.modules.agent.service import SYSTEM_PROMPT
+# 以 `python scripts/h7a_model_quality.py`（cwd=backend）执行时，`app` 不在 sys.path 上，
+# 需显式补上 backend/ —— 这是本文件唯一需要的 sys.path 操作。
+# （2026-09-16 补：此前缺这段，文档里那条运行命令实际跑不起来，报 ModuleNotFoundError）
+_BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
+
+from app.core.config import get_settings  # noqa: E402
+from app.modules.agent import llm as llm_gateway  # noqa: E402
+from app.modules.agent.llm import LLMError  # noqa: E402
+from app.modules.agent.service import SYSTEM_PROMPT  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 SAMPLES_PATH = HERE / "h7a_samples.json"
