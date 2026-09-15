@@ -84,9 +84,16 @@ node scripts/verify_login_flow.js
 # 真机走查（现行轨：IDE 自带 wechatide 工具链；驱动层 scripts/wechatide_client.py）
 # ⭐ 一键跑：起 IDE（先清场）+ 起后端 + 铺种子 + 跑章节 —— 四件事必须同生共死，
 #    因为本环境在命令结束后会回收该命令的所有后代进程（分开跑必然空转）。
-python scripts/run_walkthrough_devtools.py                       # 全部章节
+python scripts/run_walkthrough_devtools.py                       # 全部章节（--section all 是默认值）
 python scripts/run_walkthrough_devtools.py --section 16          # 只跑指定章节
 python scripts/run_walkthrough_devtools.py --section 8,8b --pay  # 含副作用的支付流转
+
+# ⚠️ `--section all` 与 `--pay` 是两个**独立**开关，别指望前者带上后者：
+#   * `--section all`（含省略时的默认）会把 ⑧b 排进去，但 ⑧b 在没开 `--pay` 时
+#     记的是 **NOT_RUN**（`WALK_PAY=1` 未设）而不是通过 —— 它会被汇总成"未执行"；
+#   * 要**真的**跑 ⑧b，必须两个一起给：`--section all --pay`。
+#   * 反过来 `--pay` 单独用也行，它只是设 `WALK_PAY=1`，跑哪些章节仍由 `--section` 决定。
+python scripts/run_walkthrough_devtools.py --section all --pay   # 全章节 **且** 真跑 ⑧b
 
 # 也可以自己把 IDE 与后端起好，只跑章节（前置条件见脚本 docstring）：
 python scripts/verify_miniapp_devtools.py
