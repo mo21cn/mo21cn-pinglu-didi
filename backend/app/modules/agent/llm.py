@@ -100,7 +100,16 @@ async def chat_json(
         # 2026-09-16 H7a 实测撞到：MiniMax 余额不足返回 402
         # `{"type":"insufficient_balance_error"}`。此前落进 bad_request ⇒
         # 报出来是"请求被拒绝"，掩盖了"该充值"这个**真正要做的动作**。
-        raise LLMError("quota", "LLM 账户余额或配额不足（HTTP 402），需充值后重试")
+        # ⚠️ 但 402 **不等于**「没买订阅」：平台的**订阅额度**与**账户余额（wallet）**
+        # 挂在**两套互不通用的凭证**上（MiniMax 官方："订阅 Key 与普通按量计费 API Key
+        # 相互独立，不能混用"）。拿按量计费的 Key 去花订阅额度 ⇒ 报 402，
+        # 而套餐里额度可能还剩满 —— 那时"充值"是错的动作，"换 Key"才是对的。
+        # 故提示须同时指向两种可能；现场定位用 backend/scripts/llm_key_doctor.py。
+        raise LLMError(
+            "quota",
+            "LLM 账户余额或可用资源不足（HTTP 402）：请核对所用 Key 与计费方式是否匹配"
+            "（订阅额度须用订阅 Key），或为当前凭证充值",
+        )
     if resp.status_code >= 500:
         raise LLMError("network", f"LLM 服务端错误 {resp.status_code}")
     if resp.status_code != 200:
