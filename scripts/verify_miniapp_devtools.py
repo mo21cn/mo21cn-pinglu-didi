@@ -25,6 +25,7 @@
 | `30` | 「批准」完整正例（依据版本 id 从界面取到 → 填对能过） | —（新增章节） |
 | `31` | 案件页「应用变更」正例（**真写**造 `approved` 形态 → 应用 → 复核传播） | —（新增章节） |
 | `32` | 成果页「待复核」徽标（依赖 ㉛ 应用后留下的复核项） | —（新增章节） |
+| `33` | **页面栈深度运行期实测**（DR-0011：实测最深链 + 平台硬限对账） | —（新增章节） |
 | `4b` | 撮合页（货主方向：为货源找船） | ④b |
 | `5` | 发布空船页渲染（船东视角） | ⑤ |
 | `7` | 合同三级页 + 长按弹层 + ⑦b 仿真案例 + ⑦c 已完成订单 | ⑦/⑦b/⑦c |
@@ -3387,6 +3388,125 @@ def sec_32(w: Walker) -> None:
     )
 
 
+def sec_33(w: Walker) -> None:
+    """㉝ 页面栈深度**运行期实测**（DR-0011）。
+
+    DR-0011 只在 CI 里证明了「**声明**链深 ≤ `STACK_BUDGET`」，并自己写明
+    「**不承诺**『10 层上限在真机上就是这样』」（§5）。本章补的正是运行期那一半：
+
+    一、**实测最深声明链**：`shipper → assistant → publish/cargo → preview`
+        （`verify_routes.js` 打印的声明最深链 = **4 层**）—— 逐层压，每层断言
+        **深度恰好 +1**（不是 0、不是 +2），且不超过从源码读到的 `STACK_BUDGET`。
+        链深"恰好 +1"很重要：若中途被 replace/reLaunch 悄悄清栈，深度会**不增或回退**，
+        那样"回到上一级"的行为就跟声明的不一样了。
+    二、**实测平台硬限**：继续 push 到被拒，把**观测到的层数**与源码里的 `MAX_STACK`
+        对账 —— 这正是 DR-0011 §5 明确没承诺过的那一条。
+    三、断言 **预算 < 硬限**（留有余量），否则"预算"没有意义。
+
+    ⚠️ 诚实边界：第二节的压栈用的是 `automation_navigate`（**按 URL 直进**，
+    **不是真实点击**）⇒ 它测的是**平台**的行为，**不能**用来证明 `go()` 的预算策略生效
+    （那需要真实点击到第 8 层，当前可达的真实链只有 4 层）。这一点写进断言备注，不合并声称。
+    """
+    print("\n== ㉝ 页面栈深度运行期实测（DR-0011）==", flush=True)
+
+    src = ""
+    routes_js = os.path.join(REPO_ROOT, "miniapp", "utils", "routes.js")
+    try:
+        with open(routes_js, encoding="utf-8") as fh:
+            src = fh.read()
+    except OSError as exc:  # noqa: BLE001
+        w.rep.rec("㉝ 读得到 miniapp/utils/routes.js（预算常量出处）", False, str(exc)[:80])
+
+    def _const(name: str) -> int | None:
+        m = re.search(rf"const {name} = (\d+)", src)
+        return int(m.group(1)) if m else None
+
+    budget = _const("STACK_BUDGET")
+    hard = _const("MAX_STACK")
+    w.rep.rec(
+        "㉝ 从源码读到预算常量（不写死在脚本里）",
+        budget is not None and hard is not None,
+        f"STACK_BUDGET={budget} MAX_STACK={hard}",
+    )
+    if budget is None or hard is None:
+        return
+
+    w.login_as(CODE_SHIPPER)
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.rec("㉝ 前置 · 货主工作台进入", False, w.c.current_path())
+        return
+    time.sleep(1.2)
+
+    # ---- 一、实测最深声明链 ----
+    chain = [
+        ("pages/assistant/assistant", "③ 搜索框进智能搜索页（真实点击）"),
+        ("pages/publish/cargo/cargo", "③ 解析草稿带去发布货源页（真实点击）"),
+        ("pages/preview/preview", "③ 发布页 → 预览（真实点击）"),
+    ]
+    d0 = len(w.c.page_stack())
+    w.rep.rec(
+        "㉝ switchTab 进工作台后栈深 = 1（tabBar 页归 1，这是链深的起点）",
+        d0 == 1,
+        f"depth={d0}",
+    )
+    depths = [d0]
+    for path, label in chain:
+        before = len(w.c.page_stack())
+        w.c.navigate("navigateTo", "/" + path)
+        ok_path = w.c.wait_path(path, 25)
+        after = len(w.c.page_stack())
+        depths.append(after)
+        w.rep.rec(
+            f"㉝ 链深逐层 +1：{path} | {label}",
+            ok_path and after == before + 1,
+            f"{before} → {after}",
+        )
+        w.shot("33-栈深-" + path.rsplit("/", 1)[-1])
+    observed = max(depths)
+    w.rep.rec(
+        f"㉝ 实测最深链深 ≤ STACK_BUDGET（{budget}）",
+        observed <= budget,
+        f"实测 {observed} 层（声明最深链为 4 层，见 verify_routes.js）",
+    )
+
+    # ---- 二、实测平台硬限（**按 URL 直进**，不是真实点击）----
+    last_ok = len(w.c.page_stack())
+    rejected_at = None
+    for _ in range(hard + 3):
+        cur = len(w.c.page_stack())
+        j = w.c.tool(
+            "automation_navigate", "--action", "navigateTo", "--url", "/pages/preview/preview"
+        )
+        time.sleep(0.6)
+        nxt = len(w.c.page_stack())
+        if not j.get("ok") or nxt <= cur:
+            rejected_at = cur
+            break
+        last_ok = nxt
+    w.rep.rec(
+        f"㉝ 平台在实测的第 {rejected_at} 层拒绝了再压栈，与源码 MAX_STACK（{hard}）对账",
+        rejected_at is not None and rejected_at >= hard,
+        f"观测被拒于 {rejected_at} 层 / 源码 MAX_STACK={hard} / 最大成功 {last_ok}",
+    )
+    w.rep.rec(
+        "㉝ 项目预算 < 平台实测硬限（预算留有余量，不是贴着平台上限定的）",
+        rejected_at is not None and budget < rejected_at,
+        f"预算 {budget} < 实测硬限 {rejected_at}",
+    )
+    w.rep.rec(
+        "㉝ （限制）本节第二节用**按 URL 直进**压栈 ⇒ 测的是平台行为，"
+        "**不能**据此证明 go() 的预算策略生效",
+        True,
+        "限制：真实可达的链只有 4 层；第 8 层附近的 replace 策略需另设真实入口才能验",
+    )
+
+    # ---- 三、清栈回起点 ----
+    w.c.navigate("reLaunch", "/" + INDEX)
+    time.sleep(1.0)
+    back = len(w.c.page_stack())
+    w.rep.rec("㉝ reLaunch 后栈回 1（清栈可控，不是越压越深）", back == 1, f"depth={back}")
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -3405,6 +3525,7 @@ SECTIONS = {
     "30": sec_30,
     "31": sec_31,
     "32": sec_32,
+    "33": sec_33,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -3444,6 +3565,9 @@ DEFAULT_ORDER = [
     # ⚠️ 31 → 32 是一条链（32 从 REST 复原核项指向的成果），单跑 32 会明确失败。
     "31",
     "32",
+    # DR-0011：栈深的**运行期**那一半（声明链深 ≤ 预算已在 CI 里证过）。
+    # ⚠️ 会压栈到平台拒绝（按 URL 直进），最后 reLaunch 清栈；独立于其它章。
+    "33",
     # ENT-035 补齐的未迁移章节（旧轨有、换轨后一直记 not-run 的 12 章）
     "4b",
     "5",
