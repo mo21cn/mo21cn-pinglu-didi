@@ -547,6 +547,12 @@ def test_session_and_job_api_timestamps_render_on_mysql(mysql):
 #     MySQL 与 SQLite 对「DATETIME 存成什么、怎么比」的实现不同；
 #   * 「旧 worker 迟到写入」要的是"两个连接各自持租约"的并发形状。
 # 这三条同时也是 H7b 的**闭合证据**：守卫写错时它们在 CI 里会红。
+#
+# ⚠️ **跨会话读取的坑（首跑就踩了）**：MySQL 默认 REPEATABLE READ，而
+# SQLAlchemy 的 Session **不会自动提交纯读** —— 一个会话做过 SELECT 之后事务
+# 就一直开着，后续读都落在**同一个快照**上。于是「A 会话写并提交、再用 B 会话
+# 读」会读到旧数据，表现为"刚才那行没写进去"。SQLite 没有这个现象（读也能看见
+# 最新提交），**本地复现不出来**。⇒ 断言终局一律用**新开的会话**去读。
 
 
 def _seed_job(db, *, max_attempts: int = 3) -> int:
@@ -707,15 +713,26 @@ def test_agent_job_stale_worker_write_is_discarded(mysql):
             attempt_no=int(c1["attempt_count"]),
         )
     )
+    # ⚠️ 终局读取必须用**新会话**，不能用 `db`：
+    # MySQL 默认隔离级别是 REPEATABLE READ，而 `db` 在上一次 `get_job` 之后
+    # **事务一直开着**（SQLAlchemy 不会自动提交纯读）。它的快照早于 `stale_db`
+    # 的提交 ⇒ 用 `db` 读会看不见那行 `abandoned`，表现为"作废没留痕"
+    # （首次跑本用例就是这么红的：留痕其实在库里，是读的那只眼睛是旧的）。
+    # SQLite 没有这个问题（整个库一把写锁、读也能看见最新提交），所以本地
+    # 用 SQLite 复现不出来 —— 这正是这条必须在真实 MySQL 上跑的理由之一。
     stale_db.close()
-    assert stale.get("lease_lost") is True, stale
-
-    final = jobs.get_job(db, job_id)
     db.close()
+    verify = mysql()
+    final = jobs.get_job(verify, job_id)
+    verify.close()
+    assert stale.get("lease_lost") is True, stale
     assert final["status"] == "succeeded", "迟到写入改掉了接管者的终局"
     assert final["lease_owner"] is None
     kinds = [(a["status"], a["error_kind"]) for a in final["attempts"]]
-    assert ("abandoned", "lease_lost") in kinds, f"作废未留痕: {kinds}"
+    assert ("abandoned", "lease_lost") in kinds, (
+        f"作废未留痕: {kinds}｜写入方会话读到的 attempts="
+        f"{[(a['status'], a['error_kind']) for a in (stale.get('attempts') or [])]}"
+    )
 
 
 def _seed_org_with_entrustment(db, owner_id: int) -> int:
