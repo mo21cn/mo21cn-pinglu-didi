@@ -409,3 +409,47 @@ HO 于 2026-09-16 授权"下一步建议 **1–5 全部执行**（含进入 S1 �
    核实：**`git diff --cached --stat <sha>` 为空**才是"文件没丢"的证据（porcelain 会把索引里
    360 条全报成 `A `/`AM`，那是**读数陷阱**，不是真的被重新添加）。
 
+### 9.7 本轮执行记录（2026-09-16，HO 授权「授权合并 / R1 取 ③ / H7a 探测 / ④ 补证 / ⑤ 清理」）
+
+| # | 事项 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 授权合并 **PR #120**（DR-0003：作者不自批 ⇒ 等 HO 授权） | ✅ 纯 API `PUT /pulls/120/merge`（squash + **显式 `commit_title`**）⇒ `merged: true`、sha **`c1aae3a`**、`merged_at=2026-09-16T05:54:05Z`；合并前 CI 6 组全 `SUCCESS`、`CLEAN` / `MERGEABLE` | `.workbuddy/_merge120.py` + `_merge120_out.txt` |
+| 2 | 同步本地 `develop` 并切出本切片分支 | ✅ `fetch`（proxy 首轮 rc=0）⇒ `FETCH_HEAD == c1aae3a` ⇒ `merge-base --is-ancestor` rc=0 ⇒ `update-ref refs/heads/develop c1aae3a 662fbb5`（带旧值＝乐观锁）⇒ 两侧 tree 同为 `a68b97d` ⇒ `checkout -B S1-claim-conflict-path c1aae3a` | `.workbuddy/_sync_dev.py` + `_sync_dev_out.txt` |
+| 3 | 落档 **D-5 裁定**（R1 取 ③ / R2 做 ①；② 两轮都不取） | ✅ 三处同步：余量台账 §四、`DEMO-1-plan.md` §9 第 13 条、本文件 §9.6 第 7 条 | `DEMO-1-r1-remainder.md` §四 **D-5** |
+| 4 | **H7a**：先查记忆、再跑探测（不直接交 HO） | ✅ `backend/scripts/llm_key_doctor.py`（4 步只读）**rc=0**：形态 **`sk-cp-…`**（订阅 Key）→ `/models` **200** → `/token_plan/remains` **200**（general 5h 剩 **100%** / 周剩 **98%**）→ `/chat/completions` **200 且真回话** ⇒ **端到端可调用** | `.workbuddy/_key_doctor_out.txt` |
+| 5 | 新增 **㊴ 章**（详情页受理入口的「被抢认领」路径 ⇒ 409 ⇒ 刷新） | ✅ 单跑 `--section 39`：**断言 19 / PASS=16 / FAIL=0**；同批 `--section 36,37,38,39` 复跑：**断言 94 / PASS=88 / FAIL=0 / NOT_RUN=0**（+6 `LIMITATION`） | `miniapp-device-artifacts/_walk_140431_out.txt`（单跑）、`_walk_143048_out.txt`（同批复跑） |
+| 6 | 清理 `.workbuddy` 本轮临时件 | ✅ **29/29 已移入回收站、0 残留**（`ctypes` 直调 `SHFileOperationW` + `FOF_ALLOWUNDO` ⇒ 判据取"路径是否还在"）；被 docs 引用的与本轮证据一律**保留** | `.workbuddy/_trash_tmp.py` |
+
+⚠️ **五条如实交代**：
+
+1. **`RESULT: NOT_RUN`（`LIMITATION=6`）既不表示"没跑"、也不表示"有失败"**：本轮同批实为
+   **PASS=88 / FAIL=0 / NOT_RUN=0**。`LIMITATION` 在 HO 五档里被**归并进 `NOT_RUN`** ⇒ 汇报**双句**。
+2. **同批首跑确有一条 `FAIL`，已如实留在日志里**（`[重跑关联] 2026-09-16T14:27:54=FAIL`，
+   首次结果**保留不覆盖**）：`FAIL | ㊱ [seed-mgr-multi] 「我的」页委托入口可见 | showEntrust=None`
+   ＋ 1 条 `NOT_RUN`（后续对照推不动）。**同一次运行**里 ㊳ 章对**同一身份**的同一条前置是 `PASS`
+   ⇒ 判为**页面未就绪的读数竞态**，不是权限功能缺陷。修法：`open_workbench()` 把固定 `sleep`
+   换成**轮询到 `showEntrust` 非 `None`**（40×0.5s）；⚠️ **只让读数可靠、不放松判据**
+   （断言照样是 `is True`，`None` 与 `False` 都失败）。⇒ **"判据不变、修的是读数"** 这条区分必须
+   留在纸上，否则下次复跑变绿会被读成"问题本来不存在"。
+3. **㊴ 章自己登记了 4 条边界（均不计入通过）**：① **详情页**入口上的「撤权 ⇒ 403」分支**仍无
+   独立设备证据**（㊲ 证的是**队列卡片**入口）；② 载体单**经 API 建/提交**；③ "另一个写者"是
+   **同进程 API 调用**；④ **409 的界面提示文案不可断言**（toast 不在渲染树里）。⚠️ 产物里 ① 写成
+   **去向记录** —— **去向记录 ≠ 通过**。
+4. **顺带订正 `DEMO-1-plan.md` §4 的「出口判据逐句取证情况」表**：该表长期停留在**第二切片**口径
+   （②「组织侧受理队列的 UI 还没接」、③④「真机侧 `NOT_RUN`」），与**同一页上方**工作项表里
+   ㊱㊲ 的 `PASS` **自相矛盾**。已按 ㊱㊲㊳㊴ 的现有证据刷新，并在表头写明「本表记的是**取证缺口**、
+   **不是** AC 判定；整句合取**由 HO 判**」，另注明本次订正的原因，避免被读成"证据突然变多了"。
+5. **本机 git 故障本轮**未**复现**：合并 PR #120 与 `update-ref` 两处写操作的前后对账（**refs 逐条
+   比名字** ＋ ` D` ＋ `porcelain` ＋ `ls-files` 四路）分别为 `12→12 / 0 / 0 / 361→361` 与
+   `6→7 / 0 / 0 / 361`。⚠️ **一次不复现不等于故障消失** —— 规矩照旧：每次写操作前后都做
+   「**逐条比名字**」的对账（只比数量会漏掉"删 A 连带清 B"）。
+
+📌 **本轮未闭合项（不得读成已完成）**：
+
+1. **㊴ 章代码与三份文档的改动尚未提交**（`scripts/verify_miniapp_devtools.py` 与
+   `DEMO-1-plan.md` / `DEMO-1-r1-remainder.md` / 本文件）⇒ 待跑统一门禁 13 项 ⇒ 分组提交 ⇒ 开 PR ⇒
+   **等 HO 授权**再合并（DR-0003）。
+2. **H7a 验证包仍未真跑**：本轮授权的是"**跑探测确认** Key 可调用"，**探测通过 ≠ H7a 通过** ——
+   `H7a-真实模型质量验证包.md` 的首次真跑仍是 `NOT_RUN`（原因为 **HTTP 402**），需**重跑**才算数。
+3. **㊴ 的「详情页 403 分支」仍是去向记录**，不是通过。
+
