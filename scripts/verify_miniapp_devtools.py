@@ -133,6 +133,10 @@ TITLE_B = "演示委托·乙组织队列样本"
 #: 而甲只拿到 `["entrust:view", "entrust:assignment:claim"]`。㊳⑧ 的「提交成功」路径
 #: 必须落在它上面（理由见该节注释）。
 ORG_WORKBENCH = "演示经营主体·工作台"
+#: ㊴ 章**自己造**的载体单标题。甲组织在种子里只有**一张** `submitted` 样本单
+#: （`TITLE_A`），而它已被 ㊳ 章受理掉 ⇒「被抢认领」要另找一张。不新造**种子**
+#: （不必动 `seed_entrust_orgpicker.py`），只在本章运行时经 API 建一张。
+TITLE_RACE_DETAIL = "走查·详情页被抢认领（本章 API 建单）"
 
 CODE_SHIPPER = "seed-shipper"
 CODE_OWNER = "seed-owner"
@@ -1047,7 +1051,19 @@ class Walker:
             return False
         self.c.nav("switchTab", "/" + MINE, MINE)
         time.sleep(2.5)
-        mine = self.c.page_data()
+        # ⚠️ 轮询到 `showEntrust` **有值**为止，不靠固定 sleep。
+        #    2026-09-16 实测踩到：合并轮（`--section 36,37,38,39`）里 ㊱ 章**首跑**拿到
+        #    `showEntrust=None` ⇒ 记 1 条 `FAIL` 并把该节后面的对照全推成 `NOT_RUN`；
+        #    而**同一次运行**里 ㊳ 章对**同一个身份** `seed-mgr-multi` 的同一条前置是 PASS ⇒
+        #    这是「页面还没就绪」的**读数**问题，不是权限功能缺陷。
+        #    ⚠️ 轮询只让读数可靠，**不放松判据**：下面照样断言 `is True`，
+        #    `None` 与 `False` 都会失败（差别只是"没读到"与"读到了但没有"）。
+        mine: dict = {}
+        for _ in range(40):
+            mine = self.c.page_data()
+            if mine.get("showEntrust") is not None:
+                break
+            time.sleep(0.5)
         # 入口是否可见由服务端决定 —— 这也是在验「我的」页的权限投影
         if not self.rep.rec(
             f"{tag} [{code}] 「我的」页委托入口可见（服务端放行）",
@@ -5987,6 +6003,249 @@ def sec_38(w: Walker) -> None:
     )
 
 
+def sec_39(w: Walker) -> None:
+    """㊴ 详情页受理入口的「**被抢认领**」界面路径（D-4 §5 第四条 · 图 2 第 4 行的 409 一半）。
+
+    为什么还差这一条
+    ----------------
+    D-4 裁定的 §5 第四条有**两个**分支，都落在「入口展示之后、后端拒绝」这一格：
+
+      · 「权限**被撤销** ⇒ 403 ⇒ 刷新」—— ㊲ 章（**队列卡片**入口）；
+      · 「已被**他人抢先认领** ⇒ 409 ⇒ 刷新」—— ㉟ 章第五节（**队列卡片**入口）。
+
+    ⚠️ 两处都**不是详情页**。而 2026-09-16 把详情页的「受理委托」从 `wx.showModal`
+    改成**页内确认条**（㊳ 章）⇒ `detail.js: onSubmitClaim` 里
+    `status === 403 || status === 409 ⇒ load()` 成了**一条新的代码路径**，
+    此前没有任何设备侧证据。本章补的就是它。
+
+    四个入口 × 两个分支，各归各的证据（**互不顶替**）
+    -------------------------------------------------
+    | 章 | 入口 | 分支 | 证据 |
+    | --- | --- | --- | --- |
+    | ㉟ 五 | 队列卡片 | 409 被抢 | 页内确认条 + 队列刷成服务端真实状态 |
+    | ㊲ 三 | 队列卡片 | 403 撤权 | 页内确认条 + 刷新（成对断言单据未被改动） |
+    | ㊳ ②④ | 详情页 | 无（成功侧） | 确认条展开 / 受理成功 |
+    | **本章** | **详情页** | **409 被抢** | 确认条展开 ⇒ 点确认 ⇒ 409 ⇒ 刷新 |
+
+    本章**真写一张单**（API 建单 + API 提交到甲组织 + 被抢一次受理）：
+      · 货主用 `seed-shipper-orgpicker`（在甲组织有生效委托授权）；
+      · **页面身份** `seed-mgr-single`（**仅甲**经理）、**抢单者** `seed-mgr-multi`（甲经理）
+        —— 甲组织是种子里**唯一**有两个经理的组织，「被抢」只能在这里造；
+      · 不新造**种子**（本机只需一张运行时的载体单）；
+      · 放在全量序列最末，且**不依赖**其它章节留下的状态。
+
+    ⚠️ 与 ㊳ 的样本必须**分开**：甲组织在种子里只有**一张** `submitted` 样本单
+    （`TITLE_A`），㊳ 会把它受理掉 ⇒ 本章自己经 API 建一张，否则两章会抢同一张。
+    """
+    print("\n== ㊴ 详情页受理入口的「被抢认领」路径（409 ⇒ 刷新）==", flush=True)
+    base_err = w.c.errors()
+
+    tok_multi = (api_login(CODE_MGR_MULTI) or {}).get("access_token") or ""
+    rows = (api_get("/entrust/my-orgs", tok_multi) or {}).get("items") or []
+    oa = next((r or {} for r in rows if str((r or {}).get("name") or "") == ORG_A), {})
+    org_a_id = str(oa.get("org_id") or "")
+
+    tok_single = (api_login(CODE_MGR_SINGLE) or {}).get("access_token") or ""
+    rows_s = (api_get("/entrust/my-orgs", tok_single) or {}).get("items") or []
+    osingle = next((r or {} for r in rows_s if str((r or {}).get("name") or "") == ORG_A), {})
+    w.rep.rec(
+        "㊴ 前置：页面身份 `seed-mgr-single` 是**仅甲组织**的 manager、抢单者 "
+        "`seed-mgr-multi` 也是甲组织 manager —— 甲组织是种子里**唯一**有两个经理的"
+        "组织，「被抢」只能在这里造",
+        bool(org_a_id)
+        and str(osingle.get("member_role")) == "manager"
+        and str(oa.get("member_role")) == "manager"
+        and len(rows_s) == 1,
+        f"甲#{org_a_id} single={osingle.get('member_role')!r}（组织数={len(rows_s)}）"
+        f" multi={oa.get('member_role')!r}",
+    )
+    if not org_a_id or str(osingle.get("member_role")) != "manager":
+        w.rep.not_run(
+            "㊴ 详情页被抢认领路径",
+            "前置身份不满足。先跑 backend/scripts/seed_entrust_orgpicker.py 再重跑。",
+        )
+        return
+
+    # ---- 载体单：经 API 建单 + 提交到甲组织（**不是**界面提交，本章断言的对象是详情页）----
+    ts = int(time.time() * 1000)
+    tok_op = (api_login(CODE_SHIPPER_ORGPICKER) or {}).get("access_token") or ""
+    st_new, created = api_post(
+        "/entrust/assignments",
+        tok_op,
+        {"title": TITLE_RACE_DETAIL, "cargo_summary": "㊴ 章载体单：详情页「被抢认领」路径"},
+        f"walk39-new-{ts}",
+    )
+    new_id = str((created or {}).get("assignment_id") or "")
+    rev = int((created or {}).get("revision") or 0)
+    st_sub, submitted = (0, None)
+    if new_id and rev:
+        st_sub, submitted = api_post(
+            f"/entrust/assignments/{new_id}/submit",
+            tok_op,
+            {"org_id": int(org_a_id), "expected_revision": rev},
+            f"walk39-sub-{ts}",
+        )
+    w.rep.rec(
+        "㊴ 前置：载体单已建成并**提交到甲组织**（`submitted`）⇒ 本章与 ㊳ 各用各的单，"
+        "不会互抢（甲组织种子里只有一张待受理样本单，㊳ 会把它受理掉）",
+        st_new in (200, 201)
+        and st_sub in (200, 201)
+        and str((submitted or {}).get("status") or "") == "submitted",
+        f"建单 HTTP={st_new} id={new_id!r} 提交 HTTP={st_sub} "
+        f"status={(submitted or {}).get('status')!r}",
+    )
+    if not new_id or st_sub not in (200, 201):
+        w.rep.not_run("㊴ 详情页被抢认领路径", "载体单未建成，链路断在这里")
+        return
+
+    # ============ 一、详情页起点：待受理 + 受理入口在（先证有）============
+    print("\n-- 一、详情页起点（先证有）--", flush=True)
+    if not w.open_workbench(CODE_MGR_SINGLE, tag="㊴"):
+        w.rep.not_run("㊴ 详情页被抢认领路径", "未能以 seed-mgr-single 进入经理工作台")
+        return
+    w.wait_data(lambda x: x.get("view") is not None, tries=30, gap=0.5)
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_a_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={new_id}", DETAIL)
+    pd0 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    n_open0 = w.c.count('[data-act-claim-open="1"]')
+    w.rep.rec(
+        "㊴ ① 起点：待受理态、**受理入口在** —— 必须先证有：没有它，「被抢之后按钮消失」"
+        "就与「本来就没有按钮」分不开（那是完全不同的结论）",
+        pd0.get("canClaim") is True and n_open0 == 1,
+        f"canClaim={pd0.get('canClaim')!r} open={n_open0}",
+    )
+    w.shot("39-1-详情页-待受理-入口在")
+
+    # ============ 二、页内确认条展开（把页面停在「用户已决定受理」的那一刻）============
+    print("\n-- 二、确认条展开（抢单前）--", flush=True)
+    t_open = w.c.tap('[data-act-claim-open="1"]')
+    time.sleep(1.2)
+    d_open = w.c.page_data()
+    n_sub_open = w.c.count('[data-act-claim-submit="1"]')
+    n_cancel_open = w.c.count('[data-act-claim-cancel="1"]')
+    w.rep.rec(
+        "㊴ ② 点「受理委托」⇒ 确认条在**页内**展开（确认 / 取消同时可点）。形态本身已由 "
+        "㊳ ② 断言，这里只用它把页面停在「用户已经决定要受理」的那一刻",
+        bool(t_open) and d_open.get("claimOpen") is True and n_sub_open == 1 and n_cancel_open == 1,
+        f"tap={t_open} claimOpen={d_open.get('claimOpen')!r} "
+        f"submit={n_sub_open} cancel={n_cancel_open}",
+    )
+    w.shot("39-2-确认条展开-抢单前")
+
+    # ============ 三、抢单：外部先受理，页面还不知道 ============
+    print("\n-- 三、外部先受理 ⇒ 页面仍旧 --", flush=True)
+    st_race, _ = api_post(
+        f"/entrust/assignments/{new_id}/claim", tok_multi, {}, f"walk39-race-{ts}"
+    )
+    truth_race = api_get(f"/entrust/assignments/{new_id}", tok_single) or {}
+    w.rep.rec(
+        "㊴ ③ 抢单前置：**另一名**甲组织经理（`seed-mgr-multi`）经 API 把这单受理走了"
+        "（刻意不走界面 —— 单模拟器做不出第二个界面实例，与 ㉟ 章第五节同一条理由）",
+        st_race in (200, 201) and str(truth_race.get("status") or "") == "claimed",
+        f"抢单 HTTP={st_race} 服务端 status={truth_race.get('status')!r} "
+        f"claimed_by={truth_race.get('claimed_by')!r}",
+    )
+    d_stale = w.c.page_data()
+    n_sub_stale = w.c.count('[data-act-claim-submit="1"]')
+    w.rep.rec(
+        "㊴ ③ 而**页面还不知道**：确认条仍在、`canClaim` 仍为 true（前端不轮询状态/权限）"
+        "—— 这正是 §5「以后端结果为准」存在的原因；此时按下去**必然**被拒",
+        d_stale.get("canClaim") is True and n_sub_stale == 1,
+        f"页面 canClaim={d_stale.get('canClaim')!r} 确认键={n_sub_stale}（服务端已 claimed）",
+    )
+
+    # ============ 四、迟到的那一下 ⇒ 后端拒绝 ⇒ 页面自己刷新 ============
+    print("\n-- 四、迟到的那一下 ⇒ 刷新 ============", flush=True)
+    t_late = w.c.tap('[data-act-claim-submit="1"]')
+    d_after = w.wait_data(
+        # ⚠️ 判据取 `canClaim is False`，**不取** `not claiming` —— 后者在 catch 里
+        #    先被置回 false，而 `load()` 还没回来，会在"canClaim 仍为 true"的那一瞬间
+        #    提前返回，把一条本会通过的断言判成红的（假红）。`wait_data` 在轮询用尽时
+        #    返回最后一次读数 ⇒ 真要失败也带着现场数据，不会静默。
+        lambda x: x.get("view") not in (None, "", "loading") and x.get("canClaim") is False,
+        tries=60,
+        gap=0.5,
+    )
+    n_open1 = w.c.count('[data-act-claim-open="1"]')
+    n_sub1 = w.c.count('[data-act-claim-submit="1"]')
+    n_cancel1 = w.c.count('[data-act-claim-cancel="1"]')
+    w.rep.rec(
+        "㊴ ④ 迟到的那一下 ⇒ 页面**自己刷新**（D-4 §5：以后端结果为准）：`canClaim` 翻 "
+        "false、受理入口与确认条一起从渲染树里消失 —— 而不是留一个点了必然被拒的按钮。"
+        "⚠️ 与括号里那半句**成对**才算证到：`canCreateCase` 同时翻 **true**（只有 "
+        "`status=claimed` 才会出现「登记案件」入口）⇒ 这次的翻转**只可能**来自"
+        "「服务端已受理」，不是「权限被撤」那种翻转",
+        bool(t_late)
+        and d_after.get("canClaim") is False
+        and d_after.get("canCreateCase") is True
+        and n_open1 == 0
+        and n_sub1 == 0
+        and n_cancel1 == 0,
+        f"tap={t_late} canClaim={d_after.get('canClaim')!r} "
+        f"canCreateCase={d_after.get('canCreateCase')!r} open={n_open1} "
+        f"submit={n_sub1} cancel={n_cancel1}",
+    )
+    w.shot("39-3-被抢之后-页面刷新")
+
+    # ============ 五、拒因直证：这个写操作确实"必然被拒" ============
+    print("\n-- 五、拒因直证 --", flush=True)
+    st_again, body_again = api_post(
+        f"/entrust/assignments/{new_id}/claim", tok_single, {}, f"walk39-again-{ts}"
+    )
+    w.rep.rec(
+        "㊴ ⑤ 拒因**直证**（口径事实，不是缺陷判定）：用**页面那一个身份**直接再调一次"
+        "受理 ⇒ 服务端 **409**（`claim_assignment` 是单条 `UPDATE ... WHERE "
+        "status='submitted'`，条件没打中即判冲突）。⇒ 页面刚才那一下「必然被拒」不是"
+        "随机失败，就是这条已复现的冲突语义；本条断言的是**这个事实可复现**，"
+        "**不是**「功能正常」",
+        st_again == 409,
+        f"HTTP={st_again} body={str(body_again)[:150]}",
+    )
+
+    # ============ 六、诚实边界（不计入通过）============
+    print("\n-- 六、诚实边界（不计入通过）--", flush=True)
+    w.rep.rec(
+        "㊴ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        str(w.new_errors(base_err))[:200],
+    )
+    w.rep.rec(
+        "㊴ 去向记录（**复用**，不是本章新证）：队列卡片入口上的同一分支由 "
+        "**㉟ 章第五节**（409 被抢）与 **㊲ 章**（403 撤权）覆盖；本章只补**详情页**入口，"
+        "不重复断言、也不顶替它们",
+        True,
+        "去向：㉟ 五 = 409 @ 队列 · ㊲ = 403 @ 队列 · 本章 = 409 @ 详情页",
+    )
+    w.rep.rec(
+        "㊴ ⚠️ **仍未取证**（去向记录，**不是通过**）：**详情页**入口上的「权限被撤销 ⇒ 403」"
+        "分支没有独立证据 —— ㊲ 章证的是**队列卡片**入口。它与本章的 409 走的是同一个 "
+        "`onSubmitClaim` 的 `if (status === 403 || status === 409) return self.load()`，"
+        "但「403 也走这条」目前只有**代码阅读**，设备证据只到 409 ⇒ 保持未取证，不得涂绿",
+        True,
+        "缺的是详情页上的 403 通道（与 ㊲ 的撤权配方同形，只是换成详情页入口）",
+    )
+    w.rep.limitation(
+        "㊴ 本章的载体单经 **API 建单 / 提交**，不是界面提交",
+        "本章断言的对象是详情页「点开之后」的页内形态与刷新链路，与这张单是**谁建的**"
+        "无关；「界面真实点击提交到甲组织」这条由 ㉟ 章第一节覆盖。两者是不同的事实，"
+        "不能互相顶替。",
+    )
+    w.rep.limitation(
+        "㊴ 的「另一个写者」是**同进程 API 调用**，不是第二个真机客户端",
+        "单模拟器做不出第二个界面实例（与 ㉟ 章第五节同一条边界）。本章证的是"
+        "「后端拒绝 ⇒ 页面刷新」这条链路；**并发本身**由后端单条条件更新 ＋ "
+        "MySQL 集成用例覆盖，不在本章范围内。",
+    )
+    w.rep.limitation(
+        "㊴ 的 409 提示**文案**不可被工具断言",
+        "与 ⑧b / ㉕D / ㊲ / ㊳ 同一个**工具**边界（toast 不在渲染树里），与产品无关。"
+        "本章能证的是可观察结果：HTTP 409、`canClaim` / `canCreateCase` 的翻转、"
+        "锚点在渲染树里的命中数。",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -6011,6 +6270,7 @@ SECTIONS = {
     "36": sec_36,
     "37": sec_37,
     "38": sec_38,
+    "39": sec_39,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -6085,6 +6345,11 @@ DEFAULT_ORDER = [
     # S1 收尾（2026-09-16）：详情页两个关键路径改成页内 DOM 之后的**真机验收**。
     # ⚠️ 必须排在 ㊱ 之后：本章会**受理掉**甲组织那张样本单（㊱ 要求它仍是 submitted）。
     "38",
+    # ㊴ 详情页受理入口的「**被抢认领**」路径（D-4 §5 第四条 · 图 2 第 4 行）。
+    # ⚠️ 必须排在 ㊳ 之后：甲组织种子里只有**一张**待受理样本单，㊳ 会受理掉它；
+    #    本章因此经 API 自建一张载体单（不新造种子），两章各用各的单。
+    #    本章**不依赖**其它章节留下的状态，单跑也能成立（前置只是种子里的身份与组织）。
+    "39",
 ]
 
 
