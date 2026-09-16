@@ -2,6 +2,7 @@
 
 会话
 ----
+- GET    /api/v1/entrust/assignments/{aid}/session-context    会话上下文（该用哪条授权）
 - POST   /api/v1/entrust/entrustments/{eid}/sessions        创建会话（幂等）
 - GET    /api/v1/entrust/sessions                           列表（我的 / 授权的组织）
 - GET    /api/v1/entrust/sessions/{sid}                     详情（含消息时间线）
@@ -66,7 +67,12 @@ from app.modules.entrust._http import (
     require_entrust_enabled,
     run_write,
 )
-from app.modules.entrust.access import PERM_AGENT_JOB, PERM_QUOTE_CREATE, PERM_VIEW
+from app.modules.entrust.access import (
+    PERM_AGENT_JOB,
+    PERM_QUOTE_CREATE,
+    PERM_VIEW,
+    find_active_entrustments,
+)
 from app.modules.entrust.authz import (
     assert_can_view_entrustment,
     assert_can_view_scoped_object,
@@ -88,6 +94,7 @@ from app.modules.entrust.schemas import (
     ArtifactAdoptIn,
     JobAttemptOut,
     JobCreate,
+    SessionContextOut,
     SessionCreate,
     SessionDetailOut,
     SessionListOut,
@@ -287,6 +294,86 @@ def create_session(
 
 
 @router.get(
+    "/assignments/{assignment_id}/session-context",
+    response_model=SessionContextOut,
+    summary="会话上下文（为这单开会话该用哪条委托授权）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def get_session_context(
+    assignment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """解析「为这张委托单创建会话」所需的授权上下文。
+
+    ## 为什么需要它（这不是可选的便利端点）
+
+    `POST /entrustments/{entrustment_id}/sessions` 要求调用方**先知道授权 id**，
+    而现有两条清单都答不了这个问题：
+
+    * `GET /my-orgs` 读的是 `ent_org_member`（组织成员身份），不含授权 id；
+    * `GET /my-entrustments` 只列**货主自己授权出去**的授权 —— 经理不在其中。
+
+    于是界面这边只剩下"猜一个授权 id、试到不报错为止"，而权限判定绝不能建立在
+    猜测上。这与 `access.list_my_orgs` 的 docstring 是同一条论据：
+    **服务端说"请指定"，前端就必须有合法手段拿到可选项**。
+
+    ## 它做查找，不做判定
+
+    * **做**：把这条委托单对应的 `(货主, 组织)` 与唯一一条匹配的生效授权查出来；
+    * **不做**：不回答"你能不能建"。那个判断由
+      `assert_can_write_entrustment` 唯一决定（见 `SessionContextOut` 的说明）。
+
+    匹配不到唯一一条时**不猜**：返回 `entrustment_id=null` 并在 `note` 里写清是哪一种
+    （未指定组织 / 无生效授权 / 多条匹配需显式指定）。
+    """
+    assignment = load_assignment(db, assignment_id)
+    if assignment is None:
+        raise not_found("委托不存在")
+    owner_user_id = int(assignment["owner_user_id"])
+    raw_org = assignment.get("org_id")
+    org_id = int(raw_org) if raw_org is not None else None
+
+    user_id = int(user.id)
+    if user_id != owner_user_id:
+        # 与委托详情、工作台**同一条**可见性口径（货主本人或授权组织成员），
+        # 不在这里另立一套判据。
+        assert_can_view_scoped_object(
+            db,
+            user_id=user_id,
+            owner_user_id=owner_user_id,
+            org_id=org_id,
+            detail="委托不存在",
+        )
+
+    entrustment_id: int | None = None
+    note = ""
+    if org_id is None:
+        # 没选定服务经营主体 ⇒ 无从定位授权。这不是"没权限"，报错文案要区分开。
+        note = "该委托未指定服务经营主体，无法定位委托授权"
+    else:
+        # ⚠️ 这里刻意**不**用 `resolve_context().delegations` 过滤：那只覆盖
+        # 调用者所在组织那一侧，货主本人会拿到空元组 —— 而"这单的货主与组织之间
+        # 有哪几条生效授权"与"谁在问"无关（见 find_active_entrustments 的说明）。
+        matches = find_active_entrustments(db, org_id=org_id, owner_user_id=owner_user_id)
+        if len(matches) == 1:
+            entrustment_id = matches[0]
+        elif not matches:
+            note = "这单的货主与组织之间没有生效中的委托授权"
+        else:
+            # 唯一选项才自动选中，多条一律不猜 —— 猜错的后果是把会话挂到
+            # 另一条授权上，数据边界随之改变，而界面上看不出来。
+            note = "同一(货主, 组织)下存在多条生效授权，需显式指定"
+
+    return SessionContextOut(
+        assignment_id=assignment_id,
+        org_id=org_id,
+        entrustment_id=entrustment_id,
+        note=note,
+    )
+
+
+@router.get(
     "/sessions",
     response_model=SessionListOut,
     summary="会话列表（我的 / 授权组织的）",
@@ -297,6 +384,9 @@ def list_sessions(
     org_id: int | None = Query(default=None, ge=1),
     session_status: str | None = Query(default=None, alias="status"),
     agent_specialty: str | None = Query(default=None),
+    assignment_id: int | None = Query(
+        default=None, ge=1, description="按委托单过滤（会话页从工作台进来时只有委托单号）"
+    ),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -309,6 +399,7 @@ def list_sessions(
             created_by=user_id,
             agent_specialty=agent_specialty,
             status=session_status,
+            assignment_id=assignment_id,
             page=page,
             size=size,
         )
@@ -335,6 +426,7 @@ def list_sessions(
             org_id=scope_org,
             agent_specialty=agent_specialty,
             status=session_status,
+            assignment_id=assignment_id,
             page=page,
             size=size,
         )

@@ -519,6 +519,39 @@ def list_my_entrustments(
     return items
 
 
+def find_active_entrustments(
+    session: Session, *, org_id: int, owner_user_id: int, now: datetime | None = None
+) -> tuple[int, ...]:
+    """列出某 (货主, 组织) 对之间**生效中**的授权 id。
+
+    ## 为什么单独一个公开助手，而不是复用 `resolve_context().delegations`
+
+    `AccessContext.delegations` 只覆盖**调用者所在组织**那一侧的授权：
+    货主本人（通常不是任何组织的成员）拿到的是一份空元组，
+    于是"这单的货主与组织之间有哪几条授权"在他那里会答成"没有" ——
+    而事实上是有的。**把调用者身份混进一次纯查找里，会产出错误的答案**，
+    所以这里刻意不带身份过滤。
+
+    ## 调用方必须先做可见性判定
+
+    本函数不做任何权限判定，也不回答"你能不能建会话"。调用方负责先确认
+    "这个人可以看这张委托单"（如 `assert_can_view_scoped_object`），
+    再拿这里的结果去尝试创建 —— 真正的授权判定仍由
+    `assert_can_write_entrustment` 唯一决定。
+
+    ## 可能返回多条
+
+    `ent_entrustment` **没有** (org_id, entrust_user_id) 唯一约束（只有
+    `ent_org_member` 有），所以同一对之间可以并存多条生效授权。
+    调用方据此**不得猜**：多于一条时应当要求显式指定。
+
+    时间窗与状态的判定**与 `_active_delegations` 同一实现**，
+    不在这里重写一遍（否则"生效"会有两个定义）。
+    """
+    delegations = _active_delegations(session, org_ids={org_id}, now=now or utcnow_naive())
+    return tuple(d.entrustment_id for d in delegations if d.owner_user_id == owner_user_id)
+
+
 def assert_can(
     session: Session,
     *,

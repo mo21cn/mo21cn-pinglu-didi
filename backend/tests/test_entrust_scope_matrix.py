@@ -69,7 +69,7 @@ def test_matrix_keys_are_unique():
 
 
 def test_matrix_size_matches_baseline():
-    """条目数锁定为 62。
+    """条目数锁定为 63。
 
     数量变化本身不是错误，但**必须是有意的**：增删端点时同时改这里，
     强制在 PR 里显式说明"为什么端点集合变了"。
@@ -88,8 +88,14 @@ def test_matrix_size_matches_baseline():
     货主侧"我授权出去的组织"，是 UI-07 选择**提交目标**的唯一合法数据源。
     `ent_entrustment` 此前无任何 HTTP 面，`/my-orgs` 读的是 `ent_org_member`，
     两者不是一回事（DR-0012），拿后者顶上会产出"能选但必然 403"的选项。
+    62 → 63（S2 首片 / HO 0917-2 执行顺序 2）：新增
+    `GET /assignments/{assignment_id}/session-context` —— 建会话要
+    `entrustment_id`，而 `/my-orgs` 只回成员身份、`/my-entrustments` 只回货主自己
+    授权出去的授权，经理两边都拿不到本单那一条。缺了它，前端只剩"猜一个 id 试到不报错
+    为止"，而权限判定不能建立在猜测上（与 61→62 那条同源，都是"服务端说请指定、
+    前端必须有合法手段拿到可选项"）。
     """
-    assert len(sm.SCOPE_MATRIX) == 62
+    assert len(sm.SCOPE_MATRIX) == 63
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

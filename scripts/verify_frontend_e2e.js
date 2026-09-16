@@ -63,6 +63,17 @@ const entrustTasksByAssignment = {}     // assignmentId → 单委托任务清�
 const entrustCaseDetails = {}
 const entrustWriteProof = {}            // ⑮ 段真写前后的读数对比（后端事实）
 
+// S2 首片（真实会话 → 消息/附件 → 持久化作业 → 重进恢复）：这几份载荷都由
+// bootstrap **用真接口**取回来（含真建一个会话 + 真发一条消息 + 真跑一次作业），
+// 再按 session/assignment 编号回放给页面。
+// ⚠️ 不在桩里编一份假聊天：那样页面显示得再对，也证明不了"会话、消息、作业真的落库"
+//    —— 而"落库 + 换设备仍能恢复"正是 S2 首片要证明的那件事。
+const entrustSessions = {}              // assignmentId → 会话清单（真载荷）
+const entrustSessionDetail = {}         // sessionId → 会话详情（含消息时间线）
+const entrustJobsByAssignment = {}      // assignmentId → 作业清单（真载荷）
+const entrustEntrustmentAttachments = {} // entrustmentId → 附件清单（真载荷）
+const entrustSessionContext = {}        // assignmentId → 会话上下文（真载荷）
+
 // ── 页面驱动的写通道 ──────────────────────────────────────────────────────
 // 写请求**只在 ⑮ 段的显式用户动作里放行**（点"保存新版本"、点"设为生效版本"）：
 // `load()` 期间任何写请求都被拒 —— 与 route() 里"写端点有意不登记"是同一条纪律。
@@ -79,7 +90,11 @@ async function pageWrite(method, p, body, key) {
   const res = await api(method, p, {
     token: ownerToken,
     body: body,
-    headers: { 'Idempotency-Key': key }
+    // ⚠️ 有的推进类端点在契约里**不要求**幂等键（如 `POST /agent/jobs/{jid}/run`：
+    // 幂等来自作业状态机与租约，重复调用会 409）。此时必须**不带**这个头 ——
+    // 传 `undefined` 会让 fetch 直接抛 "invalid header value"，
+    // 而表现是"页面推进作业失败"，与真实原因（桩写坏了）毫无关系。
+    headers: key ? { 'Idempotency-Key': key } : {}
   })
   // 连**响应**一起记下来：⑮ 段要拿后端返回的 `revision_no` 做断言，
   // 而不是从页面的 setData 里反推（那又变成自证）。
@@ -118,6 +133,14 @@ async function refreshArtifactReplay(artifactId) {
 }
 
 const qs = (p) => (p ? '?' + new URLSearchParams(p).toString() : '')
+
+/**
+ * 幂等键（bootstrap 里以"脚本自己"为发起方的真写用）。
+ *
+ * 页面驱动的那几条写用的是页面自己生成的键（`utils/entrust.newIdempotencyKey`）——
+ * 那才是被测行为。这里只给 bootstrap 造夹具用，不参与断言。
+ */
+const rid = () => 'e2e-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
 
 async function api(method, p, { token, body, headers } = {}) {
   const res = await fetch(BASE + '/api/v1' + p, {
@@ -381,6 +404,120 @@ async function bootstrap() {
     }
   })()
 
+  // ── S2 首片载荷：**真的建**一个会话、发一条消息、跑一次作业 ─────────────────
+  //
+  // 为什么 bootstrap 里要真写：S2 首片要证明的是"会话 / 消息 / 作业**真的落库**，
+  // 离开再回来还在"。若只回放一份手写快照，页面显示得再对也证明不了这一点 ——
+  // 那正是 HO 说的"不做前端假聊天"。
+  //
+  // 与成果段同一条纪律：写完之后**复读**（下面几条 GET），再灌进回放表。
+  // 于是页面看到的每一格都是后端事实，而不是脚本的期望值。
+  await (async function loadSessionPayload() {
+    const aid = entrustWriteProof.assignmentId
+    if (!aid) {
+      note('S2 会话 · 无委托锚点（成果段没挑到委托），跳过')
+      return
+    }
+    try {
+      // 授权 id 走**真接口**取，不在脚本里推 —— 与页面同一条口径。
+      const ctxRes = await api('GET',
+        '/entrust/assignments/' + aid + '/session-context', { token: tok.owner })
+      if (ctxRes.status !== 200) {
+        note('S2 会话 · session-context 取不到（' + ctxRes.status + '），跳过：'
+          + JSON.stringify(ctxRes.data).slice(0, 140))
+        return
+      }
+      entrustSessionContext[aid] = ctxRes.data
+      const eid = ctxRes.data.entrustment_id
+      if (!eid) {
+        note('S2 会话 · 会话上下文未给出唯一授权（' + String(ctxRes.data.note || '')
+          + '），跳过')
+        return
+      }
+
+      // 幂等：本机重复跑时复用已有会话。每次都新建会让消息越堆越多，
+      // "离开后重进仍可恢复"的断言就会被上一轮的消息污染。
+      let sid = 0
+      const firstList = await api('GET',
+        '/entrust/sessions' + qs({ view: 'mine', assignment_id: aid, size: 20 }),
+        { token: tok.owner })
+      if (firstList.status === 200 && (((firstList.data || {}).items) || []).length) {
+        sid = firstList.data.items[0].session_id
+      } else {
+        const made = await api('POST', '/entrust/entrustments/' + eid + '/sessions', {
+          token: tok.owner,
+          body: {
+            assignment_id: aid,
+            agent_specialty: 'agent_02',
+            title: '委托 #' + aid + ' 报价会话'
+          },
+          headers: { 'Idempotency-Key': rid() }
+        })
+        if (made.status !== 200) {
+          note('S2 会话 · 建会话被拒（' + made.status + '）：'
+            + JSON.stringify(made.data).slice(0, 160))
+          return
+        }
+        sid = made.data.session_id
+      }
+
+      // 消息与作业同样只造一次（幂等重跑）。
+      const detail0 = await api('GET', '/entrust/sessions/' + sid, { token: tok.owner })
+      const msgs0 = ((detail0.data || {}).messages) || []
+      if (!msgs0.length) {
+        await api('POST', '/entrust/sessions/' + sid + '/messages', {
+          token: tok.owner,
+          body: { content: '贵港到梧州，水泥 3000 吨，报个价' },
+          headers: { 'Idempotency-Key': rid() }
+        })
+      }
+      const jobs0 = await api('GET',
+        '/entrust/agent/jobs' + qs({ assignment_id: aid, size: 20 }), { token: tok.owner })
+      if (!((((jobs0.data || {}).items) || []).length)) {
+        const job = await api('POST', '/entrust/sessions/' + sid + '/jobs', {
+          token: tok.owner,
+          // ⚠️ `input` 必须真的带上报价文本，且形状与页面 `onSend()` **一致**
+          // （`{input: {quote_text}}`）。不带它作业不会失败，而是**成功地**返回
+          // "未提供待解析的报价文本"（`findings[0].code = NO_QUOTE_INPUT`）
+          // ⇒ `artifact_proposals` 为空 ⇒ "提案 N 条"永远是 0。
+          // 那种假绿比红更麻烦：断言看到的是一个**合理解释**，而不是一次错误。
+          body: {
+            base_revision: 1,
+            input: { quote_text: '贵港到梧州，水泥 3000 吨，每吨 45 元，含装卸，10 月 8 日前装船' }
+          },
+          headers: { 'Idempotency-Key': rid() }
+        })
+        if (job.status === 200) {
+          // 推进一次 ⇒ 作业真的执行（`LLM_MOCK=true` ⇒ fixture 信封，
+          // 所以界面上必须有"这是 fixture"的标注 —— 那也正是要断言的）。
+          await api('POST', '/entrust/agent/jobs/' + job.data.job_id + '/run',
+            { token: tok.owner, body: {} })
+        } else {
+          note('S2 会话 · 提交作业被拒（' + job.status + '）：'
+            + JSON.stringify(job.data).slice(0, 160))
+        }
+      }
+
+      // 复读成回放载荷：页面看到的必须是**写之后**的库。
+      const sList = await api('GET',
+        '/entrust/sessions' + qs({ view: 'mine', assignment_id: aid, size: 20 }),
+        { token: tok.owner })
+      if (sList.status === 200) entrustSessions[aid] = sList.data
+      const sDetail = await api('GET', '/entrust/sessions/' + sid, { token: tok.owner })
+      if (sDetail.status === 200) entrustSessionDetail[String(sid)] = sDetail.data
+      const jList = await api('GET',
+        '/entrust/agent/jobs' + qs({ assignment_id: aid, size: 20 }), { token: tok.owner })
+      if (jList.status === 200) entrustJobsByAssignment[aid] = jList.data
+      const att = await api('GET', '/entrust/entrustments/' + eid + '/attachments',
+        { token: tok.owner })
+      if (att.status === 200) entrustEntrustmentAttachments[String(eid)] = att.data
+      entrustWriteProof.sessionId = sid
+      entrustWriteProof.entrustmentId = eid
+    } catch (e) {
+      note('S2 会话 · 取数失败，跳过：' + (e && e.message))
+    }
+  })()
+
   console.log('载荷就绪：货 %d · 船 %d · 泊位 %d · 预约 %d · 订单 %d · 支付单 %d · 合同 %d',
     (D.cargoList.items || []).length, (D.ships.items || []).length, (D.berths.items || []).length,
     (D.appts.items || []).length, (D.orders.items || []).length,
@@ -396,6 +533,14 @@ async function bootstrap() {
   }
   if (!(D.entrustMine.items || []).length) {
     note('委托支线无载荷 —— 请确认已铺 backend/scripts/seed_entrust_demo.py')
+  }
+  if (entrustWriteProof.sessionId) {
+    const sd = entrustSessionDetail[String(entrustWriteProof.sessionId)] || {}
+    const jl = (entrustJobsByAssignment[entrustWriteProof.assignmentId] || {}).items || []
+    console.log('S2 会话载荷：会话 #%s（授权 #%s）· 消息 %d 条 · 作业 %d 个（状态 %s）',
+      String(entrustWriteProof.sessionId), String(entrustWriteProof.entrustmentId),
+      (sd.messages || []).length, jl.length,
+      jl.map(function (j) { return String(j.status) }).join(','))
   }
 }
 
@@ -439,6 +584,35 @@ function route(url, body) {
   if ((m = u.match(/^\/entrust\/assignments\/(\d+)\/artifacts$/))) {
     const l = entrustAssignmentArtifacts[Number(m[1])]
     return l ? { ok: l } : { err: '未拉取委托 ' + m[1] + ' 的成果清单' }
+  }
+  // ── 会话与作业（S2 首片）──────────────────────────────────────────────
+  // ⚠️ 三条都用**精确正则**，且 `/sessions/{id}` 必须排在 `/sessions` 之前 ——
+  //    否则会话详情会被"列表"分支接走，页面把一份分页对象当成会话详情用
+  //    （不抛异常，只是消息时间线永远空掉，看起来像"这单还没聊过"）。
+  if ((m = u.match(/^\/entrust\/assignments\/(\d+)\/session-context$/))) {
+    const c = entrustSessionContext[Number(m[1])]
+    return c ? { ok: c } : { err: '未拉取委托 ' + m[1] + ' 的会话上下文' }
+  }
+  if ((m = u.match(/^\/entrust\/sessions\/(\d+)$/))) {
+    const d = entrustSessionDetail[m[1]]
+    return d ? { ok: d } : { err: '未拉取会话 ' + m[1] + ' 的详情' }
+  }
+  if (u === '/entrust/sessions') {
+    const q = body || {}
+    // 页面按 `assignment_id` 定位本单会话（它只有委托单号）。没有这个过滤，
+    // 页面会拿到别人的会话并"看起来正常" —— 那是最坏的一种假绿。
+    const key = Number(q.assignment_id)
+    const rows = entrustSessions[key]
+    return rows ? { ok: rows } : { err: '未拉取委托 ' + q.assignment_id + ' 的会话清单' }
+  }
+  if (u === '/entrust/agent/jobs') {
+    const q = body || {}
+    const rows = entrustJobsByAssignment[Number(q.assignment_id)]
+    return rows ? { ok: rows } : { err: '未拉取委托 ' + q.assignment_id + ' 的作业清单' }
+  }
+  if ((m = u.match(/^\/entrust\/entrustments\/(\d+)\/attachments$/))) {
+    const rows = entrustEntrustmentAttachments[m[1]]
+    return rows ? { ok: rows } : { err: '未拉取授权 ' + m[1] + ' 的附件清单' }
   }
   if ((m = u.match(/^\/entrust\/assignments\/(\d+)$/))) {
     const d = entrustDetail[Number(m[1])]
@@ -637,6 +811,30 @@ function loadPage(file, ctx) {
         // 只是经 route() 回放（写之后由 refreshArtifactReplay() 换成真事实）。
         fetchArtifactTypes: () => fetchVia('/entrust/artifact-types'),
         fetchArtifact: (id) => fetchVia('/entrust/artifacts/' + id),
+        // ── 会话与作业（S2 首片）────────────────────────────────────────
+        // ⚠️ 同一条纪律：**新增一个取数函数就必须在此登记**。漏登记的会落到真实
+        //    request.js，在 Node 里（无 wx.request）直接抛错，被页面的 `.catch`
+        //    吞成一个空数组 ⇒ 模板核对报"字段未产出"，而报错位置离真因很远
+        //    （本轮就是靠本地复现 CI 才发现）。
+        fetchSessionContext: (id) => fetchVia('/entrust/assignments/' + id + '/session-context'),
+        fetchSessions: (opts) => {
+          const o = opts || {}
+          const data = { view: o.view || 'mine', page: o.page || 1, size: o.size || 20 }
+          if (o.orgId) data.org_id = o.orgId
+          if (o.assignmentId) data.assignment_id = o.assignmentId
+          if (o.status) data.status = o.status
+          return fetchVia('/entrust/sessions', data)
+        },
+        fetchSession: (sid) => fetchVia('/entrust/sessions/' + sid),
+        fetchJobs: (opts) => {
+          const o = opts || {}
+          const data = { page: o.page || 1, size: o.size || 20 }
+          if (o.sessionId) data.session_id = o.sessionId
+          if (o.assignmentId) data.assignment_id = o.assignmentId
+          return fetchVia('/entrust/agent/jobs', data)
+        },
+        fetchEntrustmentAttachments: (eid) =>
+          fetchVia('/entrust/entrustments/' + eid + '/attachments'),
         fetchRevisions: (id) => fetchVia('/entrust/artifacts/' + id + '/revisions'),
         // 写端点：**只放行显式用户动作**（见 WRITE_ENABLED）。走真网络，
         // 失败时抛带 `httpStatus` 的错误 —— 与 utils/request.js 的拒绝形状一致，
@@ -670,7 +868,21 @@ function loadPage(file, ctx) {
         closeCase: (id, body, key) =>
           pageWrite('POST', '/entrust/exceptions/' + id + '/close', body, key).then(rejectIfNotOk),
         reopenCase: (id, body, key) =>
-          pageWrite('POST', '/entrust/exceptions/' + id + '/reopen', body, key).then(rejectIfNotOk)
+          pageWrite('POST', '/entrust/exceptions/' + id + '/reopen', body, key).then(rejectIfNotOk),
+        // ── S2 首片四条写命令 ────────────────────────────────────────────
+        // 与上面同一条通道：只在 `WRITE_ENABLED` 的段里真发。取数阶段一律被拒 ——
+        // 建会话/发消息都会改库，在"读"的段里发生它会让后续断言拿到一个被自己污染的世界。
+        createSession: (eid, body, key) =>
+          pageWrite('POST', '/entrust/entrustments/' + eid + '/sessions', body, key)
+            .then(rejectIfNotOk),
+        appendMessage: (sid, content, key) =>
+          pageWrite('POST', '/entrust/sessions/' + sid + '/messages', { content: content }, key)
+            .then(rejectIfNotOk),
+        submitJob: (sid, body, key) =>
+          pageWrite('POST', '/entrust/sessions/' + sid + '/jobs', body, key).then(rejectIfNotOk),
+        // 推进作业：**不带**幂等键（契约如此，见 pageWrite 里的说明）
+        runJob: (jid) =>
+          pageWrite('POST', '/entrust/agent/jobs/' + jid + '/run', {}, null).then(rejectIfNotOk)
       })
     }
     if (s.indexOf('auth') !== -1) {
@@ -1833,6 +2045,103 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           } else ok()
         } else {
           note('11 会话屏 · 成果段未取到参照成果，只做了"与后端一致"的比对')
+        }
+
+        // ── S2 首片：会话 / 消息 / 附件 / 持久化作业（HO 0917-2 执行顺序 2）────
+        // 判据一律对着**后端事实**（bootstrap 用真接口真建的那一份），
+        // 而不是"页面上有东西" —— 后者在页面自己拼一份数组时同样成立，
+        // 那就成了 HO 明说不做的"前端假聊天"。
+        // ⚠️ `writesDriven` 是上面那个块的局部变量，这里不可见（用它会在运行期
+        //    ReferenceError 崩掉，而崩点在最后一段、前面全绿）。改用局部基线。
+        const P2 = P + 'S2 · '
+        const w0 = pageWrites.length
+        const sid = entrustWriteProof.sessionId
+        const beDetail = entrustSessionDetail[String(sid)] || {}
+        const beJobs = (entrustJobsByAssignment[aid] || {}).items || []
+        const beMsgs = beDetail.messages || []
+        if (!sid || !beMsgs.length) {
+          // 有委托锚点却没造出会话/消息 ⇒ 是**权限或夹具**的问题，显式失败。
+          // 静默跳过等于整段没验，而"全绿但什么都没验"比红更难发现。
+          fail(P2 + '夹具未造出会话与消息（S2 首片无载荷可验）',
+            'sessionId=' + String(sid) + ' msgs=' + beMsgs.length)
+        } else {
+          if (String(d.sessionId) !== String(sid)) {
+            fail(P2 + '页面定位到的会话不是本单那一条', String(d.sessionId) + ' vs ' + sid)
+          } else ok()
+          if ((d.messages || []).length !== beMsgs.length) {
+            fail(P2 + '消息条数与后端不符', (d.messages || []).length + ' vs ' + beMsgs.length)
+          } else ok()
+          // 每条消息都要有角色与来源的中文标注（UI 按来源区分 manual / agent /
+          // deterministic）。缺了它，"谁说的、是不是模型说的"在界面上无从分辨。
+          const badMsg = (d.messages || []).find(function (m) {
+            return !m.role || !m.roleLabel || !m.sourceLabel || !String(m.content || '').length
+          })
+          if (badMsg) fail(P2 + '消息缺角色/来源/正文', JSON.stringify(badMsg).slice(0, 160))
+          else ok()
+          if ((d.jobs || []).length !== beJobs.length) {
+            fail(P2 + '作业条数与后端不符', (d.jobs || []).length + ' vs ' + beJobs.length)
+          } else ok()
+          // 作业状态必须落成中文标签**并带 chip 类**：这是"失败"与"已完成"在界面上
+          // 长得一样那类缺陷的判据（类名漏一个取值就会同色）。
+          const badJob = (d.jobs || []).find(function (j) {
+            return !j.statusLabel || !j.statusClass
+              || String(j.statusClass).indexOf('chip') !== 0
+          })
+          if (badJob) fail(P2 + '作业缺状态标签/chip 类', JSON.stringify(badJob).slice(0, 160))
+          else ok()
+          // 后端 succeeded ⇒ 页面必须显示"有几条提案"，且 fixture 模式必须**可见**
+          // （`LLM_MOCK=true` 下把桩当模型质量证据是最要命的一种误读）。
+          const beOkJobs = beJobs.filter(function (j) { return j.status === 'succeeded' })
+          if (!beOkJobs.length) {
+            fail(P2 + '夹具里没有成功的作业（S2 首片的"结果"一侧没验到）',
+              beJobs.map(function (j) { return String(j.status) }).join(','))
+          } else {
+            const one = (d.jobs || []).find(function (j) {
+              return String(j.jobId) === String(beOkJobs[0].job_id)
+            })
+            if (!one || one.proposalCount < 1) {
+              fail(P2 + '作业成功但页面没列出提案', one ? String(one.proposalCount) : '缺该作业')
+            } else {
+              ok()
+              // ⚠️ fixture 模式标注**当前验不到**，如实记 note —— 不假装验过。
+              // 原因：`agentjobs._row_to_job` 没把 `mocked` 放进**作业投影**
+              // （它只存在于 `ent_agent_job_attempt.mocked`），而会话页读的是
+              // **作业列表** ⇒ `decorateJob().mocked` 恒 false，界面上那句
+              // "本页含 fixture 结果（LLM_MOCK）"永远不会出现。
+              // 要修得让作业投影带上 mocked（属独立切片，见接口增量 §7.4）。
+              if (!one.mocked) {
+                note(P2 + 'fixture 模式标注未生效：后端作业投影没有 mocked 字段，'
+                  + '而界面必须能标明"这是桩输出"')
+              } else ok()
+            }
+          }
+          // 附件条数必须与后端一致（0 条也是合法事实，但要**一致**）
+          const beAtt = (entrustEntrustmentAttachments[
+            String(entrustWriteProof.entrustmentId)] || {}).items || []
+          if ((d.attachments || []).length !== beAtt.length) {
+            fail(P2 + '附件条数与后端不符', (d.attachments || []).length + ' vs ' + beAtt.length)
+          } else ok()
+
+          // 「离开后重新进入仍可恢复」：**新装载一次**（新实例、无页面内缓存），
+          // 断言它拿回同样的会话、消息与作业。这是本片的核心承诺，
+          // 也是"只在页面里存一份数组"必然过不了的那一条。
+          const again = await walk('11b 会话屏 · 重进恢复', 'pages/entrust/session/session', null,
+            { role: 'owner', arg: { assignment_id: String(aid) } }, ['onLoad'])
+          if (again) {
+            const d2 = again._final()
+            if (String(d2.sessionId) !== String(sid)
+              || (d2.messages || []).length !== beMsgs.length
+              || (d2.jobs || []).length !== beJobs.length) {
+              fail(P2 + '重进后恢复出的现场与首次不一致',
+                'sid=' + String(d2.sessionId) + ' msgs=' + (d2.messages || []).length
+                + ' jobs=' + (d2.jobs || []).length)
+            } else ok()
+          }
+          // 两次装载都是**只读**：会话已存在时页面不该再建会话、发消息或跑作业。
+          if (pageWrites.length !== w0) {
+            fail(P2 + '取数阶段发了写请求（会话已存在时不该写）',
+              pageWrites.length + ' vs ' + w0)
+          } else ok()
         }
       }
     }

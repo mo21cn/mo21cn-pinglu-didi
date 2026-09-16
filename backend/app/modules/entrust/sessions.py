@@ -237,12 +237,21 @@ def list_sessions(
     created_by: int | None = None,
     agent_specialty: str | None = None,
     status: str | None = None,
+    assignment_id: int | None = None,
     page: int = 1,
     size: int = 20,
 ) -> tuple[int, list[dict[str, Any]]]:
-    """分页列会话（过滤条件全部可选，由调用方按可见性传参）。"""
+    """分页列会话（过滤条件全部可选，由调用方按可见性传参）。
+
+    `assignment_id` 是 S2 首片加的：会话页从工作台进来时手里只有委托单号，
+    没有委托授权号 —— 没有它，页面就得把整页会话拉下来在前端筛，
+    既多传数据又会把"该组织别的单子的会话"一并暴露给前端。
+    """
     clauses: list[str] = []
     params: dict[str, Any] = {}
+    if assignment_id is not None:
+        clauses.append("assignment_id = :aid")
+        params["aid"] = assignment_id
     if owner_user_id is not None:
         clauses.append("owner_user_id = :owner")
         params["owner"] = owner_user_id

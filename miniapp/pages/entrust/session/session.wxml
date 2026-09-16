@@ -1,12 +1,18 @@
 <!--
-  委托发货 · 专业会话屏（UI-03 的成果卡一半 / DR-0015 / ENT-033）
+  委托发货 · 专业会话屏（UI-03 / DR-0015 / ENT-033 / **S2 首片**）
 
-  本页只闭合 AC-05 的「聊天侧」：**成果卡**。它必须与工作台、成果页
-  **同源同版本** —— 卡上的 `artifact_id` / `revision_no` 读的是同一份投影
-  （`utils/entrust.js` 的 `decorateArtifact`），本页**不复写**任何字段名映射。
+  本页两块内容：
+    1. 真实会话：消息时间线 + 输入框 + 作业卡（S2 首片的纵向增量）；
+    2. 成果卡：与工作台、成果页同源同版本（AC-05 的聊天侧）。
 
-  不做 `running/failed jobs` 与 `manual takeover`：二者依赖尚不存在的 Agent 执行器，
-  在该执行器落地前建界面，等于建一个永远显示不出来的空壳（DR-0015 §4.2）。
+  三处刻意的写法
+  --------------
+  * 作业卡写「**提案**」而不是「解析结果」：作业成功只产出 envelope，
+    它变成成果要再走一次人工采纳（AC-09）。写成"结果"会让人以为已落库。
+  * 失败卡显示**失败类型**（`error_kind`），不只写"失败" ——
+    "失败"两个字无法自助，而失败类型是后端分类过的。
+  * fixture 模式有独立提示条：结构与真实模式同构，但**不是真实模型输出**，
+    混在一起报就等于拿假证据充数。
 
   编译禁形：条件与循环**分两层**，绝不把 `wx:for` 写到带 `wx:if` 的元素上
   （`wx:else` 会绑不到 `wx:if` ⇒ 整页编译失败，见 verify_wxml_directives.js）。
@@ -22,7 +28,11 @@
 
   <view class="session-head">
     <text class="session-title">委托 #{{assignmentId}}</text>
-    <text class="session-sub">会话中的成果引用与工作台同源同版本</text>
+    <text class="session-sub">{{sessionTitle}} · {{sessionStatusLabel}} · {{attachmentText}}</text>
+  </view>
+
+  <view wx:if="{{mockedNote}}" class="mock-note">
+    <text class="mock-note-text">{{mockedNote}}</text>
   </view>
 
   <view wx:if="{{view === 'loading'}}" class="state">
@@ -46,6 +56,57 @@
     <view class="state-hint">{{viewHint}}</view>
   </view>
   <view wx:else>
+    <view class="section">
+      <view class="section-title">对话（{{messages.length}}）</view>
+
+      <block wx:for="{{messages}}" wx:key="messageId">
+        <view class="msg {{item.role === 'user' ? 'msg-me' : 'msg-agent'}}">
+          <view class="msg-head">
+            <text class="msg-role">{{item.roleLabel}}</text>
+            <text class="msg-source">{{item.sourceLabel}}</text>
+          </view>
+          <view class="msg-body">{{item.content}}</view>
+        </view>
+      </block>
+
+      <view wx:if="{{messages.length === 0}}" class="empty-line">
+        <text class="empty-line-text">还没有消息。在下方粘贴一段报价文本，Agent 会解析它</text>
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">作业（{{jobs.length}}）</view>
+
+      <block wx:for="{{jobs}}" wx:key="jobId">
+        <view class="job">
+          <view class="job-head">
+            <text class="job-title">作业 #{{item.jobId}}</text>
+            <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+          </view>
+
+          <view wx:if="{{item.status === 'failed'}}" class="job-fail">
+            <text class="job-fail-text">{{item.errorKind ? '失败类型 ' + item.errorKind : '失败'}}{{item.errorMessage ? '：' + item.errorMessage : ''}}</text>
+          </view>
+
+          <view wx:elif="{{item.status === 'succeeded'}}" class="job-ok">
+            <text class="job-ok-text">已产出提案 {{item.proposalCount}} 条（提案 ≠ 成果，需人工采纳）</text>
+          </view>
+
+          <view wx:else class="job-pending">
+            <text class="job-pending-text">{{item.statusLabel}}，可再次进入本页查看结果</text>
+          </view>
+
+          <view wx:if="{{item.mocked}}" class="job-mock">
+            <text class="job-mock-text">fixture 输出（LLM_MOCK），不是真实模型结果</text>
+          </view>
+        </view>
+      </block>
+
+      <view wx:if="{{jobs.length === 0}}" class="empty-line">
+        <text class="empty-line-text">还没有作业</text>
+      </view>
+    </view>
+
     <view class="section">
       <view class="section-title">本单成果（{{cards.length}}）</view>
 
@@ -76,6 +137,20 @@
           </view>
         </view>
       </block>
+    </view>
+  </view>
+
+  <view class="composer">
+    <input
+      class="composer-input"
+      value="{{draft}}"
+      placeholder="粘贴报价文本，例如：贵港到梧州 500 吨水泥，单价 42 元/吨"
+      bindinput="onDraft"
+      confirm-type="send"
+      bindconfirm="onSend"
+    />
+    <view class="composer-send {{sending ? 'composer-send-off' : ''}}" bindtap="onSend">
+      <text class="composer-send-text">{{sending ? '执行中' : '发送并解析'}}</text>
     </view>
   </view>
 </view>

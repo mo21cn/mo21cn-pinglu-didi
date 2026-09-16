@@ -798,6 +798,32 @@ def test_create_session_and_job_end_to_end(env):
     assert detail.status_code == 200
     assert detail.json()["job"]["attempt_count"] == 1
 
+    # ── S2 首片：页面实际调用的两个查询 ──────────────────────────────
+    # 会话页从工作台进来时只有委托单号，`load()` 靠这两个端点恢复现场。
+    # 服务层那条测试证明的是过滤逻辑；这里证明的是**参数真的透传到了 HTTP 层**
+    # ——只测服务层会漏掉"查询参数忘了声明"这种错。
+    found = env.client.get(
+        f"/api/v1/entrust/sessions?view=mine&assignment_id={aid}", headers=_headers(manager)
+    )
+    assert found.status_code == 200, found.text
+    assert found.json()["total"] == 1
+    assert found.json()["items"][0]["session_id"] == sid
+
+    # 反事实：换一个没有会话的委托单号必须为空，而不是"忽略参数返回全部"
+    none_ = env.client.get(
+        "/api/v1/entrust/sessions?view=mine&assignment_id=999999", headers=_headers(manager)
+    )
+    assert none_.status_code == 200
+    assert none_.json()["total"] == 0
+
+    # "离开后重新进入仍可恢复"：按委托单号能取回本单作业
+    jl = env.client.get(
+        f"/api/v1/entrust/agent/jobs?assignment_id={aid}", headers=_headers(manager)
+    )
+    assert jl.status_code == 200, jl.text
+    assert jl.json()["total"] == 1
+    assert jl.json()["items"][0]["job_id"] == jid
+
 
 def test_outsider_cannot_see_or_touch_session(env):
     db = env.make_session()
@@ -1064,3 +1090,174 @@ def test_quota_error_is_not_retryable():
     # 未分类的一律不重试（宁可停下来人工看，也不要盲目重试掩盖问题）
     assert jobs.is_retryable(None) is False
     assert jobs.is_retryable("llm_unknown") is False
+
+
+def test_list_sessions_filters_by_assignment(session):
+    """S2 首片：`GET /sessions` 必须能按委托单号过滤。
+
+    会话页从工作台进来时手里**只有委托单号**，没有委托授权号。没有这个过滤，
+    页面就得把整页会话拉下来在前端筛 —— 既多传数据，又会把"该组织别的单子的会话"
+    一并暴露给前端。
+
+    反事实那一条是必要的：只断言"过滤后是 1 条"证明不了过滤生效 ——
+    万一建会话那一步本身只建了一条，这个断言照样过。
+    """
+    sess.create_session(
+        session,
+        entrustment_id=1,
+        assignment_id=101,
+        owner_user_id=7,
+        org_id=3,
+        created_by=7,
+        specialty=None,
+        title="委托 101 的会话",
+    )
+    sess.create_session(
+        session,
+        entrustment_id=1,
+        assignment_id=102,
+        owner_user_id=7,
+        org_id=3,
+        created_by=7,
+        specialty=None,
+        title="委托 102 的会话",
+    )
+
+    total_all, _ = sess.list_sessions(session, created_by=7)
+    assert total_all == 2, "反事实：不过滤时应有 2 条（否则下面那条断言没有意义）"
+
+    total, items = sess.list_sessions(session, created_by=7, assignment_id=102)
+    assert total == 1
+    assert items[0]["title"] == "委托 102 的会话"
+    assert int(items[0]["assignment_id"]) == 102
+
+    # 查一个没有会话的委托单 ⇒ 空，而不是"忽略过滤条件返回全部"
+    total_none, items_none = sess.list_sessions(session, created_by=7, assignment_id=999)
+    assert total_none == 0
+    assert items_none == []
+
+
+# ─────────────────────────── S2 首片：会话上下文（该用哪条委托授权）
+
+
+def test_session_context_resolves_the_only_matching_entrustment(env):
+    """经理要建会话，就必须有一个**合法**拿到授权 id 的地方。
+
+    经理不在 `/my-entrustments` 里（那是"货主自己授权出去"的视角），
+    `/my-orgs` 又只回成员身份 —— 缺了这个端点，界面只能猜一个 id 试到不报错为止。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+
+    resp = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/session-context", headers=_headers(manager)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["assignment_id"] == aid
+    assert body["org_id"] == org
+    assert body["entrustment_id"] == eid
+    assert body["note"] == ""
+
+
+def test_session_context_id_is_actually_accepted_by_create(env):
+    """交叉断言：上下文给出的 id 必须**真的能用**。
+
+    只断言"字段非空"不够 —— 一个查错的 id 同样非空，而界面会在建会话时撞
+    400/403，表现为"能打开页面但建不了会话"。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    ctx = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/session-context", headers=_headers(manager)
+    ).json()
+    assert ctx["entrustment_id"] == eid, "上下文给的必须就是那条授权"
+    made = _make_session(env, manager, eid=ctx["entrustment_id"], aid=aid)
+    assert made.status_code == 200, made.text
+    assert int(made.json()["assignment_id"]) == aid
+    assert int(made.json()["entrustment_id"]) == eid
+
+
+def test_session_context_agrees_with_assignment_detail_on_org(env):
+    """`org_id` 必须与委托详情同一事实 —— 两处不一致时界面无从判断该信谁。"""
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    detail = env.client.get(f"/api/v1/entrust/assignments/{aid}", headers=_headers(manager))
+    assert detail.status_code == 200, detail.text
+    ctx = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/session-context", headers=_headers(manager)
+    ).json()
+    assert ctx["org_id"] == detail.json().get("org_id")
+    assert ctx["org_id"] == org
+
+
+def test_session_context_does_not_guess_when_assignment_has_no_org(env):
+    """反事实 ①：委托没选服务经营主体 ⇒ 不许猜一条授权回来。
+
+    ⚠️ 这条必须用**货主本人**调用：`org_id` 一旦为 NULL，组织侧的可见性就没了
+    （经理是靠组织成员身份才看得到这单），用经理会得到 404 而不是本用例要验的分支。
+    反过来这也顺带证明了查找与调用者身份无关 —— 货主不是任何组织的成员，
+    却仍能问出"这单所属的(货主,组织)"这件事。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    db.execute(text("UPDATE ent_assignment SET org_id = NULL WHERE id = :i"), {"i": aid})
+    db.commit()
+
+    resp = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/session-context", headers=_headers(owner)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["org_id"] is None
+    assert body["entrustment_id"] is None
+    assert "未指定服务经营主体" in body["note"]
+
+
+def test_session_context_reports_missing_entrustment_without_guessing(env):
+    """反事实 ①b：组织与货主之间没有生效授权 ⇒ 说清楚，而不是随便给一条。
+
+    取值用 `suspended`：`ent_entrustment.status` 的列注释是 `active/suspended`
+    （不是 `revoked` —— 那个常量属别的表，别按"常量存在"就假定它属于本列）。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    db.execute(text("UPDATE ent_entrustment SET status = 'suspended' WHERE id = :i"), {"i": eid})
+    db.commit()
+
+    body = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/session-context", headers=_headers(manager)
+    ).json()
+    assert body["entrustment_id"] is None
+    assert "没有生效中的委托授权" in body["note"]
+
+
+def test_session_context_does_not_guess_between_multiple_entrustments(env):
+    """反事实 ②：同一(货主, 组织)下有两条生效授权 ⇒ 一条都不自动选中。
+
+    猜错的后果是把会话挂到**另一条**授权上（数据边界随之改变），而界面上看不出来。
+    ⚠️ 前提是库里真允许两条：`ent_entrustment` **没有** (org_id, entrust_user_id)
+    唯一约束（只有 `ent_org_member` 有），所以这条分支是可达的、不是纯粹的防御代码。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    second = _entrust(db, org, owner_id=owner["user_id"])
+    assert second != eid, "夹具必须真的造出第二条，否则这条用例没有意义"
+
+    body = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/session-context", headers=_headers(manager)
+    ).json()
+    assert body["entrustment_id"] is None
+    assert "多条" in body["note"]
+
+
+def test_session_context_is_invisible_to_outsiders(env):
+    """反事实 ③：非参与方 404 —— 与委托详情同一条可见性判据，不是新判据。"""
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    outsider = _login(env.client, "stranger")
+    resp = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/session-context", headers=_headers(outsider)
+    )
+    assert resp.status_code == 404
+    assert "拒绝" in resp.text or "不存在" in resp.text

@@ -189,3 +189,19 @@ S1 就是第一处。计划里那条备注应当按此修正（已在 §5 提出
 | 13 | 权限**未加载 / 加载失败** ⇒ **不展示**可执行按钮 | ✅ 两个入口都在取数**之前**显式置空投影（不依赖"恰好还没取到"这种偶然）；判据函数在第二参数缺席时**恒为 false**（保守缺省） |
 | 14 | 写端**独立**校验 —— 隐藏按钮 ≠ 放行 | ✅ **后端未改**：`claim_assignment` 本就用 `ctx.can(PERM_ASSIGN_CLAIM, org_id=org_id)`，与展示判据**同源**。㊱ 章以**API 直证 403**（同组织只读成员直接调用）把这条落地为设备侧证据 |
 
+### 7.4 第五切片（S2 首片：真实会话 → 消息/附件 → 持久化作业 → 重进恢复）
+
+触发：HO 0917-2 执行顺序 2。本节只登记其中与**接口面**有关的部分。
+
+| # | 条目 | 状态 |
+| --- | --- | --- |
+| 15 | **新增只读端点** `GET /entrust/assignments/{assignment_id}/session-context` | ✅ `scope_matrix` **62 → 63**。**为什么必须新增**：建会话是 `POST /entrustments/{eid}/sessions`，路径参数要求调用方**先知道授权 id**，而现有两条清单都答不了 —— `/my-orgs` 读 `ent_org_member`（只回成员身份），`/my-entrustments` 只列**货主自己授权出去**的授权。经理两者都拿不到本单那一条 ⇒ 前端只剩"猜一个 id 试到不报错为止"。⚠️ 本端点**只查不判**：响应模型里刻意**没有** `can_create`，因为能否建由 `assert_can_write_entrustment` 唯一决定，再给一个布尔值就是在权限上制造第二个真相 |
+| 16 | 该查找**不按调用者身份过滤** | ✅ 新增 `access.find_active_entrustments(org_id, owner_user_id)`。初版写成复用 `resolve_context().delegations` 过滤，结果**货主本人**（不是任何组织的成员）拿到空元组 ⇒ 把"有授权"答成"没有"。**把调用者身份混进一次纯查找，会产出错误答案**；可见性由调用方先判（复用委托详情那条判据） |
+| 17 | `ent_entrustment` **没有** (org_id, entrust_user_id) 唯一约束 | ✅ 同一对之间可并存多条生效授权（只有 `ent_org_member` 有唯一约束）。故多条时返回 `entrustment_id=null` + `note`，**一条都不自动选中** —— 猜错的后果是把会话挂到**另一条**授权上，数据边界随之改变，而界面上看不出来 |
+| 18 | `GET /sessions` 新增 `assignment_id` 过滤 | ✅ 会话页从工作台进来时只有委托单号。反事实用例证明它**真在过滤**：换一张没有会话的单号必须为空，而不是"忽略参数返回全部" |
+| 19 | **演示种子的授权补第 7 项权限** `entrust:agent:job` | ✅ `seed_entrust_demo.py` 的 `ORG_PERMISSIONS` 6 → 7。会话与 Agent 作业是**另一项**权限：缺了它，演示组织能看工作台、能认领，却在"进入专属会话"这一步直接 **403**（表现为"页面能打开但建不了会话"）。只读成员不该有这一项，而演示组织的经理正是要让 Agent 干活的那个人 |
+| 20 | ⚠️ **发现但本轮未修**：作业投影没有 `mocked` | `mocked` 只存在于 `ent_agent_job_attempt`（`agentjobs._row_to_job` 不返回它），而会话页读的是**作业列表** ⇒ `decorateJob().mocked` 恒 `false`，界面上"本页含 fixture 结果（LLM_MOCK）"这句**永远不会出现**。要修得让作业投影带上它（取最近一次尝试的 `mocked`）⇒ 独立切片。**本轮不假装验过**：e2e 对这条只记 note |
+| 21 | **前端缺陷（本轮修）**：`decorateJob` 的提案键写成 `proposals` | ✅ 后端信封的键是 **`artifact_proposals`**（`envelope.project_envelope_for_operator` 的返回）。写错**不报错**，只让"提案 N 条"永远是 **0** —— 界面上看起来像"模型没给出任何提案"，而事实是读错了键。由 e2e 新增的"作业成功 ⇒ 页面必须列出提案"断言抓到 |
+| 22 | **前端缺陷（本轮修）**：`ensureSession` 用了组织选择器的 `pickEntrustment` | ✅ 它返回 `{orgId, needPick}`，**不是** `entrustmentId` ⇒ `entrustmentId` 恒 `undefined`，页面**必然**掉进"没有可用的委托授权"这一支，而真原因是取错了函数。改为只走 `session-context`（第 15 条） |
+| 23 | e2e harness：新增取数函数**必须登记进 `requireStub`** | ✅ 漏登记的会落到真实 `request.js`，在 Node 里（无 `wx.request`）直接抛错、被页面 `.catch` 吞成空数组 ⇒ 字段永不产出。本轮 5 条取数 + 4 条写命令全部登记；bootstrap 新增 S2 真写段（真建会话 → 真发消息 → 真提交作业 → 真推进一次 → **复读**成回放载荷），走查新增 9 条断言（含"重进恢复"与"取数阶段不得发写请求"） |
+
