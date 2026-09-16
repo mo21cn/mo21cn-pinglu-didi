@@ -228,6 +228,16 @@ const WALK_ANCHORS = [
   //    同一文件同一属性只能登记一次（登记表按 file|attr 去重）。
   { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'card-act',
     attr: 'data-act-session', value: '{{item.assignmentId}}', handler: 'onOpenSession' },
+  // S1 工作项 4（第 ㉟ 章）：队列卡片上的**受理**三段式。
+  // 与 ENT-041「应用变更」同形 —— 确认条是**页内 DOM**（`wx.showModal` 不在渲染树里、
+  // 工具点不到它的确认键），三个属性名两两不同：`onToggleClaim` 被「受理」与「取消」
+  // 共用，若都写 `data-act-claim`，两者在断言与这张表里就同形了（表按 file|attr 去重）。
+  { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'card-act',
+    attr: 'data-act-claim', value: '{{item.assignmentId}}', handler: 'onToggleClaim' },
+  { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'card-act',
+    attr: 'data-act-claim-submit', value: '{{item.assignmentId}}', handler: 'onSubmitClaim' },
+  { kind: 'act', file: 'pages/entrust/workbench/workbench.wxml', class: 'card-act',
+    attr: 'data-act-claim-cancel', value: '{{item.assignmentId}}', handler: 'onToggleClaim' },
   // 受影响项候选行（任务 / 成果共用一份候选表，靠 `target_kind` 区分）
   { kind: 'row', file: 'pages/entrust/case-create/case-create.wxml', class: 'cand-row',
     attr: 'data-id', value: '{{item.target_id}}' },

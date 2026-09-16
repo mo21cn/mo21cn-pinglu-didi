@@ -2067,6 +2067,145 @@ section('⑤ 静态防线')
     }
   }
 
+  // ---------------------------------------------------------------- ⑪ 队列受理
+  section('⑪ 组织受理队列的受理入口（S1 工作项 4 / D1-02）')
+  {
+    const WB = path.join(MP, 'pages/entrust/workbench/workbench.js')
+    const WW = path.join(MP, 'pages/entrust/workbench/workbench.wxml')
+    const wbk = stripComments(fs.readFileSync(WB, 'utf8'))
+    const wbw = fs.readFileSync(WW, 'utf8')
+
+    // —— ① 投影层：`canClaim` 只看**委托状态**，不看权限 ——
+    // 前端不假装知道当前身份有没有 `entrust:assignment:claim`（那取决于组织成员
+    // 资格与授权，只有服务端知道）。反过来若这里恒 true，界面上就会出现一个
+    // 必然 403 的按钮，用户点完只看到拒绝、不知道是自己没权限还是单据有问题。
+    {
+      const EB = require(path.join(MP, 'utils', 'entrust.js'))
+      const row = (st) =>
+        EB.decorateAssignment({
+          assignment_id: 7,
+          title: 't',
+          cargo_summary: 'c',
+          quantity: '1',
+          quantity_unit: '吨',
+          status: st,
+          revision: 1,
+          created_at: '2026-09-16 10:00',
+          org_id: 3
+        })
+      check('投影：待受理的委托给 canClaim（受理入口出现）', row('submitted').canClaim === true)
+      for (const st of ['draft', 'claimed', 'cancelled']) {
+        check(`投影：${st} 不给 canClaim（受理入口不出现）`, row(st).canClaim === false)
+      }
+    }
+
+    // —— ② 页面：三段式的状态机（真页面模块驱动）——
+    const wx = makeWx()
+    const claimed = []
+    // 桩只提供页面**用到的**契约面；刻意不桩 `claimAssignment` 的失败路径，
+    // 失败分支改用源码切片断言（见 ③）—— 异步时序里等 Promise 会让断言有竞态。
+    const EN = {
+      VIEW: {
+        LOADING: 'loading',
+        READY: 'ready',
+        EMPTY: 'empty',
+        EXPIRED: 'expired',
+        DENIED: 'denied',
+        ERROR: 'error'
+      },
+      STATUS_META: {
+        draft: { label: '草稿' },
+        submitted: { label: '待受理' },
+        claimed: { label: '已受理' },
+        cancelled: { label: '已取消' }
+      },
+      STATUS_ORDER: ['draft', 'submitted', 'claimed', 'cancelled'],
+      CASE_KIND_LABELS: { exception: '异常' },
+      CASE_KIND_ORDER: ['exception'],
+      CASE_ORG_SCOPE_LABELS: { unclosed: '未关闭', all: '全部' },
+      CASE_ORG_SCOPE_ORDER: ['unclosed', 'all'],
+      claimAssignment: (id, key) => {
+        claimed.push({ id: id, key: key })
+        return Promise.resolve({})
+      },
+      newIdempotencyKey: (p) => p + '-k1',
+      decorateList: (rows) => rows || [],
+      decorateOrgs: (rows) => rows || [],
+      decorateCaseList: (rows) => rows || [],
+      fetchMyOrgs: () => Promise.resolve({ items: [] }),
+      fetchQueue: () => Promise.resolve({ total: 0, items: [] }),
+      fetchCaseOrgList: () => Promise.resolve({ total: 0, items: [] }),
+      pageHint: () => '',
+      pickOrg: () => ({ orgId: '3', reason: 'only' }),
+      viewState: () => ({ state: 'empty', title: '', hint: '' })
+    }
+    let cfg = null
+    try {
+      cfg = loadConfig(WB, 'page', wx, [], null, {
+        'utils/routes': require(path.join(MP, 'utils', 'routes.js')),
+        'utils/entrust': EN
+      })
+    } catch (e) {
+      fail('工作台页 JS 可加载', e.message)
+    }
+    check('工作台页 JS 可加载并捕获 Page 配置', !!cfg)
+
+    if (cfg) {
+      const page = instantiate(cfg)
+      const ev = (ds) => ({ currentTarget: { dataset: ds } })
+
+      // ⚠️ dataset 一律传**数字**：真实投影层的 `assignmentId` 就是数字，而
+      //    `claimOpenId` 要在模板里与它做严格比较 ⇒ 页面必须把 id 归一成字符串。
+      //    传字符串会让这条断言失去意义（那正是本缺陷第一次没被发现的原因）。
+      cfg.onToggleClaim.call(page, ev({ actClaim: 7 }))
+      check('点「受理」在**页内**展开该卡的确认条，且 id 被归一成字符串（claimOpenId="7"）', page.data.claimOpenId === '7', `claimOpenId=${JSON.stringify(page.data.claimOpenId)}`)
+
+      cfg.onToggleClaim.call(page, ev({ actClaim: 7 }))
+      check('再点同一张即收起（不留"必须点别处才能取消"的面板）', page.data.claimOpenId === '')
+
+      cfg.onToggleClaim.call(page, ev({ actClaim: 7 }))
+      cfg.onToggleClaim.call(page, ev({ actClaimCancel: 7 }))
+      check('「取消」收起确认条（与「受理」共用同一处置，只靠 dataset 键区分）', page.data.claimOpenId === '')
+
+      cfg.onToggleClaim.call(page, ev({ actClaim: 7 }))
+      cfg.onToggleClaim.call(page, ev({ actClaim: 8 }))
+      check('展开另一张会收起上一张（同一时刻只有一条确认条，避免按错 —— 受理不可回退）', page.data.claimOpenId === '8', `claimOpenId=${JSON.stringify(page.data.claimOpenId)}`)
+
+      cfg.onSubmitClaim.call(page, ev({ actClaimSubmit: 8 }))
+      check('「确认受理」调用受理接口，且幂等键是**新生成**的（不是复用上一次的）', claimed.length === 1 && claimed[0].id === '8' && !!claimed[0].key, JSON.stringify(claimed))
+      check('确认受理后确认条立刻收起、并置「在飞」标记（防同一张卡重复点击）', page.data.claimOpenId === '' && page.data.claimingId === '8', `open=${JSON.stringify(page.data.claimOpenId)} claiming=${JSON.stringify(page.data.claimingId)}`)
+
+      const before = claimed.length
+      cfg.onSubmitClaim.call(page, ev({ actClaimSubmit: 8 }))
+      check('同一张卡在飞期间重复确认不再发第二次请求', claimed.length === before, `额外发了 ${claimed.length - before} 次`)
+    }
+
+    // —— ③ 失败与成功都要重取队列（异步分支改用源码切片，避免断言竞态）——
+    const at = wbk.indexOf('submitClaim(assignmentId) {')
+    const body = at >= 0 ? wbk.slice(at, at + 1400) : ''
+    check('受理的收口方法存在（submitClaim）', at >= 0)
+    check('受理成功后重取队列（否则本地列表还显示「待受理」，用户以为没生效）', /\.then\(function \(\)[\s\S]{0,320}loadQueue\(\)/.test(body))
+    check('受理失败（409 已被别人受理）也重取队列 —— 本地列表已过期，不刷新用户会以为"点了没反应"', /httpStatus === 409[\s\S]{0,200}loadQueue\(\)/.test(body))
+    check('受理这条路**不走**原生弹层（wx.showModal 不在渲染树里，工具点不到它的确认键）', body.length > 0 && body.indexOf('showModal') === -1)
+
+    // —— ④ 模板：三段式 + 三个锚点两两不同 ——
+    check('模板里确认条是页内 DOM（data-act-claim-submit 存在）', /data-act-claim-submit="/.test(wbw))
+    const anchors = ['data-act-claim', 'data-act-claim-submit', 'data-act-claim-cancel']
+    check(
+      '三个锚点两两不同且都在（onToggleClaim 被两个元素共用，同名会让「展开」与「取消」在断言里同形）',
+      new Set(anchors).size === 3 && anchors.every((a) => wbw.indexOf(a + '="') !== -1)
+    )
+    check('受理入口只在待受理的卡上出现（wx:if 包 canClaim）', /wx:if="\{\{item\.canClaim\}\}"/.test(wbw))
+    // 模板侧的同型检查（与页面侧的 `String()` 归一是一对）：任一侧漏掉，
+    // 确认条都会**永不显示**，而那种失效不会报错、只会表现为"点了没反应"。
+    const cmps = wbw.match(/claimOpenId\s*===\s*[^"}]+/g) || []
+    check(
+      'claimOpenId 的比较两侧同型（模板把卡片 id 字符串化：`item.assignmentId + \'\'`）',
+      cmps.length > 0 && cmps.every((c) => /\+\s*''/.test(c)),
+      JSON.stringify(cmps)
+    )
+  }
+
   // ---------------------------------------------------------------- 汇总
   console.log('\n' + '='.repeat(72))
   console.log(`UI 交互契约校验：OK ${N_OK} · FAIL ${FAILS.length}`)

@@ -201,6 +201,14 @@ function decorateAssignment(row) {
     status: data.status,
     statusLabel: statusLabel(data.status),
     statusClass: statusClass(data.status),
+    // 队列卡片上「受理」入口是否出现。**只看委托状态**，不看权限 ——
+    // 与详情页 `canClaim` 同一条判据（`detail.js` 的 applyState）。前端不假装
+    // 知道当前身份有没有 `entrust:assignment:claim`：那取决于组织成员资格与
+    // 授权，只有服务端知道；无权限时服务端给 403，请求层如实提示。
+    //
+    // 反过来若这里硬编码「有权限」，就会出现"摆一个必然 403 的按钮"，
+    // 用户点完只看到一句拒绝，却不知道是自己没权限还是单据有问题。
+    canClaim: data.status === 'submitted',
     revision: data.revision,
     createdAt: data.created_at || '',
     orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id)

@@ -162,17 +162,56 @@
           <view class="card-line card-line-weak">{{item.quantityText}}</view>
           <view class="card-foot row-between">
             <text class="card-meta">#{{item.assignmentId}} · {{item.createdAt}}</text>
-            <!-- 「打开会话」（DR-0015 / AC-05 的聊天侧入口）：
-                 用 `catchtap` 而不是 `bindtap` —— 卡片整体已 bindtap="onOpen"，
-                 用 bindtap 会**同时**跳详情与会话（两个动作都跑，看起来像"点一次跳了两页"）。
-                 锚点 `data-act-session` 与卡片自己的 `data-id` 分开，才能让走查
-                 **唯一命中**这个动作（同名属性复用会让"点第 i 个动作"失去意义）。 -->
-            <view
-              class="card-act"
-              data-act-session="{{item.assignmentId}}"
-              catchtap="onOpenSession"
-              hover-class="hover-dim"
-            >会话 ›</view>
+            <view class="card-acts">
+              <!-- 「受理」（S1 工作项 4 / D1-02）：只在**待受理**（`submitted`）时出现。
+                   是否真有权限由服务端判定 —— 与详情页 `canClaim` 同一条判据，
+                   前端不假装知道（无权限时服务端 403，请求层如实提示）。
+                   确认条做成**页内 DOM** 而不是 `wx.showModal`：原生弹层不在渲染树里，
+                   走查工具点不到它的确认键 ⇒ "确认之后"那一步就永远拿不到设备证据
+                   （同 ENT-041 案件页「应用变更」的取向；受理是本页唯一会改变业务状态
+                   的动作，不可回退，所以它必须可验证）。
+                   三个属性名两两不同：`onToggleClaim` 被两个元素共用，若都写
+                   `data-act-claim` 会让"展开"与"取消"在断言里同形，登记表也按
+                   file|attr 去重、只能登记一个。 -->
+              <block wx:if="{{item.canClaim}}">
+                <!-- ⚠️ 比较前必须把卡片 id **字符串化**：`claimOpenId` 来自 dataset
+                     （显式 `String()` 归一），而投影层的 `assignmentId` 是数字。
+                     WXML 的 `===` 是严格比较，一边字符串一边数字会**永远不相等** ——
+                     表现是"点了受理没反应"（确认条不显示），且静态门禁查不出来。 -->
+                <block wx:if="{{claimOpenId === item.assignmentId + ''}}">
+                  <view
+                    class="card-act card-act-strong"
+                    data-act-claim-submit="{{item.assignmentId}}"
+                    catchtap="onSubmitClaim"
+                    hover-class="hover-dim"
+                  >确认受理</view>
+                  <view
+                    class="card-act"
+                    data-act-claim-cancel="{{item.assignmentId}}"
+                    catchtap="onToggleClaim"
+                    hover-class="hover-dim"
+                  >取消</view>
+                </block>
+                <view
+                  wx:else
+                  class="card-act"
+                  data-act-claim="{{item.assignmentId}}"
+                  catchtap="onToggleClaim"
+                  hover-class="hover-dim"
+                >受理</view>
+              </block>
+              <!-- 「打开会话」（DR-0015 / AC-05 的聊天侧入口）：
+                   用 `catchtap` 而不是 `bindtap` —— 卡片整体已 bindtap="onOpen"，
+                   用 bindtap 会**同时**跳详情与会话（两个动作都跑，看起来像"点一次跳了两页"）。
+                   锚点 `data-act-session` 与卡片自己的 `data-id` 分开，才能让走查
+                   **唯一命中**这个动作（同名属性复用会让"点第 i 个动作"失去意义）。 -->
+              <view
+                class="card-act"
+                data-act-session="{{item.assignmentId}}"
+                catchtap="onOpenSession"
+                hover-class="hover-dim"
+              >会话 ›</view>
+            </view>
           </view>
         </view>
       </block>

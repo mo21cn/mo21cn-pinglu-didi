@@ -137,6 +137,24 @@
   border-radius: 8rpx;
 }
 
+/* 卡片脚的动作组。受理与「会话」**可能同时出现**（待受理的卡上两个都有），
+   所以要排成一行右对齐；若不包一层 flex，两个 inline 元素之间的空白会随
+   模板缩进变化，看起来像"受理与会话之间随机多个缝"。 */
+.card-acts {
+  display: flex;
+  align-items: center;
+  margin-right: -16rpx;
+}
+
+/* 二次确认里的「确认受理」：这一下会**改变业务状态**且不可回退，
+   所以比旁边的「取消」和常态的「受理」更"重"（实心 + 白字），
+   避免在两条并排小字里按错 —— 按错的代价是一次真实受理。 */
+.card-act-strong {
+  color: #FFFFFF;
+  background: #3B5BDB;
+  font-weight: 600;
+}
+
 .empty-hint {
   margin-top: 8rpx;
   font-size: 24rpx;

@@ -16,7 +16,17 @@
 |---|---|---|---|
 | `seed-mgr-multi` | A 组织经理 + B 组织成员 | `ambiguous` | 顶栏出现选择器，且**不预选** |
 | `seed-mgr-single` | 仅 A 组织经理 | `only` | 顶栏**不出现**选择器 |
+| `seed-mgr-only-b` | 仅 B 组织经理 | `only` | 顶栏不出现选择器，且队列里**只有 B 的委托** |
 | `seed-mgr-none` | 无任何组织身份 | `none` | 提示「还没有加入经营主体」 |
+
+⚠️ **为什么必须有 `seed-mgr-only-b`**（2026-09-16 补，S1 出口判据 ④）：
+`GET /assignments/{id}` 的可见性判据是「**该委托的组织 ∈ 调用者的任一组织**」
+（`ctx.org_ids`，不区分"当前在看哪个组织"）。所以 `seed-mgr-multi`
+（A+B 双身份）**无论如何都看得到 A 的委托** —— 拿它验
+「unrelated organization B 不可见」会**验不出来**，得到的会是假绿。
+要证这条必须有一个**不属于 A** 的组织身份，即本行的 `seed-mgr-only-b`。
+它与 `seed-mgr-none` 的区别：后者是"没有组织"，验不出"组织 B 的成员看不到组织 A 的委托"
+这个**跨组织**结论。
 
 另有一个货主身份 `seed-shipper-orgpicker`：给 A、B 两个组织**各留一张标题不同的
 已提交委托**。这是「切换组织后队列真的变了」变得**可断言**的前提 —— 否则两个组织
@@ -62,6 +72,9 @@ ORG_B = "演示经营主体·乙"
 MULTI_CODE = "seed-mgr-multi"
 SINGLE_CODE = "seed-mgr-single"
 NONE_CODE = "seed-mgr-none"
+#: 仅 B 组织经理。存在的唯一理由是出口判据 ④ 需要**一个不属于 A 的组织身份**
+#: —— `seed-mgr-multi` 是 A+B 双身份，看不到"跨组织不可见"这条（见模块 docstring）。
+ONLY_B_CODE = "seed-mgr-only-b"
 SHIPPER_CODE = "seed-shipper-orgpicker"
 
 # 同一货主在两个组织下的委托，**标题必须不同**（见模块 docstring 的说明）。
@@ -195,6 +208,7 @@ def main() -> int:
         multi = _user(db, MULTI_CODE, "演示经理·多组织")
         single = _user(db, SINGLE_CODE, "演示经理·单组织")
         none = _user(db, NONE_CODE, "演示经理·无组织")
+        only_b = _user(db, ONLY_B_CODE, "演示经理·仅乙组织")
         shipper = _user(db, SHIPPER_CODE, "演示货主·组织选择器")
 
         # multi：A 组织是**经理**、B 组织只是**成员** —— 这不是随意的取值，
@@ -202,6 +216,9 @@ def main() -> int:
         _member(db, org_a, multi, "manager")
         _member(db, org_b, multi, "member")
         _member(db, org_a, single, "manager")
+        # only_b：**只在 B**，是出口判据 ④（unrelated organization B 不可见）的样本 ——
+        # 它既不属于 A，队列与详情都必须看不到 A 的委托。
+        _member(db, org_b, only_b, "manager")
         # none 刻意不加任何成员关系。
 
         _entrust(db, org_a, shipper, ["entrust:view", "entrust:assignment:claim"])
@@ -216,6 +233,8 @@ def main() -> int:
         print("      → 期望 pickOrg 分支 ambiguous（顶栏出现选择器且不预选）")
         print(f"  {SINGLE_CODE}  user_id={single}  A=manager")
         print("      → 期望 pickOrg 分支 only（顶栏不出现选择器）")
+        print(f"  {ONLY_B_CODE}  user_id={only_b}  B=manager（**不属于 A**）")
+        print("      → 出口判据 ④：队列里只有乙组织委托，且甲组织的委托详情 404")
         print(f"  {NONE_CODE}  user_id={none}  无组织")
         print("      → 期望 pickOrg 分支 none（提示还没有加入经营主体）")
         print(f"  {SHIPPER_CODE}  user_id={shipper}  A/B 各有授权")
