@@ -4960,17 +4960,290 @@ def sec_35(w: Walker) -> None:
         "后端层（`test_entrust_s1_exit_criteria.py` 的条件 UPDATE rowcount 用例）。"
         "两者是不同的东西，不能互相顶替。",
     )
-    w.rep.limitation(
-        "㉟ 「成员（只读）身份也会看到受理按钮」这一 UI 口径未修正、未取证",
-        "`canClaim` 只看委托状态、不判权限（与详情页同一条既有判据）⇒ 只有 "
-        "`entrust:view` 的 member 也能看到「受理」，点下去服务端 403。"
-        "这是**既有口径**（detail 页一直如此），不是本章引入；已登记为待评审项 D-4，"
-        "本章不擅自改语义。",
+    # ⚠️ 本条原是一条 LIMITATION：「成员（只读）身份也会看到受理按钮」。
+    #    D-4 裁定（2026-09-16，**采纳**）之后判据已改成
+    #    「可认领状态 ∧ 该委托所属组织内的认领权限」⇒ 该口径**不再成立**。
+    #    这里改记一条**已闭环**的说明而不是删掉：读过上一版结论的人要能顺着它找到
+    #    去向（正面取证在 ㊱ 章，实现见 `miniapp/utils/entrust.js` 的 `canClaimAssignment`）。
+    #    ⚠️ 它**不是**在说"原问题通过了" —— 原条描述的是**修正前**的行为，
+    #       两者是不同的事实，不能互相顶替。
+    w.rep.rec(
+        "㉟ 原 LIMITATION「member 也看得到受理按钮」已随 D-4 裁定**修正**"
+        "（判据改为「可认领状态 ∧ 该委托所属组织的认领权限」）⇒ 本条只保留去向",
+        True,
+        "D-4 裁定 §1–§5；正面取证见 ㊱ 章；实现见 utils/entrust.js 的 canClaimAssignment()",
     )
     w.rep.not_run(
         "㉟ 受理后**迟到写入者**的终局（abandoned / lease_lost）在界面上的可见性",
         "那两个终局是服务端内部状态，本期没有面向经理的界面出口 ⇒ 真机侧无从观察。"
         "其断言完全在后端用例里（㉞ 章第五节亦同）。",
+    )
+
+
+def sec_36(w: Walker) -> None:
+    """㊱ 受理入口的**展示判据**（D-4 裁定 §1–§5 的设备侧验收）。
+
+    为什么另起一章
+    --------------
+    ㉟ 章验的是「队列可见性 / 能不能受理 / 并发 / 跨组织不可见」（出口判据 ②③④）；
+    本章验的是**同一个动作的入口在什么条件下出现** —— D-4 裁定把
+    `entrust:assignment:claim` 的**展示判断**授权给前端，同时立了六条约束。
+    它需要一组 ㉟ 章没有的身份对照，所以另起一章；并且**接替** ㉟ 章第七条那条
+    「member 也看得到受理按钮」的 LIMITATION（该口径已被本裁定修正）。
+
+    为什么**零写入**（不提交、也不受理任何委托）
+    ------------------------------------------
+    只用种子里两张稳定样本：甲 `TITLE_A`、乙 `TITLE_B`（都要求 `submitted`）。
+    理由：种子的 `_submitted_assignment` 按 `(owner, title)` 查**唯一行**，若该行不是
+    `submitted` 就调 `submit_assignment` 重新提交 —— 而 `claimed` 的单**不能**重新提交
+    （服务端回"只有草稿可提交"）⇒ **一旦受理掉，下一次跑种子就会抛异常**。
+    所以裁定图 2 第 2 行的"正常受理"复用 ㉟ 章第三节的实证，本章不重复消耗数据。
+
+    ⭐ 双向对照（本章最有价值的一条）
+    -------------------------------
+    要证明的是「按钮的出现与否取决于**该委托所属组织内的权限**」。单一方向的观察
+    都留有漏洞，所以两向都做：
+
+      对照 1（同一身份、两个队列）：`seed-mgr-multi`（甲 = manager / 乙 = member；
+              种子自述它是 DR-0008「跨组织权限不得并集」的回归样本）——
+              甲队列的单**有**入口、乙队列的单**无**。
+              堵掉的漏洞：「这个身份本来就不显示按钮」。
+      对照 2（同一队列、两个身份）：乙队列分别由 `seed-mgr-multi`（乙 member）与
+              `seed-mgr-only-b`（乙 manager）看 —— 前者**无**、后者**有**。
+              堵掉的漏洞：「乙组织的单因为别的原因（状态/数据）刚好不显示」。
+
+    两向交叉之后，"差异来自组织权限"这个解释就没有对手了。
+    """
+    print("\n== ㊱ 受理入口判据（D-4）：组织权限 · 双向对照 · 403 ==", flush=True)
+    base_err = w.c.errors()
+    claim_perm = "entrust:assignment:claim"
+
+    # ============ 一、API 直证：判据的数据源（/my-orgs）确实按组织分域 ============
+    print("\n-- 一、/my-orgs 的权限投影：按组织分域 --", flush=True)
+    tok_multi = (api_login(CODE_MGR_MULTI) or {}).get("access_token") or ""
+    rows = (api_get("/entrust/my-orgs", tok_multi) or {}).get("items") or []
+    # 按**组织名**定位（id 自增、重跑会变；名字是种子里写死的常量）
+    by_name = {str((r or {}).get("name") or ""): (r or {}) for r in rows}
+    oa, ob = by_name.get(ORG_A) or {}, by_name.get(ORG_B) or {}
+    org_a_id, org_b_id = str(oa.get("org_id") or ""), str(ob.get("org_id") or "")
+    perm_a = [str(p) for p in (oa.get("permissions") or [])]
+    perm_b = [str(p) for p in (ob.get("permissions") or [])]
+
+    w.rep.rec(
+        "㊱ 前置：`seed-mgr-multi` 的两条身份都取到，且角色正是 甲=manager / 乙=member"
+        "（本章对照设计的根基 —— 角色若被别的章节改走，结论就不成立）",
+        bool(org_a_id)
+        and bool(org_b_id)
+        and str(oa.get("member_role")) == "manager"
+        and str(ob.get("member_role")) == "member",
+        f"甲={oa.get('member_role')}#{org_a_id} / 乙={ob.get('member_role')}#{org_b_id}",
+    )
+    w.rep.rec(
+        "㊱ ①③ **API 直证**：`/my-orgs` 里甲含 `entrust:assignment:claim`、乙**不含** "
+        "—— 这就是 D-4 判据的数据源，它必须按组织分域（跨组织并集是已修过的越权）",
+        claim_perm in perm_a and claim_perm not in perm_b,
+        f"甲={perm_a} / 乙={perm_b}",
+    )
+    # ⚠️ 先证"有"，再证"无"：乙的投影若为空集，"不含 claim" 只是没取到，那是假绿。
+    w.rep.rec(
+        "㊱ 乙组织的权限投影**非空**（否则「不含 claim」可能只是没取到 —— 假绿）",
+        len(perm_b) > 0,
+        f"乙={perm_b}",
+    )
+
+    def find_submitted(org_id: str, title: str, token: str) -> str:
+        """在该组织队列里找「标题匹配**且状态为 submitted**」的那张单（找不到给空串）。
+
+        ⚠️ 必须**同时**校验状态：种子里可能已躺着同标题的 `claimed` 单（上一次走查
+        受理过的），只按标题命中就会拿一张不可认领的单去断言"有没有受理入口" ——
+        那时"没有按钮"虽然是对的，结论却是错的（它因为**状态**不显示，不是因为权限）。
+        """
+        data = api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", token) or {}
+        for row in data.get("items") or []:
+            item = row or {}
+            if str(item.get("title") or "") == title and item.get("status") == "submitted":
+                return str(item.get("assignment_id") or "")
+        return ""
+
+    id_a = find_submitted(org_a_id, TITLE_A, tok_multi)
+    id_b = find_submitted(org_b_id, TITLE_B, tok_multi)
+    w.rep.rec(
+        "㊱ 前置：甲、乙各找到一张**标题匹配且 status=submitted** 的样本单",
+        bool(id_a) and bool(id_b),
+        f"甲#{id_a}（{TITLE_A}） / 乙#{id_b}（{TITLE_B}）",
+    )
+    if not (id_a and id_b):
+        # 样本缺失时后面的界面断言全部无意义 —— 直接收口，别让它退化成"看起来没按钮"。
+        w.rep.not_run(
+            "㊱ ①②③ 受理入口的界面可见性",
+            "种子样本单缺失（见上一条）。先跑 `backend/scripts/seed_entrust_orgpicker.py` "
+            "再重跑本章；种子会保证这两张单处于 submitted。",
+        )
+        return
+
+    # ============ 二、对照 1：同一身份看两个队列 ============
+    print("\n-- 二、对照 1：同一身份（甲 manager / 乙 member）看两个队列 --", flush=True)
+    # ⚠️ 必须**先清掉「上次选中的组织」**：`pickOrg` 有 `saved` 分支（沿用上次选择，
+    #    ⑯ 章段一后半专门验过它），而这个 Storage 键在开发者工具里**跨 IDE 重启保留**
+    #    —— 上一次走查（⑯ 章末尾点了「乙」）留下的值会让本段一进来就走 `saved`，
+    #    于是"不预选"必然落空。首次真跑就是这么红的（`orgs=['2','3'] active='3'`）。
+    #    这不是为了好过而放宽断言：saved 分支由 ⑯ 章单独覆盖，本段要的是 ambiguous 分支。
+    #    （清两次＝抗一次无声失败，⑯ 章同法。）
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.remove_storage(ORG_STORAGE_KEY)  # 双保险：确认清掉上次选择
+    if not w.open_workbench(CODE_MGR_MULTI, tag="㊱"):
+        w.rep.not_run("㊱ 对照 1", "未能进入经理工作台")
+    else:
+        # 多组织 ⇒ pickOrg 分支 ambiguous ⇒ 顶栏给药丸且**不预选**，队列停在 denied 态。
+        d0 = w.wait_data(lambda x: bool(x.get("orgReason")), tries=40, gap=0.5)
+        w.rep.rec(
+            "㊱ 前置：多组织身份进工作台**不预选**（顶栏出现组织药丸）"
+            "—— 正是种子对 multi 预期的 ambiguous 分支",
+            len(d0.get("orgs") or []) >= 2
+            and d0.get("orgReason") == "ambiguous"
+            and not d0.get("activeOrgId"),
+            f"orgs={[o.get('orgId') for o in (d0.get('orgs') or [])]} "
+            f"reason={d0.get('orgReason')!r} active={d0.get('activeOrgId')!r}",
+        )
+        # 药丸上的中文标签本身就是投影层的产物：甲应含「受理委托」、乙应只有「查看委托」。
+        pill_a = next((o for o in (d0.get("orgs") or []) if str(o.get("orgId")) == org_a_id), None)
+        pill_b = next((o for o in (d0.get("orgs") or []) if str(o.get("orgId")) == org_b_id), None)
+        w.rep.rec(
+            "㊱ ①③ 页面 data 里的组织权限标签：甲含「受理委托」、乙不含"
+            "（与 API 那一层同源 —— 同一份 `ctx.permissions_in_org`）",
+            bool(pill_a)
+            and bool(pill_b)
+            and any("受理委托" in str(x) for x in (pill_a.get("permissions") or []))
+            and not any("受理委托" in str(x) for x in (pill_b.get("permissions") or [])),
+            f"甲={pill_a and pill_a.get('permissions')} / 乙={pill_b and pill_b.get('permissions')}",
+        )
+
+        # —— 乙组织（member）：走 storage 选组织，比点药丸稳（⑯ 章同法）——
+        w.c.set_storage(ORG_STORAGE_KEY, org_b_id)
+        if w.reenter_workbench() != WORKBENCH:
+            w.rep.rec("㊱ 对照 1 乙侧", False, "重进工作台失败")
+        else:
+            db = w.wait_data(
+                lambda x: (
+                    x.get("view") not in (None, "", "loading")
+                    and str(x.get("activeOrgId")) == org_b_id
+                ),
+                tries=40,
+                gap=0.5,
+            )
+            b_items = db.get("items") or []
+            b_row = next((x for x in b_items if str(x.get("assignmentId")) == id_b), None)
+            w.rep.rec(
+                "㊱ ①③ 乙队列里**看得到**那张 submitted 样本单（**先证有** —— 否则"
+                "「没有受理入口」会被「看不到这张单」顶替，那是完全不同的结论）",
+                b_row is not None and b_row.get("status") == "submitted",
+                f"队列={[str(x.get('assignmentId')) for x in b_items][:6]} 目标#{id_b}",
+            )
+            w.rep.rec(
+                "㊱ ①③ 投影层：该卡 `canClaim` 为 **false**（乙只是 member，无认领权限）",
+                bool(b_row) and b_row.get("canClaim") is False,
+                f"canClaim={b_row and b_row.get('canClaim')!r}",
+            )
+            n_btn_b = w.c.count(f'[data-act-claim="{id_b}"]')
+            w.rep.rec(
+                "㊱ ① 界面上该卡**没有**受理按钮（图 2 第 1 行：同组织只读成员 ⇒ 无认领按钮）",
+                n_btn_b == 0,
+                f'[data-act-claim="{id_b}"] 命中 {n_btn_b}',
+            )
+            w.shot("36-1-乙组织无受理入口")
+
+        # —— 甲组织（manager）：**真实点击药丸**切（真入口，不靠 storage）——
+        t_pill = w.c.tap(f'[data-org="{org_a_id}"]')
+        time.sleep(3.0)
+        da = w.wait_data(
+            lambda x: (
+                x.get("view") not in (None, "", "loading") and str(x.get("activeOrgId")) == org_a_id
+            ),
+            tries=40,
+            gap=0.5,
+        )
+        a_items = da.get("items") or []
+        a_row = next((x for x in a_items if str(x.get("assignmentId")) == id_a), None)
+        w.rep.rec(
+            "㊱ ② 甲队列里同状态的样本单：`canClaim` 为 **true**"
+            "（同一身份、同一页面、同一份代码 —— 差异只来自组织角色）",
+            bool(a_row) and a_row.get("canClaim") is True,
+            f"canClaim={a_row and a_row.get('canClaim')!r} tap={t_pill}",
+        )
+        n_btn_a = w.c.count(f'[data-act-claim="{id_a}"]')
+        w.rep.rec(
+            "㊱ ② 界面上该卡**有**受理按钮（图 2 第 2 行；受理本身已由 ㉟ 章第三节实证，"
+            "本章不重复消耗这张单）",
+            n_btn_a == 1,
+            f'[data-act-claim="{id_a}"] 命中 {n_btn_a}',
+        )
+        w.shot("36-2-甲组织有受理入口")
+
+    # ============ 三、对照 2：同一队列、换身份（乙 manager）============
+    print("\n-- 三、对照 2：乙队列换身份（seed-mgr-only-b，乙 manager）--", flush=True)
+    if not w.open_workbench(CODE_MGR_ONLY_B, tag="㊱"):
+        w.rep.not_run("㊱ 对照 2", "仅乙组织经理未能进入工作台")
+    else:
+        d_ob = w.wait_data(
+            lambda x: x.get("view") not in (None, "", "loading"),
+            tries=40,
+            gap=0.5,
+        )
+        ob_items = d_ob.get("items") or []
+        ob_row = next((x for x in ob_items if str(x.get("assignmentId")) == id_b), None)
+        n_btn_ob = w.c.count(f'[data-act-claim="{id_b}"]')
+        w.rep.rec(
+            f"㊱ ①②③ 对照 2：**同一张单**（乙组织 #{id_b}）在乙经理（有认领权限）眼里"
+            "**有**受理按钮 —— 与对照 1 里同一张单在 multi（乙 member）眼里**没有**形成对照。"
+            "⇒ 按钮的出现只取决于「该组织的权限」，与单本身、页面、代码都无关",
+            bool(ob_row) and ob_row.get("canClaim") is True and n_btn_ob == 1,
+            f"canClaim={ob_row and ob_row.get('canClaim')!r} 命中={n_btn_ob}",
+        )
+        w.shot("36-3-乙组织经理有受理入口")
+
+    # ============ 四、API 直证：无权限的直接调用仍被拒（图 2 ① 后半句）============
+    print("\n-- 四、无权限直接调用 ⇒ 403 --", flush=True)
+    st_deny, body_deny = api_post(
+        f"/entrust/assignments/{id_b}/claim",
+        tok_multi,
+        {},
+        idem_key=f"walk36-deny-{int(time.time() * 1000)}",
+    )
+    w.rep.rec(
+        "㊱ ① 图 2 第 1 行后半句「**直接调用仍被拒绝**」：`seed-mgr-multi` 对乙组织的"
+        "委托 POST claim ⇒ 服务端 **403**（藏按钮不等于放行 —— 写端独立校验，裁定 §3）",
+        st_deny == 403,
+        f"HTTP={st_deny} body={json.dumps(body_deny, ensure_ascii=False)[:160]}",
+    )
+    # ⚠️ 该次调用**没有**改变单据状态：403 在条件 UPDATE 之前抛出 ⇒ 不消耗样本。
+    truth_b = api_get(f"/entrust/assignments/{id_b}", tok_multi) or {}
+    w.rep.rec(
+        "㊱ ④ 本次被拒的调用**没有**改动单据（仍为 submitted、仍无人认领）"
+        "—— 负例不能留下副作用，否则下一次跑就没有样本了",
+        str(truth_b.get("status")) == "submitted",
+        f"status={truth_b.get('status')!r} claimed_by={truth_b.get('claimed_by')!r}",
+    )
+
+    # ============ 五、诚实边界（不计入通过）============
+    print("\n-- 五、诚实边界（不计入通过）--", flush=True)
+    w.rep.rec(
+        "㊱ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        str(w.new_errors(base_err))[:200],
+    )
+    w.rep.limitation(
+        "㊱ 裁定 §5 的「**权限被撤销**」分支：只证到后端拒绝，未证到界面刷新",
+        "要在运行中把某人在某组织的角色从 manager 改成 member，需要一个改成员角色的"
+        "通道 —— 本切片没有面向界面的撤权入口。所以：**后端拒绝**已由本节 403 直证；"
+        "**界面刷新**逻辑（403/409 ⇒ `load()` 重取权限投影 + 队列）只有静态断言"
+        "（verify_ui_interactions.js ⑪ 章）。另一分支「**被人抢先认领**」的界面路径"
+        "有真机证据（㉟ 章第五节：迟到的那一下拿 409 并把队列刷成服务端真实状态）。",
+    )
+    w.rep.limitation(
+        "㊱ 对照 2 里切身份用的是**重新登录**，不是同一个会话内的权限变化",
+        "`seed-mgr-multi` 与 `seed-mgr-only-b` 是两个账号。这足以证明「按钮取决于"
+        "该组织的权限」（两账号、同一张单、同一页面），但**不能**替代"
+        "「同一会话内权限变化后界面是否跟着变」—— 那正是上一条 LIMITATION 的内容。",
     )
 
 
@@ -4995,6 +5268,7 @@ SECTIONS = {
     "33": sec_33,
     "34": sec_34,
     "35": sec_35,
+    "36": sec_36,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -5058,6 +5332,10 @@ DEFAULT_ORDER = [
     #    排在前面会让后面按条数/按状态断言的章节变脆（"34" 也真写委托，但它在
     #    "4b"～"14" 之前；本节的增量写在它们之后，不再叠加污染）。
     "35",
+    # ㊱ 受理入口判据（D-4）：**零写入** —— 不提交、也不受理任何委托，只观察受理
+    #    入口的可见性，并调 API 取 403。但它会切换「上次选中的组织」这个 Storage
+    #    键（`ORG_STORAGE_KEY`）⇒ 同样排在末尾，免得把后面按组织断言的章节搅乱。
+    "36",
 ]
 
 
