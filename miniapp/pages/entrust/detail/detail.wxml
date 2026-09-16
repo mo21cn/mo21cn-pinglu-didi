@@ -55,11 +55,38 @@
         </view>
       </view>
 
-      <!-- 待受理：给真实可执行的受理入口（无权限时服务端会如实拒绝） -->
+      <!-- 待受理：给真实可执行的受理入口（无权限时服务端会如实拒绝）。
+           确认条做成**页内 DOM** 而不是 `wx.showModal`：原生弹层不在渲染树里、
+           工具点不到它的确认键 ⇒ 受理这条**唯一会改变业务状态、且不可回退**的路径
+           就永远拿不到设备证据（D-4 §5 还要求"被拒后要刷新状态"，那一步同样得看得见）。
+           与队列卡片同一形态，区别只是本页只有一张委托（不需要 `claimOpenId` 记账）。
+           三个锚点两两不同：`onToggleClaim` 被"展开"与"取消"共用，若都写
+           `data-act-claim`，两者在断言与锚点登记表里就同形了（登记表按 file|attr 去重）。 -->
       <view wx:if="{{canClaim}}" class="card slot-card">
         <view class="slot-note">该委托已提交，等待组织成员受理</view>
         <view class="slot-actions">
-          <view class="slot-btn" bindtap="onClaim" hover-class="hover-dim">受理委托</view>
+          <block wx:if="{{claimOpen}}">
+            <view class="slot-note">受理后该委托进入组织队列，可以派发任务；此操作不可回退。</view>
+            <view
+              class="slot-btn slot-btn-strong"
+              data-act-claim-submit="1"
+              bindtap="onSubmitClaim"
+              hover-class="hover-dim"
+            >确认受理</view>
+            <view
+              class="slot-btn"
+              data-act-claim-cancel="1"
+              bindtap="onToggleClaim"
+              hover-class="hover-dim"
+            >取消</view>
+          </block>
+          <view
+            wx:else
+            class="slot-btn"
+            data-act-claim-open="1"
+            bindtap="onToggleClaim"
+            hover-class="hover-dim"
+          >受理委托</view>
         </view>
       </view>
 
@@ -134,6 +161,39 @@
           <view wx:if="{{item.countsText}}" class="slot-counts">{{item.countsText}}</view>
 
           <view wx:if="{{item.actionLabel}}" class="slot-actions">
+            <!-- 记录任务的**页内输入条**（2026-09-16 取代 `wx.showModal({editable:true})`）：
+                 可编辑弹层同样不在渲染树里、确认键点不到 ⇒ "记录任务"这条关键输入
+                 在真机上永远无法被验证。写法与案件页的 `act-input` 一致：
+                 输入框带 `data-df` 标记、提交/取消各一个锚点，属性名两两不同。
+                 ⚠️ 判据是 `taskOpenKey === item.key`：两侧都是**字符串**
+                 （页面侧 `String(ds.key)` 归一、`WORKBENCH_SLOTS` 的 key 本就是字符串），
+                 WXML 的 `===` 是严格比较，一边字符串一边数字会**永远不相等**
+                 ⇒ 表现是"点了记录任务没反应"，且静态门禁查不出来。 -->
+            <view wx:if="{{taskOpenKey === item.key}}" class="slot-form">
+              <view class="slot-note">记录任务 · {{taskForm.typeLabel}}</view>
+              <input
+                class="slot-input"
+                data-df="task-title"
+                value="{{taskForm.title}}"
+                placeholder="任务标题（1–128 字）"
+                placeholder-class="input-ph"
+                maxlength="128"
+                bindinput="onTaskInput"
+              />
+              <view
+                class="slot-btn slot-btn-strong"
+                data-act-task-submit="{{item.key}}"
+                bindtap="onSubmitTask"
+                hover-class="hover-dim"
+              >提交任务</view>
+              <view
+                class="slot-btn"
+                data-act-task-cancel="{{item.key}}"
+                bindtap="onCancelTask"
+                hover-class="hover-dim"
+              >取消</view>
+              <view wx:if="{{taskHint}}" class="slot-note slot-warn">{{taskHint}}</view>
+            </view>
             <!-- 任务类型选择：页内展开（不用 showActionSheet —— 超过 6 项在真机底部会被切断，
                  项目约定长列表走专用组件；这里只有 7 项且同在一张卡内，展开更少上下文切换） -->
             <view wx:if="{{item.taskPick && pickKey === item.key}}" class="slot-picks">

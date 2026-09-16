@@ -200,6 +200,32 @@
   background: #EEF2FF;
 }
 
+/* 页内确认条 / 输入条（2026-09-16）—— 关键路径不落在原生弹层上，
+   理由与静态防线见 detail.js 头注释。
+   `.slot-btn-strong` 是"会改变业务状态、且不可回退"的那一个：与主色一致，
+   并在下方留出间距，使「确认」与「取消」不会贴成一块、看不出主次。 */
+.slot-btn-strong {
+  margin-bottom: 12rpx;
+  color: #FFFFFF;
+  background: #3B5BDB;
+}
+
+/* 页内输入条的容器：把"标题 + 输入框 + 两个按钮"收成一块，
+   与它上面那条「记录任务」按钮之间靠 `slot-actions` 的 padding 分开 */
+.slot-form {
+  padding: 4rpx 0 8rpx;
+}
+
+.slot-input {
+  margin: 12rpx 0 16rpx;
+  padding: 16rpx 20rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  color: #0F2540;
+  background: #FFFFFF;
+}
+
 .status-note {
   margin-top: 20rpx;
 }

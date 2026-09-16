@@ -110,6 +110,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -127,6 +128,11 @@ ORG_A = "演示经营主体·甲"
 ORG_B = "演示经营主体·乙"
 TITLE_A = "演示委托·甲组织队列样本"
 TITLE_B = "演示委托·乙组织队列样本"
+#: 工作台那张样本单（委托 #1）所在的组织 —— `seed_entrust_demo` 的演示组织。
+#: 它与甲/乙的**关键差别在授权行**：它是**完整 6 项**（含 `entrust:task:dispatch`），
+#: 而甲只拿到 `["entrust:view", "entrust:assignment:claim"]`。㊳⑧ 的「提交成功」路径
+#: 必须落在它上面（理由见该节注释）。
+ORG_WORKBENCH = "演示经营主体·工作台"
 
 CODE_SHIPPER = "seed-shipper"
 CODE_OWNER = "seed-owner"
@@ -386,6 +392,58 @@ def ensure_role(token: str, role: str) -> tuple[str, str]:
     if status == 200 and isinstance(data, dict):
         return (data.get("access_token") or token), f"已切到 {role}"
     return token, f"切换 {role} 失败（HTTP {status}）"
+
+
+def find_submitted(org_id: str, title: str, token: str) -> str:
+    """在该组织队列里找「标题匹配**且状态为 submitted**」的那张单（找不到给空串）。
+
+    ⚠️ 必须**同时**校验状态：种子里可能已躺着同标题的 `claimed` 单（上一次走查
+    受理过的），只按标题命中就会拿一张不可认领的单去断言"有没有受理入口" ——
+    那时"没有按钮"虽然是对的，结论却是错的（它因为**状态**不显示，不是因为权限）。
+    """
+    data = api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", token) or {}
+    for row in data.get("items") or []:
+        item = row or {}
+        if str(item.get("title") or "") == title and item.get("status") == "submitted":
+            return str(item.get("assignment_id") or "")
+    return ""
+
+
+def flip_org_role(code: str, org: str, role: str) -> tuple[int, str]:
+    """把演示身份在某组织的成员角色改掉（走查专用的**撤权 / 复权**通道）。
+
+    `ent_org_member` **没有 HTTP 接口** ⇒ D-4 §5 的「权限被撤销」只能在**运行中**改库，
+    用同族的本机数据工具 `backend/scripts/flip_org_role.py`（见其模块 docstring）。
+
+    ⚠️ 解释器要挑对：那个脚本依赖 sqlalchemy / `app.core.database`，只有仓库 `.venv` 里装了。
+    优先用 `.venv/Scripts/python.exe`，没有才退回当前解释器 —— 并且**把失败如实带回来**
+    （rc / stderr），不在这里吞掉：改角色失败而后面继续断言，会得到"看起来是权限生效了"的
+    假绿（其实是原角色没动、按钮本来就在）。
+    """
+    venv_py = os.path.join(REPO_ROOT, ".venv", "Scripts", "python.exe")
+    py = venv_py if os.path.isfile(venv_py) else sys.executable
+    try:
+        proc = subprocess.run(
+            [
+                py,
+                os.path.join("scripts", "flip_org_role.py"),
+                "--code",
+                code,
+                "--org",
+                org,
+                "--role",
+                role,
+            ],
+            cwd=os.path.join(REPO_ROOT, "backend"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:  # 解释器/脚本缺失也算失败
+        return 1, f"{type(exc).__name__}: {exc}"
+    return proc.returncode, ((proc.stdout or "") + (proc.stderr or "")).strip()
 
 
 class Anchors:
@@ -5051,20 +5109,8 @@ def sec_36(w: Walker) -> None:
         f"乙={perm_b}",
     )
 
-    def find_submitted(org_id: str, title: str, token: str) -> str:
-        """在该组织队列里找「标题匹配**且状态为 submitted**」的那张单（找不到给空串）。
-
-        ⚠️ 必须**同时**校验状态：种子里可能已躺着同标题的 `claimed` 单（上一次走查
-        受理过的），只按标题命中就会拿一张不可认领的单去断言"有没有受理入口" ——
-        那时"没有按钮"虽然是对的，结论却是错的（它因为**状态**不显示，不是因为权限）。
-        """
-        data = api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", token) or {}
-        for row in data.get("items") or []:
-            item = row or {}
-            if str(item.get("title") or "") == title and item.get("status") == "submitted":
-                return str(item.get("assignment_id") or "")
-        return ""
-
+    # `find_submitted` 已提到模块级（㊲ 章要用的**是同一份**实现 —— 各留一份副本的话，
+    # 将来只改一处就没人发现，两章对"样本单"的判据会悄悄分叉）。
     id_a = find_submitted(org_a_id, TITLE_A, tok_multi)
     id_b = find_submitted(org_b_id, TITLE_B, tok_multi)
     w.rep.rec(
@@ -5231,19 +5277,713 @@ def sec_36(w: Walker) -> None:
         not w.new_errors(base_err),
         str(w.new_errors(base_err))[:200],
     )
-    w.rep.limitation(
-        "㊱ 裁定 §5 的「**权限被撤销**」分支：只证到后端拒绝，未证到界面刷新",
-        "要在运行中把某人在某组织的角色从 manager 改成 member，需要一个改成员角色的"
-        "通道 —— 本切片没有面向界面的撤权入口。所以：**后端拒绝**已由本节 403 直证；"
-        "**界面刷新**逻辑（403/409 ⇒ `load()` 重取权限投影 + 队列）只有静态断言"
-        "（verify_ui_interactions.js ⑪ 章）。另一分支「**被人抢先认领**」的界面路径"
-        "有真机证据（㉟ 章第五节：迟到的那一下拿 409 并把队列刷成服务端真实状态）。",
+    # ⭐ 2026-09-16：这两格原来是 `LIMITATION`，现在换成**去向记录**。
+    #    ⚠️ **换去向 ≠ 原问题通过了**：它们描述的是 **㊱ 章本节**当时的能力边界 ——
+    #    本节**仍然**只证到「服务端 403」，"界面刷新"那半句的完整链路是 ㊲ 章承担的
+    #    （同一 token、同一页面、运行中撤权）。两条证据分别记录、互不顶替。
+    w.rep.rec(
+        "㊱ 裁定 §5 的「**权限被撤销** ⇒ 界面刷新」已另开通道取证 ⇒ **见 ㊲ 章**"
+        "（本节仍只证到后端 403；㊲ 章用「运行中改成员角色」把刷新链路整条走完）",
+        True,
+        "去向：本文件 ㊲ 章（sec_37）· 通道：backend/scripts/flip_org_role.py",
+    )
+    w.rep.rec(
+        "㊱ 对照 2 切身份用的是**重新登录**（`seed-mgr-multi` 与 `seed-mgr-only-b` 是两个"
+        "账号）—— 这一点是**事实**而不是缺口：它证明的是「按钮取决于该组织的权限」；"
+        "「同一会话内权限变化」已由 **㊲ 章**补上",
+        True,
+        "两账号事实不变；同会话内变化的证据在 ㊲ 章",
+    )
+
+
+def sec_37(w: Walker) -> None:
+    """㊲ 受理入口的**权限撤销**边界（D-4 §5 第四条 / 图 2 第 4 行）：撤权 ⇒ 拒绝 ⇒ 界面刷新。
+
+    为什么单独一章
+    --------------
+    ㊱ 章把这条分支如实记成 `LIMITATION`：它证明的是「同组织只读成员看不到按钮、
+    直接调用被拒」，**不能**证明「入口**已经展示之后**权限被撤销，界面会跟着变」。
+    后者需要在**运行中**改权限，而 `ent_org_member` / `ent_entrustment` **没有 HTTP 接口**
+    ⇒ 只能落库（通道：`backend/scripts/flip_org_role.py`）。
+
+    ⭐ 撤权对象怎么选（**首跑踩过，留档**）
+    ------------------------------------
+    首跑用 **甲组织**（`seed-mgr-multi`，manager）撤角色 ⇒ **写端仍返回 200**。
+    用最小复现定位到根因（不依赖 IDE）：`access.resolve_context` 的权限是
+    「**角色权限 ∪ 生效中的委托授权**」，而种子给 org 2（甲）的委托授权里**本来就含**
+    `entrust:assignment:claim`：
+
+        甲(org 2).permissions = ["entrust:view", "entrust:assignment:claim"]
+        乙(org 3).permissions = ["entrust:view"]
+
+    ⇒ 撤掉角色之后 claim 仍由**授权**给出 ⇒「撤角色」在甲组织**不是撤权**
+    （200 是**正确**行为，不是产品缺陷）。本节的配方因此改为
+    **乙组织 + `seed-mgr-only-b`**：那个组织的授权不含 claim ⇒ claim **只**来自角色
+    ⇒ 撤角色＝真撤权。
+    这条"必须先确认被撤的那条权限**没有别的来源**"的教训，比结论本身更容易被忘掉，
+    所以甲组织那一侧的观察被**保留为一条事实断言**（前置②）。
+
+    三件事必须**同时**成立，缺一条结论都不完整：
+
+      ① 撤权**前**按钮**在**（本章起点 —— 否则「消失」无从谈起，那是从未展示过）；
+      ② 撤权后**不刷新**时按钮**仍然在**：页面拿的是**旧权限投影**（前端不轮询权限，
+         这不是缺陷，恰是「写端必须独立校验」这条裁定存在的原因），但**服务端已经拒绝**
+         —— 同一个 token 直证 **403**（裁定 §3：隐藏按钮 ≠ 放行）；
+      ③ 触发 D-4 §5 的真实链路（点确认受理 ⇒ 403 ⇒ 页面 `load()`）之后：按钮**消失**、
+         `canClaim` 翻 false、单据**未被改动**（负例不留副作用），且这张单**仍看得见**
+         （撤的是认领权限，不是查看权限 —— 裁定 §4）。
+
+    ⚠️ ③ 的两条必须**成对**断言（按钮消失 + 单据状态未变）：若写端其实成功了（首跑就是），
+    `canClaim` 会因为 `status` 变了而翻 false —— 断言照样"通过"，但它证的是另一件事。
+    那是**超证**（声称的比证据多），必须在断言里一并堵住，否则这条 PASS 是假绿。
+
+    最后**还原角色**并断言按钮**回来**：这是对照组，排掉「页面/工具本来就是坏的」这个
+    替代解释，也证明链路**双向可逆**。
+
+    ⚠️ 本章**会改库**（成员角色），且**必须在 `finally` 里还原** —— 种子脚本的
+    `_member()` 是「有则跳过」，不会把角色改回来；不还原就是给下一次走查的 ㊱ 章埋雷
+    （那边对照 2 要求 `seed-mgr-only-b` 在乙是 `manager`）。
+    """
+    print("\n== ㊲ 受理入口的权限撤销边界（D-4 §5）：撤权 ⇒ 403 ⇒ 界面刷新 ==", flush=True)
+    base_err = w.c.errors()
+    claim_perm = "entrust:assignment:claim"
+
+    tok_multi = (api_login(CODE_MGR_MULTI) or {}).get("access_token") or ""
+    tok_subj = (api_login(CODE_MGR_ONLY_B) or {}).get("access_token") or ""
+    by_m = {
+        str((r or {}).get("name") or ""): (r or {})
+        for r in ((api_get("/entrust/my-orgs", tok_multi) or {}).get("items") or [])
+    }
+    by_s = {
+        str((r or {}).get("name") or ""): (r or {})
+        for r in ((api_get("/entrust/my-orgs", tok_subj) or {}).get("items") or [])
+    }
+    org_a = by_m.get(ORG_A) or {}
+    org_b = by_s.get(ORG_B) or {}
+    org_a_id, org_b_id = str(org_a.get("org_id") or ""), str(org_b.get("org_id") or "")
+    perm_a = [str(p) for p in (org_a.get("permissions") or [])]
+    perm_b = [str(p) for p in (org_b.get("permissions") or [])]
+
+    w.rep.rec(
+        "㊲ 前置①：撤权对象选 `seed-mgr-only-b`@**乙** —— 该身份在那里是 manager，"
+        "且该组织的权限集里 `entrust:assignment:claim` **只**来自角色（没有第二条来源）。"
+        "⚠️ 这条前后任一不成立，本节配方就得重新挑组织",
+        bool(org_b_id) and str(org_b.get("member_role")) == "manager" and claim_perm in perm_b,
+        f"乙#{org_b_id} role={org_b.get('member_role')!r} perms={perm_b}",
+    )
+    w.rep.rec(
+        "㊲ 前置②（**事实，不是缺陷**）：**甲**组织的权限集里 claim 与角色**并存** ⇒ "
+        "在甲撤角色**撤不掉** claim（权限 = 角色权限 ∪ 生效委托授权）。"
+        "首跑就是在这里撞上 200 的 —— 本节据此换了撤权对象。"
+        "⚠️ 这条同时是**前提守卫**：种子若改了甲的授权，本节配方要跟着复核",
+        bool(org_a_id) and claim_perm in perm_a,
+        f"甲#{org_a_id} role={org_a.get('member_role')!r} perms={perm_a}",
+    )
+    if str(org_b.get("member_role")) != "manager" or claim_perm not in perm_b:
+        w.rep.not_run(
+            "㊲ 撤权 — 刷新链路",
+            "前置不成立：`seed-mgr-only-b` 在乙不是 manager，或该组织不含 claim 权限。"
+            "先跑 backend/scripts/seed_entrust_orgpicker.py（或让本章的还原步骤跑一次）再重跑。",
+        )
+        return
+
+    id_b = find_submitted(org_b_id, TITLE_B, tok_subj)
+    w.rep.rec(
+        "㊲ 前置③：乙组织里找到一张**标题匹配且 status=submitted** 的样本单"
+        "（本章**不会**受理成功 —— 写端会被拒 ⇒ 整章零业务写入）",
+        bool(id_b),
+        f"乙#{id_b}（{TITLE_B}）",
+    )
+    if not id_b:
+        w.rep.not_run(
+            "㊲ 撤权 — 刷新链路",
+            "乙组织样本单缺失（可能已被历史走查受理掉）。先跑 seed_entrust_orgpicker.py。",
+        )
+        return
+
+    # ============ 一、撤权前：按钮在（本章起点）============
+    print("\n-- 一、撤权前：受理入口在 --", flush=True)
+    # 先清「上次选中的组织」再写死乙：`pickOrg` 有 `saved` 分支，而该 Storage 键跨 IDE
+    # 重启保留 ⇒ 不显式指定就可能落在甲（那里 claim 撤不掉），本章的起点断言会直接失真。
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.remove_storage(ORG_STORAGE_KEY)  # 双保险：确认清掉上次选择
+    w.c.set_storage(ORG_STORAGE_KEY, org_b_id)
+    if not w.open_workbench(CODE_MGR_ONLY_B, tag="㊲"):
+        w.rep.not_run("㊲ 撤权 — 刷新链路", "未能进入经理工作台")
+        return
+    w.wait_data(
+        lambda x: (
+            x.get("view") not in (None, "", "loading") and str(x.get("activeOrgId")) == org_b_id
+        ),
+        tries=40,
+        gap=0.5,
+    )
+    n_before = w.c.count(f'[data-act-claim="{id_b}"]')
+    w.rep.rec(
+        "㊲ ① 撤权**前**：该卡**有**受理按钮（本章的起点 —— 没有它，「消失」无从谈起）",
+        n_before == 1,
+        f'[data-act-claim="{id_b}"] 命中 {n_before}',
+    )
+    w.shot("37-1-撤权前-按钮在")
+
+    flipped = False
+    try:
+        # ============ 二、运行中撤权（全章唯一的写操作，且会被还原）============
+        print("\n-- 二、运行中把乙组织的角色改成 member --", flush=True)
+        rc, out = flip_org_role(CODE_MGR_ONLY_B, ORG_B, "member")
+        flipped = rc == 0
+        w.rep.rec(
+            "㊲ ② 走查专用通道把该身份在**乙组织**的角色 manager → **member**"
+            "（`ent_org_member` 无 HTTP 接口 ⇒ 只能落库；这一步是这条边界能取证的前提）",
+            flipped,
+            f"rc={rc} out={out[:200]}",
+        )
+        if not flipped:
+            w.rep.not_run("㊲ 撤权 — 刷新链路", f"改角色失败：rc={rc} out={out[:200]}")
+            return
+
+        # —— ②a **先证权限真的被撤销**：同一 token 重取 /my-orgs ——
+        # ⚠️ 这一步不能省：少了它，下一行的 403 就证明不了"是撤权导致的"
+        #    （首跑在甲组织正是如此：权限没变，于是 200，而断言照样"看起来"通过了）。
+        by2 = {
+            str((r or {}).get("name") or ""): (r or {})
+            for r in ((api_get("/entrust/my-orgs", tok_subj) or {}).get("items") or [])
+        }
+        ob2 = by2.get(ORG_B) or {}
+        perm_b2 = [str(p) for p in (ob2.get("permissions") or [])]
+        w.rep.rec(
+            "㊲ ②a **先证权限真的被撤销了**：同一 token 重取 `/my-orgs` ⇒ 该组织权限集里 "
+            "`entrust:assignment:claim` **已消失**（只剩 `entrust:view`）",
+            str(ob2.get("member_role")) == "member" and claim_perm not in perm_b2,
+            f"乙 role={ob2.get('member_role')!r} perms={perm_b2}",
+        )
+
+        # —— ②b 服务端已经拒绝：**同一个 token**，不重新登录 ——
+        status, body = api_post(
+            f"/entrust/assignments/{id_b}/claim",
+            tok_subj,
+            {},
+            idem_key=f"walk37-revoke-{int(time.time() * 1000)}",
+        )
+        w.rep.rec(
+            "㊲ ②b 撤权后直接调用受理 ⇒ 服务端 **403**（裁定 §3：隐藏按钮 ≠ 放行）。"
+            "同一 token 且未重新登录 ⇒ 权限取自**库**，不是 token 里的角色快照",
+            status == 403,
+            f"HTTP={status} body={json.dumps(body, ensure_ascii=False)[:160]}",
+        )
+        truth = api_get(f"/entrust/assignments/{id_b}", tok_subj) or {}
+        w.rep.rec(
+            "㊲ ②c 被拒的调用**没有**改动单据（仍 submitted、仍无人认领）—— 负例不留副作用，"
+            "否则下一次跑就没有样本了",
+            str(truth.get("status")) == "submitted",
+            f"status={truth.get('status')!r} claimed_by={truth.get('claimed_by')!r}",
+        )
+
+        # —— ②d 界面上那份**陈旧**的按钮仍在（这是被测事实，不是缺陷）——
+        n_stale = w.c.count(f'[data-act-claim="{id_b}"]')
+        w.rep.rec(
+            "㊲ ②d 撤权后**未刷新**时按钮**仍在** —— 页面拿的是旧权限投影（前端不轮询权限）。"
+            "这不算缺陷：它正是「服务端必须独立校验」这条裁定存在的原因",
+            n_stale == 1,
+            f'[data-act-claim="{id_b}"] 命中 {n_stale}',
+        )
+        w.shot("37-2-撤权后未刷新-按钮仍在")
+
+        # ============ 三、走 D-4 §5 的真实链路：确认受理 ⇒ 403 ⇒ load() ============
+        print("\n-- 三、点确认受理 ⇒ 403 ⇒ 页面自己刷新 --", flush=True)
+        t_open = w.c.tap(f'[data-act-claim="{id_b}"]')
+        time.sleep(1.5)
+        d_open = w.c.page_data()
+        w.rep.rec(
+            "㊲ ③ 点「受理」在**页内**展开确认条（受理这条路不走原生弹层，见 ㉟ 章第三节）",
+            bool(t_open) and d_open.get("claimOpenId") == id_b,
+            f"tap={t_open} claimOpenId={d_open.get('claimOpenId')!r}",
+        )
+        t_sub = w.c.tap(f'[data-act-claim-submit="{id_b}"]')
+        d_after = w.wait_data(
+            lambda x: x.get("view") not in (None, "", "loading") and not x.get("claimingId"),
+            tries=40,
+            gap=0.5,
+        )
+        a_items = d_after.get("items") or []
+        a_row = next((x for x in a_items if str(x.get("assignmentId")) == id_b), None)
+        n_after = w.c.count(f'[data-act-claim="{id_b}"]')
+        truth_ui = api_get(f"/entrust/assignments/{id_b}", tok_subj) or {}
+        w.rep.rec(
+            "㊲ ③ **后端拒绝之后页面自己刷新**（D-4 §5：显示明确提示并刷新状态）："
+            "`canClaim` 翻成 **false**、受理按钮**消失** —— 而不是留一个点了必然 403 的按钮。"
+            "⚠️ 与括号里那半句**成对**才算证到：单据**仍是 submitted** ⇒ 按钮消失只可能来自"
+            "**权限被撤**，不是「这张单已经被受理了」（首跑正是后者，那条断言当时是**超证**）",
+            bool(t_sub)
+            and a_row is not None
+            and a_row.get("canClaim") is False
+            and n_after == 0
+            and str(truth_ui.get("status")) == "submitted",
+            f"tap={t_sub} canClaim={a_row and a_row.get('canClaim')!r} 命中={n_after} "
+            f"单据 status={truth_ui.get('status')!r}",
+        )
+        w.rep.rec(
+            "㊲ ③ 刷新后这张单**仍看得见**（撤掉的是**认领**权限，不是查看权限 —— "
+            "裁定 §4：仍可查看其有权读取的内容）",
+            a_row is not None,
+            f"队列={[str(x.get('assignmentId')) for x in a_items][:6]} 目标#{id_b}",
+        )
+        w.shot("37-3-撤权后已刷新-按钮消失")
+    finally:
+        # ============ 四、还原（**必须在 finally**，否则给下一次走查埋雷）============
+        rc_back, out_back = flip_org_role(CODE_MGR_ONLY_B, ORG_B, "manager")
+        w.rep.rec(
+            "㊲ 收尾：把角色**还原**成 manager —— 本章会改库，而种子脚本的 `_member()` 是"
+            "「有则跳过」、不会自己改回来；不还原，下一次走查的 ㊱ 章对照 2 会红"
+            "（那一节要求 `seed-mgr-only-b` 在乙是 manager）",
+            rc_back == 0,
+            f"rc={rc_back} out={out_back[:160]}",
+        )
+
+    # ============ 五、对照组：复权后按钮回来（排掉「页面/工具本来就是坏的」）============
+    if flipped:
+        print("\n-- 五、对照组：复权后按钮回来 --", flush=True)
+        path_re = w.reenter_workbench()
+        d_re = w.wait_data(
+            lambda x: (
+                x.get("view") not in (None, "", "loading") and str(x.get("activeOrgId")) == org_b_id
+            ),
+            tries=40,
+            gap=0.5,
+        )
+        re_row = next(
+            (x for x in (d_re.get("items") or []) if str(x.get("assignmentId")) == id_b),
+            None,
+        )
+        n_re = w.c.count(f'[data-act-claim="{id_b}"]')
+        w.rep.rec(
+            "㊲ 对照组：**还原角色**后重进页面，按钮**回来**（`canClaim` 翻回 true）—— "
+            "排掉「页面/工具本来就是坏的」这个替代解释，也证明链路**双向可逆**。"
+            "⚠️ 这一步是**重新进入页面实例**，不等于原地刷新；原地刷新由第三节的 403 链路覆盖",
+            bool(re_row) and re_row.get("canClaim") is True and n_re == 1,
+            f"path={path_re} canClaim={re_row and re_row.get('canClaim')!r} 命中={n_re}",
+        )
+        w.shot("37-4-复权后-按钮回来")
+
+    # ============ 六、诚实边界（不计入通过）============
+    print("\n-- 六、诚实边界（不计入通过）--", flush=True)
+    w.rep.rec(
+        "㊲ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        str(w.new_errors(base_err))[:200],
     )
     w.rep.limitation(
-        "㊱ 对照 2 里切身份用的是**重新登录**，不是同一个会话内的权限变化",
-        "`seed-mgr-multi` 与 `seed-mgr-only-b` 是两个账号。这足以证明「按钮取决于"
-        "该组织的权限」（两账号、同一张单、同一页面），但**不能**替代"
-        "「同一会话内权限变化后界面是否跟着变」—— 那正是上一条 LIMITATION 的内容。",
+        "㊲ 页面上的**提示文案**本身无法被工具断言",
+        "403 的提示由请求层按服务端 `detail` 发出，而 toast / 弹层都不在渲染树里"
+        "（与 ⑧b / ㉕D 同一个**工具**边界，与产品无关）。本章能证的是可观察的结果："
+        "HTTP 403、该组织权限集里 claim 已消失、`canClaim` 翻 false、按钮从渲染树里消失、"
+        "队列刷到服务端真实状态。",
+    )
+
+
+def sec_38(w: Walker) -> None:
+    """㊳ 详情页「关键路径」的**页内形态**（2026-09-16 统一后的真机取证）。
+
+    为什么单独一章
+    --------------
+    2026-09-16 把详情页两处关键路径从**原生弹层**改成**页内 DOM**：
+
+      · 「受理委托」：`wx.showModal` 确认 ⇒ 页内确认条（展开 / 确认 / 取消三个锚点）；
+      · 「记录任务」：`wx.showModal({editable: true})` ⇒ 页内输入条（input + 提交 / 取消）。
+
+    改动的**理由就是可验证性本身**：原生弹层不在渲染树里（`.weui-dialog*` 命中 0），
+    工具点不到它的确认键 ⇒「受理」这条**唯一会改变业务状态、且不可回退**的路径
+    永远拿不到设备证据。所以本章不是"顺手补个覆盖"，它正是那次改写的**验收条件** ——
+    页内形态若在真机上点不动，那次改写就只是把一种不可验证换成了另一种不可验证。
+
+    与 ㊲ 章的分工：㊲ 走**队列卡片**上的受理入口（权限撤销边界）；本章走**详情页**上的
+    受理入口（页内形态本身）。两处入口共用 `utils/entrust.js: canClaimAssignment()`，
+    但**渲染路径不同**，必须各自有证据。
+
+    ⚠️ 本章**会改库**（受理掉一张样本单 ⇒ `submitted → claimed`）：
+      · 用**甲组织**样本单（`seed-mgr-multi` 在甲是 manager）；
+      · 必须排在 ㊱ 章**之后**（㊱ 要求该单仍是 `submitted`，它才拿得到"有受理按钮"那一侧）；
+      · 每次走查都是新临时库 ⇒ 不污染下一次。
+
+    本章用到**两套身份、两张单**（2026-09-16 补；这是 ⑦ / ⑧ 拆开的原因）
+    -----------------------------------------------------------------
+    ①–⑦ 段：`seed-mgr-multi` @ **甲组织样本单** —— 验**页内形态**与**失败侧**；
+    ⑧ 段：`seed-owner` @ **委托 #1**（`ENTRUST_ASSIGNMENT_ID`，工作台组织）—— 验**成功侧**。
+
+    为什么不在一张单上把成功侧也验掉：`create_task` 的判权走 **owner 维度**
+    （`AccessContext._delegated_by(货主, "entrust:task:dispatch")`），而授权行是**按
+    「货主 → 组织」逐条写的** —— 甲组织的授权行里**没有** `task:dispatch`（它只拿到
+    `["entrust:view", "entrust:assignment:claim"]`），所以在甲样本单上提交**必然 403**。
+    那是权限模型的事实，不是本章要证的东西；要证「页内输入条提交成功 ⇒ 任务真的落库
+    ⇒ 输入条复位」，就得换到**持有该授权**的组合上。两张单、两套身份，各证一侧。
+    ⑦（失败侧）与 ⑧（成功侧）**互补且不可互相顶替**。
+    """
+    print("\n== ㊳ 详情页关键路径的页内形态：受理确认条 + 任务输入条 ==", flush=True)
+    base_err = w.c.errors()
+
+    tok_multi = (api_login(CODE_MGR_MULTI) or {}).get("access_token") or ""
+    rows = (api_get("/entrust/my-orgs", tok_multi) or {}).get("items") or []
+    by_name = {str((r or {}).get("name") or ""): (r or {}) for r in rows}
+    oa = by_name.get(ORG_A) or {}
+    org_a_id = str(oa.get("org_id") or "")
+    w.rep.rec(
+        "㊳ 前置：`seed-mgr-multi` 在甲组织是 **manager**（详情页才会渲染受理卡）",
+        bool(org_a_id) and str(oa.get("member_role")) == "manager",
+        f"甲#{org_a_id} role={oa.get('member_role')!r}",
+    )
+    if not org_a_id or str(oa.get("member_role")) != "manager":
+        w.rep.not_run(
+            "㊳ 详情页页内形态",
+            "前置角色不是 manager。先跑 backend/scripts/seed_entrust_orgpicker.py 再重跑。",
+        )
+        return
+
+    id_a = find_submitted(org_a_id, TITLE_A, tok_multi)
+    w.rep.rec(
+        "㊳ 前置③：甲组织里找到一张 `status=submitted` 的样本单"
+        "（本章会**受理**它 ⇒ 必须排在 ㊱ 章之后 —— 那一章要求它仍是 submitted）",
+        bool(id_a),
+        f"甲#{id_a}（{TITLE_A}）",
+    )
+    if not id_a:
+        w.rep.not_run(
+            "㊳ 详情页页内形态",
+            "甲组织样本单缺失或已被受理（历史走查吃过）。先跑 seed_entrust_orgpicker.py。",
+        )
+        return
+
+    # ============ 一、打开详情页：受理卡在、且是页内的「受理委托」 ============
+    print("\n-- 一、打开详情页：受理卡的页内形态 --", flush=True)
+    # ⚠️ **先把页面身份切成 `seed-mgr-multi`**：本章第一版漏了这一步，而 ㊲ 章把页面会话
+    #    留在了 `seed-mgr-only-b`（只属于乙组织）⇒ 甲组织的委托 #3 对它 **404** ⇒ 详情页
+    #    渲染成拒绝态（截图：「功能未开放 · 委托发货当前未启用」），表现为"受理卡根本不出现"。
+    #    而本章的 API 侧前置用的是 `tok_multi`，**照样通过** —— 症状因此很容易被误读成
+    #    "页内确认条没实现"。教训：**页面会话与 API 会话是两条通道**，用 API 取数
+    #    不会替页面登录；页面级断言之前必须先把页面那一条通道建立起来。
+    if not w.open_workbench(CODE_MGR_MULTI, tag="㊳"):
+        w.rep.not_run("㊳ 详情页页内形态", "未能以 seed-mgr-multi 进入经理工作台")
+        return
+    w.wait_data(lambda x: x.get("view") is not None, tries=30, gap=0.5)
+    # 详情页的权限投影**自己**从 `/my-orgs` 按 org_id 建表（不依赖 `entrust_active_org`），
+    # 这里仍先写死甲：将来详情页若引入"按当前组织"的口径，本节的起点不会悄悄失真。
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_a_id)
+    # ⚠️ 进详情页这一步是**脚本侧 navigate**，不是真实点击 —— 真实点击入口
+    #    （队列卡片 → 详情）由 ㉟ / ㊱ 章覆盖；本章断言的对象是「进了详情页之后」。
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={id_a}", DETAIL)
+    pd0 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    n_open0 = w.c.count('[data-act-claim-open="1"]')
+    n_sub0 = w.c.count('[data-act-claim-submit="1"]')
+    n_cancel0 = w.c.count('[data-act-claim-cancel="1"]')
+    w.rep.rec(
+        "㊳ ① 详情页渲染出**待受理**态：受理卡在，且入口是**页内**的「受理委托」；"
+        "初始**未展开**（确认条的两个按钮都还没出现）",
+        pd0.get("canClaim") is True and n_open0 == 1 and n_sub0 == 0 and n_cancel0 == 0,
+        f"canClaim={pd0.get('canClaim')!r} open={n_open0} submit={n_sub0} cancel={n_cancel0}",
+    )
+    w.shot("38-1-详情页-受理卡页内形态")
+
+    # ============ 二、真机点「受理委托」⇒ 确认条在页内展开 ============
+    print("\n-- 二、点「受理委托」⇒ 页内确认条展开 --", flush=True)
+    t_open = w.c.tap('[data-act-claim-open="1"]')
+    time.sleep(1.2)
+    d_open = w.c.page_data()
+    n_sub = w.c.count('[data-act-claim-submit="1"]')
+    n_cancel = w.c.count('[data-act-claim-cancel="1"]')
+    n_open_gone = w.c.count('[data-act-claim-open="1"]')
+    w.rep.rec(
+        "㊳ ② 真机点「受理委托」⇒ 确认条在**页内**展开（`claimOpen` 翻 true，"
+        "「确认受理」与「取消」同时出现在渲染树里、原展开按钮消失）。"
+        "这条路**不经过原生弹层** —— 弹层不在渲染树里，工具点不到它的确认键",
+        bool(t_open)
+        and d_open.get("claimOpen") is True
+        and n_sub == 1
+        and n_cancel == 1
+        and n_open_gone == 0,
+        f"tap={t_open} claimOpen={d_open.get('claimOpen')!r} "
+        f"submit={n_sub} cancel={n_cancel} open={n_open_gone}",
+    )
+    w.shot("38-2-受理确认条-页内展开")
+
+    # ============ 三、点「取消」⇒ 收起且零副作用（保住样本） ============
+    print("\n-- 三、点「取消」⇒ 收起，且单据未被改动 --", flush=True)
+    t_cancel = w.c.tap('[data-act-claim-cancel="1"]')
+    time.sleep(1.0)
+    d_cancel = w.c.page_data()
+    n_open_back = w.c.count('[data-act-claim-open="1"]')
+    truth_mid = api_get(f"/entrust/assignments/{id_a}", tok_multi) or {}
+    w.rep.rec(
+        "㊳ ③ 点「取消」⇒ 确认条收起（`claimOpen` 翻回 false、展开按钮回来），"
+        "且**单据没有被改动**（仍 `submitted`、仍无人认领）—— 负例不留副作用，"
+        "否则这一章自己就把样本吃掉了",
+        bool(t_cancel)
+        and d_cancel.get("claimOpen") is False
+        and n_open_back == 1
+        and str(truth_mid.get("status")) == "submitted",
+        f"tap={t_cancel} claimOpen={d_cancel.get('claimOpen')!r} open={n_open_back} "
+        f"status={truth_mid.get('status')!r} claimed_by={truth_mid.get('claimed_by')!r}",
+    )
+
+    # ============ 四、重开 ⇒ 确认受理 ⇒ 真受理成功 ============
+    print("\n-- 四、确认受理 ⇒ 服务端状态真的翻转 --", flush=True)
+    w.c.tap('[data-act-claim-open="1"]')
+    time.sleep(1.2)
+    t_sub = w.c.tap('[data-act-claim-submit="1"]')
+    d_done = w.wait_data(
+        lambda x: x.get("view") not in (None, "", "loading") and not x.get("claiming"),
+        tries=60,
+        gap=0.5,
+    )
+    truth_after = api_get(f"/entrust/assignments/{id_a}", tok_multi) or {}
+    n_open_done = w.c.count('[data-act-claim-open="1"]')
+    n_sub_done = w.c.count('[data-act-claim-submit="1"]')
+    w.rep.rec(
+        "㊳ ④ 真机点「确认受理」⇒ 受理**成功**：服务端 `submitted → claimed` 且 "
+        "`claimed_by` 已落（**API 直证**，不只看界面），页面 `canClaim` 翻 false、"
+        "受理入口从渲染树里消失",
+        bool(t_sub)
+        and str(truth_after.get("status")) == "claimed"
+        and bool(truth_after.get("claimed_by"))
+        and d_done.get("canClaim") is False
+        and n_open_done == 0
+        and n_sub_done == 0,
+        f"tap={t_sub} status={truth_after.get('status')!r} "
+        f"claimed_by={truth_after.get('claimed_by')!r} "
+        f"canClaim={d_done.get('canClaim')!r} open={n_open_done} submit={n_sub_done}",
+    )
+    w.shot("38-3-受理成功-入口消失")
+
+    # ============ 五、记录任务：页内输入条（取代可编辑弹层）============
+    print("\n-- 五、记录任务：页内输入条 --", flush=True)
+    w.rep.rec(
+        "㊳ ⑤ 受理成功后 `canCreateCase` 出现（受理前没有责任主体，`raise_case` 会 409 ⇒ "
+        "受理前不摆必然失败的按钮）",
+        d_done.get("canCreateCase") is True,
+        f"canCreateCase={d_done.get('canCreateCase')!r}",
+    )
+    # 槽位动态挑一个「可用、有记录任务动作、不需要先选类型」的：
+    # 写死 `procurement` 会在该槽位 `available=false` 时恒失败，而那是数据问题不是缺陷。
+    cand = [
+        s
+        for s in (d_done.get("slots") or [])
+        if s.get("available") and s.get("actionLabel") and not s.get("taskPick")
+    ]
+    slot = cand[0] if cand else {}
+    slot_key = str(slot.get("key") or "")
+    slot_type = str(slot.get("taskType") or "")
+    w.rep.rec(
+        "㊳ ⑤ 前置：详情页里存在一个「可用 + 有记录任务动作 + 不必先选类型」的槽位"
+        "（写死某个 key 会在该槽位不可用时恒失败 —— 那是数据问题，不是缺陷）",
+        bool(slot_key) and bool(slot_type),
+        f"候选={[str(s.get('key')) for s in cand]} 选中={slot_key!r} taskType={slot_type!r}",
+    )
+    if not slot_key:
+        w.rep.not_run("㊳ 记录任务的页内输入条", "没有可用槽位，无法验证输入条")
+    else:
+        tasks0 = (api_get(f"/entrust/tasks?assignment_id={id_a}&size=50", tok_multi) or {}).get(
+            "items"
+        ) or []
+        t_rec = w.c.tap(f'[data-key="{slot_key}"]')
+        time.sleep(1.0)
+        d_form = w.c.page_data()
+        n_input = w.c.count('[data-df="task-title"]')
+        n_tsub = w.c.count(f'[data-act-task-submit="{slot_key}"]')
+        n_tcancel = w.c.count(f'[data-act-task-cancel="{slot_key}"]')
+        w.rep.rec(
+            "㊳ ⑤ 点槽位上的「记录任务」⇒ **页内输入条**展开（`taskOpenKey` 是该槽位 key、"
+            "输入框与提交 / 取消锚点同时出现）。取代的正是 `wx.showModal({editable: true})`"
+            " —— 可编辑弹层同样不在渲染树里，确认键点不到",
+            bool(t_rec)
+            and d_form.get("taskOpenKey") == slot_key
+            and n_input == 1
+            and n_tsub == 1
+            and n_tcancel == 1,
+            f"tap={t_rec} taskOpenKey={d_form.get('taskOpenKey')!r} "
+            f"form.type={((d_form.get('taskForm') or {}).get('type'))!r} "
+            f"input={n_input} submit={n_tsub} cancel={n_tcancel}",
+        )
+        w.shot("38-4-记录任务-页内输入条")
+
+        # 空标题 ⇒ **页内**提示（不是 toast），且没有创建任何任务
+        t_empty = w.c.tap(f'[data-act-task-submit="{slot_key}"]')
+        time.sleep(1.0)
+        d_hint = w.c.page_data()
+        tasks_empty = (
+            api_get(f"/entrust/tasks?assignment_id={id_a}&size=50", tok_multi) or {}
+        ).get("items") or []
+        w.rep.rec(
+            "㊳ ⑤ 空标题提交 ⇒ **页内**给出提示（`taskHint` 非空、输入条仍展开），"
+            "且**没有**创建任务。提示刻意不走 toast：toast 几秒后消失"
+            "（而「为什么没提交」正是此刻要一直看到的那句话），"
+            "且同样不在渲染树里、不可断言",
+            bool(t_empty)
+            and bool(str(d_hint.get("taskHint") or "").strip())
+            and d_hint.get("taskOpenKey") == slot_key
+            and len(tasks_empty) == len(tasks0),
+            f"tap={t_empty} taskHint={d_hint.get('taskHint')!r} "
+            f"taskOpenKey={d_hint.get('taskOpenKey')!r} 任务数={len(tasks0)}→{len(tasks_empty)}",
+        )
+        w.shot("38-5-空标题-页内提示")
+
+        # 真键入 ⇒ bindinput 真的接上了（验的是**输入通道**本身，与"提交成功"是两件事）
+        task_title = "走查㊳·页内输入条样本"
+        ok_input = w.c.input_text('[data-df="task-title"]', task_title)
+        time.sleep(0.8)
+        d_typed = w.c.page_data()
+        typed = str((d_typed.get("taskForm") or {}).get("title") or "")
+        w.rep.rec(
+            "㊳ ⑤ 真机键入标题 ⇒ `bindinput` 真的接上了（页面 `taskForm.title` 收到文本）。"
+            "验的是**输入通道**，不是「填个值」—— 用 `setData` 填值也能让字段非空，"
+            "那验不出绑定",
+            bool(ok_input) and typed == task_title,
+            f"input ok={ok_input} taskForm.title={typed!r} 期望={task_title!r}",
+        )
+        # ⚠️ 本节断言的对象是**可观察的失败行为**，不是「功能正常」。实测链条（2026-09-16）：
+        #    `create_task` 的判权是 `assert_can(perm=task:dispatch, owner_user_id=那单单主)`，
+        #    而 `AccessContext._delegated_by()` 只认「**该货主**授予的授权行」里的权限。
+        #    甲组织的授权行来自货主 `seed-shipper-orgpicker`，内容是
+        #    `["entrust:view", "entrust:assignment:claim"]` ⇒ **不含** `task:dispatch` ⇒ 403。
+        #    与此同时，同一身份在 `/my-orgs` 的**组织维度**权限集里**有** `task:dispatch`
+        #    （来自 `ORG_ROLE_PERMISSIONS["manager"]`）⇒ **同一权限码，两个维度给出相反答案**。
+        #    这是**实测事实**，归属待产品裁决；本节负责把它固定住，并证明前端在失败时
+        #    **不留脏状态**（不假装成功，也不把用户已打的字吞掉）。
+        print("\n-- 六、提交（甲组织无 owner 维度授权）--", flush=True)
+        t_rej = w.c.tap(f'[data-act-task-submit="{slot_key}"]')
+        time.sleep(2.5)
+        d_rej = w.c.page_data()
+        tasks_rej = (api_get(f"/entrust/tasks?assignment_id={id_a}&size=50", tok_multi) or {}).get(
+            "items"
+        ) or []
+        kept_title = str((d_rej.get("taskForm") or {}).get("title") or "") == task_title
+        w.rep.rec(
+            "㊳ ⑦ 提交被后端拒 ⇒ 页面**不留脏状态**：输入条仍展开、用户已键入的标题仍在、"
+            "任务数未变。失败时**故意不调 `load()`** —— 否则输入条一收，"
+            "用户重试得把标题重打一遍",
+            bool(t_rej)
+            and d_rej.get("taskOpenKey") == slot_key
+            and kept_title
+            and len(tasks_rej) == len(tasks0),
+            f"tap={t_rej} taskOpenKey={d_rej.get('taskOpenKey')!r} 标题保留={kept_title} "
+            f"任务数={len(tasks0)}→{len(tasks_rej)}",
+        )
+        w.shot("38-6-提交被拒-页面不留脏状态")
+
+        # ---- 拒因直证：不是随机失败，而是两个维度对同一权限码给出相反答案 ----
+        st_direct, body_direct = api_post(
+            f"/entrust/assignments/{id_a}/tasks",
+            tok_multi,
+            {"task_type": slot_type, "title": "走查㊳·拒因直证（不应落库）"},
+            f"38-rej-{int(time.time() * 1000)}",
+        )
+        perms_a = list(oa.get("permissions") or [])
+        w.rep.rec(
+            "㊳ ⑦b 拒因**直证**（口径事实，不是缺陷判定）：同一身份在 `/my-orgs` 的"
+            "**组织维度**权限集里**有** `entrust:task:dispatch`，而写端按 **owner 维度**判权 ⇒ "
+            "**403**。前端的槽位动作只看 `board.status === 'claimed'`、**不查写权限**，"
+            "所以界面会摆出一个**必然被拒**的写操作。本条断言的是「这个差异确实存在且可复现」，"
+            "**不是**「功能正常」—— 归属待产品裁决，见 DEMO-1-r1-remainder.md",
+            st_direct == 403 and "entrust:task:dispatch" in str(body_direct),
+            f"HTTP={st_direct} body={str(body_direct)[:150]} 甲组织/my-orgs perms={perms_a}",
+        )
+
+    # ============ 八、成功路径：换到 owner 维度有授权的组合 ============
+    #
+    # 为什么必须换组合：`create_task` 走 **owner 维度**，而授权行是**按「货主 → 组织」
+    # 逐条写的** —— 同一个权限码在不同组织之间可以不同。工作台那张样本单
+    # （委托 #1，`claimed`）的货主是 `seed-shipper`，演示组织（`ORG_WORKBENCH`）拿到的
+    # 是**完整 6 项**（含 `entrust:task:dispatch`）⇒ 该组织的经理 `seed-owner` 才是
+    # "能真的把任务建出来"的身份。**这是权限模型定的组合，不是绕开它。**
+    #
+    # 本节也是本章**唯一**能证「页内输入条提交成功后由 `load()` 统一复位」的地方：
+    # ⑤ 只证了形态，⑦ 证的是失败侧的不留脏状态。
+    print("\n-- 八、提交成功路径（owner 维度有授权的组合）--", flush=True)
+    tok_owner = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    org_wb_id = ""
+    for r in (api_get("/entrust/my-orgs", tok_owner) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == ORG_WORKBENCH:
+            org_wb_id = str((r or {}).get("org_id") or "")
+    if not org_wb_id or not w.open_workbench(CODE_OWNER, tag="㊳⑧"):
+        w.rep.not_run(
+            "㊳ ⑧ 提交成功路径",
+            f"未能以 {CODE_OWNER} 进入工作台（{ORG_WORKBENCH} org_id={org_wb_id!r}）",
+        )
+    else:
+        w.wait_data(lambda x: x.get("view") is not None, tries=30, gap=0.5)
+        w.c.remove_storage(ORG_STORAGE_KEY)
+        w.c.remove_storage(ORG_STORAGE_KEY)
+        w.c.set_storage(ORG_STORAGE_KEY, org_wb_id)
+        w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={ENTRUST_ASSIGNMENT_ID}", DETAIL)
+        pd_ok = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+        cand_ok = [
+            s
+            for s in (pd_ok.get("slots") or [])
+            if s.get("available") and s.get("actionLabel") and not s.get("taskPick")
+        ]
+        slot_ok = cand_ok[0] if cand_ok else {}
+        slot_ok_key = str(slot_ok.get("key") or "")
+        tasks_wb0 = (
+            api_get(f"/entrust/tasks?assignment_id={ENTRUST_ASSIGNMENT_ID}&size=50", tok_owner)
+            or {}
+        ).get("items") or []
+        w.rep.rec(
+            "㊳ ⑧ 前置：在有授权的组合上（`seed-owner` @ 委托 #1），详情页给出可用的"
+            "「记录任务」槽位（受理前没有责任主体，不摆必然失败的按钮）",
+            bool(slot_ok_key) and pd_ok.get("canCreateCase") is True,
+            f"单 #{ENTRUST_ASSIGNMENT_ID} canCreateCase={pd_ok.get('canCreateCase')!r} "
+            f"候选={[str(s.get('key')) for s in cand_ok]} 选中={slot_ok_key!r}",
+        )
+        if not slot_ok_key:
+            w.rep.not_run("㊳ ⑧ 提交成功路径", "该单上没有可用槽位")
+        else:
+            wb_title = "走查㊳·页内输入条样本（工作台）"
+            t_ok1 = w.c.tap(f'[data-key="{slot_ok_key}"]')
+            time.sleep(1.0)
+            i_ok = w.c.input_text('[data-df="task-title"]', wb_title)
+            time.sleep(0.8)
+            t_ok2 = w.c.tap(f'[data-act-task-submit="{slot_ok_key}"]')
+            d_ok = w.wait_data(
+                lambda x: x.get("view") not in (None, "", "loading") and not x.get("taskOpenKey"),
+                tries=60,
+                gap=0.5,
+            )
+            tasks_wb1 = (
+                api_get(f"/entrust/tasks?assignment_id={ENTRUST_ASSIGNMENT_ID}&size=50", tok_owner)
+                or {}
+            ).get("items") or []
+            titles_wb = [str((x or {}).get("title") or "") for x in tasks_wb1]
+            w.rep.rec(
+                "㊳ ⑧ 提交 ⇒ 任务**真的建出来了**（**API 直证**：任务列表里出现该标题、"
+                "条数 +1），且输入条由 `load()` **统一复位**（`taskOpenKey` 清空 —— "
+                "复位只在一处，不在两处各收一次）",
+                bool(t_ok1 and i_ok and t_ok2)
+                and wb_title in titles_wb
+                and len(tasks_wb1) == len(tasks_wb0) + 1
+                and not d_ok.get("taskOpenKey"),
+                f"tap={t_ok1} input={i_ok} submit={t_ok2} 槽位={slot_ok_key!r} "
+                f"任务数={len(tasks_wb0)}→{len(titles_wb)} 含目标={wb_title in titles_wb} "
+                f"taskOpenKey={d_ok.get('taskOpenKey')!r}",
+            )
+            w.shot("38-8-提交成功-任务已记录")
+
+    # ============ 九、诚实边界（不计入通过）============
+    print("\n-- 九、诚实边界（不计入通过）--", flush=True)
+    w.rep.rec(
+        "㊳ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        str(w.new_errors(base_err))[:200],
+    )
+    w.rep.limitation(
+        "㊳ 「进入详情页」这一步是**脚本侧 `navigate()`**，不是真实点击",
+        "本章断言的对象是「点开详情**之后**」的页内形态（确认条 / 输入条）。详情页的"
+        "**真实点击入口**（队列卡片 → 详情）由 ㉟ / ㊱ 章覆盖。两者是不同的事实，"
+        "不能互相顶替。",
+    )
+    w.rep.limitation(
+        "㊳ 成功 / 失败时的 **toast 文案**本身不可被工具断言",
+        "与 ⑧b / ㉕D / ㊲ 同一个**工具**边界（不在渲染树里），与产品无关。本章能证的"
+        "是可观察的结果：服务端状态翻转、`canClaim` / `taskOpenKey` 的取值、锚点在"
+        "渲染树里的命中数、以及任务是否真的出现在 API 载荷里。",
     )
 
 
@@ -5269,6 +6009,8 @@ SECTIONS = {
     "34": sec_34,
     "35": sec_35,
     "36": sec_36,
+    "37": sec_37,
+    "38": sec_38,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -5336,6 +6078,13 @@ DEFAULT_ORDER = [
     #    入口的可见性，并调 API 取 403。但它会切换「上次选中的组织」这个 Storage
     #    键（`ORG_STORAGE_KEY`）⇒ 同样排在末尾，免得把后面按组织断言的章节搅乱。
     "36",
+    # ㊲ 受理入口的**权限撤销**边界（D-4 §5）：撤权 ⇒ 403 ⇒ 界面刷新。
+    # ⚠️ 本章**会改库**（把 multi 在甲组织的角色**临时**改成 member）⇒ 必须排在 ㊱ 之后，
+    #    且**自带 finally 还原**：它不还原就会把 ㊱ 章的前置（multi 在甲是 manager）弄坏。
+    "37",
+    # S1 收尾（2026-09-16）：详情页两个关键路径改成页内 DOM 之后的**真机验收**。
+    # ⚠️ 必须排在 ㊱ 之后：本章会**受理掉**甲组织那张样本单（㊱ 要求它仍是 submitted）。
+    "38",
 ]
 
 

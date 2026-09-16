@@ -214,6 +214,24 @@ const WALK_ANCHORS = [
   //    没有锚点时 `tap('.slot-btn')` 会点到第一个「记录任务」，把断言建立在巧合上。
   { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-create-case',
     value: 'create-case', handler: 'onCreateCase' },
+  // 2026-09-16（S1 收尾）：详情页的**两个关键路径**从原生弹层改成页内 DOM。
+  // 受理确认条（三段式）与「记录任务」输入条各三个锚点，属性名两两不同 ——
+  // `onToggleClaim` 被"展开"与"取消"共用，同名会让两者在断言与这张表里同形
+  // （登记表按 file|attr 去重、每文件每属性只能登记一次）。
+  // 为什么必须有锚点：本页有 7 个 `.slot-btn`（各槽位的「记录任务」）与 1 个受理按钮，
+  // 走查工具**没有 index 参数** ⇒ 没有锚点就只能点到第一个，把断言建立在巧合上。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-claim-open',
+    value: '1', handler: 'onToggleClaim' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-claim-submit',
+    value: '1', handler: 'onSubmitClaim' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-claim-cancel',
+    value: '1', handler: 'onToggleClaim' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-task-submit',
+    value: '{{item.key}}', handler: 'onSubmitTask' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-task-cancel',
+    value: '{{item.key}}', handler: 'onCancelTask' },
+  // 页内输入框（文本靠 setData 注值，见走查脚本的声明），与案件页的 `act-input`+`data-df` 同形
+  { kind: 'static', file: 'pages/entrust/detail/detail.wxml', class: 'slot-input', attr: 'data-df' },
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-toggle-links',
     value: '1', handler: 'onToggleLinks' },
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-submit-case',
