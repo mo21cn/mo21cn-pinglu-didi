@@ -28,13 +28,17 @@ const {
   VIEW,
   TASK_TYPE_LABELS,
   TASK_TYPE_ORDER,
+  ORG_PERM_CLAIM,
+  canClaimAssignment,
   claimAssignment,
   createTask,
   decorateDetail,
   decorateWorkbench,
   fetchAssignment,
+  fetchMyOrgs,
   fetchWorkbench,
   newIdempotencyKey,
+  permittedOrgIds,
   viewState
 } = require('../../../utils/entrust')
 
@@ -66,7 +70,16 @@ Page({
     detail: null,
     fields: [],
     slots: [],
-    /** 待受理（status=submitted）时给「受理委托」入口；是否有权限由服务端判定 */
+    /**
+     * 「受理委托」入口 —— 两个条件**同时**满足才为真（D-4 裁定 §1）：
+     * 委托处于可认领状态（`submitted`），且当前操作者在**该委托所属组织**内
+     * 有 `entrust:assignment:claim`。
+     *
+     * 判据由 `canClaimAssignment()` 给出（与队列卡片**同一份实现**，裁定 §4）。
+     * 初值 `false` 是保守缺省：权限投影取到之前不得提前展示可执行按钮（裁定 §4）。
+     * 隐藏按钮**不等于**放行 —— 写端 `claim_assignment` 仍按同一个 `org_id`
+     * 独立校验成员资格与权限（裁定 §3）。
+     */
     canClaim: false,
     /**
      * 已受理（status=claimed）时给「登记异常 / 变更」入口。
@@ -130,6 +143,9 @@ Page({
     }
 
     this.setData({ assignmentId: rawId })
+    // 组织权限投影（D-4 裁定 §2）。取数**之前**置空：空表 ⇒ 不显示受理入口 ——
+    // 这是裁定 §4「权限尚未加载或加载失败时，不提前展示可执行按钮」的代码形态。
+    this.permittedOrgIds = {}
     this.load()
   },
 
@@ -137,11 +153,24 @@ Page({
     const self = this
     const id = this.data.assignmentId
     this.setData({ view: VIEW.LOADING, viewTitle: '加载中', viewHint: '' })
-    // 两个请求一起发：工作台是主内容，委托本体是它的头卡。任一失败都按失败处理 ——
-    // 「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
-    return Promise.all([fetchAssignment(id), fetchWorkbench(id)])
+    // 前两个请求是**页面内容**：工作台是主内容，委托本体是它的头卡。任一失败都按失败
+    // 处理 ——「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
+    //
+    // 第三个是**权限投影**（D-4 裁定 §2），决定受理入口显不显示。它与前两个
+    // **命运不同**：自己消化失败、降级成"空投影"（⇒ 不显示入口）。依据是裁定 §4
+    // 「仍可查看其有权读取的内容」—— 拿不到权限结论时用户仍有权读这张委托，
+    // 把整页打成错误态是**过度反应**，而且会说错话（委托明明读到了，页面却说失败）。
+    // 保守方向也在这里：拿不到 ⇒ 不显示，而不是猜"有权限"。
+    return Promise.all([
+      fetchAssignment(id),
+      fetchWorkbench(id),
+      fetchMyOrgs().catch(function () {
+        return null
+      })
+    ])
       .then(function (res) {
-        const detail = decorateDetail(res[0])
+        self.permittedOrgIds = permittedOrgIds((res[2] && res[2].items) || [], ORG_PERM_CLAIM)
+        const detail = decorateDetail(res[0], self.permittedOrgIds)
         const board = decorateWorkbench(res[1])
         self.applyState(viewState({ status: 200, total: 1 }), detail, board)
       })
@@ -163,9 +192,15 @@ Page({
       detail: detail,
       fields: detail ? this.buildFields(detail) : [],
       slots: board ? board.slots : [],
-      // 受理入口只看**委托状态**：有没有权限由服务端判定（前端不做权限判定，
-      // 也不假装知道）。无权限时服务端给 403，请求层会把原因如实提示出来。
-      canClaim: !!(board && board.status === 'submitted'),
+      // 受理入口 = 可认领状态 ∧ **该委托所属组织**内的认领权限 ——
+      // 与队列卡片**同一份实现**（`canClaimAssignment`，D-4 裁定 §4）。
+      // 组织取 `detail.orgId`：受理用的工作台载荷里没有 `org_id`。
+      // 无权限时服务端仍会拒绝（403），请求层如实提示 —— 这里只决定显不显示。
+      canClaim: canClaimAssignment(
+        board && board.status,
+        detail && detail.orgId,
+        this.permittedOrgIds
+      ),
       canCreateCase: !!(board && board.status === 'claimed'),
       unassignedHint: board ? board.unassignedHint : ''
     })
@@ -265,8 +300,19 @@ Page({
             wx.showToast({ title: '已受理', icon: 'success' })
             return self.load()
           })
-          .catch(function () {
+          .catch(function (err) {
             wx.hideLoading()
+            // D-4 裁定 §5：入口展示之后**权限被撤销（403）或委托已被他人认领（409）**，
+            // 一律「以后端结果为准」—— 提示已由请求层按服务端 `detail` 如实发出，
+            // 这里必须把页面刷成最新状态（重取权限投影 + 委托本体），
+            // 否则用户会对着一个已经不可能成功的按钮反复点。
+            // ⚠️ 其余错误（400 / 网络层）**不**刷新：状态没变，刷新只会让用户丢掉
+            //    当前位置感，还可能把真正该看的那条提示顶掉。
+            const status = (err && err.httpStatus) || 0
+            if (status === 403 || status === 409) {
+              return self.load()
+            }
+            return null
           })
       }
     })
