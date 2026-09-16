@@ -426,6 +426,24 @@ class SessionMessageOut(BaseModel):
     created_at: str
 
 
+class SessionContextOut(BaseModel):
+    """「为这张委托单开会话」所需的上下文：**这是一次查找，不是一次判定**。
+
+    ⚠️ 这里**没有** `can_create` 之类的字段，是刻意的：能不能建由
+    `POST /entrustments/{eid}/sessions` 里的 `assert_can_write_entrustment` 唯一决定。
+    本模型再给一个布尔值，就等于在权限上制造第二个真相 ——
+    两侧一旦分叉，界面会给出一个"看起来可以、点下去 403"的按钮。
+
+    `entrustment_id` 为 `None` 时**不是**"不许"，而是"定位不到唯一一条"，
+    原因写在 `note` 里（未指定组织 / 无生效授权 / 多条匹配需显式指定）。
+    """
+
+    assignment_id: int
+    org_id: int | None
+    entrustment_id: int | None = None
+    note: str = ""
+
+
 class SessionDetailOut(BaseModel):
     session: SessionOut
     messages: list[SessionMessageOut]

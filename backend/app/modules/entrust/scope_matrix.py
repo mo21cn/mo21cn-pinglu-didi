@@ -128,6 +128,17 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "authz.assert_can_view_assignment），非参与方 404",
     ),
     _r(
+        "GET",
+        "/assignments/{assignment_id}/session-context",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="会话上下文（S2 首片）：查这单所属(货主,组织)与唯一匹配的生效授权，"
+        "给前端一个**合法**的授权 id 来源（否则只能猜）。可见性复用委托详情那条判据，"
+        "非参与方 404；本端点只查不判 —— 能否建会话仍由 POST "
+        "/entrustments/{eid}/sessions 的 assert_can_write_entrustment 决定",
+    ),
+    _r(
         "PATCH",
         "/assignments/{assignment_id}",
         GUARD_OWNER_SELF,
