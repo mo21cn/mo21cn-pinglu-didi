@@ -175,3 +175,17 @@ S1 就是第一处。计划里那条备注应当按此修正（已在 §5 提出
 | 7 | `utils/entrust.js` 的 `decorateAssignment()` **新增 `canClaim`（纯投影字段）**：`canClaim = (status === 'submitted')` | ✅ 只作**展示**用，**不参与判权** —— 前端不假装知道当前身份有没有 `entrust:assignment:claim`（那取决于组织成员资格与授权，只有服务端知道）。⇒ 副作用是"**只读成员也看得到受理按钮**"，登记为待评审 **D-4**（见 `DEMO-1-r1-remainder.md` §四） |
 | 8 | 受理入口**刻意用页内确认条，不用原生 `wx.showModal`** | ✅ 这是**可验证性**驱动的选择，不是审美：原生弹层**不在渲染树里**（`.weui-dialog*` 选择器命中 0），工具点不到它的确认键 ⇒ 用弹层承担的关键路径**永远拿不到设备证据**。「受理」是唯一改变业务状态的链路，不能落在不可验证的交互上 |
 | 9 | 种子新增身份 `seed-mgr-only-b`（仅乙组织经理） | ✅ **演示数据**，不是接口面。为什么**必须有**它：`GET /assignments/{id}` 的可见性判据是「该委托的组织 ∈ 调用者的**任一**组织」，而 `seed-mgr-multi`（甲+乙双身份）**必然**看得到甲组织的单 ⇒ 拿它验"unrelated organization B 不可见"会得到**假绿** |
+
+### 7.3 第四切片（D-4 裁定落地）的接口面决定（如实登记）
+
+触发：`DEMO-1-r1-remainder.md` §四 **D-4**（队列卡片的「受理」入口只看委托状态、不判权限）
+于 2026-09-16 由 HO **裁定采纳**（四条边界见该处）。本节只登记其中与**接口面**有关的部分。
+
+| # | 条目 | 状态 |
+| --- | --- | --- |
+| 10 | 判据改为「**可认领状态**（`submitted`）**∧ 该委托所属组织内**有 `entrust:assignment:claim`」，**两个入口共用一份实现** | ✅ `utils/entrust.js` 新增 `canClaimAssignment(status, orgId, permitted)` 与 `permittedOrgIds(rawOrgs, perm)`；`decorateAssignment` / `decorateDetail` 加（透传）权限投影参数。⚠️ `decorateList` 必须**显式包一层** `map`，不能写 `rows.map(decorateAssignment)` —— `map` 会把 `index` 塞进第二参数，于是"权限表"是一个数字，而 `isPermittedOrg(0, …)` 恒为 false ⇒ 表现为"受理按钮从来不出现"，**静默**且与真实权限无关 |
+| 11 | **不新增端点、不新增字段**：权限投影复用**已有**的 `GET /entrust/my-orgs` 的 `permissions` | ✅ `scope_matrix` **62 条不变**；`AssignmentOut` **不新增** `capabilities`。这是**最小修正**分支：`MyOrgOut.permissions` 与写端**同源**（`access.py` 的 `ctx.permissions_in_org`）⇒ 前端据此展示**不会**出现"界面说能、后端说不能"的反向不一致。代价是详情页多一路只读请求，故把它做成**可降级**：拿不到权限结论时**不展示**入口、但**仍渲染**该页有权读取的内容（裁定 §4 的代码形态） |
+| 12 | 前端**按 `org_id` 分域**取权限，**严禁**跨组织并集 | ✅ `permittedOrgIds()` 产出的是一张**按组织 id 索引**的表（一页可跨组织）。⚠️ 入参必须是**原始载荷** —— 喂 `decorateOrgs()` 的产出（权限码已翻成中文标签）**恒为空表且静默**。跨组织并集是**已复现并修过**的越权（`access.py` 注释留痕），所以这一条是硬约束，不是风格 |
+| 13 | 权限**未加载 / 加载失败** ⇒ **不展示**可执行按钮 | ✅ 两个入口都在取数**之前**显式置空投影（不依赖"恰好还没取到"这种偶然）；判据函数在第二参数缺席时**恒为 false**（保守缺省） |
+| 14 | 写端**独立**校验 —— 隐藏按钮 ≠ 放行 | ✅ **后端未改**：`claim_assignment` 本就用 `ctx.can(PERM_ASSIGN_CLAIM, org_id=org_id)`，与展示判据**同源**。㊱ 章以**API 直证 403**（同组织只读成员直接调用）把这条落地为设备侧证据 |
+
