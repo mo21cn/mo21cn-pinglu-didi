@@ -1,0 +1,111 @@
+{
+  "_comment": "H7a 挑战样本集（cargo_parse）。与主集 h7a_samples.json **分别统计、分别报告**，不混合、不改变主集的达标判定。",
+  "_rules": [
+    "HO 0917 批准新增；**预先固定** —— 不得按运行结果事后增删或改写（那样会把『补样本』变成一条把指标做好看的捷径）",
+    "新增 N 条输入**不保证**产生 N 次错误；不得跑到『错误凑够』为止",
+    "歧义输入的**正确行为是置 null（未知／需澄清）**，不强行指定唯一答案 ⇒ 本集多处 expect 为 null，模型若给出非 null 即计为编造",
+    "同一输入重复调用**不算**新增独立样本",
+    "本集结果仅作观察项，无阈值、不折算成达标/不达标"
+  ],
+  "_grading": "与 h7a_samples.json 完全相同（同一套机器判分口径），仅样本内容不同",
+  "samples": [
+    {
+      "id": "C01",
+      "note": "歧义货种·化肥（散装 or 袋装均可）⇒ 正确行为是货种置 null 待澄清",
+      "text": "有一批化肥要从南宁运到贵港，20吨，11月5号装货，运费给九千",
+      "expect": {
+        "cargo_name": { "keywords": ["化肥"] },
+        "cargo_type": null,
+        "weight_t": 20,
+        "origin_port": "NNG",
+        "dest_port": "GGU",
+        "expect_date": { "ymd": "11-05" },
+        "offer_price": 9000
+      }
+    },
+    {
+      "id": "C02",
+      "note": "超纲单位·公斤换算（18000 公斤 = 18 吨）",
+      "text": "柳州发梧州，18000公斤的钢材，11月12号走，运费一万三",
+      "expect": {
+        "cargo_name": { "keywords": ["钢材"] },
+        "cargo_type": "general",
+        "weight_t": 18,
+        "origin_port": "LZH",
+        "dest_port": "WUZ",
+        "expect_date": { "ymd": "11-12" },
+        "offer_price": 13000
+      }
+    },
+    {
+      "id": "C03",
+      "note": "边界数量·小数精度（3.75 吨，不得四舍五入成 4）",
+      "text": "北海到钦州有一批设备，3.75吨，11月20号装，出价六千五",
+      "expect": {
+        "cargo_name": { "keywords": ["设备"] },
+        "cargo_type": "general",
+        "weight_t": 3.75,
+        "origin_port": "BHZ",
+        "dest_port": "QNZ",
+        "expect_date": { "ymd": "11-20" },
+        "offer_price": 6500
+      }
+    },
+    {
+      "id": "C04",
+      "note": "港口非标准写法（『南宁港』『贵港港』带『港』字）⇒ 仍应映射到枚举代码",
+      "text": "从南宁港发一批玉米到贵港港，120吨，12月18号装货，运费两万",
+      "expect": {
+        "cargo_name": { "keywords": ["玉米"] },
+        "cargo_type": "bulk",
+        "weight_t": 120,
+        "origin_port": "NNG",
+        "dest_port": "GGU",
+        "expect_date": { "ymd": "12-18" },
+        "offer_price": 20000
+      }
+    },
+    {
+      "id": "C05",
+      "note": "业务相邻但非货源描述（查运价）⇒ 正确行为是全部置 null，不得把『问价』当成货源",
+      "text": "现在南宁到贵港的水泥运价大概多少钱一吨？",
+      "expect": {
+        "cargo_name": null,
+        "cargo_type": null,
+        "weight_t": null,
+        "origin_port": null,
+        "dest_port": null,
+        "expect_date": null,
+        "offer_price": null
+      }
+    },
+    {
+      "id": "C06",
+      "note": "自相矛盾的数量（先说三十吨后改口三百吨）⇒ 正确行为是重量置 null 待澄清",
+      "text": "崇左到贺州有批木片，大概三十吨……不对，是三百吨，12月28号装，运费另议",
+      "expect": {
+        "cargo_name": { "keywords": ["木片"] },
+        "cargo_type": "bulk",
+        "weight_t": null,
+        "origin_port": "CHZ",
+        "dest_port": "HEZ",
+        "expect_date": { "ymd": "12-28" },
+        "offer_price": null
+      }
+    },
+    {
+      "id": "C07",
+      "note": "歧义日期（『月底』无法确定具体日）⇒ 正确行为是日期置 null 待澄清",
+      "text": "贵港发南宁一批白糖，80吨，我想月底装上船，运费一万五",
+      "expect": {
+        "cargo_name": { "keywords": ["白糖"] },
+        "cargo_type": "bulk",
+        "weight_t": 80,
+        "origin_port": "GGU",
+        "dest_port": "NNG",
+        "expect_date": null,
+        "offer_price": 15000
+      }
+    }
+  ]
+}

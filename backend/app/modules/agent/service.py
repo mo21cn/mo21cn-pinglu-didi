@@ -101,6 +101,30 @@ class AgentServiceError(Exception):
         self.kind = kind
 
 
+def coerce_confidence(value: object) -> float | None:
+    """把模型报的置信度归一成 ``[0,1]`` 的 float；无法归一则返回 ``None``。
+
+    这是**产品侧与评测侧共用的唯一来源**（评测脚本 ``h7a_model_quality.py`` 直接 import 它），
+    目的是让两边对"什么算一个合法置信度"有一致定义（HO 0917「对齐产品与评测的置信度语义」）。
+
+    ⚠️ **调用方不得写成 ``x or 默认值``** —— 那有两个坑：
+    ① 合法的 ``0``（模型明说"我完全不确定"）会被默认值顶掉；
+    ② "字段缺失"会被记成"置信度 0"，而二者语义完全不同：
+       前者是模型没说话，后者是模型说了"概率为零"。
+
+    返回 ``None`` 时调用方应**自己决定兜底策略并单独计数**，不要静默折算成 0。
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        f = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if f != f or f < 0.0 or f > 1.0:  # NaN 或越界
+        return None
+    return f
+
+
 def _sanitize(field: str, value: object, today: date) -> tuple[object, bool]:
     """单字段合法化过滤；返回 (清洗后值, 是否需人工复核)。"""
     if value is None:
@@ -146,6 +170,7 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
     cleaned: dict[str, Any] = {}
     needs_review: list[str] = []
     confidences: list[float] = []
+    conf_defaulted = 0
 
     for field in (
         "cargo_name",
@@ -159,9 +184,15 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
         value, review = _sanitize(field, raw.get(field), today)
         if review:
             needs_review.append(field)
-        confidences.append(
-            float(field_conf.get(field) or (0.9 if value is not None and not review else 0.0))
-        )
+        # ⚠️ 旧写法 ``field_conf.get(field) or 默认值`` 有两个错：
+        # ① 合法的 0（模型明确说没把握）会被 0.9 顶掉 ⇒ 置信度被系统性高估；
+        # ② "字段缺失"被记成 0，而 0 的真实含义是"模型说了概率为零"。
+        # ⇒ 先归一（coerce_confidence），拿不到合法值**才**走兜底，并单独计数。
+        conf = coerce_confidence(field_conf.get(field))
+        if conf is None:
+            conf = 0.9 if (value is not None and not review) else 0.0
+            conf_defaulted += 1
+        confidences.append(conf)
         cleaned[field] = value
 
     draft = ParsedCargoField(**cleaned)
@@ -177,6 +208,7 @@ async def parse_cargo(db: Session, *, user_id: int, text: str) -> CargoParseResu
         draft=draft,
         confidence=confidence,
         needs_review=needs_review,
+        confidence_defaulted=conf_defaulted,
         mocked=result.mocked,
         latency_ms=result.latency_ms,
     )
