@@ -119,7 +119,11 @@ Page({
     //
     // 守卫必须放在取数**之前**：把格式非法的 `org_id` 原样送进接口，等于把一次
     // 「传播/手改错误」渲染成「这个组织没有委托」—— 后者是会被当成业务事实汇报出去的。
-    const rawOrg = query && query.org_id != null ? String(query.org_id) : ''
+    // ⚠️ 过一遍 `R.decodeParam`：`onLoad` 拿到的是**未解码**的百分号串（见该函数注释）。
+    //    本页带的是纯数字 `org_id`，`encodeURIComponent` 本是恒等变换、接上它行为不变；
+    //    统一这么写是为了**同一类缺陷不留第二处** —— 受理屏（带中文货名）已经因此
+    //    翻过车，将来这个参数换成中文就会重演。
+    const rawOrg = R.decodeParam(query && query.org_id)
     const gate = R.guardEntry(SELF + (rawOrg ? '?org_id=' + encodeURIComponent(rawOrg) : ''), {
       coldStart: R.currentDepth() <= 1,
       orgId: rawOrg

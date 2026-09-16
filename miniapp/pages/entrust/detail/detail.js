@@ -100,7 +100,9 @@ Page({
     // `paramSchema` 里，`go()` 与 `onLoad` 用同一套规则。初版页面只查 `!id`，
     // 于是 `?assignment_id=../../x`、`?assignment_id=a b` 这类"看着有值"的会被放过去，
     // 一路带到接口。
-    const rawId = query && query.assignment_id != null ? String(query.assignment_id) : ''
+    // ⚠️ 归一化后再重建 url（见 `routes.decodeParam`）：`onLoad` 拿到的是未解码串，
+    //    再编码一次就是二次编码。本页是 ASCII id，行为不变；统一写法防将来带中文时重演。
+    const rawId = R.decodeParam(query && query.assignment_id)
     const gate = R.guardEntry(SELF + (rawId ? '?assignment_id=' + encodeURIComponent(rawId) : ''), {
       coldStart: R.currentDepth() <= 1
     })

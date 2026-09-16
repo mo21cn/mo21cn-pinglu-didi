@@ -26,6 +26,7 @@
 | `31` | 案件页「应用变更」正例（**真写**造 `approved` 形态 → 应用 → 复核传播） | —（新增章节） |
 | `32` | 成果页「待复核」徽标（依赖 ㉛ 应用后留下的复核项） | —（新增章节） |
 | `33` | **页面栈深度运行期实测**（DR-0011：实测最深链 + 平台硬限对账） | —（新增章节） |
+| `34` | UI-07 客户委托草稿 / 提交屏（S1 出口判据前置：全链真实点击 + 在途载荷续接） | —（新增章节） |
 | `4b` | 撮合页（货主方向：为货源找船） | ④b |
 | `5` | 发布空船页渲染（船东视角） | ⑤ |
 | `7` | 合同三级页 + 长按弹层 + ⑦b 仿真案例 + ⑦c 已完成订单 | ⑦/⑦b/⑦c |
@@ -552,6 +553,7 @@ BERTH = "pages/port/berth/berth"
 ASSISTANT = "pages/assistant/assistant"
 PREVIEW = "pages/preview/preview"
 WORKBENCH = "pages/entrust/workbench/workbench"
+INTAKE = "pages/entrust/intake/intake"
 ARTIFACT = "pages/entrust/artifact/artifact"
 DETAIL = "pages/entrust/detail/detail"
 CASE = "pages/entrust/case/case"
@@ -3975,6 +3977,628 @@ def sec_33(w: Walker) -> None:
     w.rep.rec("㉝ reLaunch 后栈回 1（清栈可控，不是越压越深）", back == 1, f"depth={back}")
 
 
+# ㉞ UI-07 客户委托草稿 / 提交屏（S1 出口判据的**前置**）
+# ---------------------------------------------------------------------------
+# 三个演示身份，分别对应受理屏的三种数据形态（种子见 backend/scripts/
+# `seed_entrust_demo.py` 与 `seed_entrust_orgpicker.py`）：
+#   seed-shipper           → 对「演示经营主体·工作台」有**一条**生效授权 ⇒ 唯一目标
+#   seed-shipper-orgpicker → 对甲 / 乙**两条**授权                ⇒ 多目标必须显式选
+#   seed-mgr-multi         → **没有任何**委托授权                 ⇒ 空态
+# ⚠️ 这几个常量放在**模块级**：函数体内的全大写局部变量会被 ruff 判成 N806。
+CODE_SHIPPER_ORGPICKER = "seed-shipper-orgpicker"
+CODE_MGR_MULTI = "seed-mgr-multi"
+INTAKE_TITLE_OK = "走查·大连→上海 5 万吨煤炭（受理屏真实点击）"
+INTAKE_TITLE_LOCK = "走查·锁定与续接（受理屏）"
+INTAKE_CARRY_NAME = "走查货物·铁矿石"
+INTAKE_CARRY_QTY = "2400"
+INTAKE_EMPTY_TITLE = "还没有可委托的服务主体"
+
+
+def sec_34(w: Walker) -> None:
+    """㉞ UI-07 客户委托草稿 / 提交屏（S1 出口判据的**前置**）。
+
+    为什么单独一章
+    --------------
+    UI-07 是 S1 的出口屏：货主在「发布货源」页选「委托发货」→ 受理屏 → 建草稿 →
+    提交 → 落到该委托详情。此前 S1 只到「写码完成」——**没有一次真实点击**验过这条
+    链路，也没有人看过五态各自长什么样。CI 能证的只是「五个分支都在模板里」
+    （`verify_entrust_ui.js`）与「这一页没有裸导航」（`verify_routes.js`）；
+    「点提交之后到底落在哪一页」「续接到底有没有生效」只能真机跑。
+
+    本节覆盖（措辞与手段一一对应）
+    ----------------------------
+    一、**全链真实点击**：身份卡 → 自定义 tabBar 凸起「发布货物」→「委托发货」
+        → 真实输入标题 → 「提交委托」。每一步都是 `tap()` 打到页面 / 组件自己的入口，
+        导航由页面代码的 `go()` 决策；`push` 与 `replace` 分别按「栈深 +1 / 不变」对账。
+    二、**在途载荷（幂等键持久化）**：建草稿后两把键 + 编号 + 版本是否落盘、
+        换页面实例重进是否续接同一张草稿、续接后提交是否落到**同一张**委托。
+        「响应丢失后重进会重复建草稿」这条已知余量修没修，看的就是第二节。
+    三、多目标不许替用户猜｜四、空态｜五、五态分支渲染。
+
+    ⚠️ 诚实边界（四条，均在末尾按档登记、**不计入通过**）：
+    * 「草稿已建、提交未成」这个中间态**无法用真实点击造出**（真实点击要么两步都成，
+      要么在 `ensureDraft` 之前就被前置检查拦下）⇒ 第二节那一步走
+      `call_method('ensureDraft', [...])`，**证据等级低于点击**；
+    * 「重新填写 / 放弃」的清理写在原生 `wx.showModal` 的确认回调里，确认键不在
+      渲染树、工具点不到 ⇒ 只证「入口存在 + 未确认前不改数据」；
+    * 并发双写、真·跨进程续接、五态的**到达条件**（真实 401 / 403 / 404 / 断网）
+      在单模拟器里做不出来。
+    """
+    print("\n== ㉞ UI-07 客户委托草稿/提交屏（S1 出口判据前置）==", flush=True)
+
+    def draft_key() -> str:
+        """按**页面同一条口径**算出当前用户的在途载荷键。
+
+        ⚠️ 这里刻意**复刻** `intake.js` 的推导（`前缀 + user_id`），而不是
+        「扫 storage 里所有以 `entrust_intake_draft_` 开头的键」：后者会让
+        **按用户隔离**这条性质永远为真 —— 换个账号登录后，扫到的还是上一个人的键，
+        而断言照样报「找到了」。键必须由当前 `user_id` 算出来，隔离才算被测到。
+        """
+        val = w.c.evaluate(
+            "function(){var r=wx.getStorageSync('user_info');if(!r)return '';"
+            "var u=null;try{u=JSON.parse(r)}catch(e){return ''}"
+            "var id=(u&&u.user_id!=null)?String(u.user_id):'';"
+            "return id?('entrust_intake_draft_'+id):'';}"
+        )
+        return str(val) if val else ""
+
+    def draft_raw(key: str) -> str:
+        """在途载荷的原始文本（空串 = 没有这份载荷）。"""
+        if not key:
+            return ""
+        val = w.c.evaluate(
+            "function(k){var v=wx.getStorageSync(k);return v?JSON.stringify(v):'';}", [key]
+        )
+        return str(val) if val else ""
+
+    def text_of(selector: str) -> str:
+        """元素的可见文本（剥标签 + 压空白）。
+
+        `--action text` 只读第一个匹配项，故一律取 `outerWXML` 做包含断言（与 ⑮ 章同口径）。
+        """
+        return re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(selector)))
+
+    def clear_draft() -> None:
+        """清掉当前身份留下的在途载荷（进场景前用，免得上一次的续接干扰本场景）。"""
+        key = draft_key()
+        if key:
+            w.c.remove_storage(key)
+
+    def entry_carry_probe() -> tuple[str, str]:
+        """读受理屏实例自己记着的 `onLoad` 入参：**框架给什么就是什么**。
+
+        返回 `(原样值, 解码一次后的值)`。
+
+        ⚠️ 这个探针是本轮新增的，起因是一次**看不懂的失败**：首跑时受理屏直接进
+        `view='error' title='入口参数不合法'`，而当时打印的 note 里既没有 `hint`
+        （守卫给的原因）也没有框架实际交给了什么 —— 只能靠 `dir()`/Node 复现去猜。
+        结论是：小程序把 query **原样（未解码）**交给 `onLoad`，页面若拿它重建 url
+        就会**再编码一次**，中文初值长度膨胀 3 倍。把这件事写成探针，下一次失败
+        第一眼就能看到"框架给的是哪一形态"。
+        """
+        val = w.c.evaluate(
+            "function(){var s=getCurrentPages()||[];"
+            "for(var i=s.length-1;i>=0;i--){var p=s[i];"
+            "if(p&&p.route==='pages/entrust/intake/intake'){var o=p.options||{};"
+            "var r=(o.cargo_name==null?'':String(o.cargo_name));var d=r;"
+            "try{d=decodeURIComponent(r)}catch(e){d=r}"
+            "return {raw:r,norm:d};}}"
+            "return {raw:'',norm:''};}"
+        )
+        if not isinstance(val, dict):
+            return "", ""
+        return str(val.get("raw") or ""), str(val.get("norm") or "")
+
+    def open_cargo_entry() -> tuple[bool, str]:
+        """进入「发布货源」页：先试真实入口（自定义 tabBar 中间的凸起），探不到就 URL 直进。
+
+        **第一节与第二节共用这一个函数** —— 各写一份的后果本轮已经演过一遍：
+        第二节硬点了 `[data-key='publish']`，而第一节实测该锚点命中 0（自定义 tabBar
+        是组件，不在页面级查询范围内），于是第二节的前置断言必然失败，看上去像
+        "续接没生效"，实际是**链路根本没进去**。共用之后，"锚点不可达"这件事只有
+        一个地方知道，两节要么都退化成 URL 直进、要么都不退化。
+
+        返回 `(是否到达发布货源页, 进入方式)`；进入方式写进断言 note —— 它是证据等级，
+        不能省。
+        """
+        n_center = w.c.count('[data-key="publish"]')
+        if n_center == 1:
+            w.c.tap('[data-key="publish"]')
+            via = "真实点击 tabBar 凸起"
+        else:
+            w.c.nav("navigateTo", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
+            via = f"URL 直进（凸起锚点命中 {n_center} 个，组件树不在页面级查询范围内）"
+        ok = w.c.wait_path(PUBLISH_CARGO, 30)
+        time.sleep(1.4)
+        return ok, via
+
+    def to_intake(carry: bool, qty: str = INTAKE_CARRY_QTY) -> tuple[bool, bool, int]:
+        """在「发布货源」页填草稿初值 → 真实点击「委托发货」→ 到达受理屏。
+
+        返回 `(是否点到入口, 是否到达受理屏, 锚点命中数)`。
+        """
+        if carry:
+            # `pickEntrustDelivery()` 读的就是 `this.data.form.cargo_name / weight_t`，
+            # setData 足以驱动它；「输入框接上了 bindinput」是另一件事（受理屏那边
+            # 用真实输入验）。⚠️ 用 `set_data` 而不是逐字段真实输入。
+            w.c.set_data({"form.cargo_name": INTAKE_CARRY_NAME, "form.weight_t": qty})
+            time.sleep(0.6)
+        n_entrust = w.c.count('[data-act-entrust="1"]')
+        if n_entrust != 1:
+            return False, False, n_entrust
+        t = w.c.tap('[data-act-entrust="1"]')
+        ok = w.c.wait_path(INTAKE, 30)
+        time.sleep(1.6)
+        return bool(t), bool(ok), n_entrust
+
+    # ===================== 一、全链真实点击 =====================
+    print("\n-- 一、全链真实点击（身份卡 → 发布货物 → 委托发货 → 提交）--", flush=True)
+    path = w.login_as(CODE_SHIPPER)
+    if path != INDEX:
+        w.rep.rec("㉞ 前置 · seed-shipper 登录", False, f"未停在身份选择页（{path}）")
+        return
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.rec("㉞ 前置 · 真点击身份卡进入货主工作台", False, w.c.current_path())
+        return
+    time.sleep(1.2)
+    dep_start = len(w.c.page_stack())
+    w.rep.rec(
+        "㉞ 冷启动后真点击身份卡 ⇒ switchTab 归 1（链路起点，不是越压越深）",
+        dep_start == 1,
+        f"depth={dep_start}",
+    )
+    w.rep.rec(
+        "㉞ 在途载荷键按 `user_id` 推导（拿不到 user_id 的账号**不持久化**）",
+        draft_key() != "",
+        f"key={draft_key()!r}",
+    )
+    clear_draft()
+
+    # 真实入口＝自定义 tabBar 中间的凸起「发布货物」（`custom-tab-bar/index.js`
+    # 的 `key === 'publish'` 分支）。它是**组件**，可能不在页面级 `querySelectorAll`
+    # 的查询范围内 ⇒ 先探再用、探不到就**如实降级**（不假装点到了）。
+    # 降级路径与第二节共用 `open_cargo_entry()`：两节各写一份，下一次锚点变化时
+    # 就会有一节**悄悄退化成假失败**（本轮第二节正是这么挂的）。
+    dep_a = len(w.c.page_stack())
+    n_center = w.c.count('[data-key="publish"]')
+    ok_cargo, via_cargo = open_cargo_entry()
+    if n_center == 1:
+        w.rep.rec(
+            "㉞ **push（真实入口）**：tabBar 凸起「发布货物」→ 发布货源页，栈深 +1",
+            ok_cargo and len(w.c.page_stack()) == dep_a + 1,
+            f"{dep_a} → {len(w.c.page_stack())}（{via_cargo} path={w.c.current_path()}）",
+        )
+    else:
+        w.rep.not_run(
+            "㉞ tabBar 凸起「发布货物」的真实点击",
+            f"`[data-key='publish']` 命中 {n_center} 个（自定义 tabBar 是**组件**，不在"
+            "页面级查询范围内；客户端也没有坐标点击 / 组件作用域查询通道）⇒ 本跳改用 "
+            "URL 直进发布货源页，本节只对「委托发货 → 提交」两跳主张真实点击。"
+            "要补上这一跳得另开 OS 级鼠标通道（与 ⑧b 原生弹层同一类手段），本切片未做。",
+        )
+
+    pg_cargo = w.wait_data(lambda x: x.get("showChannel") is True, tries=30)
+    w.rep.rec(
+        "㉞ 发布货源页的默认态就是发货方式选择（进入即出现，不需要额外一步）",
+        pg_cargo.get("showChannel") is True,
+        f"showChannel={pg_cargo.get('showChannel')}",
+    )
+    # 给源页面填上货名 / 货量（`weight_t` 口径是吨）——本节要验的是「被带过去当草稿初值」，
+    # 所以值必须与默认空值**不同**。⚠️ 用 `set_data` 而不是逐字段真实输入：
+    # `pickEntrustDelivery()` 读的就是 `this.data.form.cargo_name / weight_t`，setData 足以
+    # 驱动它；「输入框接上了 bindinput」是另一件事（受理屏那边用真实输入验）。
+    # 这两步现在收在 `to_intake()` 里，第二节走同一份代码。
+    n_entrust = w.c.count('[data-act-entrust="1"]')
+    w.shot("34-1-发货方式-锚点")
+    w.rep.rec(
+        "㉞ 「委托发货」入口可被唯一命中"
+        "（同类 `.ch-opt` 有两个，而工具没有 index 参数 ⇒ 必须有可区分的锚点）",
+        n_entrust == 1,
+        f"命中 {n_entrust} 个",
+    )
+    if n_entrust != 1:
+        w.rep.not_run("㉞ 受理屏相关全部断言", "「委托发货」锚点缺失，链路断在这里")
+        return
+
+    dep_b = len(w.c.page_stack())
+    t_intake, ok_intake, _ = to_intake(carry=True)
+    dep_c = len(w.c.page_stack())
+    w.shot("34-2-受理屏-初始")
+    w.rep.rec(
+        "㉞ **push（真实入口）**：「委托发货」→ 受理屏，栈深 +1",
+        bool(t_intake and ok_intake) and dep_c == dep_b + 1,
+        f"{dep_b} → {dep_c}（tap={t_intake} path={w.c.current_path()}）",
+    )
+    if not ok_intake:
+        w.rep.not_run("㉞ 受理屏相关全部断言", "未进入受理屏，链路断在这里")
+        return
+
+    # 入口入参的**框架原样形态**必须写进 note：受理屏是第一个带**中文**参数的入口，
+    # 首跑就栽在「框架交给 `onLoad` 的是未解码串 ⇒ 页面重建 url 时二次编码」上。
+    # 断言只要求「解码一次后就是用户填的那串字」—— 对两种框架行为都成立，
+    # 而 note 把**本机实测到底是哪一种**记下来（事实有来源，不靠推测）。
+    raw_name, norm_name = entry_carry_probe()
+    w.rep.rec(
+        "㉞ 入口入参归一化：框架原样给的形态不影响判定"
+        "（框架给的是「已解码值」还是「百分号原样串」，见 note）",
+        norm_name == INTAKE_CARRY_NAME,
+        f"onLoad.cargo_name={raw_name!r} → 解码一次={norm_name!r}",
+    )
+
+    pg = w.wait_data(lambda x: x.get("view") == "ready", tries=30)
+    w.rep.rec(
+        "㉞ 五态之 ready：授权清单到达且非空",
+        pg.get("view") == "ready",
+        f"view={pg.get('view')!r} title={pg.get('viewTitle')!r} hint={pg.get('viewHint')!r}",
+    )
+    targets = pg.get("targets") or []
+    org_names = [str((t or {}).get("orgName") or "") for t in targets]
+    w.rep.rec(
+        "㉞ 可选目标来自「我授权出去的组织」（不是「我所在的组织」——"
+        "后者会给出能选但必然 403 的选项）",
+        len(targets) >= 1,
+        f"targets={len(targets)} {org_names}",
+    )
+    form = pg.get("form") or {}
+    w.rep.rec(
+        "㉞ 货名 / 货量 / 单位被当作草稿初值带过来（不做二次加工）",
+        form.get("cargo_summary") == INTAKE_CARRY_NAME
+        and form.get("quantity") == INTAKE_CARRY_QTY
+        and form.get("quantity_unit") == "吨",
+        f"cargo_summary={form.get('cargo_summary')!r} quantity={form.get('quantity')!r} "
+        f"unit={form.get('quantity_unit')!r}",
+    )
+    w.rep.rec(
+        "㉞ 标题**没有**被货名冒充（`title` 仍为空：源页面没有「要办什么」这个信息）",
+        not str(form.get("title") or "").strip(),
+        f"title={form.get('title')!r}",
+    )
+    carry_hint = str(pg.get("carryHint") or "")
+    w.rep.rec(
+        "㉞ 界面说清了这几个值是「带过来的」（不让用户以为是服务端知道他填过）",
+        "发布货源" in carry_hint,
+        f"carryHint={carry_hint!r}",
+    )
+    w.rep.rec(
+        "㉞ 唯一可用目标被自动选中（只有一个才直接选；多个必须问用户，见第三节）",
+        pg.get("needPick") is False and str(pg.get("orgId") or "") != "",
+        f"needPick={pg.get('needPick')} orgId={pg.get('orgId')!r} orgName={pg.get('orgName')!r}",
+    )
+
+    t_title = w.c.input_text('[data-field="title"]', INTAKE_TITLE_OK)
+    time.sleep(0.9)
+    pg_in = w.c.page_data()
+    w.rep.rec(
+        "㉞ 真实输入触发 `bindinput`（标题进了页面 data，不是只写进渲染层）",
+        bool(t_title) and (pg_in.get("form") or {}).get("title") == INTAKE_TITLE_OK,
+        f"input={t_title} title={(pg_in.get('form') or {}).get('title')!r}",
+    )
+    w.shot("34-3-受理屏-已填")
+
+    dep_d = len(w.c.page_stack())
+    t_submit = w.c.tap('[data-act-submit-intake="1"]')
+    ok_detail = w.c.wait_path(DETAIL, 60)
+    time.sleep(2.0)
+    pg_det = w.wait_data(lambda x: x.get("view") == "ready" and bool(x.get("detail")), tries=30)
+    w.shot("34-4-提交后-委托详情")
+    detail = pg_det.get("detail") or {}
+    new_id = str(pg_det.get("assignmentId") or "")
+    w.rep.rec(
+        "㉞ **replace（真实入口）**：提交成功后落到该委托详情，且**栈深不增**"
+        "——返回键回不到一张已经提交过的表单",
+        bool(t_submit and ok_detail) and len(w.c.page_stack()) == dep_d,
+        f"{dep_d} → {len(w.c.page_stack())}（tap={t_submit} path={w.c.current_path()}）",
+    )
+    w.rep.rec(
+        "㉞ 详情页显示的是刚提交的那张单（标题 = 本页填的那一句）",
+        detail.get("title") == INTAKE_TITLE_OK and new_id != "",
+        f"assignmentId={new_id!r} title={detail.get('title')!r}",
+    )
+    w.rep.rec(
+        "㉞ 提交后状态为「待受理」（受理是显式动作，不会自动发生）",
+        detail.get("status") == "submitted",
+        f"status={detail.get('status')!r} label={detail.get('statusLabel')!r}",
+    )
+    w.rep.rec(
+        "㉞ 详情页写明委托给了哪个组织（不是「未指定组织」）",
+        bool(str(detail.get("orgId") or "")),
+        f"orgId={detail.get('orgId')!r} orgText={detail.get('orgText')!r}",
+    )
+    key_after = draft_key()
+    w.rep.rec(
+        "㉞ 提交成功后在途载荷被清除（留着的话下次进来会续接一张**已经提交过**的草稿："
+        "界面说「内容已锁定」、提交却被服务端以状态冲突拒绝，用户既改不了也提交不了）",
+        key_after != "" and draft_raw(key_after) == "",
+        f"key={key_after!r} raw={draft_raw(key_after)[:60]!r}",
+    )
+
+    # ===================== 二、草稿锁定 → 续接 → 不重复建单 =====================
+    print("\n-- 二、草稿锁定 → 换实例续接 → 提交不重复建单 --", flush=True)
+    clear_draft()
+    w.c.nav("switchTab", "/" + SHIPPER, SHIPPER)
+    time.sleep(1.6)
+    # ⚠️ 这一跳**必须**与第一节共用 `open_cargo_entry()` / `to_intake()`：
+    #    首跑时这里硬点了 `[data-key='publish']`，而第一节已经实测该锚点命中 0
+    #    （自定义 tabBar 是组件）⇒ 本前置断言必然失败，读起来像"续接没生效"，
+    #    实际是**链路根本没进去**，还连带把在途载荷那几条压成 NOT_RUN。
+    ok1, via1 = open_cargo_entry()
+    t2, ok2, _ = to_intake(carry=True, qty="88")
+    w.rep.rec(
+        "㉞ 第二节前置 · 再次进入受理屏（身份不变；进入方式见 note —— 它是证据等级）",
+        bool(ok1 and t2 and ok2),
+        f"path={w.c.current_path()}｜发布货源页：{via1}｜受理屏：真实点击={t2}",
+    )
+    if not ok2:
+        w.rep.not_run("㉞ 在途载荷相关断言", "未再次进入受理屏")
+    else:
+        pg_lock = w.wait_data(lambda x: x.get("view") == "ready", tries=30)
+        w.rep.rec(
+            "㉞ 第二节前置 · 受理屏 ready（授权清单到达）",
+            pg_lock.get("view") == "ready",
+            f"view={pg_lock.get('view')!r} hint={pg_lock.get('viewHint')!r}",
+        )
+        w.c.input_text('[data-field="title"]', INTAKE_TITLE_LOCK)
+        time.sleep(0.9)
+        key_fill = draft_key()
+        raw_fill = draft_raw(key_fill)
+        w.rep.rec(
+            "㉞ 只填了内容（草稿还没建）就已经落盘 —— 否则「填到一半被杀掉」会连内容带意图一起丢",
+            key_fill != "" and INTAKE_TITLE_LOCK in raw_fill,
+            f"key={key_fill!r} 含标题={'是' if INTAKE_TITLE_LOCK in raw_fill else '否'}",
+        )
+
+        # ⚠️ 这里**故意**用方法调用而不是点击：真实点击「提交委托」只有两种结局
+        # （两步都成 / 在 ensureDraft 之前就被前置检查拦下），造不出「草稿已建、提交未成」
+        # 这个中间态。证据等级低于点击，已在末尾按 limitation 登记。
+        w.c.call_method(
+            "ensureDraft",
+            [
+                {
+                    "title": INTAKE_TITLE_LOCK,
+                    "cargo_summary": INTAKE_CARRY_NAME,
+                    "quantity": "88",
+                    "quantity_unit": "吨",
+                }
+            ],
+        )
+        time.sleep(2.0)
+        pg_locked = w.c.page_data()
+        cid = str(pg_locked.get("createdId") or "")
+        w.rep.rec(
+            "㉞ [方法调用·证据等级低于点击] 草稿建立后页面进入锁定态，并拿到编号与版本",
+            pg_locked.get("locked") is True
+            and cid != ""
+            and int(pg_locked.get("draftRevision") or 0) > 0,
+            f"locked={pg_locked.get('locked')} createdId={cid!r} "
+            f"rev={pg_locked.get('draftRevision')!r}",
+        )
+        if not cid:
+            w.rep.not_run("㉞ 锁定 / 续接相关断言", "未拿到 createdId（ensureDraft 未生效）")
+        else:
+            key_lock = draft_key()
+            raw_lock = draft_raw(key_lock)
+            has4 = all(
+                t in raw_lock for t in ("createKey", "submitKey", "createdId", "draftRevision")
+            )
+            w.rep.rec(
+                "㉞ 在途载荷含**两把**幂等键 + 编号 + 版本"
+                "（重试必须原样复用；重新取数会让「重试」变成「同键异体」409）",
+                has4 and cid in raw_lock,
+                f"key={key_lock!r} 四字段齐={has4} 含编号={cid in raw_lock}",
+            )
+
+            before_lock = str((w.c.page_data().get("form") or {}).get("title") or "")
+            w.c.input_text('[data-field="title"]', "锁定后尝试改写")
+            time.sleep(0.9)
+            after_lock = str((w.c.page_data().get("form") or {}).get("title") or "")
+            w.rep.rec(
+                "㉞ 锁定后**真实**往标题框输入不会改变内容"
+                "（模板 `disabled` + 处理函数在 `locked` 时早退，两层至少一层真的在挡）",
+                before_lock == INTAKE_TITLE_LOCK and after_lock == INTAKE_TITLE_LOCK,
+                f"{before_lock!r} → {after_lock!r}",
+            )
+
+            note = text_of(".draft-note")
+            w.rep.rec(
+                "㉞ 界面告知草稿已在服务端、内容已锁定，并给出「重新填写」出口",
+                cid in note and "重新填写" in note,
+                f"draft-note={note!r}",
+            )
+            n_restart = w.c.count('[data-act-intake-restart="1"]')
+            w.rep.rec(
+                "㉞ 「重新填写」入口可被唯一命中（与「提交」不是同类元素，仍单独登记锚点，"
+                "防止模板改动把锚点悄悄弄丢）",
+                n_restart == 1,
+                f"命中 {n_restart} 个",
+            )
+            w.shot("34-5-受理屏-草稿已锁定")
+
+            saved_id = cid
+            saved_ck = str(pg_locked.get("createKey") or "")
+            w.c.navigate("reLaunch", "/" + INTAKE)
+            time.sleep(2.6)
+            pg_resume = w.wait_data(lambda x: x.get("view") == "ready", tries=30)
+            w.shot("34-6-换实例重进-已续接")
+            resume_id = str(pg_resume.get("createdId") or "")
+            resume_ck = str(pg_resume.get("createKey") or "")
+            w.rep.rec(
+                "㉞ **换页面实例**重进后自动续接同一张草稿（编号与创建键都复原）——"
+                "「响应丢失后重进会重复建草稿」这条余量修没修，看的就是这一条",
+                resume_id == saved_id and resume_ck == saved_ck,
+                f"createdId {saved_id!r} → {resume_id!r} / "
+                f"createKey 一致={'是' if resume_ck == saved_ck else '否'}",
+            )
+            w.rep.rec(
+                "㉞ 续接后仍处于锁定态，且内容就是用户填过的那一份",
+                pg_resume.get("locked") is True
+                and str((pg_resume.get("form") or {}).get("title") or "") == INTAKE_TITLE_LOCK,
+                f"locked={pg_resume.get('locked')} "
+                f"title={(pg_resume.get('form') or {}).get('title')!r}",
+            )
+            w.rep.rec(
+                "㉞ 续接时界面明确说明这是续接来的（静默恢复会让用户以为自己上次已经提交成功了）",
+                "已续接" in str(pg_resume.get("carryHint") or ""),
+                f"carryHint={pg_resume.get('carryHint')!r}",
+            )
+            t3 = w.c.tap('[data-act-submit-intake="1"]')
+            ok3 = w.c.wait_path(DETAIL, 60)
+            time.sleep(2.0)
+            pg_r = w.wait_data(
+                lambda x: x.get("view") == "ready" and bool(x.get("detail")), tries=30
+            )
+            w.shot("34-7-续接后提交-同一张委托")
+            w.rep.rec(
+                "㉞ 续接后**真实点击**提交，落到**同一张**委托的详情 ⇒ 服务端没有多出一张草稿"
+                "（`ensureDraft` 复用了编号与版本，这正是修掉重复提交的那一处）",
+                bool(t3 and ok3) and str(pg_r.get("assignmentId") or "") == saved_id,
+                f"续接编号 {saved_id!r} / 详情编号 {pg_r.get('assignmentId')!r}",
+            )
+
+    # ===================== 三、授权给多个组织时不许替用户猜 =====================
+    print("\n-- 三、授权给多个组织时不许替用户猜 --", flush=True)
+    path = w.login_as(CODE_SHIPPER_ORGPICKER)
+    if path != INDEX or not w.enter_role("shipper", SHIPPER):
+        w.rep.rec(
+            "㉞ 前置 · seed-shipper-orgpicker 登录并进入货主工作台",
+            False,
+            f"path={w.c.current_path()}",
+        )
+    else:
+        clear_draft()
+        w.c.nav("reLaunch", "/" + INTAKE, INTAKE)
+        time.sleep(2.2)
+        pg_multi = w.wait_data(lambda x: x.get("view") == "ready", tries=30)
+        w.shot("34-8-多目标-未选")
+        w.rep.rec(
+            "㉞ 授权给两个组织时**不预选**、要求用户显式选择"
+            "（`needPick` 为真且 `orgId` 为空）——平台不替你决定交给谁",
+            pg_multi.get("needPick") is True and not str(pg_multi.get("orgId") or ""),
+            f"needPick={pg_multi.get('needPick')} orgId={pg_multi.get('orgId')!r} "
+            f"targets={len(pg_multi.get('targets') or [])}",
+        )
+        n_pill = w.c.count(".pick-pill")
+        w.rep.rec(
+            "㉞ 每个可用目标渲染成一颗可选 pill（数量和授权条数一致）",
+            n_pill == len(pg_multi.get("targets") or []) and n_pill >= 2,
+            f"pill={n_pill} targets={len(pg_multi.get('targets') or [])}",
+        )
+        first_org = str(((pg_multi.get("targets") or [{}])[0] or {}).get("orgId") or "")
+        t_pick = w.c.tap(f'[data-org-id="{first_org}"]')
+        time.sleep(1.0)
+        pg_pick = w.c.page_data()
+        w.shot("34-9-多目标-已选")
+        w.rep.rec(
+            "㉞ 真实点击目标 pill 后选中态落到 data（组织 id 与名称同时更新）",
+            bool(t_pick)
+            and str(pg_pick.get("orgId") or "") == first_org
+            and bool(str(pg_pick.get("orgName") or "")),
+            f"tap={t_pick} orgId={pg_pick.get('orgId')!r} orgName={pg_pick.get('orgName')!r}",
+        )
+
+    # ===================== 四、空态：没有可委托的服务主体 =====================
+    print("\n-- 四、空态：没有可委托的服务主体 --", flush=True)
+    path = w.login_as(CODE_MGR_MULTI)
+    if path != INDEX or not w.enter_role("shipper", SHIPPER):
+        w.rep.rec("㉞ 前置 · seed-mgr-multi 登录并进入货主工作台", False, w.c.current_path())
+    else:
+        clear_draft()
+        w.c.nav("reLaunch", "/" + INTAKE, INTAKE)
+        time.sleep(2.2)
+        pg_empty = w.wait_data(lambda x: x.get("view") == "empty", tries=30)
+        w.shot("34-10-空态")
+        w.rep.rec(
+            "㉞ 五态之 empty：没有生效委托授权时是**单独一态**，不是笼统的「没有数据」",
+            pg_empty.get("view") == "empty"
+            and INTAKE_EMPTY_TITLE in str(pg_empty.get("viewTitle") or ""),
+            f"view={pg_empty.get('view')!r} title={pg_empty.get('viewTitle')!r}",
+        )
+        empty_hint = str(pg_empty.get("viewHint") or "")
+        w.rep.rec(
+            "㉞ 空态说清了下一步去哪儿解决（去找服务主体完成委托授权）",
+            "授权" in empty_hint,
+            f"hint={empty_hint[:60]!r}",
+        )
+        n_submit = w.c.count('[data-act-submit-intake="1"]')
+        n_input = w.c.count(".form-input")
+        w.rep.rec(
+            "㉞ 空态下不渲染表单与提交入口（不给一个必然失败的按钮）",
+            n_submit == 0 and n_input == 0,
+            f"提交入口={n_submit} 输入框={n_input}",
+        )
+        w.rep.rec(
+            "㉞ 空态下 targets 为空且没有残留的选中项（不继承上一个身份的选择）",
+            not (pg_empty.get("targets") or []) and not str(pg_empty.get("orgId") or ""),
+            f"targets={len(pg_empty.get('targets') or [])} orgId={pg_empty.get('orgId')!r}",
+        )
+
+    # ===================== 五、五态分支渲染（注入状态）=====================
+    print("\n-- 五、五态分支渲染（注入状态；到达条件见 NOT_RUN）--", flush=True)
+    w.rep.limitation(
+        "㉞ 五态分支渲染用的是**注入状态**（`setData`），不是状态自然到达",
+        "注入的只有 `view` / `viewTitle`：验的是「模板分支是否存在、文案对不对、"
+        "该给的出口有没有给」；**到达条件**（真实 401 / 403 / 404 / 断网）见本节 NOT_RUN。",
+    )
+    branches = [
+        ("loading", ".empty", "加载中", 0),
+        ("expired", ".err-card", "登录已过期", 1),
+        ("denied", ".err-card", "无查看权限", 0),
+        ("error", ".err-card", "加载失败", 1),
+        ("empty", ".err-card", INTAKE_EMPTY_TITLE, 0),
+    ]
+    for state, sel, want, want_btn in branches:
+        w.c.set_data({"view": state, "viewTitle": want, "viewHint": "（走查注入状态，非真实到达）"})
+        time.sleep(0.8)
+        n_hit = w.c.count(sel)
+        shown = want in text_of(sel)
+        n_btn = w.c.count(".err-btn")
+        w.rep.rec(
+            f"㉞ 五态分支 · `{state}` 落在可见区且文案正确",
+            n_hit == 1 and shown,
+            f"{sel} 命中 {n_hit} / 文案含 {want!r}={shown}",
+        )
+        w.rep.rec(
+            f"㉞ 五态分支 · `{state}` 的出口按钮与设计一致"
+            f"（能靠重试 / 重登解决的才给按钮：{'有' if want_btn else '无'}）",
+            n_btn == want_btn,
+            f".err-btn={n_btn} 期望={want_btn}",
+        )
+        w.shot(f"34-11-五态-{state}")
+
+    # ===================== 六、本节够不着的那几条（如实登记）=====================
+    print("\n-- 六、诚实边界（不计入通过）--", flush=True)
+    w.rep.limitation(
+        "㉞ 「草稿已建、提交未成」这一中间态是用**方法调用**造出来的（不是真实点击）",
+        "真实点击「提交委托」只有两种结局：两步都成，或在 `ensureDraft` 之前就被前置检查"
+        "拦下（标题为空 / 组织未选）—— 造不出这个中间态。所以第二节那一步走的是 "
+        "`call_method('ensureDraft')`，证据等级低于点击；断言读的仍是真机 data 与 storage。",
+    )
+    w.rep.limitation(
+        "㉞ 「重新填写」/「放弃」在**确认后**清掉在途载荷",
+        "两条都走原生 `wx.showModal`，确认键不在渲染树里、工具点不到 ⇒ 本节只证了"
+        "入口存在、锚点唯一、提示文案正确，**不证明**点确认后清键。清理函数本身另有静态"
+        "断言（verify_ui_interactions.js ⑩ 章）与「提交成功后载荷被清」的实机证据（第一节末）。",
+    )
+    w.rep.not_run(
+        "㉞ 五态中 expired / denied / error 的**到达条件**",
+        "需要真实的 401 / 403 / 404 / 网络中断：401 要等登录态自然过期（不可控），"
+        "403 / 404 要在请求飞行中撤掉授权（本切片没有撤权入口），断网要改运行环境。"
+        "第五节已用注入状态验证这三种的**分支渲染**，到达条件未取证。",
+    )
+    w.rep.not_run(
+        "㉞ 并发双写（两端同时提交只应成功一次）",
+        "单模拟器只有一个页面实例，做不出两个并发写者。该路径的取证在后端层："
+        "backend/tests/test_entrust_s1_exit_criteria.py 的 "
+        "`test_claim_race_only_one_writer_wins`（条件 UPDATE 的 rowcount 为 1 / 0）与 "
+        "`test_claim_race_loser_cannot_overwrite_via_service_layer`。",
+    )
+    w.rep.not_run(
+        "㉞ 真·跨进程续接（杀掉小程序但保留 storage）",
+        "工具侧只能做到「换页面实例」（`reLaunch`，已 PASS）；`remove_storage` 会把要验的"
+        "载荷一起删掉，无法表达「进程没了、storage 还在」。这一条只到「换实例仍续接」，"
+        "进程级未取证。",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -3994,6 +4618,7 @@ SECTIONS = {
     "31": sec_31,
     "32": sec_32,
     "33": sec_33,
+    "34": sec_34,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -4036,6 +4661,10 @@ DEFAULT_ORDER = [
     # DR-0011：栈深的**运行期**那一半（声明链深 ≤ 预算已在 CI 里证过）。
     # ⚠️ 会压栈到平台拒绝（按 URL 直进），最后 reLaunch 清栈；独立于其它章。
     "33",
+    # S1 出口屏（UI-07）：客户受理 → 建草稿 → 提交的**全链真实点击**。
+    # ⚠️ 放最后：它会真写委托（`seed-shipper` 名下多出两张 submitted），
+    #    若排在前面会让后面按条数断言的章节变脆。
+    "34",
     # ENT-035 补齐的未迁移章节（旧轨有、换轨后一直记 not-run 的 12 章）
     "4b",
     "5",

@@ -40,6 +40,18 @@ const section = (t) => console.log('\n=== ' + t + ' ===')
 
 const read = (p) => fs.readFileSync(path.join(MP, p), 'utf8')
 
+/**
+ * 剥掉注释后返回**等长**文本（注释处留等长空白）。
+ *
+ * 判"代码里有没有 X"必须看**代码**、不看注释：注释里会自然写到 `wx.navigateTo`
+ * （"此前这里是裸 navigateTo"这类说明），把注释算进判断会把一次**正确**的改写
+ * 判成失败。保留长度是为了让随后按 `indexOf` 做的**切片下标**语义不变。
+ */
+const stripComments = (s) =>
+  String(s)
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
+    .replace(/^([ \t]*)\/\/[^\n]*/gm, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
+
 // ---------------------------------------------------------------- 运行时桩
 function makeWx() {
   const calls = {
@@ -1165,14 +1177,7 @@ section('⑤ 静态防线')
       /\.ch-card-entrust\s*\{[^}]*#3584FD[^}]*#4A81FF/.test(cargoWxss))
 
     // —— 行为 ——
-    // ⚠️ 判定必须看**代码**、不看注释：本页注释里会自然写到 `wx.navigateTo`
-    //    （"此前这里是裸 navigateTo"这类说明），把注释算进判断会把一次正确的
-    //    改写判成失败。剥成等长空白，保持后续按方法名切片的下标语义
-    //    （与 `verify_routes.js` 的 stripComments 同一手法）。
-    const stripComments = (s) =>
-      String(s)
-        .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
-        .replace(/^([ \t]*)\/\/[^\n]*/gm, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
+    // `stripComments` 已提到文件级（本节与 ⑩ 节共用一份定义）。
     const cargoCode = stripComments(cargoJs)
 
     check('进入本页默认弹出（data 初值 true 且在 onLoad 复位）',
@@ -1875,6 +1880,190 @@ section('⑤ 静态防线')
         !/wx\.(navigateTo|redirectTo|reLaunch)\s*\(/.test(src)
       )
       check(`${label}页：确实调用了 go( / guardEntry(`, /\bgo\(/.test(src) && /\bguardEntry\(/.test(src))
+    }
+  }
+
+  // ---------------------------------------------------------------- ⑩ UI-07 客户委托草稿 / 提交屏
+  //
+  // 这一屏是 S1 第二切片新增的交互面。它的三条语义在别处都没有断言，而一旦被后续
+  // 重构悄悄破坏，表现都**不是报错**，而是"看起来正常但用户吃亏"：
+  //   ① 提交成功必须**收口**到详情 —— 停在表单上会让返回键把用户带回一张已提交的表单；
+  //   ② 在途状态（两把幂等键 + 草稿编号与版本 + 表单内容）落 storage 且**按用户隔离**
+  //      —— 这是"响应丢失 + 杀掉小程序重进会重复提交"的修复本体；隔离缺失更糟，
+  //      等于下一个登录的账号能读到上一个人的货名（客户数据泄漏）；
+  //   ③ 草稿建立后锁内容字段 —— 否则改完重提会多建一张没人认领的草稿。
+  //
+  // ⚠️ 静态断言只能证明"代码里写了"，**不能**证明"跑起来对"。真机证据另见走查产物。
+  section('⑩ UI-07 客户委托草稿 / 提交屏（在途状态持久化 · 锁定语义 · 提交收口）')
+  {
+    const IK = path.join(MP, 'pages/entrust/intake/intake.js')
+    const IW = path.join(MP, 'pages/entrust/intake/intake.wxml')
+    const IX = path.join(MP, 'pages/entrust/intake/intake.wxss')
+    const ik = stripComments(fs.readFileSync(IK, 'utf8'))
+    const iw = fs.readFileSync(IW, 'utf8')
+    const ix = fs.readFileSync(IX, 'utf8')
+
+    // —— ① 提交收口 ——
+    check(
+      '提交成功经 go() 收口到委托详情（不是停在表单上）',
+      /R\.go\(\s*'\/pages\/entrust\/detail\/detail\?assignment_id='/.test(ik)
+    )
+    check(
+      '本页不再裸调 wx 导航（治理真的接上了）',
+      !/wx\.(navigateTo|redirectTo|reLaunch)\s*\(/.test(ik)
+    )
+
+    // —— ② 在途状态持久化 + 按用户隔离 ——
+    check(
+      '持久化键带 user_id（按用户隔离；不得用全局键兜底）',
+      /uid \? DRAFT_STORE_PREFIX \+ uid : ''/.test(ik) && /user\.user_id/.test(ik)
+    )
+    check(
+      '读回时做形状校验：版本不符即当作没有草稿（不做兼容猜测）',
+      /raw\.v !== DRAFT_STORE_VERSION/.test(ik)
+    )
+    // ⚠️ 按**方法签名**切片，不用 `indexOf('ensureDraft(')` —— 那样命中的是
+    //    `onSubmit` 里的调用处，切片会落到别的方法体上，断言看着过、其实没测到。
+    for (const [sig, why] of [
+      ['onInput(e) {', '填到一半被杀掉不能丢内容'],
+      ['ensureDraft(body) {', '建草稿拿到的编号与版本丢了就会再建一张'],
+      ['sendSubmit(assignmentId, revision) {', '键要先落盘再发请求，否则响应丢失就等于没留键']
+    ]) {
+      const at = ik.indexOf(sig)
+      check(
+        `${sig} 里把在途状态落盘（${why}）`,
+        at >= 0 && /persistDraft\(\)/.test(ik.slice(at, at + 1200)),
+        at >= 0 ? '' : '找不到方法签名 ' + sig
+      )
+    }
+    check(
+      '提交成功先清掉持久化载荷（否则下次会续接一张已提交的草稿，界面成为无法脱身的假状态）',
+      /id = self\.data\.createdId[\s\S]{0,400}clearPersistedDraft\(\)/.test(ik)
+    )
+    check(
+      '「放弃」也清掉持久化载荷（用户说了放弃，下次不该再冒出这张草稿）',
+      (ik.match(/clearPersistedDraft\(\)/g) || []).length >= 2
+    )
+
+    // —— ③ 锁定语义 ——
+    check(
+      '草稿建立后内容字段锁定（模板 disabled + onInput 早退，两道都要有）',
+      /disabled="\{\{locked\}\}"/.test(iw) && /if \(this\.data\.locked\) return/.test(ik)
+    )
+    check(
+      '改内容会作废创建用的幂等键（否则服务端重放旧响应，界面显示的是旧内容）',
+      /patch = \{ createKey: '' \}/.test(ik)
+    )
+    check(
+      '换提交目标只作废提交键、不锁内容（草稿的 org_id 在提交时才写入）',
+      /setData\(\{ submitKey: '' \}\)/.test(ik)
+    )
+
+    // —— ④ 续接必须有脱身出口 ——
+    check(
+      '续接来的草稿内容已锁定，页面必须给「重新填写」断开关联',
+      /onRestart\s*\(/.test(ik) && /bindtap="onRestart"/.test(iw) && /\.draft-note-act\s*\{/.test(ix)
+    )
+
+    // —— 五态与入口守卫（与 verify_entrust_ui.js 的登记互补：那里查类名，这里查分支）——
+    for (const st of ['loading', 'expired', 'denied', 'error', 'empty']) {
+      check(`五态分支含 ${st}`, new RegExp("view === '" + st + "'").test(iw))
+    }
+    check(
+      '入口守卫：参数非法直接给 error 态（不借 viewState 伪装成业务状态）',
+      /guardEntry\(urlOf\(query\)/.test(ik)
+    )
+
+    // —— ⑤ 入口入参归一化（真机 ㉞ 抓到：二次编码 ⇒ 中文初值撞长度上限）——
+    //
+    // 这一条的来由是**真机失败**，不是推演：受理屏是第一个带**中文**参数的入口，
+    // 小程序把 query 原样（未解码）交给 `onLoad`，页面再 `encodeURIComponent`
+    // 就是第二次编码 —— `走查货物·铁矿石` 8 字变 69 字符，撞上 `cargo_name` 的
+    // 长度上限，本页把自己的入口判成「参数不合法」，整页只剩一个错误态。
+    // 此前六个页面只带 ASCII id，`encodeURIComponent` 是恒等变换，所以一直没暴露。
+    //
+    // 断言分三层：归一化本身幂等 → **缺陷确实存在**（反向钉住，防止断言写错）→
+    // 真页面用真路由模块跑两种入参形态都必须进得去且初值正确。
+    {
+      const Routes = require(path.join(MP, 'utils', 'routes.js'))
+      const NAME = '走查货物·铁矿石'
+      const ENC = encodeURIComponent(NAME)
+
+      check(
+        'decodeParam 对已解码值／纯 ASCII 是恒等变换（老页面接上它行为不变）',
+        Routes.decodeParam(NAME) === NAME && Routes.decodeParam('12') === '12'
+      )
+      check(
+        'decodeParam 解掉一次百分号编码；非法序列与字面量 % 原样返回（不误伤「含量50%」）',
+        Routes.decodeParam(ENC) === NAME
+        && Routes.decodeParam('含量50%') === '含量50%'
+        && Routes.decodeParam(null) === ''
+        && Routes.decodeParam(undefined) === ''
+      )
+      // 反向断言：证明"再编码一次"**确实会改变值** —— 归一化不是装饰。
+      //
+      // ⚠️ 这里刻意**不**用「二次编码 ⇒ 撞长度上限」来断言：长度上限是
+      //    `cargo_name` 的契约宽度，它按落地字段（`cargo_summary`，后端 512）
+      //    对齐，不该为了造一个断言把它调小。真机上之所以"整页只剩错误态"，
+      //    是**两个缺陷叠加**：64 的窄上限 × 3 倍膨胀。宽度对齐后长度不再撞，
+      //    但值仍然是乱的 —— 这才是 `decodeParam` 要解决的那一半。
+      const twiceVal = Routes.parseQuery('k=' + encodeURIComponent(ENC)).k
+      check(
+        '二次编码确实会改变值（再编码一次得到 %25E8… 而不是「走查货物·铁矿石」）',
+        twiceVal === ENC && twiceVal !== NAME,
+        twiceVal === NAME ? '再编码没有改变值 —— 归一化成了装饰' : ''
+      )
+      check(
+        'cargo_name 宽度与落地字段对齐（后端 AssignmentCreate.cargo_summary = 512）',
+        Routes.ROUTES['pages/entrust/intake/intake'].paramSchema.cargo_name.maxLength === 512
+      )
+      const once = 'pages/entrust/intake/intake?cargo_name=' + ENC
+      check(
+        `单次编码的值能通过入口守卫（${NAME.length} 字 / ${ENC.length} 字符）`,
+        Routes.guardEntry(once, { coldStart: true }).ok === true
+      )
+
+      // 真页面：两种入参形态都必须进得去，且初值是**用户看到的那串字**
+      const EN = {
+        VIEW: {
+          LOADING: 'loading', READY: 'ready', EMPTY: 'empty',
+          EXPIRED: 'expired', DENIED: 'denied', ERROR: 'error'
+        },
+        fetchMyEntrustments: () => Promise.resolve({ items: [] }),
+        decorateEntrustments: (rows) => rows,
+        pickEntrustment: (rows) => (rows.length === 1
+          ? { orgId: String(rows[0].orgId), needPick: false }
+          : { orgId: '', needPick: rows.length > 1 }),
+        assignmentDraftBody: () => ({ ok: true, errors: [], body: {} }),
+        assignmentWriteError: () => ({ kind: '', title: '', hint: '' }),
+        createAssignment: () => Promise.resolve({}),
+        submitAssignment: () => Promise.resolve({}),
+        newIdempotencyKey: () => 'k',
+        viewState: () => ({ state: 'error', title: '加载失败', hint: '' })
+      }
+      for (const [label, q] of [
+        ['框架给已解码值', { cargo_name: NAME, quantity: '2400', quantity_unit: '吨' }],
+        ['框架给百分号原样串（真机实测形态）', { cargo_name: ENC, quantity: '2400', quantity_unit: encodeURIComponent('吨') }]
+      ]) {
+        const wx = makeWx()
+        const page = instantiate(loadConfig(IK, 'page', wx, [], null, {
+          'utils/routes': Routes,
+          'utils/entrust': EN
+        }))
+        page.onLoad(q)
+        check(
+          `${label}：入口守卫放行（不被判成「入口参数不合法」）`,
+          page.data.view !== 'error',
+          `view=${page.data.view} title=${page.data.viewTitle}`
+        )
+        check(
+          `${label}：货名／货量／单位原样回填（不是一串 %E8%B5%B0…）`,
+          page.data.form.cargo_summary === NAME
+          && page.data.form.quantity === '2400'
+          && page.data.form.quantity_unit === '吨',
+          JSON.stringify(page.data.form)
+        )
+      }
     }
   }
 

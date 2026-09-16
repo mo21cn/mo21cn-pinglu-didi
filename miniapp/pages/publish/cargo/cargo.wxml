@@ -155,7 +155,15 @@
       </view>
       <view class="ch-desc">您发布货物，自行在<text class="ch-brand">船好多</text>平台找寻认证船主接单并完成运输。</view>
 
-      <view class="ch-opt ch-opt-gap" bindtap="pickEntrustDelivery" hover-class="ch-opt-hover">
+      <!-- `data-act-entrust` 是走查锚点：两个 `.ch-opt` 是**同类元素**，而工具没有
+           index 参数（`nth-child` 被忽略、坐标触摸也会落到第一个）⇒ 没有可区分的
+           属性就点不到这一项。锚点登记在 scripts/verify_miniapp.js 的 WALK_ANCHORS。 -->
+      <view
+        class="ch-opt ch-opt-gap"
+        data-act-entrust="1"
+        bindtap="pickEntrustDelivery"
+        hover-class="ch-opt-hover"
+      >
         <view class="ch-card ch-card-entrust">
           <view class="ch-icon">
             <view class="ch-box-lid"></view>

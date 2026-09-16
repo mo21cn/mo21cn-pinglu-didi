@@ -171,6 +171,12 @@ if (fs.existsSync(cfgPath)) {
 //   act    行内动作锚点 —— 带该属性的标签必须绑定指定事件处理函数
 //   static 枚举型锚点 —— 值本来就是常量（如 `data-mode="fixed"`），只查类名归属
 const WALK_ANCHORS = [
+  // ㉞ S1 / UI-07（客户委托草稿/提交屏）：真实入口与两处页内动作。
+  // 「委托发货」与「自主发货」在 cargo.wxml 里是**同类元素**（都是 `.ch-opt`），
+  // 而走查工具没有 index 参数 ⇒ 必须靠可区分属性才能点到第二项。
+  { kind: 'act', file: 'pages/publish/cargo/cargo.wxml', class: 'ch-opt', attr: 'data-act-entrust', value: '1', handler: 'pickEntrustDelivery' },
+  { kind: 'act', file: 'pages/entrust/intake/intake.wxml', attr: 'data-act-submit-intake', value: '1', handler: 'onSubmit' },
+  { kind: 'act', file: 'pages/entrust/intake/intake.wxml', attr: 'data-act-intake-restart', value: '1', handler: 'onRestart' },
   // ⑦/⑦b/⑦c/⑧/⑨/⑨b 六章共用：订单卡与行内动作
   { kind: 'row', file: 'pages/trade/orders/orders.wxml', class: 'order-card', attr: 'data-order-id', value: '{{item.id}}' },
   { kind: 'act', file: 'pages/trade/orders/orders.wxml', attr: 'data-act-contract', handler: 'onContractPage', value: '{{item.id}}' },

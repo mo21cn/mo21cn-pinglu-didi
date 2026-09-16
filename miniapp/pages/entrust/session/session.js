@@ -45,7 +45,9 @@ Page({
     }
     this.setData({ statusBarHeight: info.statusBarHeight || 20 })
 
-    const rawId = query && query.assignment_id != null ? String(query.assignment_id) : ''
+    // ⚠️ 归一化后再重建 url（见 `routes.decodeParam`）：`onLoad` 拿到的是未解码串，
+    //    再编码一次就是二次编码。本页是 ASCII id，行为不变；统一写法防将来带中文时重演。
+    const rawId = R.decodeParam(query && query.assignment_id)
     const gate = R.guardEntry(
       SELF + (rawId ? '?assignment_id=' + encodeURIComponent(rawId) : ''),
       { coldStart: R.currentDepth() <= 1 }

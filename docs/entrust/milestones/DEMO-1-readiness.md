@@ -208,7 +208,39 @@ pytest **705**（通过 694 / 跳过 11 / 失败 0 / 错误 0）；mypy 98 文�
 3. **幂等键只活在页面实例里** —— "响应丢失 + 杀掉小程序重进"会再建一张草稿
    （已在 `intake.js` 文件头如实登记；修复需按用户隔离持久化）。
 
-⇒ 已推送并开 PR **#115**（base `develop`，head `b2145d4`）：**待 HO 授权后合并**（见 §9.2）。
+⇒ 已推送并开 PR **#115**（base `develop`，head `b2145d4`）；**已按 HO 授权 squash 合并**
+⇒ merge commit **`d932c43`**（执行记录见 §9.3 第 1 行）。
+
+### 8.2 S1 第二切片：落地状态（2026-09-16，分支 `feature/DEMO1-S1-exit-criteria`）
+
+第一切片登记的三条"不得算作已完成"，本切片逐条处置（**不新造口径**，仍按 §8.1 原编号）：
+
+| # | 第一切片的余量 | 本切片处置 | 证据等级 |
+| --- | --- | --- | --- |
+| 1 | S1 出口判据**一条都还没验证** | 落成 `backend/tests/test_entrust_s1_exit_criteria.py` **8 条**可执行断言（四项判据各有正例 + 负例；文件型 SQLite，终局一律**换新会话读**，见 DR-0002） | 后端用例 **8 条全过**（junitxml 判据） |
+| 2 | UI-07 **未做真机走查** | `verify_miniapp_devtools.py` 新增 **㉞ 章**：全链**真实点击**（身份卡 → 发布货物页 → 「委托发货」→ 真实输入标题 → 提交 → 详情落地）走进 **69 项**断言 | **PASS=62 / FAIL=0 / NOT_RUN=4 / LIMITATION=3** |
+| 3 | **幂等键只活在页面实例里** | 在途状态按用户隔离落 `storage`（`entrust_intake_draft_<user_id>`，拿不到 `user_id` 的账号**不持久化**）；`reLaunch` 换页面实例后自动续接**同一张**草稿 | 真机 PASS（编号 `6` → `6`、创建键一致） |
+
+门禁：**13/13 PASS**（`scripts/verify_local_gates.py`）；
+pytest **713**（通过 702 / 跳过 11 / 失败 0 / 错误 0）；mypy 98 文件无问题；ruff `check` / `format --check` 均 rc=0。
+
+远端：已推送并开 **PR #116**（base `develop`，head `fe42f34`）⇒ **CI 12/12 全绿**
+（`push` 与 `pull_request` 两个事件的 6 项各跑一遍，`conclusion` 全 `SUCCESS`
+—— 含本地跑不了的「前端端到端（真后端载荷驱动）」与「并发集成 / 数据库迁移（MySQL 8.0）」）。
+⚠️ **CI 绿 ≠ 出口判据通过**；且**未合并**（DR-0003，等 HO 授权），见 §9.4。
+
+⚠️ **两条不得误读**：
+
+1. **㉞ 章的章节结论是 `NOT_RUN`，不等于"没跑"。** 62 项 PASS、FAIL=0，但另有 4 项 `NOT_RUN`
+   与 3 项 `LIMITATION`；六档口径下**只有 `PASS` 计入通过** ⇒ 本章**不能**写成"通过"。
+   逐条清单与"为什么没有证据"见 `DEMO-1-plan.md` §4 S1 的交代块。
+2. **本切片在走查中修掉了两个真实产品缺陷**（都不是走查脚本的问题）：
+   ① **入口参数二次编码** —— `onLoad` 拿到的 query 是**百分号原样串**，页面按"已解码"重建 url
+   会再编码一次；中文货名 8 字 → **69 字符**撞 `cargo_name.maxLength` ⇒ 页把自己的入口判成非法。
+   ASCII 参数上是恒等变换，所以此前六个只带 id 的页面都没暴露；
+   ② **`router.py` 漏捕 `AccessDeniedError`** ⇒ 越权认领与无生效授权提交返回 **HTTP 500** 而非 403
+   （函数里那个 `→ 403` 分支根本没机会执行）。两条都带了回归用例
+   （前端 `verify_ui_interactions.js` ⑩ 章 / 后端出口判据用例）。
 
 ## §9 收尾执行记录（2026-09-16，HO 授权 1–5）
 
@@ -253,6 +285,53 @@ HO 于 2026-09-16 授权"下一步建议 **1–5 全部执行**（含进入 S1 �
 | 4 | 提交与推送 | `405bd29..b2145d4`（**单提交**、19 文件、+1781/−26）；推送后远端 sha 与本地一致 | `git ls-remote origin` |
 | 5 | 开 PR | **#115**（base `develop`） | `POST /repos/.../pulls` ⇒ `201` |
 
-⚠️ **本切片未验证 S1 的出口判据**（见 §8.1 的三条）⇒ 本 PR **不声称任何 D1 行通过**，
-且**尚未合并**（DR-0003：PR 作者不自批，只有 HO 授权可合并）。
+⚠️ **本切片未验证 S1 的出口判据**（见 §8.1 的三条）⇒ 本 PR **不声称任何 D1 行通过**。
+（合并由 HO 在**下一轮授权**中给出，见 §9.3 第 1 行 —— DR-0003：PR 作者不自批。）
+
+### 9.3 S1 第二切片的执行记录（2026-09-16，HO 授权「下一步建议 1–5 全部执行」）
+
+| # | 事项 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 合并 PR #115 / #114（HO 授权） | ✅ squash → **`d932c43`**；本地 `develop` 已同步（`refs/rorigin/develop` == `d932c43`） | `PUT /pulls/115/merge` ⇒ `{"merged":true}` |
+| 2 | UI-07 真机走查 | ✅ `verify_miniapp_devtools.py` 新增 **㉞ 章**（69 项）；首跑 **FAIL=11** ⇒ 定位到入口二次编码缺陷 ⇒ 修完重跑 **FAIL=0** | `miniapp-device-artifacts/_walk_082603_out.txt` |
+| 3 | 修入口参数二次编码 | ✅ `routes.js` 新增 `decodeParam()`；`cargo_name.maxLength` **64 → 512**（对齐后端 `cargo_summary`）；**7 个入口页**一并接上归一化 | 静态门禁 `verify_ui_interactions.js` ⑩ 章（**真页面模块 + 真路由模块**跑行为，含反向断言） |
+| 4 | 在途幂等键按用户持久化 | ✅ `intake.js` 7 处落 `storage`；`onLoad` 内**续接优先于 carry** | 真机 ㉞ 第二节 PASS |
+| 5 | 出口判据落成可执行断言 | ✅ `backend/tests/test_entrust_s1_exit_criteria.py` **8 条** | 门禁 pytest **713**（通过 702 / 跳过 11 / 失败 0 / 错误 0） |
+| 6 | 修 `router.py` 漏捕 `AccessDeniedError` | ✅ 三处 `except` 收敛为 `(svc.AssignmentError, AccessDeniedError)` | 出口判据用例（第 4 项判据的负例）复现 → 修 → 复测 |
+| 7 | 全量门禁复跑 | ✅ **13/13 PASS** | `.workbuddy/_gates.txt` |
+
+⚠️ **三处如实交代**：
+
+1. **合并 ≠ 出口判据通过。** #115 合并时出口判据"一条都还没验证"；本切片补的是**证据**，
+   而证据里有 4 项 `NOT_RUN` + 3 项 `LIMITATION` ⇒ **本切片同样不声称任何 D1 行通过**。
+2. **首跑的 11 条 `FAIL` 全部是同一个根因的链式后果**（页面进了错误态 ⇒ 表单没渲染 ⇒
+   输入框与提交钮都点不到）。定位过程**没有重跑真机**：先做排除法（导航前的 `resolveNavigation`
+   用**同一个** `parseQuery` 校验且通过了，⇒ 只可能是页面又编码了一次），再用 **Node 直跑被测模块**
+   复现出**同一条** reason（精确命中「超长（上限 64）」）。真机一轮约 10 分钟、Node 复现是秒级
+   ⇒ **"能不能用纯逻辑复现"应当先于"再起一次环境"来问**。
+3. **环境侧代价（留档）**：本机 shell shim 构造 `PATH` 失败（`C:\Windows\System32` 被截断）⇒
+   `tasklist` / `taskkill` / `mkdir` / `tail` 全部不可达，而走查运行器**依赖 `tasklist` / `taskkill`**
+   ⇒ 会**静默降级成假结论**；叠加"本环境在命令结束时回收该命令的全部后代进程"与
+   "IDE 冷 `CompileCache` 约 9 分钟、而就绪闸门只给约 2 分钟" ⇒ 曾连续两轮 `ENV_BLOCKED`。
+   解法：**起 IDE + 探测 + 跑走查必须同一个脚本内完成**，且**必须先 `open_project_window`
+   再读 `pageStack`**（否则回 `cant find runtimeid by projectpath` —— 那是应有回答，不是故障）。
+
+### 9.4 提交 / 推送 / CI / PR 记录（2026-09-16，同一轮授权）
+
+| # | 事项 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 按关注点分三个提交（后端 / 前端 / 文档） | ✅ `38c8e80`（2 文件 +590/−4）/ `f92356c`（14 文件 +1139/−30）/ `fe42f34`（4 文件 +170/−19） | `git diff d932c43..HEAD --stat` = 20 文件、+1899/−53，与提交前的 `--stat` 逐项吻合 |
+| 2 | 推送 | ✅ 第 1 次 `schannel: server closed abruptly`、**第 2 次成功**；远端 sha == 本地 HEAD | `git ls-remote` ⇒ `fe42f34134bcaf70aafaf972ada0b4aca9ac1de4` |
+| 3 | 开 PR | ✅ **#116**（base `develop`） | `POST /repos/{R}/pulls` ⇒ `201` |
+| 4 | CI | ✅ **12/12 全绿**（`not_success=0`） | `GET /commits/{sha}/check-runs` |
+
+⚠️ **两条如实交代**：
+
+1. **CI 绿 ≠ PRD 完成，也 ≠ 出口判据通过。** 12 项绿只证明"既有门禁在**本提交**上通过"；
+   ㉞ 章的 4 项 `NOT_RUN` + 3 项 `LIMITATION` 一条都不会因为 CI 绿而变成"有证据"。
+2. **本轮遇到一次"写操作脚本被 SIGTERM ≠ 操作没发生"**：分组提交脚本在**收尾打印阶段**被
+   工具侧超时杀掉（stdout 全空、`Exit Code 1 / Signal SIGTERM`），重跑报
+   `nothing added to commit` —— 但 **3 个提交其实已全部创建**（`git log -5` 三条齐全、
+   `diff --stat` 与提交前完全吻合、refs 总数未变、`D` 行数 0）。⇒ 判据是**目标产物在不在**，
+   **不是**进程存活状态或返回码（与"推送超时 ≠ 推送失败"同源）。
 

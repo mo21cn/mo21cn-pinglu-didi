@@ -76,7 +76,26 @@ def require_entrust_enabled() -> None:
 
 
 def _http_error(exc: Exception) -> HTTPException:
-    """服务层异常 → HTTP 语义（集中映射，避免各端点口径漂移）。"""
+    """服务层异常 → HTTP 语义（集中映射，避免各端点口径漂移）。
+
+    ⚠️ 调用方的 `except` **必须同时列出两类域异常**：
+    `svc.AssignmentError`（受理链路，`assignments.py`）与
+    `AccessDeniedError`（叠加层权限，`access.py`）。
+
+    它们**没有共同基类** —— `access.py` 不能反向 import `assignments.py` 取基类
+    （会造成循环 import：`assignments` 已经 import `access`）。
+
+    只捕获 `AssignmentError` 曾经是一个**真实缺陷**（2026-09-16 由 S1 出口判据
+    第四条用例复现）：越权认领（乙组织成员认领甲组织的单）与无生效授权提交都会
+    抛 `AccessDeniedError`，它绕过 `except` 一路抛到未处理异常 ⇒ **HTTP 500**，
+    而本函数里那个 `isinstance(exc, AccessDeniedError) → 403` 分支根本没机会执行。
+    API 层此前只测过"同组织双认领"（走 `AssignmentStateError` → 409），
+    所以 500 一直没被发现。回归用例：`tests/test_entrust_s1_exit_criteria.py`。
+
+    另一处同类设施是 `_http.py:map_access_denied`（`artifacts_api.py` 走那条路，
+    口径正确）。本文件保留了自己的这一份，属**待收敛的重复实现**，见
+    `DEMO-1-plan.md` §8 技术债。
+    """
     if isinstance(exc, svc.AssignmentNotFoundError):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, (svc.RevisionConflictError, svc.AssignmentStateError)):
@@ -126,7 +145,7 @@ def _run_write(
             return body
     except IdempotencyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except svc.AssignmentError as exc:
+    except (svc.AssignmentError, AccessDeniedError) as exc:
         raise _http_error(exc) from exc
 
 
@@ -245,7 +264,7 @@ def get_assignment(
 ) -> Any:
     try:
         assignment = svc.get_assignment(db, assignment_id)
-    except svc.AssignmentError as exc:
+    except (svc.AssignmentError, AccessDeniedError) as exc:
         raise _http_error(exc) from exc
     if assignment is None:
         raise HTTPException(status_code=404, detail="委托单不存在")
@@ -317,7 +336,7 @@ def update_assignment(
             quantity=data.quantity if "quantity" in provided else None,
             quantity_unit=data.quantity_unit if "quantity_unit" in provided else None,
         )
-    except svc.AssignmentError as exc:
+    except (svc.AssignmentError, AccessDeniedError) as exc:
         raise _http_error(exc) from exc
     return assignment_out(result)
 

@@ -80,7 +80,15 @@
            而那张草稿在界面上再也找不到（见 intake.js 文件头第 1 条）。 -->
       <view class="card form-card">
         <view class="draft-note" wx:if="{{createdId}}">
-          草稿 #{{createdId}} 已保存在服务端。内容已锁定，请继续完成提交；若要改内容请返回后重新发起。
+          <text class="draft-note-text">草稿 #{{createdId}} 已保存在服务端，内容已锁定，请继续完成提交。</text>
+          <!-- 换内容的**唯一**出口。没有它，想改货名的用户只能"先提交再撤回"——
+               那会留下一张真实的废单。它只断开本地关联，**不**删服务端草稿。 -->
+          <view
+            class="draft-note-act"
+            data-act-intake-restart="1"
+            bindtap="onRestart"
+            hover-class="hover-dim"
+          >重新填写</view>
         </view>
 
         <view class="form-label">一句话说明（要办什么）</view>
