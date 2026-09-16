@@ -2,15 +2,22 @@
 #
 # 本文件的"原文"部分是**待审定的清单本体**：裁定方在第一轮无法看到它
 # （原备忘落在被 .gitignore 覆盖的 .workbuddy/ 下），因此在此逐项登记。
-# 状态字段一律如实：未跑就是 NOT_RUN，受限就是 LIMITATION，不得涂绿。
+#
+# ⚠️ 2026-09-16 第二轮（A 执行）追加的规则：
+#   · 每项的 `statement` / `targets` / `why_now` **保持原文不改** —— 它们是审计
+#     对象的原貌。"改审计对象"与"改结论"是两件不同的事，不能混。
+#   · 复核中发现的事实错误一律走**新增** `correction` 字段订正，写明原文错在哪、
+#     正确值是什么。**不静默改写原文。**
+#   · 状态与 7 字段记录写在 `status` / `result` 下：未跑就是 NOT_RUN、
+#     受限就是 LIMITATION，**不得涂绿**。
 
 meta:
   doc: docs/entrust/milestones/DEMO-1-gesture-matrix.yaml
   decision: DR-0018
   contract_refs: ["§10.1 Witnessed business script", "§10.2 Focused negative demonstrations", "§10.3 Result classification", "D1-14", "D1-15"]
   round: "B → A（2026-09-16 裁定；先 B 后 A）"
-  candidate_sha: "待提交后回填"
-  status_of_round: "B 完成（2026-09-16，自证 5/5 判据通过，逐面结论见 DEMO-1-runbook.md §6.3）；A 未执行"
+  candidate_sha: "本切片 PR #124 的 head（提交后由 PR 页面给出；A 的产出落在 B 之后的提交里）"
+  status_of_round: "B 完成（2026-09-16，自证 5/5 判据通过，逐面结论见 DEMO-1-runbook.md §6.3）；A 完成（2026-09-16，五项**全部有结论**：PASS=2 / LIMITATION=3）"
   item_count_frozen: 5
   discipline:
     - "只有 PASS 计入通过；LIMITATION 不计入通过（合同 §10.3）"
@@ -18,6 +25,22 @@ meta:
     - "页面方法 / 接口调用可证明业务结果，但不得替代真实点击或触摸的交互证据（DR-0018 裁定二·A·4）"
     - "每项达成『找到可用路径』或『确认限制并给出替代方案』之一即结束该项；不开展无限期手势自动化研究"
     - "关键动作应有可见、可操作的真实入口；不应只依赖长按 / 滑动 / 工具无法操作的原生层"
+  a_round_summary:
+    executed: "2026-09-16（B 与 A 同一轮，先 B 后 A）"
+    outcome: "PASS ×2（P-1 / P-2）· LIMITATION ×3（P-3 / P-4 / P-5）· NOT_RUN ×0"
+    evidence_grade_note: >-
+      ⚠️ 五项的**证据等级不相同**，逐项在 `result.tool_limitation` 里写明：
+      P-1 / P-2 是**直接实测**（走查章节）；P-3 是**工具能力面逐方法核对**；
+      P-4 是**同族实测（⑧b 的 showModal）+ 能力面**，其本体未单独实测；
+      P-5 **无靶子 ⇒ 未实测**，结论为平台机制 + 能力面推断。
+      汇报时**不得**把后三项说成"实测过"。
+    corrections_made: ["P-1.why_now", "P-4.why_now"]
+    evidence:
+      P-1: "miniapp 走查 ㉞ 章（既有断言：`input_text` → `bindinput` → `data.form.title`；提交后详情页标题一致）"
+      P-2: "miniapp 走查 ㊷ 章（本轮新增；断言 12 项 = PASS 11 / FAIL 0 / LIMITATION 1）"
+      P-3: "scripts/wechatide_client.py 的 `Client` 方法面（逐方法核对，无手势族）"
+      P-4: "走查 ⑧b 章同族实测（`showModal` 的 `.weui-dialog*` 命中 0）+ 工具动作面"
+      P-5: "全仓静态扫描（`chooseMedia` / `chooseMessageFile` 使用处 = 0，无可测靶子）+ 平台机制"
 
 # 每项必须填的 7 个字段（裁定二·A·3）
 record_schema:
@@ -36,7 +59,7 @@ record_schema:
   - field: design_constraint
     meaning: "对产品设计的约束（若受限，界面必须怎么改才可验证）"
 
-# 五项探针（原文；status 一律 NOT_RUN，待 A 执行后逐项回填）
+# 五项探针（原文；`result` 由 A 执行后逐项回填）
 items:
   - id: P-1
     title: 会话输入框键入文本并送出
@@ -50,8 +73,33 @@ items:
     why_now: >-
       走查工具此前从未向 input 写入过文本（全仓 39 章无先例）。若不可行，S2 的输入形态
       要么改成可脚本化形态，要么该格只能人工见证 —— 这个结论必须在 UI-03 开工前拿到。
-    status: NOT_RUN
-    result: null
+    correction: >-
+      2026-09-16 复核：「全仓 39 章无先例」**不成立**。`input_text`（底层
+      `automation_element_action --action input`）**已被用过 6 处**：
+      `[data-field="title"]` 三处（㉞ 章 4404 / 4476 / 4527）、`[data-df="task-title"]`
+      两处、工作台表单标题一处。而**其中 ㉞ 章那条断言证的正是本项要问的事** ——
+      「真实输入触发 `bindinput`（标题进了页面 data，不是只写进渲染层）」。
+      ⇒ 结论方向由"未知"变成"已可做到"，本项按**既有证据**记 PASS、**不重复探路**
+      （裁定二·A·2：已有有效证据 ⇒ 不复做 —— 把"系统返回键"从清单删除用的就是这条）。
+    status: PASS
+    result:
+      business_action: "向委托受理屏的标题输入框键入一段文本，并提交该委托"
+      environment: >-
+        候选 SHA 见 meta.candidate_sha；走查临时库
+        （seed_demo + seed_entrust_demo + seed_entrust_orgpicker）；wechatide 工具链（devtools 3.17.x）
+      input_method: >-
+        真实 `tap` ＋ 工具 `input` 动作（`Client.input_text(selector, value)`）——
+        **不是** `setData` 注入，所以证的是"输入真的接上了"
+      observable_result: >-
+        ① 页面 data：`form.title` === 写入值（证明 `bindinput` 真的触发）；
+        ② 后端载荷：提交后详情页标题 === 写入值（文本真的落进服务端）
+      tool_limitation: "无（本项工具侧不受限）"
+      alternative_path: "无（不需要替代路径）"
+      design_constraint: >-
+        ⚠️ 靶子不是 UI-03（S2 未开发），而是 `pages/entrust/intake`。结论按**机制**可迁移
+        （同一工具动作、同一 `bindinput` 通路），但 UI-03 落地后建议用**同一手法**复验一次。
+        对 S2 的约束：输入框请用 `bindinput` 受控形态（值进页面 data），
+        **不要**把文本只留在渲染层 —— 那样"文本真的落进服务端"这一格会失去设备证据。
 
   - id: P-2
     title: 列表滚动到底 / 触发加载更早一页
@@ -68,8 +116,38 @@ items:
     non_duplicate_note: >-
       与 P-3 不重复：P-2 断言的中间态是「更早一页进入列表」，关键动作是滚动；
       P-3 断言的中间态是「刷新回调被触发」，关键动作是下拉。
-    status: NOT_RUN
-    result: null
+    status: PASS
+    result:
+      business_action: "在「我的委托」列表上滚动到底，加载更早一页（第 2 页），使第 21 条及之后的委托可见"
+      environment: >-
+        候选 SHA 见 meta.candidate_sha；走查临时库；wechatide 工具链（devtools 3.17.x）；
+        页面 `pages/entrust/assignments/assignments`
+      input_method: >-
+        页面级 `pageScrollTo`（`Client.scroll_to(top)` → `automation_viewport_action
+        --action pageScrollTo`）—— **原生页面滚动**，不是手势。它与 `onReachBottom`
+        同一个触发源，故这条路径**不需要**滑动手势。
+      observable_result: >-
+        页面 data：`items.length` 20 → 27、`page` 1 → 2、`hasMore` True → False、
+        **`reachCount` 0 → 1**（`onReachBottom` 真的被调用过一次）、
+        `pageHint` 『第 2/2 页 · 共 27 条』；**并且**界面第 2 页的编号序列与
+        `GET /entrust/assignments?view=owner&page=2` **逐条一致**
+      tool_limitation: >-
+        工具**没有滑动手势 API**（`swipe` / 触摸手势一个都没有）。但"滚到底"这条不依赖手势：
+        页面级 `pageScrollTo` 是原生通路，实测**确实触发了 `onReachBottom`**
+        （`reachCount=1`、列表 20 → 27）。⇒ 本项在工具侧**不受限**，找到了可用路径。
+      alternative_path: "无（原生通路可用）"
+      design_constraint: >-
+        ① 分页触发条件请用 `onReachBottom`（**不是**自己按滚动位置算阈值）—— 它可被
+        `pageScrollTo` 造出，因而可自动化验收；② 页长若改动，须同步改走查侧的页长常量，
+        否则断言会在"条目数"那一格暴露偏差（探针侧是**故意**这样设计的）；
+        ③ ⚠️ 与 P-3 的对照是本项最重要的产出：**触底可造、下拉不可造**，
+        两者可脚本化程度不同 ⇒ 列表必须同时有"触底加载"与"页内刷新入口"，不能只靠下拉。
+      preexisting_defect_fixed: >-
+        ⚠️ 本项落地时发现该页**本来就有真缺陷**：`load()` 只取第 1 页
+        （`PAGE_SIZE = 20`）而**没有 `onReachBottom`** ⇒ 货主提了 25 张单时第 21 张之后
+        **永远看不到**，而界面会诚实地显示「第 1/2 页」，让缺陷看起来像功能
+        （"有分页提示"）。本轮补上 `onReachBottom` 才使本项有靶子，也才修掉这个缺陷。
+        **分页提示不是分页能力。**
 
   - id: P-3
     title: 下拉刷新（真实触摸手势）
@@ -82,8 +160,30 @@ items:
     why_now: >-
       这是委托侧目前在册的唯一一条 LIMITATION（㊶ 章）。若真手势不可造，
       「刷新后可复现」这类断言需要页内刷新按钮作为替代入口。
-    status: NOT_RUN
-    result: null
+    status: LIMITATION
+    result:
+      business_action: "在列表页下拉刷新，使 `onPullDownRefresh` 触发、`load()` 真跑一次"
+      environment: >-
+        候选 SHA 见 meta.candidate_sha；页面 `pages/entrust/assignments/assignments`
+        （`enablePullDownRefresh = true`）；wechatide 工具链（devtools 3.17.x）
+      input_method: "**无可用输入方式**（见 tool_limitation）"
+      observable_result: >-
+        无（本项**未取得设备证据**）⇒ `onPullDownRefresh` 与一切"刷新后 X 仍成立"的断言
+        在设备侧**无法自动触发**
+      tool_limitation: >-
+        工具的驱动面**只有 5 个 element action**（`text` / `tap` / `longpress` / `scrollTo` /
+        `input`）＋ **1 个页面级动作**（`pageScrollTo`），**没有任何 swipe / 触摸手势 API**
+        —— 逐方法核对过 `scripts/wechatide_client.py` 的 `Client`。⇒ 下拉这个**真实触摸
+        手势**造不出来。⚠️ 但同族的"触底"**可造**（见 P-2），故**不能**笼统说
+        "滚动类交互都不能脚本化" —— 两者的可脚本化程度并不相同。
+      alternative_path: >-
+        ① **OS 级真实输入**（`SendInput` 鼠标拖动）：⑧b 章用过这条通道做一次性取证，
+        但**不可重复、不成断言**，只能作一次性证据；
+        ② **页内刷新入口**（刷新按钮 / 返回重进）：可脚本化，是**可重复**的替代路径。
+      design_constraint: >-
+        任何"刷新后 X 仍成立"的验收要求，界面**必须**同时提供页内刷新入口
+        （刷新按钮，或"返回后重进"这条已被 ㊶ 章证过的通路），否则该格只能记 LIMITATION、
+        进不了通过。这是 S2 / S3 **所有列表页**的通用约束。
 
   - id: P-4
     title: 原生动作面板的选择项
@@ -96,8 +196,38 @@ items:
     why_now: >-
       动作面板不在渲染树（全仓 33 处使用）。选不中的话，「用面板选附件来源」这条交互
       就永远拿不到设备证据，S2 必须改用页内形态。
-    status: NOT_RUN
-    result: null
+    correction: >-
+      2026-09-16 复核：「全仓 33 处使用」**已过时**。港口 / 船队选择那一批
+      （13 项超过面板 `itemList` 上限 6）**早已改成页内 `port-picker` 组件**，
+      `utils/ports.js` 与四个页面的注释都记着这次迁移。当前**真实调用为 11 处**
+      （`pages/owner/owner.js` 2、`pages/shipper/shipper.js` 4、
+      `pages/publish/cargo/cargo.js` 4、`pages/publish/ship/ship.js` 1），
+      且都是**少量项的操作菜单**，不是"S2 附件来源分支"那类多分支选择。
+      ⇒ 订正后靶子更少、更集中，但**结论方向不变**（原生面板够不到）。
+    status: LIMITATION
+    result:
+      business_action: "对 `wx.showActionSheet` 弹出的面板选中第 i 项，使对应业务结果发生"
+      environment: >-
+        候选 SHA 见 meta.candidate_sha；靶子见 correction（11 处真实调用）；
+        wechatide 工具链（devtools 3.17.x）
+      input_method: "**无可用输入方式**"
+      observable_result: "无（本项**未单独实测**；结论依据见 tool_limitation）"
+      tool_limitation: >-
+        原生动作面板**不在小程序的渲染树里** ⇒ 工具的元素级动作（只认 selector）够不到
+        它的选项。**同族证据**：⑧b 章实测 `wx.showModal` 的 `.weui-dialog*` **命中 0**、
+        确认键点不到 —— 该章为此把委托侧关键路径从原生弹层改成**页内确认条**，
+        并已把整页 `wx.showModal` 清干净（`verify_ui_interactions.js` 有专条守着）。
+        ⚠️ **`showActionSheet` 本体本轮未单独实测** —— 本条依据是"同族实测 ＋ 工具动作面"，
+        属机制推断 + 邻近实测，**证据等级低于 P-2 的直接实测**，汇报时不得等同。
+        按裁定二·A·2（已有有效证据 ⇒ 不复做），本轮不对该族重复探路。
+      alternative_path: >-
+        页内展开的选择条 —— 先例就在本仓：`pages/entrust/detail` 的"任务类型选择"
+        原本用 `showActionSheet`，因 7 项超过面板上限已改成**页内展开条**
+        （`detail.js` 的注释记着这次迁移）。
+      design_constraint: >-
+        S2 的"附件来源分支"**不要**用 `wx.showActionSheet`，直接用页内展开条 ——
+        否则该交互永远拿不到设备证据。（与 ⑧b 让工作项 3～4 改页内确认条是同一个教训：
+        **原生弹层承担的关键路径 = 不可验证的路径**。）
 
   - id: P-5
     title: 原生附件选择器（chooseMedia / chooseMessageFile）
@@ -110,8 +240,27 @@ items:
     why_now: >-
       当前全仓 0 处使用，由 S2 才引入 ⇒ 最可能新撞上的设计约束。若原生选择器不可脚本化，
       界面必须同时提供「示例附件 / 预置样本」入口，否则附件需求拿不到设备证据。
-    status: NOT_RUN
-    result: null
+    status: LIMITATION
+    result:
+      business_action: "经原生选择器（`chooseMedia` / `chooseMessageFile`）选一个附件并确认，使附件进入上传 / 提交路径"
+      environment: >-
+        候选 SHA 见 meta.candidate_sha；**无可测靶子** —— 全仓 `chooseMedia` /
+        `chooseMessageFile` 使用处 = **0**（该能力由 S2 才引入）
+      input_method: "**无可用输入方式**"
+      observable_result: "无（**无靶子 ⇒ 本项未实测**）"
+      tool_limitation: >-
+        两重限制，且**都要写明**：
+        ① **无靶子** —— 全仓 0 处使用，本项在当前代码上**不可测**；
+        ② **平台层** —— 原生选择器是**微信客户端**的 UI（不在小程序渲染树），
+        工具的元素级动作够不到，与 P-4 同族。
+        ⚠️ 与 P-4 一样，本条是"平台机制 ＋ 工具能力面"的推断，**未实测**。
+        空仓扫描证明的是"没有靶子"，**不是**"试过了不行" —— 两者不能混为一谈。
+      alternative_path: >-
+        界面同时提供「示例附件 / 预置样本」入口（可达、可脚本化），
+        使"附件进入业务路径"这一格在设备侧可验；原生选择器作为**可选**增强通道保留。
+      design_constraint: >-
+        ⇒ S2 的 UI-03 附件选择**必须**同时有预置样本入口，否则附件需求拿不到设备证据。
+        这正是本项存在的理由（矩阵原文已写明）。
 
 # 按裁定三「不相关项删除或替换，重复项合并；不须为凑项保留无用探针」的处置记录
 removed_or_merged:
@@ -124,6 +273,13 @@ removed_or_merged:
   - candidate: "滑动列表"
     disposition: 合并
     reason: "并入 P-2（断言的中间态与关键动作已在 P-2 写明；与 P-3 的不重复理由见 P-2.non_duplicate_note）"
+  - candidate: "原生动作面板（P-4）与原生选择器（P-5）是否合并"
+    disposition: 保留为两项
+    reason: >-
+      2026-09-16 复核：两者虽同属"原生层不可点"这一族，但**业务后果不同** ——
+      P-4 约束的是"选择项的分支怎么呈现"（可用页内展开条替代），
+      P-5 约束的是"附件本身从哪来"（必须有预置样本，否则需求拿不到证据）。
+      合并会让其中一条的 `design_constraint` 被吞掉 ⇒ 不合并。
 
 exit_criteria:
   per_item:
@@ -132,6 +288,9 @@ exit_criteria:
   round:
     - "5 项全部有结论（PASS 或 LIMITATION 二者之一），即本项收口"
     - "收口后立即进入 S2；不得把 A / B 扩充成新的长期前置阶段"
+  round_status: >-
+    ✅ 已收口（2026-09-16）：5 项全部有结论（PASS 2 / LIMITATION 3 / NOT_RUN 0），
+    每项的 7 字段记录齐备。**A 到此结束，不再扩充。**
 
 not_in_scope:
   - "不扩充探针数量（冻结为 5）"

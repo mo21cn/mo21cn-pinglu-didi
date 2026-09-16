@@ -397,7 +397,7 @@ a blocking case, and unresolved financial conditions each prevent the applicable
 | Execution plan | `docs/entrust/milestones/DEMO-1-plan.md` | 本文件 |
 | R1 remainder ledger | `docs/entrust/milestones/DEMO-1-r1-remainder.md` | 本轮登记 |
 | API/data delta | `docs/entrust/milestones/DEMO-1-interface-delta.md` | **已产出（S0-6，2026-09-16）**；其 §3.1 的唯一新增端点已于 S1 落地（见 §4 S1 进度行） |
-| Runbook | `docs/entrust/milestones/DEMO-1-runbook.md` | **已产出 S1 起步版（2026-09-16）**：账户 / 组织 / 启动 / 迁移 / 种子五件写清；⚠️ **§6 隔离复位**与**§7 三种夹具状态**两节标题就是「**缺失**」，归 S5 收口 —— 本文档**不是**「BP-05 完成」 |
+| Runbook | `docs/entrust/milestones/DEMO-1-runbook.md` | **已产出 S1 起步版（2026-09-16）**：账户 / 组织 / 启动 / 迁移 / 种子五件写清。⚠️ **§6 隔离复位**只到「最小隔离复位」、**§7 三种夹具状态 1/3 已就位**（变更复核检查点，2026-09-16；另两项仍缺失：干净起点只到"部分"、已完成历史委托卡在**委托级结案命令未实现**）⇒ 两节**都**归 S5 收口 —— 本文档**不是**「BP-05 完成」 |
 | Walkthrough | `docs/entrust/milestones/DEMO-1-walkthrough.md` | 待补（S5） |
 | Acceptance report | `docs/entrust/milestones/DEMO-1-acceptance.md` | 待补（S5） |
 | Evidence index | `docs/entrust/milestones/DEMO-1-evidence-index.md` | 待补（S5） |
@@ -683,3 +683,18 @@ S0 基线
       「fresh-run 与 seeded-checkpoint 可区分」归 S5-1）；**A 仍未执行**（5 项状态一律 `NOT_RUN`）。
     - ⚠️ **本轮不标记 BP-05 或 D1-17 全部完成**（D1-17 的另一半「fresh-run 与 seeded-checkpoint
       可区分」归 S5-1）；⚠️ **本轮裁定不含 PR #122 / #123 的合并授权**。
+      **后续（2026-09-16 深夜，用户对话另行给出）**：合并授权**已单独给出**（顺序
+      **#122 → #123 → #124**，纯 API squash）。⚠️ 上面那句是**当时**的裁定原文，**保留不改**；
+      两条记录**并存**，后者不覆盖前者 —— 授权范围随时间变化这件事本身就是记录的一部分。
+    - ✅ **A 已执行完毕（2026-09-16 深夜）**：5 项交互探针**全部有结论**
+      （`PASS`=2：P-1 输入框 `bindinput`、P-2 触底分页；`LIMITATION`=3：P-3 滑动手势、
+      P-4 动作面板、P-5 原生长按/双击）。逐项 7 字段记录、证据等级、以及**两处原文事实错误的
+      `correction`** 全部落在 `docs/entrust/milestones/DEMO-1-gesture-matrix.yaml`。
+      ⚠️ **"全部有结论"≠"全部通过"**：三项是**工具 / 平台边界**，证据等级**各不相同**
+      （P-3 为逐方法核对工具能力面、P-4 为同族实测、P-5 **无靶子 ⇒ 未实测**），
+      汇报时**不得**把它们等同成"实测过"。⚠️ 这**不是** DR-0018 之外的**新增阶段** ——
+      DR-0018 明确「不得把 A / B 扩充成新的长期前置阶段」。
+    - ✅ **§7 第 2 行夹具已产出（2026-09-16 深夜，本切片顺手收口）**：
+      `backend/scripts/seed_entrust_revalidation.py` 把「变更复核检查点」从**缺失**变成
+      **有对象可演示**（实测 4 条 `open` 复核项 ＋ 3 类 `unconfirmed`，见 runbook §7.1）。
+      ⚠️ 另两行**仍缺失**，见上一条与 runbook §7。
