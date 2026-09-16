@@ -1,0 +1,142 @@
+# DEMO-1 交互探针矩阵（DR-0018 裁定三：探针不扩充数量、五项原文入仓供逐项审定）
+#
+# 本文件的"原文"部分是**待审定的清单本体**：裁定方在第一轮无法看到它
+# （原备忘落在被 .gitignore 覆盖的 .workbuddy/ 下），因此在此逐项登记。
+# 状态字段一律如实：未跑就是 NOT_RUN，受限就是 LIMITATION，不得涂绿。
+
+meta:
+  doc: docs/entrust/milestones/DEMO-1-gesture-matrix.yaml
+  decision: DR-0018
+  contract_refs: ["§10.1 Witnessed business script", "§10.2 Focused negative demonstrations", "§10.3 Result classification", "D1-14", "D1-15"]
+  round: "B → A（2026-09-16 裁定；先 B 后 A）"
+  candidate_sha: "待提交后回填"
+  status_of_round: "B 完成（2026-09-16，自证 5/5 判据通过，逐面结论见 DEMO-1-runbook.md §6.3）；A 未执行"
+  item_count_frozen: 5
+  discipline:
+    - "只有 PASS 计入通过；LIMITATION 不计入通过（合同 §10.3）"
+    - "自动化证据不得被记录或标注为人类见证证据（DR-0018 裁定一）"
+    - "页面方法 / 接口调用可证明业务结果，但不得替代真实点击或触摸的交互证据（DR-0018 裁定二·A·4）"
+    - "每项达成『找到可用路径』或『确认限制并给出替代方案』之一即结束该项；不开展无限期手势自动化研究"
+    - "关键动作应有可见、可操作的真实入口；不应只依赖长按 / 滑动 / 工具无法操作的原生层"
+
+# 每项必须填的 7 个字段（裁定二·A·3）
+record_schema:
+  - field: business_action
+    meaning: "业务动作（用业务语言描述，不用工具语言）"
+  - field: environment
+    meaning: "运行环境（候选 SHA / 数据库 / IDE 工具链版本）"
+  - field: input_method
+    meaning: "输入方式（真实 tap / 触摸手势 / 页面方法 / 接口 / 程序化导航）"
+  - field: observable_result
+    meaning: "可观测结果（只能落三处：页面 data / 后端载荷 / API 状态码）"
+  - field: tool_limitation
+    meaning: "工具限制（做不到什么就写做不到，不得含糊）"
+  - field: alternative_path
+    meaning: "替代路径（受限时的替代取证通道；没有就写没有）"
+  - field: design_constraint
+    meaning: "对产品设计的约束（若受限，界面必须怎么改才可验证）"
+
+# 五项探针（原文；status 一律 NOT_RUN，待 A 执行后逐项回填）
+items:
+  - id: P-1
+    title: 会话输入框键入文本并送出
+    statement: >-
+      在 UI-03 会话屏的输入框内键入一段文本并点「发送」；断言页面进入发送后的状态，
+      且该文本真的落进服务端（消息载荷含该文本）。
+    targets:
+      s2_work_items: ["1. UI-03 补真实消息输入 / 历史 / 附件选择 / job 进度"]
+      main_script_steps: ["第 2 步 A1 上传样本报价并发起 AG-02"]
+      contract: ["§10.1-2", "D1-03"]
+    why_now: >-
+      走查工具此前从未向 input 写入过文本（全仓 39 章无先例）。若不可行，S2 的输入形态
+      要么改成可脚本化形态，要么该格只能人工见证 —— 这个结论必须在 UI-03 开工前拿到。
+    status: NOT_RUN
+    result: null
+
+  - id: P-2
+    title: 列表滚动到底 / 触发加载更早一页
+    statement: >-
+      在会话或历史列表上滚动到底，断言更早一页进入列表，且 onReachBottom（或等价触发）
+      真的跑过一次。
+    targets:
+      s2_work_items: ["1. UI-03 历史消息"]
+      main_script_steps: ["第 13 步重进检查同一条持久记录（历史侧）"]
+      contract: ["D1-14"]
+    why_now: >-
+      分页需求在 S2 / S3 反复出现；触发条件究竟是 onReachBottom 还是滚动事件、
+      工具能否造出 —— 决定要不要给列表补一个可脚本化的「加载更多」入口。
+    non_duplicate_note: >-
+      与 P-3 不重复：P-2 断言的中间态是「更早一页进入列表」，关键动作是滚动；
+      P-3 断言的中间态是「刷新回调被触发」，关键动作是下拉。
+    status: NOT_RUN
+    result: null
+
+  - id: P-3
+    title: 下拉刷新（真实触摸手势）
+    statement: >-
+      在列表页下拉，断言 onPullDownRefresh 被触发（load() 真跑一次、列表重取）。
+    targets:
+      s2_work_items: ["（通用形态，S2 / S3 的列表页都会用到）"]
+      main_script_steps: ["第 13 步 reload / re-enter"]
+      contract: ["D1-14", "§10.1-13"]
+    why_now: >-
+      这是委托侧目前在册的唯一一条 LIMITATION（㊶ 章）。若真手势不可造，
+      「刷新后可复现」这类断言需要页内刷新按钮作为替代入口。
+    status: NOT_RUN
+    result: null
+
+  - id: P-4
+    title: 原生动作面板的选择项
+    statement: >-
+      对一个 wx.showActionSheet 弹出面板选中第 i 项，断言该项对应的业务结果发生。
+    targets:
+      s2_work_items: ["1. UI-03 附件选择（来源分支）"]
+      main_script_steps: ["第 2 步上传样本报价"]
+      contract: ["D1-03"]
+    why_now: >-
+      动作面板不在渲染树（全仓 33 处使用）。选不中的话，「用面板选附件来源」这条交互
+      就永远拿不到设备证据，S2 必须改用页内形态。
+    status: NOT_RUN
+    result: null
+
+  - id: P-5
+    title: 原生附件选择器（chooseMedia / chooseMessageFile）
+    statement: >-
+      经原生选择器选一个附件并确认，断言附件真的进入上传或提交路径。
+    targets:
+      s2_work_items: ["1. UI-03 附件选择"]
+      main_script_steps: ["第 2 步上传样本报价", "第 7 步记录标注为样本的签名证据"]
+      contract: ["D1-03", "§10.1-2", "§10.1-7"]
+    why_now: >-
+      当前全仓 0 处使用，由 S2 才引入 ⇒ 最可能新撞上的设计约束。若原生选择器不可脚本化，
+      界面必须同时提供「示例附件 / 预置样本」入口，否则附件需求拿不到设备证据。
+    status: NOT_RUN
+    result: null
+
+# 按裁定三「不相关项删除或替换，重复项合并；不须为凑项保留无用探针」的处置记录
+removed_or_merged:
+  - candidate: "系统返回键"
+    disposition: 删除
+    reason: "已有有效证据（H2 已用于栈深与导航断言）⇒ 属重复探路，按裁定二·A·2 不复做"
+  - candidate: "长按"
+    disposition: 删除
+    reason: "S2 与主脚本当前无长按需求 ⇒ 若保留即属『为凑项保留无用探针』"
+  - candidate: "滑动列表"
+    disposition: 合并
+    reason: "并入 P-2（断言的中间态与关键动作已在 P-2 写明；与 P-3 的不重复理由见 P-2.non_duplicate_note）"
+
+exit_criteria:
+  per_item:
+    - "找到可用路径 ⇒ 记录 input_method 与 observable_result，status = PASS"
+    - "或确认限制并给出替代方案 ⇒ status = LIMITATION，且必须填 alternative_path 与 design_constraint"
+  round:
+    - "5 项全部有结论（PASS 或 LIMITATION 二者之一），即本项收口"
+    - "收口后立即进入 S2；不得把 A / B 扩充成新的长期前置阶段"
+
+not_in_scope:
+  - "不扩充探针数量（冻结为 5）"
+  - "不开展无限期的手势自动化专业研究"
+  - "本轮不标记 BP-05 或 D1-17 全部完成（D1-17 的另一半『fresh-run 与 seeded-checkpoint 可区分』归 S5-1）"
+  - "不要求依赖 S4 结案能力的『已完成历史委托』夹具"
+  - "不含 PR #122 / #123 的合并授权"
+  - "不修改 DEMO-1-contract-v1.0.md"
