@@ -45,6 +45,13 @@ class CargoParseResult(BaseModel):
     needs_review: list[str] = Field(
         default_factory=list, description="缺失/低置信、需人工补充确认的字段名"
     )
+    #: 模型**没给出**合法置信度、由兜底默认值顶上的字段数（0–7，与解析字段数一致）。
+    #: ⚠️ 必须可见：HO 0917 要求区分「模型没报告置信度」与「模型报告置信度为 0」。
+    #: 若这个数 > 0，``confidence`` 里就掺了**我们自己猜的**值，不是模型给的 ——
+    #: 调用方（含评测）据此判断这份 confidence 能不能信。
+    confidence_defaulted: int = Field(
+        default=0, ge=0, le=7, description="置信度缺失/非法、被兜底默认值替代的字段数"
+    )
     mocked: bool = Field(default=False, description="是否为规则模板输出（LLM_MOCK）")
     latency_ms: int = Field(default=0, description="解析耗时（毫秒）")
 
