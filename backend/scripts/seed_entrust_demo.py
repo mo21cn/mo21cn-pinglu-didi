@@ -115,6 +115,11 @@ ORG_PERMISSIONS = [
     "entrust:quote:publish",
     "entrust:task:dispatch",
     "entrust:settlement:create",
+    # S2 首片（HO 0917-2 执行顺序 2）：会话与 Agent 作业是**另一项**权限 ——
+    # 缺了它，演示里的组织成员能看工作台、能认领，却在"进入专属会话"这一步
+    # 直接 403，表现为"页面能打开但建不了会话"。只读成员不该有这一项，
+    # 而演示组织的经理正是要让 Agent 干活的那个人。
+    "entrust:agent:job",
 ]
 
 #: 任务清单：`(task_type, title, 是否指派给经理)`。
