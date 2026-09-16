@@ -481,9 +481,15 @@ const ROUTES = {
     paramSchema: {
       cargo_name: {
         type: 'string',
-        maxLength: 64,
+        // ⚠️ 宽度取**落地字段的真实上限**，不是随手定的：这个值进本页后就是
+        //    `form.cargo_summary`，最终由 `POST /assignments` 写入
+        //    `cargo_summary`（后端 `AssignmentCreate.max_length = 512`）。
+        //    初版写 64，于是 65～512 字的货名会被入口守卫判成「参数不合法」——
+        //    一个**源页面合法、目标页拒绝**的矛盾（真机走查 ㉞ 第一次带中文参数
+        //    就撞上了这一类，只是当时还叠了「二次编码」那个缺陷，见 `decodeParam`）。
+        maxLength: 512,
         required: false,
-        note: '来自「发布货源」的货物名称，作为草稿初值'
+        note: '来自「发布货源」的货物名称，作为草稿初值（落地为 cargo_summary，上限同后端 512）'
       },
       quantity: {
         // ⚠️ 刻意**不**声明 `int`：`paramSchema` 的 int 只接受非负**整数**，
@@ -596,6 +602,34 @@ function parseQuery(text) {
     }
   }
   return out
+}
+
+/**
+ * 归一化 `onLoad` 收到的参数值：**先解码一次**，再交给调用方。
+ *
+ * ⚠️ 为什么必须有它（2026-09-16 真机走查 ㉞ 抓到，不是推理）：
+ *    小程序把 query 参数交给 `onLoad(options)` 时**不解码**，原样是 `navigateTo`
+ *    url 里的百分号串。于是通行做法「用 `onLoad` 的值重建本页 url 再跑
+ *    `guardEntry()`」会把一个已编码的值**再编码一次**：
+ *      · ASCII 参数（`assignment_id` / `org_id` / `case_id` …）上
+ *        `encodeURIComponent` 是**恒等变换**，所以这个缺陷一直是隐性的 —— 此前
+ *        六个页面都只带 id；
+ *      · 一旦带上中文（受理屏的货名是第一个），长度会**膨胀 3 倍**：
+ *        `走查货物·铁矿石` 8 字 → 69 字符，直接撞上 `cargo_name.maxLength`，
+ *        受理屏把自己的入口判成「参数不合法」，整页只剩一个错误态。
+ *
+ * 归一化口径：有百分号才尝试解码（快速路径 + 不误伤字面量 `%`，例如货名
+ * 「含量 50%」）；解码失败（非法序列）原样返回，交由 `paramSchema` 判非法。
+ * 幂等：对已解码的值是恒等变换，所以老页面接上它**行为不变**。
+ */
+function decodeParam(value) {
+  const s = String(value == null ? '' : value)
+  if (s.indexOf('%') === -1) return s
+  try {
+    return decodeURIComponent(s)
+  } catch (e) {
+    return s
+  }
 }
 
 /** 查一条路由；未登记返回 null */
@@ -1207,6 +1241,7 @@ module.exports = {
   normalize,
   queryOf,
   parseQuery,
+  decodeParam,
   routeOf,
   edgeOf,
   isTabBarPage,

@@ -104,7 +104,9 @@ Page({
     // ── 入口守卫（ENT-019）────────────────────────────────────────────
     // 冷启动 / 外部深链必须在本页自检：`go()` 管不到这条路径。判据只有一份 ——
     // `assignment_id` 的必需性与字符集写在 `routes.js` 的 `paramSchema` 里。
-    const rawId = query && query.assignment_id != null ? String(query.assignment_id) : ''
+    // ⚠️ 归一化后再重建 url（见 `routes.decodeParam`）：`onLoad` 拿到的是未解码串，
+    //    再编码一次就是二次编码。本页是 ASCII id，行为不变；统一写法防将来带中文时重演。
+    const rawId = R.decodeParam(query && query.assignment_id)
     const gate = R.guardEntry(
       SELF + (rawId ? '?assignment_id=' + encodeURIComponent(rawId) : ''),
       { coldStart: R.currentDepth() <= 1 }

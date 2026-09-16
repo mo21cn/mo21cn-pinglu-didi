@@ -152,7 +152,9 @@ Page({
     // 判据只有一份 —— `case_id` 的必需性与字符集写在 `utils/routes.js` 的
     // `paramSchema` 里，`go()` 与 `onLoad` 用同一套规则。页面自己只查 `!id` 的话，
     // `?case_id=../../x` 这类"看着有值"的会被放过去，一路带到接口。
-    const rawId = query && query.case_id != null ? String(query.case_id) : ''
+    // ⚠️ 归一化后再重建 url（见 `routes.decodeParam`）：`onLoad` 拿到的是未解码串，
+    //    再编码一次就是二次编码。本页是 ASCII id，行为不变；统一写法防将来带中文时重演。
+    const rawId = R.decodeParam(query && query.case_id)
     const gate = R.guardEntry(SELF + (rawId ? '?case_id=' + encodeURIComponent(rawId) : ''), {
       coldStart: R.currentDepth() <= 1
     })

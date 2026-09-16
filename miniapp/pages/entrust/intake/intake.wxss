@@ -123,6 +123,27 @@
   font-size: 24rpx;
   color: #96601C;
   line-height: 1.6;
+  /* 文字 + 「重新填写」并排：按钮必须留在这一块里，否则用户读到"内容已锁定"时
+     看不到任何脱身出口（只能返回，而返回会触发放弃确认）。 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 文字占满剩余宽度，按钮不被挤走（长文案下按钮换行会看起来像页脚而不是操作） */
+.draft-note-text {
+  flex: 1;
+  padding-right: 16rpx;
+}
+
+/* 「重新填写」：明确的**次要**动作 —— 有边框、可点，但不与主按钮抢视觉权重 */
+.draft-note-act {
+  flex: none;
+  padding: 6rpx 16rpx;
+  border: 1rpx solid #96601C;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #96601C;
 }
 
 /* ── 提交 ───────────────────────────────────────────────────────────── */

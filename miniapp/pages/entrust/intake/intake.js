@@ -36,11 +36,21 @@
 //    但本页返回后货主**在界面上再也找不到它的提交入口**（同上，货主侧列表本切片没做）。
 //    "服务端有、界面没有"对用户来说等于丢了，所以必须拦一次并说清楚。
 //
-// ── 本页**没有**解决的一件事（如实登记，不假装不存在）──────────────────
-// 幂等键存在页面实例里。若提交响应丢失后用户**杀掉小程序再重进**，两把键随之消失，
-// 于是会再建一张草稿并提交 —— 也就是重复提交。跨实例收敛需要把在途键持久化，
-// 而持久化必须**按用户隔离**（否则换账号登录会读到上一个人的货名，那是客户数据泄漏）；
-// 本切片不做，登记为后续项（见 `DEMO-1-readiness.md` 的未完成清单）。
+// ── 在途状态跨页面实例续接（本切片补上，此前是已知余量）──────────────────
+//
+// 原登记的问题：幂等键只活在页面实例里，于是"提交响应丢失后**杀掉小程序再重进**"
+// 会让两把键随之消失，结果是**再建一张草稿并提交** —— 重复提交。
+//
+// 现在把在途状态（两把键 + 草稿编号与版本 + 表单内容）落 storage 并续接。
+// 三个必须守住的点：
+//   · **按用户隔离**：持久化的内容含货名等**客户数据**，用一个全局键会让下一个
+//     登录的账号读到上一个人的货名 —— 那比重复提交严重得多。键里带 `user_id`；
+//     **拿不到 `user_id` 就不持久化**（退化成页面实例内：宁可少修复一点也不泄漏）。
+//   · **不设过期**：服务端那张草稿真实存在且可提交，静默丢弃会让人以为单没了。
+//     所以续接时在界面上**明确告知**，并给一个「重新填写」断开关联。
+//   · **断开关联 ≠ 撤回**：`onRestart` / `onBack` 的放弃只清**本地**在途状态，
+//     **不**调用撤回端点 —— 服务端那张草稿仍在（可在委托工作台看到）。
+//     单方面替用户删掉服务端数据是更坏的选择。
 //
 // ENT-019 起新增委托页面必须从首个切片接入运行期导航治理（`utils/routes.js`）：
 //   · `onLoad` 的入口守卫与 `go()` 用**同一份** `paramSchema` 判定参数合法性；
@@ -63,6 +73,10 @@ const {
 
 const R = require('../../../utils/routes')
 
+// 取当前登录用户只为**给持久化键加隔离**（见文件头）。它不是权限依据 ——
+// 能委托给谁始终由服务端 `GET /my-entrustments` 决定。
+const { getUser } = require('../../../utils/auth')
+
 /** 本页路径（注册表口径）；`go()` 需要知道"从哪来"才能查到导航边 */
 const SELF = 'pages/entrust/intake/intake'
 
@@ -81,15 +95,86 @@ const BLANK_FORM = {
  *
  * 只重建 `paramSchema` 声明过的键：把 query 原样拼回去会把未知参数一起带进
  * 校验（它们没有声明、不参与判定），重建可以保证"校验的对象"与"声明的契约"一致。
+ *
+ * ⚠️ 每个值都要先过 `R.decodeParam`：小程序交给 `onLoad` 的是**未解码**的
+ *    百分号串，这里是"重建 url"而不是"照搬 url"，直接 `encodeURIComponent`
+ *    就成了**第二次编码** —— 中文货名会膨胀 3 倍（`走查货物·铁矿石` 8 字 → 69
+ *    字符），撞上 `paramSchema` 的长度上限后，本页会把自己的入口判成
+ *    「参数不合法」，用户看到一个连表单都没有的错误页。2026-09-16 真机走查 ㉞
+ *    第一次带中文参数就把这个缺陷打了出来（此前六个页面只带 ASCII id，
+ *    `encodeURIComponent` 是恒等变换，所以一直没暴露）。
  */
 function urlOf(query) {
   const q = query || {}
   const parts = []
   CARRY_KEYS.forEach(function (k) {
-    const v = q[k] == null ? '' : String(q[k])
+    const v = R.decodeParam(q[k])
     if (v) parts.push(k + '=' + encodeURIComponent(v))
   })
   return SELF + (parts.length ? '?' + parts.join('&') : '')
+}
+
+// ── 在途草稿的持久化（跨页面实例续接）───────────────────────────────────
+
+/** storage 键前缀。真键 = 前缀 + `user_id`（按用户隔离，见文件头）。 */
+const DRAFT_STORE_PREFIX = 'entrust_intake_draft_'
+
+/** 载荷版本。形状变了就改它 —— 旧版本一律当作"没有"，不做兼容猜测。 */
+const DRAFT_STORE_VERSION = 1
+
+/**
+ * 当前用户的持久化键；**拿不到 `user_id` 返回空串**，调用方据此**不持久化**。
+ *
+ * 为什么失败要退化、而不是用全局键兜底：全局键会让下一个登录的账号读到
+ * 上一个人的货名。少修复一条"重复提交"换来的是不泄漏客户数据 —— 这个交换必须做。
+ */
+function draftStoreKey() {
+  let user = null
+  try {
+    user = getUser()
+  } catch (e) {
+    user = null
+  }
+  const uid = user && user.user_id != null ? String(user.user_id) : ''
+  return uid ? DRAFT_STORE_PREFIX + uid : ''
+}
+
+function blankForm() {
+  return Object.assign({}, BLANK_FORM)
+}
+
+/**
+ * 读回在途草稿；不存在或形状不对一律返回 `null`。
+ *
+ * 形状校验是**必须的**：storage 里的东西可能来自旧版本、也可能被截断或改坏，
+ * 直接 `setData` 进去会让页面带着 `undefined` 渲染 —— 那看起来像"草稿是空的"，
+ * 而用户明明填过，于是他会重填一遍（又建一张草稿）。宁可当作没有草稿。
+ */
+function loadDraftState() {
+  const key = draftStoreKey()
+  if (!key) return null
+  let raw = null
+  try {
+    raw = wx.getStorageSync(key)
+  } catch (e) {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.v !== DRAFT_STORE_VERSION) return null
+  const form = raw.form && typeof raw.form === 'object' ? raw.form : null
+  if (!form) return null
+  return {
+    createKey: typeof raw.createKey === 'string' ? raw.createKey : '',
+    submitKey: typeof raw.submitKey === 'string' ? raw.submitKey : '',
+    createdId: raw.createdId == null ? '' : String(raw.createdId),
+    draftRevision: Number(raw.draftRevision) || 0,
+    form: {
+      title: String(form.title || ''),
+      cargo_summary: String(form.cargo_summary || ''),
+      quantity: String(form.quantity || ''),
+      quantity_unit: String(form.quantity_unit || '')
+    }
+  }
 }
 
 Page({
@@ -151,8 +236,35 @@ Page({
       return
     }
 
-    this.applyCarry(query)
+    // 续接优先于 carry：续接的是一张**已经建在服务端**的草稿（用户真实填过），
+    // 而 carry 只是"源页面能提供的默认值"。两者同时存在时，前者才是事实。
+    if (!this.restoreDraft()) this.applyCarry(query)
     this.load()
+  },
+
+  /**
+   * 续接上一次没提交完的草稿（跨页面实例）。返回是否真的续接了。
+   *
+   * 它同时恢复**两把幂等键与草稿版本** —— 这正是修掉"响应丢失后重进会重复提交"
+   * 的关键：重试必须复用同一个 `(scope, key, payload)`，重新生成键等于发起新意图。
+   */
+  restoreDraft() {
+    const saved = loadDraftState()
+    if (!saved) return false
+    const patch = {
+      form: Object.assign(blankForm(), saved.form),
+      createKey: saved.createKey,
+      submitKey: saved.submitKey,
+      createdId: saved.createdId,
+      draftRevision: saved.draftRevision,
+      // 有编号就说明草稿已在服务端 ⇒ 内容锁定（否则改完重提会建出第二张，见文件头第 1 条）
+      locked: !!saved.createdId
+    }
+    // 提示**只讲"这是续接来的"**：草稿编号与"内容已锁定"由模板里的 `draft-note`
+    // 统一表达，两处都写会变成同一句话在界面上出现两次。
+    if (saved.createdId) patch.carryHint = '已续接上次未提交的内容。'
+    this.setData(patch)
+    return true
   },
 
   /**
@@ -163,9 +275,11 @@ Page({
    */
   applyCarry(query) {
     const q = query || {}
-    const name = q.cargo_name == null ? '' : String(q.cargo_name)
-    const qty = q.quantity == null ? '' : String(q.quantity)
-    const unit = q.quantity_unit == null ? '' : String(q.quantity_unit)
+    // 同 `urlOf`：框架把 query 原样交过来（未解码），不归一化的话草稿初值会是
+    // 一串 `%E8%B5%B0…` —— 用户看到的是乱码，而不是他从上一页带过来的货名。
+    const name = R.decodeParam(q.cargo_name)
+    const qty = R.decodeParam(q.quantity)
+    const unit = R.decodeParam(q.quantity_unit)
     const patch = {}
     if (name) patch['form.cargo_summary'] = name
     if (qty) patch['form.quantity'] = qty
@@ -253,6 +367,9 @@ Page({
     const patch = { createKey: '' }
     patch['form.' + field] = (e && e.detail && e.detail.value) || ''
     this.setData(patch)
+    // 每次输入都落盘：否则"填到一半被杀掉"会丢内容，而内容丢了幂等键也失去意义
+    // （键是为这份内容准备的）。
+    this.persistDraft()
   },
 
   /**
@@ -267,6 +384,38 @@ Page({
     if (!orgId) return
     this.applyOrg(this.data.targets, orgId)
     this.setData({ submitKey: '' })
+    this.persistDraft()
+  },
+
+  /** 把当前在途状态写进 storage。拿不到用户标识就**不写**（见文件头）。 */
+  persistDraft() {
+    const key = draftStoreKey()
+    if (!key) return
+    try {
+      wx.setStorageSync(key, {
+        v: DRAFT_STORE_VERSION,
+        createKey: this.data.createKey,
+        submitKey: this.data.submitKey,
+        createdId: this.data.createdId,
+        draftRevision: this.data.draftRevision,
+        form: this.data.form
+      })
+    } catch (e) {
+      // 写不进去只影响"下次能不能续接"，不影响本次提交 —— 不该让交互失败。
+      // ⚠️ 但也不要在这里 toast：storage 满/不可用在真机上极少见，
+      //    弹一个用户无法处理的错误只会干扰主流程。
+    }
+  },
+
+  /** 清掉本地在途状态（**不**动服务端那张草稿）。 */
+  clearPersistedDraft() {
+    const key = draftStoreKey()
+    if (!key) return
+    try {
+      wx.removeStorageSync(key)
+    } catch (e) {
+      // 同上：清不掉不会让主流程失败，最坏是下次又续接一次
+    }
   },
 
   // ── 提交 ────────────────────────────────────────────────────────────
@@ -300,6 +449,10 @@ Page({
       .then(function () {
         wx.hideLoading()
         const id = self.data.createdId
+        // 提交成功 = 在途状态结束，清掉本地续接载荷。不清的话下次进来会续接一张
+        // **已经提交过**的草稿：界面显示"内容已锁定"、而提交会被服务端以状态冲突拒绝，
+        // 用户面对的是一个他无法理解也无法脱身的假状态。
+        self.clearPersistedDraft()
         self.setData({ submitting: false, createKey: '', submitKey: '' })
         wx.showToast({ title: '已提交，等待受理', icon: 'success' })
         // replace（不是 push）：返回键不该把用户带回一张已经提交过的表单。
@@ -348,6 +501,9 @@ Page({
       // `locked` 与 createdId 同时置上：从这一刻起内容字段不可再改，
       // 否则改完重提会建出第二张草稿（见文件头第 1 条）。
       self.setData({ createdId: id, draftRevision: rev, locked: true })
+      // 建草稿成功是**必须落盘**的一刻：在这里丢掉编号/版本，重进后既不知道
+      // 已有草稿、也没留下那把键，只能从头再发起一次创建 —— 就是重复提交。
+      self.persistDraft()
       return { assignmentId: id, revision: rev }
     })
   },
@@ -355,6 +511,11 @@ Page({
   sendSubmit(assignmentId, revision) {
     const key = this.data.submitKey || newIdempotencyKey('asgsub')
     this.setData({ submitKey: key })
+    // 键要在**发请求之前**落盘。若等响应回来才写，而进程在响应到达前被杀，
+    // 那把键就没留下 —— 重进后会生成新键重发，服务端看到的是两次不同的提交意图
+    // （幂等保护失效）。先写后发，最坏情况只是"键留下了但没发出去"，
+    // 下次重试复用同一个键，服务端会正确识别为同一件事。
+    this.persistDraft()
     return submitAssignment(assignmentId, this.data.orgId, revision, key)
   },
 
@@ -402,9 +563,12 @@ Page({
       cancelText: '继续填写',
       success: function (res) {
         if (res.confirm) {
-          // 用户已明确放弃：先清干净再走，否则 leave() 内部的判断路径会再拦一次
+          // 用户已明确放弃：先清干净再走，否则 leave() 内部的判断路径会再拦一次。
+          // 同时清掉持久化载荷 —— 用户说了放弃，下次进来不该再冒出这张草稿。
+          // （只清**本地**关联；服务端那张草稿仍在，撤回要走 cancel 端点，本页不做。）
+          self.clearPersistedDraft()
           self.setData({
-            form: Object.assign({}, BLANK_FORM),
+            form: blankForm(),
             createKey: '',
             submitKey: '',
             createdId: '',
@@ -413,6 +577,41 @@ Page({
           })
           leave()
         }
+      }
+    })
+  },
+
+  /**
+   * 断开关联，从头填一张新的。
+   *
+   * 存在的理由：续接来的草稿**内容已锁定**（改动会多建一张草稿，见文件头第 1 条）。
+   * 没有这个入口，一个想换货名的用户只能"先提交再撤回"—— 那会留下一张真实的废单。
+   *
+   * 它只清**本地**在途状态，**不**调用撤回端点：单方面替用户删掉服务端数据更坏。
+   */
+  onRestart() {
+    const self = this
+    wx.showModal({
+      title: '重新填写？',
+      content: this.data.createdId
+        ? '会清空本页内容，并断开与草稿 #' +
+          this.data.createdId +
+          ' 的关联。服务端那张草稿仍会保留（可在委托工作台看到），本页不再替你提交它。'
+        : '会清空本页已填的内容。',
+      confirmText: '重新填写',
+      cancelText: '继续编辑',
+      success: function (res) {
+        if (!res.confirm) return
+        self.clearPersistedDraft()
+        self.setData({
+          form: blankForm(),
+          createKey: '',
+          submitKey: '',
+          createdId: '',
+          draftRevision: 0,
+          locked: false,
+          carryHint: ''
+        })
       }
     })
   },
