@@ -397,7 +397,7 @@ a blocking case, and unresolved financial conditions each prevent the applicable
 | Execution plan | `docs/entrust/milestones/DEMO-1-plan.md` | 本文件 |
 | R1 remainder ledger | `docs/entrust/milestones/DEMO-1-r1-remainder.md` | 本轮登记 |
 | API/data delta | `docs/entrust/milestones/DEMO-1-interface-delta.md` | **已产出（S0-6，2026-09-16）**；其 §3.1 的唯一新增端点已于 S1 落地（见 §4 S1 进度行） |
-| Runbook | `docs/entrust/milestones/DEMO-1-runbook.md` | **已产出 S1 起步版（2026-09-16）**：账户 / 组织 / 启动 / 迁移 / 种子五件写清。⚠️ **§6 隔离复位**只到「最小隔离复位」、**§7 三种夹具状态 1/3 已就位**（变更复核检查点，2026-09-16；另两项仍缺失：干净起点只到"部分"、已完成历史委托卡在**委托级结案命令未实现**）⇒ 两节**都**归 S5 收口 —— 本文档**不是**「BP-05 完成」 |
+| Runbook | `docs/entrust/milestones/DEMO-1-runbook.md` | **已产出 S1 起步版（2026-09-16）**：账户 / 组织 / 启动 / 迁移 / 种子五件写清。⚠️ **§6 隔离复位**只到「最小隔离复位」、**§7 三种夹具状态 1/3 已就位**（变更复核检查点，2026-09-16；另两项仍缺失：干净起点只到"部分"、已完成历史委托卡在**委托状态机无终态（`claimed` 无出边，依赖 S4）** —— 2026-09-17 由「结案命令未实现」**订正**而来）⇒ 两节**都**归 S5 收口 —— 本文档**不是**「BP-05 完成」 |
 | Walkthrough | `docs/entrust/milestones/DEMO-1-walkthrough.md` | 待补（S5） |
 | Acceptance report | `docs/entrust/milestones/DEMO-1-acceptance.md` | 待补（S5） |
 | Evidence index | `docs/entrust/milestones/DEMO-1-evidence-index.md` | 待补（S5） |
