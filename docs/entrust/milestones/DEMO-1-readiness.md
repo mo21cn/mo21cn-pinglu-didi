@@ -224,6 +224,11 @@ pytest **705**（通过 694 / 跳过 11 / 失败 0 / 错误 0）；mypy 98 文�
 门禁：**13/13 PASS**（`scripts/verify_local_gates.py`）；
 pytest **713**（通过 702 / 跳过 11 / 失败 0 / 错误 0）；mypy 98 文件无问题；ruff `check` / `format --check` 均 rc=0。
 
+远端：已推送并开 **PR #116**（base `develop`，head `fe42f34`）⇒ **CI 12/12 全绿**
+（`push` 与 `pull_request` 两个事件的 6 项各跑一遍，`conclusion` 全 `SUCCESS`
+—— 含本地跑不了的「前端端到端（真后端载荷驱动）」与「并发集成 / 数据库迁移（MySQL 8.0）」）。
+⚠️ **CI 绿 ≠ 出口判据通过**；且**未合并**（DR-0003，等 HO 授权），见 §9.4。
+
 ⚠️ **两条不得误读**：
 
 1. **㉞ 章的章节结论是 `NOT_RUN`，不等于"没跑"。** 62 项 PASS、FAIL=0，但另有 4 项 `NOT_RUN`
@@ -310,4 +315,23 @@ HO 于 2026-09-16 授权"下一步建议 **1–5 全部执行**（含进入 S1 �
    "IDE 冷 `CompileCache` 约 9 分钟、而就绪闸门只给约 2 分钟" ⇒ 曾连续两轮 `ENV_BLOCKED`。
    解法：**起 IDE + 探测 + 跑走查必须同一个脚本内完成**，且**必须先 `open_project_window`
    再读 `pageStack`**（否则回 `cant find runtimeid by projectpath` —— 那是应有回答，不是故障）。
+
+### 9.4 提交 / 推送 / CI / PR 记录（2026-09-16，同一轮授权）
+
+| # | 事项 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 按关注点分三个提交（后端 / 前端 / 文档） | ✅ `38c8e80`（2 文件 +590/−4）/ `f92356c`（14 文件 +1139/−30）/ `fe42f34`（4 文件 +170/−19） | `git diff d932c43..HEAD --stat` = 20 文件、+1899/−53，与提交前的 `--stat` 逐项吻合 |
+| 2 | 推送 | ✅ 第 1 次 `schannel: server closed abruptly`、**第 2 次成功**；远端 sha == 本地 HEAD | `git ls-remote` ⇒ `fe42f34134bcaf70aafaf972ada0b4aca9ac1de4` |
+| 3 | 开 PR | ✅ **#116**（base `develop`） | `POST /repos/{R}/pulls` ⇒ `201` |
+| 4 | CI | ✅ **12/12 全绿**（`not_success=0`） | `GET /commits/{sha}/check-runs` |
+
+⚠️ **两条如实交代**：
+
+1. **CI 绿 ≠ PRD 完成，也 ≠ 出口判据通过。** 12 项绿只证明"既有门禁在**本提交**上通过"；
+   ㉞ 章的 4 项 `NOT_RUN` + 3 项 `LIMITATION` 一条都不会因为 CI 绿而变成"有证据"。
+2. **本轮遇到一次"写操作脚本被 SIGTERM ≠ 操作没发生"**：分组提交脚本在**收尾打印阶段**被
+   工具侧超时杀掉（stdout 全空、`Exit Code 1 / Signal SIGTERM`），重跑报
+   `nothing added to commit` —— 但 **3 个提交其实已全部创建**（`git log -5` 三条齐全、
+   `diff --stat` 与提交前完全吻合、refs 总数未变、`D` 行数 0）。⇒ 判据是**目标产物在不在**，
+   **不是**进程存活状态或返回码（与"推送超时 ≠ 推送失败"同源）。
 

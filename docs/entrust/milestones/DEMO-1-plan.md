@@ -244,7 +244,13 @@ correct queue, can be claimed once, and remains inaccessible to unrelated organi
 **进度（2026-09-16，第二切片 —— 分支 `feature/DEMO1-S1-exit-criteria`，base `develop@d932c43`）**：
 第一切片已由 **PR #115** squash 合并（`d932c43`）。第二切片把上一轮登记的三条"不得算作完成"
 闭环两条、另一条口径收窄，并把出口判据从"一条都还没验"推进到"后端 8 条可执行 + 真机 62 项 PASS"。
-工作项 **3～6 仍未开始**。
+工作项 **3～6 仍未开始**。本切片已推送并开 **PR #116**（head `fe42f34`，3 个提交 / 20 文件）；
+**CI 12/12 全绿**（`push` 与 `pull_request` 两个事件的 6 项各跑一遍，`conclusion` 全 `SUCCESS`）
+—— ⚠️ 但**未合并**：DR-0003，PR 作者不自批，等 HO 授权。
+
+⚠️ 下表「证据等级」列描述的是**该行所述这件事**的证据，**不是**"出口判据整句通过"。
+合同里的出口判据是**四句合取**（survives reload ∧ correct queue ∧ claimed once ∧
+inaccessible to B），任一句未取证则**整体不通过** —— 逐句的缺口写在表下的交代块里。
 
 | 项 | 落地内容 | 证据等级 |
 | --- | --- | --- |
@@ -258,6 +264,15 @@ correct queue, can be claimed once, and remains inaccessible to unrelated organi
 | 幂等键持久化 | `intake.js` 7 处在途状态落 `storage`；仅在提交成功 / 用户放弃时清除 | 真机 PASS（含"提交成功后在途载荷被清"） |
 | 3～4 | 组织受理队列接 UI、A1 认领接 UI（含并发负例的 UI 侧） | **未开始** |
 | 5～6 | 客户侧真实状态与承接组织、BP-05 文档化 | **未开始** |
+
+**出口判据逐句取证情况**（合同原文四句；⚠️ **整句判据 = 四句合取**）：
+
+| 判据 | 已取证的部分 | 仍缺 ⇒ **整句不成立** |
+| --- | --- | --- |
+| ① a fresh UI-created assignment **survives reload** | 真机：真实点击建草稿 → 提交 → 落到详情（`assignmentId='5'`、`status='submitted'`）；换页面实例后续接同一张草稿并提交（编号 `6` → `6`）。后端：文件型 SQLite **换新会话读**仍能读到终局 | 真机侧**没有**"重新加载后仍在列表 / 详情可见"的**独立**断言（现有证据是"换实例续接"） |
+| ② **appears in the correct queue** | 真机：受理屏可选目标来自**服务端探测**（`targets=1 ['演示经营主体·工作台']`），不用本地 `current_role`；后端：`list_my_entrustments` 14 条（含与提交门禁的交叉断言） | **组织侧受理队列的 UI 还没接**（工作项 3 未开始）⇒ 这句目前只有**后端侧**证据 |
+| ③ **can be claimed once** | 后端：条件 UPDATE 的 `rowcount` 判据 1 / 0 两条 + 迟到写入记 `abandoned` / `lease_lost` | 真机侧 `NOT_RUN`（单模拟器做不出两个并发写者）；**更大并发规模**未取证 |
+| ④ remains **inaccessible to unrelated organization B** | 后端：越权认领 → **403**（修掉了 500）、越权详情 → 404 | 真机侧 `NOT_RUN`（本切片没有撤权入口）；**旧接口未覆盖的授权面**未逐条复核 |
 
 ⚠️ **三条如实交代**（汇报一律**双句**，不得只写后一句）：
 
