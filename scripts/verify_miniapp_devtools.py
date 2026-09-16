@@ -6219,12 +6219,14 @@ def sec_39(w: Walker) -> None:
         "去向：㉟ 五 = 409 @ 队列 · ㊲ = 403 @ 队列 · 本章 = 409 @ 详情页",
     )
     w.rep.rec(
-        "㊴ ⚠️ **仍未取证**（去向记录，**不是通过**）：**详情页**入口上的「权限被撤销 ⇒ 403」"
-        "分支没有独立证据 —— ㊲ 章证的是**队列卡片**入口。它与本章的 409 走的是同一个 "
-        "`onSubmitClaim` 的 `if (status === 403 || status === 409) return self.load()`，"
-        "但「403 也走这条」目前只有**代码阅读**，设备证据只到 409 ⇒ 保持未取证，不得涂绿",
+        "㊴ 缺口登记（**保留的历史事实**，**不是**本章的通过）：本章首次跑时，**详情页**入口上的"
+        "「权限被撤销 ⇒ 403」分支**没有**独立证据 —— ㊲ 章证的是**队列卡片**入口。它与本章的 409 "
+        "走的是同一个 `onSubmitClaim` 的 `if (status === 403 || status === 409) return self.load()`，"
+        "但「403 也走这条」当时只有**代码阅读**。"
+        "⚠️ 该缺口已于 2026-09-16 由 **㊵ 章**（sec_40）兑现为设备证据。本条**不删** ——"
+        "「当时确实没有证据」本身是记录的一部分，删掉它等于伪造历史",
         True,
-        "缺的是详情页上的 403 通道（与 ㊲ 的撤权配方同形，只是换成详情页入口）",
+        "已兑现：㊵ = 403 @ 详情页；㊲ = 403 @ 队列 · ㉟ 五 = 409 @ 队列 · 本章 = 409 @ 详情页",
     )
     w.rep.limitation(
         "㊴ 本章的载体单经 **API 建单 / 提交**，不是界面提交",
@@ -6243,6 +6245,279 @@ def sec_39(w: Walker) -> None:
         "与 ⑧b / ㉕D / ㊲ / ㊳ 同一个**工具**边界（toast 不在渲染树里），与产品无关。"
         "本章能证的是可观察结果：HTTP 409、`canClaim` / `canCreateCase` 的翻转、"
         "锚点在渲染树里的命中数。",
+    )
+
+
+def sec_40(w: Walker) -> None:
+    """㊵ 详情页受理入口的「**权限撤销**」路径（403 ⇒ 刷新）—— 与 ㊴ 同入口、另一分支。
+
+    为什么还差这一条
+    ----------------
+    ㊴ 章**当时**把这条缺口如实登记为「仍未取证」：详情页入口上的 **403** 分支只有**代码阅读**
+    （`detail.js: onSubmitClaim` 的 `catch` 里 `if (status === 403 || status === 409) return self.load()`），
+    设备证据只到 **409**。本章把它补成真证据 —— 于是「入口 × 分支」四格**全部有设备侧证据**：
+
+    | 章 | 入口 | 分支 | 证据 |
+    | --- | --- | --- | --- |
+    | ㉟ 五 | 队列卡片 | 409 被抢 | 页内确认条 + 队列刷成服务端真实状态 |
+    | ㊲ 三 | 队列卡片 | 403 撤权 | 页内确认条 + 刷新（成对断言单据未被改动） |
+    | ㊴ | 详情页 | 409 被抢 | 确认条展开 ⇒ 点确认 ⇒ 409 ⇒ 刷新 |
+    | **本章** | **详情页** | **403 撤权** | 确认条展开 ⇒ 点确认 ⇒ 403 ⇒ 刷新 |
+
+    ⭐ 配方必须照抄 ㊲ 的**撤权对象选择**，不能照抄 ㊴ 的**组织**
+    ---------------------------------------------------------
+    「撤权」要求被撤的那条权限**没有第二条来源**。甲组织的委托授权里**本来就含**
+    `entrust:assignment:claim` ⇒ 在甲撤角色**撤不掉** claim（㊲ 首跑正是撞上这个 200）。
+    所以本章用 **乙组织 ＋ `seed-mgr-only-b`**：该组织 claim **只**来自角色 ⇒ 撤角色＝真撤权。
+
+    ⚠️ 而「被抢认领」（㊴）需要**同组织两个经理**，种子里只有甲满足 ⇒ 两章的选址
+    **恰好相反**。这不是笔误，是同一条理由（"被撤/被抢的那条权限有没有第二条来源"）
+    在两个分支上给出的不同答案。
+
+    ⚠️ 本章**会改库**（成员角色），且**必须在 `finally` 里还原** —— 与 ㊲ 同一条纪律：
+    种子脚本的 `_member()` 是「有则跳过」，不还原就是给下一次走查的 ㊱ 章埋雷。
+
+    ⭐ 本章与 ㊴ 合起来还能证一件单章证不了的事
+    ------------------------------------------
+    两个分支在详情页上留下的**页内痕迹不同**：`canCreateCase` 只看 `board.status === 'claimed'`。
+    ㊴ 的 409 ⇒ 单据 `claimed` ⇒ 该字段翻 **true**；本章的 403 ⇒ 单据仍 `submitted` ⇒ 仍 **false**。
+    ⇒ 两条合取，才排掉「页面把任何刷新都当成同一个结果」这种替代解释。
+    """
+    print("\n== ㊵ 详情页受理入口的「权限撤销」路径（403 ⇒ 刷新）==", flush=True)
+    base_err = w.c.errors()
+    claim_perm = "entrust:assignment:claim"
+
+    tok_subj = (api_login(CODE_MGR_ONLY_B) or {}).get("access_token") or ""
+    by_s = {
+        str((r or {}).get("name") or ""): (r or {})
+        for r in ((api_get("/entrust/my-orgs", tok_subj) or {}).get("items") or [])
+    }
+    org_b = by_s.get(ORG_B) or {}
+    org_b_id = str(org_b.get("org_id") or "")
+    perm_b = [str(p) for p in (org_b.get("permissions") or [])]
+
+    w.rep.rec(
+        "㊵ 前置①：撤权对象是 `seed-mgr-only-b`@**乙** —— 该组织里 "
+        "`entrust:assignment:claim` **只**来自角色（没有第二条来源），撤角色＝真撤权。"
+        "⚠️ 与 ㊴ 选的**甲组织恰好相反**，理由见本章 docstring",
+        bool(org_b_id) and str(org_b.get("member_role")) == "manager" and claim_perm in perm_b,
+        f"乙#{org_b_id} role={org_b.get('member_role')!r} perms={perm_b}",
+    )
+    if not org_b_id or str(org_b.get("member_role")) != "manager" or claim_perm not in perm_b:
+        w.rep.not_run(
+            "㊵ 详情页撤权路径",
+            "前置不成立：`seed-mgr-only-b` 在乙不是 manager，或该组织不含 claim 权限。"
+            "先跑 backend/scripts/seed_entrust_orgpicker.py（或等 ㊲ 章的还原步骤跑一次）再重跑。",
+        )
+        return
+
+    id_b = find_submitted(org_b_id, TITLE_B, tok_subj)
+    w.rep.rec(
+        "㊵ 前置②：乙组织里找到标题匹配且 status=submitted 的样本单（**与 ㊲ 共用同一张**）——"
+        "两章都只**尝试**受理、都被拒 ⇒ 零业务写入、不互相消耗，谁先跑都不影响谁",
+        bool(id_b),
+        f"乙#{id_b}（{TITLE_B}）",
+    )
+    if not id_b:
+        w.rep.not_run(
+            "㊵ 详情页撤权路径",
+            "乙组织样本单缺失（可能已被历史走查受理掉）。先跑 seed_entrust_orgpicker.py。",
+        )
+        return
+
+    def goto_detail(tag: str) -> dict:
+        """钉住乙组织 → 打开该单的**详情页**，返回详情页的 page_data。
+
+        ⚠️ 必须先清 `saved` 组织再写死乙：`pickOrg` 有 `saved` 分支，而该 Storage 键
+        **跨 IDE 重启保留** ⇒ 不显式指定就可能落在甲（那里 claim 撤不掉），本章断言会失真。
+        """
+        w.c.remove_storage(ORG_STORAGE_KEY)
+        w.c.remove_storage(ORG_STORAGE_KEY)  # 双保险：确认清掉上次选择
+        w.c.set_storage(ORG_STORAGE_KEY, org_b_id)
+        w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={id_b}", DETAIL)
+        return w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+
+    # ============ 一、详情页起点：入口在（先证有）============
+    print("\n-- 一、详情页起点（先证有）--", flush=True)
+    if not w.open_workbench(CODE_MGR_ONLY_B, tag="㊵"):
+        w.rep.not_run("㊵ 详情页撤权路径", "未能以 seed-mgr-only-b 进入经理工作台")
+        return
+    w.wait_data(lambda x: x.get("view") is not None, tries=30, gap=0.5)
+    pd0 = goto_detail("㊵-起点")
+    n_open0 = w.c.count('[data-act-claim-open="1"]')
+    w.rep.rec(
+        "㊵ ① 起点：详情页上待受理态、**受理入口在** —— 必须先证有：没有它，"
+        "「撤权之后入口消失」就与「本来就没有入口」分不开（那是完全不同的结论）",
+        pd0.get("canClaim") is True and n_open0 == 1,
+        f"canClaim={pd0.get('canClaim')!r} open={n_open0}",
+    )
+    w.shot("40-1-详情页-撤权前-入口在")
+
+    # ============ 二、确认条展开（把页面停在「用户已决定受理」那一刻）============
+    print("\n-- 二、确认条展开（撤权前）--", flush=True)
+    t_open = w.c.tap('[data-act-claim-open="1"]')
+    time.sleep(1.2)
+    d_open = w.c.page_data()
+    n_sub_open = w.c.count('[data-act-claim-submit="1"]')
+    n_cancel_open = w.c.count('[data-act-claim-cancel="1"]')
+    w.rep.rec(
+        "㊵ ② 点「受理委托」⇒ 确认条在**页内**展开（确认 / 取消同时可点）。形态本身已由 "
+        "㊳ ② 断言，这里只用它把页面停在「用户已经决定要受理」的那一刻",
+        bool(t_open) and d_open.get("claimOpen") is True and n_sub_open == 1 and n_cancel_open == 1,
+        f"tap={t_open} claimOpen={d_open.get('claimOpen')!r} "
+        f"submit={n_sub_open} cancel={n_cancel_open}",
+    )
+    w.shot("40-2-确认条展开-撤权前")
+
+    flipped = False
+    try:
+        # ============ 三、运行中撤权（全章唯一的写操作，且会被还原）============
+        print("\n-- 三、运行中把乙组织的角色改成 member --", flush=True)
+        rc, out = flip_org_role(CODE_MGR_ONLY_B, ORG_B, "member")
+        flipped = rc == 0
+        w.rep.rec(
+            "㊵ ③ 走查专用通道把该身份在**乙组织**的角色 manager → **member**"
+            "（`ent_org_member` 无 HTTP 接口 ⇒ 只能落库；这一步是这条边界能取证的前提）",
+            flipped,
+            f"rc={rc} out={out[:200]}",
+        )
+        if not flipped:
+            w.rep.not_run("㊵ 详情页撤权路径", f"改角色失败：rc={rc} out={out[:200]}")
+            return
+
+        # —— ③a **先证权限真的被撤销**：同一 token 重取 /my-orgs ——
+        # ⚠️ 不能省：少了它，后面的 403 就证明不了"是撤权导致的"（㊲ 首跑在甲组织正是如此）。
+        by2 = {
+            str((r or {}).get("name") or ""): (r or {})
+            for r in ((api_get("/entrust/my-orgs", tok_subj) or {}).get("items") or [])
+        }
+        ob2 = by2.get(ORG_B) or {}
+        perm_b2 = [str(p) for p in (ob2.get("permissions") or [])]
+        w.rep.rec(
+            "㊵ ③a **先证权限真的被撤销了**：同一 token 重取 `/my-orgs` ⇒ 该组织权限集里 "
+            "`entrust:assignment:claim` **已消失**（只剩 `entrust:view`）",
+            str(ob2.get("member_role")) == "member" and claim_perm not in perm_b2,
+            f"乙 role={ob2.get('member_role')!r} perms={perm_b2}",
+        )
+
+        # —— ③b 服务端已经拒绝：**同一个 token**，不重新登录 ——
+        status, body = api_post(
+            f"/entrust/assignments/{id_b}/claim",
+            tok_subj,
+            {},
+            idem_key=f"walk40-revoke-{int(time.time() * 1000)}",
+        )
+        w.rep.rec(
+            "㊵ ③b 撤权后**直接调用**受理 ⇒ 服务端 **403**（裁定 §3：隐藏按钮 ≠ 放行）。"
+            "同一 token 且未重新登录 ⇒ 权限取自**库**，不是 token 里的角色快照",
+            status == 403,
+            f"HTTP={status} body={json.dumps(body, ensure_ascii=False)[:160]}",
+        )
+
+        # —— ③c 被拒的调用没有改单据（负例不留副作用）——
+        truth = api_get(f"/entrust/assignments/{id_b}", tok_subj) or {}
+        w.rep.rec(
+            "㊵ ③c 被拒的调用**没有**改动单据（仍 submitted、仍无人认领）—— 负例不留副作用，"
+            "否则下一次跑就没有样本了",
+            str(truth.get("status")) == "submitted",
+            f"status={truth.get('status')!r} claimed_by={truth.get('claimed_by')!r}",
+        )
+
+        # —— ③d 界面上那份**陈旧**的确认条仍在（这是被测事实，不是缺陷）——
+        d_stale = w.c.page_data()
+        n_sub_stale = w.c.count('[data-act-claim-submit="1"]')
+        w.rep.rec(
+            "㊵ ③d 撤权后**未刷新**时确认条**仍在**、`canClaim` 仍为 true —— 页面拿的是"
+            "旧权限投影（前端不轮询权限）。这不算缺陷：它正是「服务端必须独立校验」"
+            "这条裁定存在的原因",
+            d_stale.get("canClaim") is True and n_sub_stale == 1,
+            f"页面 canClaim={d_stale.get('canClaim')!r} 确认键={n_sub_stale}（服务端已撤权）",
+        )
+
+        # ============ 四、迟到的那一下 ⇒ 403 ⇒ 页面自己刷新 ============
+        print("\n-- 四、迟到的那一下 ⇒ 403 ⇒ 刷新 --", flush=True)
+        t_late = w.c.tap('[data-act-claim-submit="1"]')
+        d_after = w.wait_data(
+            # 判据同 ㊴：取 `canClaim is False`，**不取** `not claiming`（后者在 catch 里
+            # 先被置回 false，而 `load()` 还没回来 ⇒ 会提前返回并造成假红）。
+            lambda x: x.get("view") not in (None, "", "loading") and x.get("canClaim") is False,
+            tries=60,
+            gap=0.5,
+        )
+        n_open1 = w.c.count('[data-act-claim-open="1"]')
+        n_sub1 = w.c.count('[data-act-claim-submit="1"]')
+        n_cancel1 = w.c.count('[data-act-claim-cancel="1"]')
+        truth_ui = api_get(f"/entrust/assignments/{id_b}", tok_subj) or {}
+        w.rep.rec(
+            "㊵ ④ 迟到的那一下 ⇒ **403** ⇒ 页面**自己刷新**（`detail.js: onSubmitClaim` 的 "
+            "`if (status === 403 || status === 409) return self.load()`）：`canClaim` 翻 **false**、"
+            "受理入口与确认条一起从渲染树里消失，而不是留一个点了必然 403 的按钮。"
+            "⚠️ 成对断言，且这一对**恰好与 ㊴ 相反**：`canCreateCase` 必须仍为 **false**"
+            "（它只看 `board.status === 'claimed'`，撤权**不改状态**、单据仍 `submitted`）；"
+            "㊴ 的 409 让同一字段翻 **true** ⇒ 两章合起来把「403 与 409 在详情页上留下**不同**"
+            "页内痕迹」证成事实",
+            bool(t_late)
+            and d_after.get("canClaim") is False
+            and d_after.get("canCreateCase") is False
+            and n_open1 == 0
+            and n_sub1 == 0
+            and n_cancel1 == 0
+            and str(truth_ui.get("status")) == "submitted",
+            f"tap={t_late} canClaim={d_after.get('canClaim')!r} "
+            f"canCreateCase={d_after.get('canCreateCase')!r} open={n_open1} "
+            f"submit={n_sub1} cancel={n_cancel1} 单据 status={truth_ui.get('status')!r}",
+        )
+        w.shot("40-3-撤权后-页面刷新-入口消失")
+    finally:
+        # ============ 收尾：还原（**必须在 finally**，否则给下一次走查埋雷）============
+        rc_back, out_back = flip_org_role(CODE_MGR_ONLY_B, ORG_B, "manager")
+        w.rep.rec(
+            "㊵ 收尾：把角色**还原**成 manager —— 本章会改库，而种子脚本的 `_member()` 是"
+            "「有则跳过」、不会自己改回来；不还原，下一次走查的 ㊱ 章对照 2 会红"
+            "（那一节要求 `seed-mgr-only-b` 在乙是 manager）",
+            rc_back == 0,
+            f"rc={rc_back} out={out_back[:160]}",
+        )
+
+    # ============ 五、对照组：复权后入口回来（排掉「页面/工具本来就是坏的」）============
+    if flipped:
+        print("\n-- 五、对照组：复权后入口回来 --", flush=True)
+        if not w.open_workbench(CODE_MGR_ONLY_B, tag="㊵-对照"):
+            w.rep.not_run("㊵ 对照组", "复权后未能重进经理工作台")
+        else:
+            w.wait_data(lambda x: x.get("view") is not None, tries=30, gap=0.5)
+            d_re = goto_detail("㊵-对照")
+            n_re = w.c.count('[data-act-claim-open="1"]')
+            w.rep.rec(
+                "㊵ 对照组：**还原角色**后重进**详情页**，入口**回来**（`canClaim` 翻回 true）—— "
+                "排掉「页面/工具本来就是坏的」这个替代解释，也证明链路**双向可逆**。"
+                "⚠️ 这一步是**重新进入页面实例**，不等于原地刷新；原地刷新由第四节覆盖",
+                d_re.get("canClaim") is True and n_re == 1,
+                f"canClaim={d_re.get('canClaim')!r} 命中={n_re}",
+            )
+            w.shot("40-4-复权后-入口回来")
+
+    # ============ 六、诚实边界（不计入通过）============
+    print("\n-- 六、诚实边界（不计入通过）--", flush=True)
+    w.rep.rec(
+        "㊵ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        str(w.new_errors(base_err))[:200],
+    )
+    w.rep.rec(
+        "㊵ 去向记录（**复用**，不是本章新证）：队列卡片入口上的同一分支由 **㊲ 章**"
+        "（403 撤权）覆盖；本章只补**详情页**入口，不重复断言、也不顶替它。"
+        "⚠️ 至此「四个入口 × 两个分支」的四格**全部有设备侧证据**；"
+        "㊴ 章里那条「仍未取证」的去向记录由本章**兑现**",
+        True,
+        "去向：㉟ 五 = 409 @ 队列 · ㊲ = 403 @ 队列 · ㊴ = 409 @ 详情页 · 本章 = 403 @ 详情页",
+    )
+    w.rep.limitation(
+        "㊵ 页面上的**提示文案**本身无法被工具断言",
+        "403 的提示由请求层按服务端 `detail` 发出，而 toast / 弹层都不在渲染树里"
+        "（与 ⑧b / ㉕D / ㊲ / ㊳ / ㊴ 同一个**工具**边界，与产品无关）。本章能证的是可观察"
+        "结果：HTTP 403、该组织权限集里 claim 已消失、`canClaim` / `canCreateCase` 的取值、"
+        "锚点在渲染树里的命中数、单据未被改动。",
     )
 
 
@@ -6271,6 +6546,7 @@ SECTIONS = {
     "37": sec_37,
     "38": sec_38,
     "39": sec_39,
+    "40": sec_40,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -6350,6 +6626,11 @@ DEFAULT_ORDER = [
     #    本章因此经 API 自建一张载体单（不新造种子），两章各用各的单。
     #    本章**不依赖**其它章节留下的状态，单跑也能成立（前置只是种子里的身份与组织）。
     "39",
+    # ㊵ 详情页受理入口的「**权限撤销**」路径（D-4 §5 第四条）：403 ⇒ 刷新。
+    # ⚠️ 与 ㊴ 同入口、另一分支。撤权对象必须选**乙组织**（该组织 claim 只来自角色），
+    #    与 ㊴ 的选址**恰好相反** —— 理由见 sec_40 docstring。
+    #    本章**会改库**（成员角色），自带 `finally` 还原；排在 ㊴ 之后，单跑也成立。
+    "40",
 ]
 
 
