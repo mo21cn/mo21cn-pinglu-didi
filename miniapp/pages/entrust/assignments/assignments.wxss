@@ -110,6 +110,19 @@
   color: #98A6B8;
 }
 
+/* 触底加载提示。`mine-more-end` 与加载中分开着色：
+   把"正在加载"和"已经到底"显示成同一种灰，用户会一直等下去。 */
+.mine-more {
+  padding: 24rpx 0;
+  text-align: center;
+  font-size: 24rpx;
+  color: #6B7A8C;
+}
+
+.mine-more-end {
+  color: #98A6B8;
+}
+
 .empty-hint {
   margin-top: 12rpx;
   padding: 0 48rpx;

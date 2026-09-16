@@ -416,3 +416,12 @@ jobs:
           cd ..
           node scripts/verify_login_flow.js
           node scripts/verify_frontend_e2e.js
+
+          # 「变更复核检查点」夹具（DEMO-1-runbook.md §7 第 2 行）。
+          # 放在**本步最后**：上面的断言已经跑完，这里再加数据不可能影响它们。
+          # 为什么必须真跑一次而不是只让 ruff 查语法：与 ci.yml 上方那条注释同一个道理 ——
+          # 一条"从没被执行过"的脚本，坏掉时是**静默**的。
+          # 跑两遍：第 2 遍走复用分支 ⇒ `set -e` 下任何一次崩溃都会让本 job 失败。
+          cd backend
+          python scripts/seed_entrust_revalidation.py
+          python scripts/seed_entrust_revalidation.py

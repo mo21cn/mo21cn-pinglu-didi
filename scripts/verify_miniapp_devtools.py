@@ -146,6 +146,16 @@ TITLE_MINE_LIST = "走查·我的委托列表可见性（㊶ 章 API 建单）"
 #: ㊶ 章的第二张载体单：**草稿**（`org_id` 为空）。它承载「承接组织未知」这一格 ——
 #: 只有真的有这么一张单，才能证界面上的「尚未委托组织」不是一句编出来的文案。
 TITLE_MINE_DRAFT = "走查·我的委托·草稿（㊶ 章 API 建单，无承接组织）"
+TITLE_PROBE_PAGE = "走查·触底分页探针（㊷ 章 API 建单）"
+#: ㊷ 章分页探针：把该身份的单据数抬到**超过一页**，第 2 页才有观测对象。
+PROBE_PAGE_TARGET = 25
+#: 页面 `assignments.js` 里 `PAGE_SIZE` 的探针侧副本。
+#: ⚠️ 两处不一致时本章会在「条目数」那一格红 —— 这是故意的：页长改了而探针没跟，
+#:    走查必须暴露出来，而不是继续按旧页长断言、把真实偏差留给用户发现。
+MINE_PAGE_SIZE = 20
+#: `pageScrollTo` 的落点：取一个必然溢出的值，交给原生 clamp 到最底。
+#: （算真实页高要在设备侧量，而这里要的只是「到底」。）
+MINE_SCROLL_BOTTOM = 99999
 
 CODE_SHIPPER = "seed-shipper"
 CODE_OWNER = "seed-owner"
@@ -6836,6 +6846,209 @@ def sec_41(w: Walker) -> None:
     )
 
 
+def sec_42(w: Walker) -> None:
+    """㊷ 触底分页探针（DR-0018 的 A.P-2）。
+
+    本章补的是 DR-0018 裁定二·A 的探针 P-2：「列表滚动到底 / 触发加载更早一页」。
+
+    P-1 为什么**不在本章重跑**
+    -------------------------
+    矩阵原文里 P-1 的 `why_now` 写着「走查工具此前从未向 input 写入过文本
+    （全仓 39 章无先例）」—— **这句是错的**。本轮复核发现 `input_text` 已被用过
+    **6 处**（`[data-field="title"]` 三处、`[data-df="task-title"]` 两处、工作台
+    表单标题一处），而且 **㉞ 章那条断言证的就是 P-1 问的那件事**：
+
+        ㉞ 真实输入触发 `bindinput`（标题进了页面 data，不是只写进渲染层）
+
+    再加上 ㉞ 章提交后详情页显示的正是本页填的那一句（文本真的落进了服务端），
+    P-1 的两个分句（键入真的接上、文本真的落库）**都已有有效证据**。
+    按裁定二·A·2「已有有效证据 ⇒ 不复做」（把「系统返回键」从清单删除用的
+    就是同一条理由），P-1 记 PASS 并注明证据来源，本章**不重复劳动**。
+
+    P-2 为什么需要一个新靶子
+    ------------------------
+    矩阵原文要断的是「更早一页进入列表 ＋ `onReachBottom` 真的跑过」。
+    而复核发现：**全仓 `onReachBottom` 0 处** —— 这个探针此前**没有可观测对象**。
+    更值得记的是，缺它的那一页正是本切片刚建的「我的委托」：`load()` 只取第 1 页
+    （`PAGE_SIZE = 20`），界面却会诚实地显示「第 1/2 页」。⇒ 货主提了 25 张单时
+    **第 21 张之后永远看不到**，而**缺陷长得像功能**（"有分页提示"）。
+    分页提示不是分页能力 —— 这正是本章开头那条断言的来历。
+
+    所以本章先给该页补上 `onReachBottom`（**修的是真缺陷，不是为探针造靶子**），
+    再用工具的原生 `pageScrollTo` 驱动触底，断言第 2 页真的进来。
+
+    驱动方式，以及这一章能证明什么
+    ------------------------------
+    `Client.scroll_to(top)` 的底层是 `automation_viewport_action pageScrollTo`
+    —— **页面级真滚动**，与小程序 `onReachBottom` 是同一个触发源。
+    ⚠️ 工具**没有滑动手势 API**（`swipe` / 触摸手势一个都没有），所以「下拉刷新」
+    那条（P-3）仍造不出来；但「滚到底」有原生通路 —— P-2 与 P-3 看起来同类，
+    可脚本化程度**并不相同**，这个差别本身就是本章要留下的设计约束。
+
+    ⚠️ 副作用：本章经 API 建 `PROBE_PAGE_TARGET` 张**草稿**单（挂在
+    `seed-shipper-orgpicker` 名下；不改任何已存在的单据、不改库）。
+    故与 ㊶ 一样放在全量序列**最末**。
+    """
+    print("\n== ㊷ 触底分页探针（DR-0018 的 A.P-2）==", flush=True)
+    base_err = w.c.errors()
+
+    w.rep.rec(
+        "㊷ P-1 去向记录（**复用**，不是本章新证）：会话输入框键入 ＋ 该文本真的落进服务端 —— "
+        "证据在 ㉞ 章（`input_text` → `bindinput` → `data.form.title`，提交后详情页标题一致）；"
+        "矩阵里「全仓无先例」那句原文**本轮已订正**（实为 6 处先例、其中一处已断言 `bindinput`）",
+        True,
+        "去向：㉞ 章「真实输入触发 bindinput」= P-1 的两个分句；本章不重跑（裁定二·A·2）",
+    )
+
+    tok = (api_login(CODE_SHIPPER_ORGPICKER) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊷ 触底分页探针", "API 登录失败，取不到该身份的 token ⇒ 前置不成立")
+        return
+
+    # ---- 前置①：把 `view=owner` 的条数抬到**超过一页** ----
+    before = api_get("/entrust/assignments?view=owner&page=1&size=1", tok) or {}
+    total0 = int(before.get("total") or 0)
+    ts = int(time.time() * 1000)
+    created = 0
+    st_last = 0
+    for i in range(PROBE_PAGE_TARGET):
+        st_last, _ = api_post(
+            "/entrust/assignments",
+            tok,
+            {
+                "title": f"{TITLE_PROBE_PAGE} #{i + 1:02d}",
+                "cargo_summary": "㊷ 章分页探针载体单（草稿，不提交）",
+            },
+            f"walk42-{i}-{ts}",
+        )
+        if st_last in (200, 201):
+            created += 1
+    after = api_get("/entrust/assignments?view=owner&page=1&size=1", tok) or {}
+    total1 = int(after.get("total") or 0)
+    w.rep.rec(
+        "㊷ 前置①：经 API 批量建**草稿**载体单，使 `view=owner` 的总数**超过一页** —— "
+        "没有这一步「第 2 页」无从产生，P-2 只能记「产品侧尚无实现」。"
+        "⚠️ 建的是草稿：不动任何已存在的单据、不改库",
+        created == PROBE_PAGE_TARGET and total1 > MINE_PAGE_SIZE,
+        f"起点 total={total0} 新建 {created}/{PROBE_PAGE_TARGET}（末次 HTTP={st_last}）"
+        f" ⇒ total={total1}（页长 {MINE_PAGE_SIZE}）",
+    )
+    if total1 <= MINE_PAGE_SIZE:
+        w.rep.not_run(
+            "㊷ 触底分页探针",
+            f"总数 {total1} 未超过一页长 {MINE_PAGE_SIZE}，第 2 页**无从产生** —— 不硬断。",
+        )
+        return
+
+    # ---- 前置②：页面通道登录（`login_as` + `enter_role` 成对）----
+    path = w.login_as(CODE_SHIPPER_ORGPICKER)
+    if path != INDEX or not w.enter_role("shipper", SHIPPER):
+        w.rep.rec(
+            "㊷ 前置②：以 `seed-shipper-orgpicker` 真的**登录进**小程序"
+            "（`login_as` + `enter_role` 成对；只调 `login_as` ＝ 停在未登录 ⇒ 页面侧全拿 401）",
+            False,
+            f"停在 {path!r}、当前 {w.c.current_path()!r}",
+        )
+        w.rep.not_run("㊷ 触底分页探针", "页面通道没进到货主端，链路断在登录")
+        return
+
+    w.c.navigate("reLaunch", "/" + MINE_LIST)
+    w.c.wait_path(MINE_LIST, tries=40)
+    d1 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    items1 = d1.get("items") or []
+    hint1 = str(d1.get("pageHint") or "")
+    expect1 = min(total1, MINE_PAGE_SIZE)
+    w.rep.rec(
+        f"㊷ ① 首屏只取**第 1 页**（{len(items1)} 张 = min(总数 {total1}, 页长 {MINE_PAGE_SIZE})），"
+        "且 `pageHint` 如实说明还有更早的（『第 1/N 页』）—— 这是触底之前应有的形态",
+        d1.get("view") == "ready"
+        and len(items1) == expect1
+        and d1.get("hasMore") is True
+        and ("1/" in hint1),
+        f"view={d1.get('view')!r} 条目数={len(items1)}（期望 {expect1}）"
+        f" hasMore={d1.get('hasMore')!r} reachCount={d1.get('reachCount')!r} "
+        f"pageHint={hint1!r}",
+    )
+    w.shot("42-1-我的委托-第1页")
+    if len(items1) != expect1:
+        w.rep.not_run("㊷ 触底分页探针", f"首屏条目数 {len(items1)} ≠ 期望 {expect1}，链路断在取数")
+        return
+
+    # ---- 触底：原生 `pageScrollTo`（页面级真滚动）----
+    print("\n-- 触底：原生 pageScrollTo --", flush=True)
+    sc = w.c.scroll_to(MINE_SCROLL_BOTTOM)
+    d2 = w.wait_data(lambda x: len(x.get("items") or []) > len(items1), tries=30, gap=0.5)
+    items2 = d2.get("items") or []
+    expect2 = min(total1, MINE_PAGE_SIZE * 2)
+    w.rep.rec(
+        "㊷ ② **触底真的把更早一页加载进来了**：原生 `pageScrollTo` 滚到底 ⇒ "
+        "`onReachBottom` 触发 ⇒ 列表变长。⚠️ 这条能成立，是因为本轮先给该页补了 "
+        "`onReachBottom`：在此之前它只取第 1 页，第 21 张之后的委托**永远看不到**",
+        bool(sc) and len(items2) == expect2 and len(items2) > len(items1),
+        f"scroll={sc} 条目数 {len(items1)} → {len(items2)}（期望 {expect2}）"
+        f" reachCount={d2.get('reachCount')!r} loadingMore={d2.get('loadingMore')!r}",
+    )
+    w.shot("42-2-我的委托-触底后第2页")
+
+    reach = int(d2.get("reachCount") or 0)
+    w.rep.rec(
+        "㊷ ③ 失败归因（**只在 ② 未过时才有信息量**，此处恒记以便归档）：触底之后 "
+        "`onReachBottom` 的调用计数 —— `0` ⇒ 工具的 `pageScrollTo` **没能**触发页面"
+        "触底事件（**工具边界**）；`≥1` 而列表没变长 ⇒ 事件到了、加载没成"
+        "（**产品侧问题**）。⚠️ 两种原因不能混为一谈：混在一起就只剩一句"
+        "『分页没验成』，分不清是工具不行还是功能不行",
+        True,
+        f"reachCount={reach}（0 = 工具没造出触底；≥1 = 造出了）",
+    )
+
+    hint2 = str(d2.get("pageHint") or "")
+    w.rep.rec(
+        "㊷ ④ 第 2 页到达后 `pageHint` 与 `hasMore` **同步**更新 —— 『分页提示』与"
+        "『分页能力』必须同时为真：只改提示不改列表，就是本章开头说的那种『缺陷长得像功能』",
+        ("2/" in hint2) and d2.get("hasMore") == (len(items2) < total1),
+        f"pageHint={hint2!r} hasMore={d2.get('hasMore')!r} page={d2.get('page')!r} "
+        f"（服务端总数 {total1}，已显示 {len(items2)}）",
+    )
+
+    # ---- 负例：界面第 2 页 == 服务端 page=2（逐条）----
+    srv = api_get(f"/entrust/assignments?view=owner&page=2&size={MINE_PAGE_SIZE}", tok) or {}
+    srv_ids = [str((it or {}).get("assignment_id")) for it in (srv.get("items") or [])]
+    ui_ids = [str(it.get("assignmentId")) for it in items2[MINE_PAGE_SIZE:]]
+    w.rep.rec(
+        "㊷ ⑤ 负例（对照服务端真相）：界面第 2 页拿到的编号序列与 "
+        "`GET /assignments?view=owner&page=2` **逐条一致** —— 没有这条，② 只证明"
+        "『列表变长了』，不能证明『长出来的就是第 2 页』（多出来的也可能只是"
+        "第 1 页被重复追加了一遍）",
+        bool(srv_ids) and srv_ids == ui_ids,
+        f"服务端 page2={srv_ids} 界面追加={ui_ids}",
+    )
+
+    w.rep.rec(
+        "㊷ 本章 console 无未豁免 error（页面自身的运行期错误）",
+        len(w.new_errors(base_err)) == 0,
+        str(w.new_errors(base_err))[:200],
+    )
+    w.rep.rec(
+        "㊷ 去向记录：**P-3（下拉刷新真手势）不在本章结论里** —— 工具的动作面只有 "
+        "`text` / `tap` / `longpress` / `scrollTo` / `input` 五个 element action "
+        "＋ 页面级 `pageScrollTo`，**没有任何 swipe / 触摸手势**（已逐方法核对 "
+        "`wechatide_client.py` 的 `Client`）。P-3 的 `tool_limitation` / "
+        "`alternative_path` / `design_constraint` 由本轮同一份矩阵文档回填，"
+        "**不由真机章声称**",
+        True,
+        "去向：DEMO-1-gesture-matrix.yaml 的 P-3（status = LIMITATION）",
+    )
+    w.rep.limitation(
+        "㊷ **下拉刷新（真手势）仍无法由本工具触发**",
+        "本页 `enablePullDownRefresh=true`（`onPullDownRefresh` → `load()`），但下拉是"
+        "**真实触摸手势**，而工具链只有上述五个 element action ＋ `pageScrollTo`，"
+        "**没有 swipe**。⚠️ 本章新证的是它的**对照面**：同属『滚动类交互』，"
+        "**触底有原生通路、下拉没有** ⇒ 两者的可脚本化程度并不相同。界面设计要按这个"
+        "差别走：分页可以走触底（本章已证可造），而『刷新后可复现』这类断言需要"
+        "页内刷新入口，不能只靠下拉。",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -6863,6 +7076,7 @@ SECTIONS = {
     "39": sec_39,
     "40": sec_40,
     "41": sec_41,
+    "42": sec_42,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -6954,6 +7168,11 @@ DEFAULT_ORDER = [
     #    `seed-shipper-orgpicker` 名下多出两张单（一张 submitted、一张 draft），
     #    排在前面会让按条数断言的章节变脆。
     "41",
+    # ㊷ DR-0018 的 A.P-2（触底分页探针）：驱动原生 `pageScrollTo` 验第 2 页真的进来。
+    # ⚠️ 与 ㊶ 同理放在最末：本章会经 API 建 25 张**草稿**单（同样挂在
+    #    `seed-shipper-orgpicker` 名下），排在前面会让按条数 / 按页长断言的章节变脆。
+    #    零改库、零改已存在的单据。**依赖**：页面须有 `onReachBottom`（本切片补的）。
+    "42",
 ]
 
 
