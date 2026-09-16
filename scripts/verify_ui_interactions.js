@@ -1790,7 +1790,135 @@ section('⑤ 静态防线')
               }
             ]
           })
-        }
+        },
+        // S2 首片（会话 / 消息 / 作业）。同一条纪律：**形状按接口真实载荷给**。
+        // ⚠️ 这里给成"本单已有一条会话"而不是空列表，是刻意的：空列表会让页面
+        // 走**建会话**分支（`POST /entrustments/{eid}/sessions`，一次写操作），
+        // 而静态用例不该触发写；而且"重进恢复"那条链路由真载荷 e2e 覆盖
+        // （那里会真建会话、真发消息、真跑作业）。
+        fetchSessions: () => {
+          log.push('fetchSessions')
+          return Promise.resolve({
+            total: 1,
+            page: 1,
+            size: 20,
+            items: [
+              {
+                session_id: 5,
+                entrustment_id: 1,
+                assignment_id: 7,
+                owner_user_id: 1,
+                org_id: 3,
+                created_by: 2,
+                agent_specialty: 'agent_02',
+                agent_specialty_label: '报价助理',
+                title: '委托 #7 报价会话',
+                status: 'open',
+                revision: 1,
+                created_at: '2026-09-17T02:00:00',
+                updated_at: '2026-09-17T02:00:00'
+              }
+            ]
+          })
+        },
+        fetchSession: (sid) => {
+          log.push('fetchSession:' + sid)
+          return Promise.resolve({
+            session: {
+              session_id: Number(sid),
+              entrustment_id: 1,
+              assignment_id: 7,
+              owner_user_id: 1,
+              org_id: 3,
+              created_by: 2,
+              agent_specialty: 'agent_02',
+              agent_specialty_label: '报价助理',
+              title: '委托 #7 报价会话',
+              status: 'open',
+              revision: 1,
+              created_at: '2026-09-17T02:00:00',
+              updated_at: '2026-09-17T02:00:00'
+            },
+            messages: [
+              {
+                message_id: 1,
+                session_id: Number(sid),
+                seq: 1,
+                role: 'user',
+                content: '贵港到梧州，水泥 3000 吨，报个价',
+                source: 'manual',
+                job_id: null,
+                created_by: 2,
+                created_at: '2026-09-17T02:00:00'
+              }
+            ]
+          })
+        },
+        fetchJobs: () => {
+          log.push('fetchJobs')
+          return Promise.resolve({
+            total: 1,
+            page: 1,
+            size: 20,
+            items: [
+              {
+                job_id: 9,
+                session_id: 5,
+                entrustment_id: 1,
+                assignment_id: 7,
+                task_id: null,
+                artifact_id: null,
+                specialty: 'agent_02',
+                status: 'succeeded',
+                attempt_count: 1,
+                max_attempts: 3,
+                lease_expires_at: null,
+                base_revision: 1,
+                input: null,
+                // ⚠️ 提案键是 **`artifact_proposals`**（后端
+                // `project_envelope_for_operator` 的返回）。写成 `proposals`
+                // 不报错，只会让"提案 N 条"永远显示 0。
+                envelope: {
+                  summary: '已按报价文本解析',
+                  artifact_proposals: [
+                    {
+                      artifact_type: 'customer_quote',
+                      artifact_label: '对客方案与报价',
+                      payload: { amount: 12000, currency: 'CNY' },
+                      note: ''
+                    }
+                  ]
+                },
+                error_kind: null,
+                error_message: null,
+                requires_review: true,
+                created_by: 2,
+                started_at: '2026-09-17T02:00:01',
+                finished_at: '2026-09-17T02:00:02',
+                cancelled_at: null,
+                created_at: '2026-09-17T02:00:00',
+                updated_at: '2026-09-17T02:00:02'
+              }
+            ]
+          })
+        },
+        fetchEntrustmentAttachments: (eid) => {
+          log.push('fetchEntrustmentAttachments:' + eid)
+          return Promise.resolve({ items: [] })
+        },
+        // 只在"本单还没有会话"时才会被调用。这里给一条完整上下文，
+        // 于是**万一**走到建会话分支，也只会调到 `createSession`（下面显式桩掉），
+        // 不会落到真实实现上。
+        fetchSessionContext: (aid) => {
+          log.push('fetchSessionContext:' + aid)
+          return Promise.resolve({
+            assignment_id: Number(aid),
+            org_id: 3,
+            entrustment_id: 1,
+            note: ''
+          })
+        },
+        createSession: () => Promise.resolve({ session_id: 5, entrustment_id: 1, assignment_id: 7 })
       })
 
     const sessLog = []
