@@ -1129,3 +1129,104 @@ def test_route_requires_auth(client):
     """统一入口同样要求登录。"""
     resp = client.post("/api/v1/agent/route", json={"text": "怎么发货"})
     assert resp.status_code == 401
+
+
+# ===========================================================================
+# HO 2026-09-17「0917 决策」后的确定性回归
+# 用**已有的失败载荷**做回归，不等线上再次随机复现（HO 明文要求）。
+# ===========================================================================
+
+
+def test_coerce_confidence_keeps_legitimate_zero():
+    """合法 0 必须保留；缺失/非法/越界返回 None（**不是** 0）。
+
+    HO 0917：「产品侧另有默认置信度逻辑，甚至使用 ``or``，可能把合法的 0 替换成默认值」。
+    旧写法 ``field_conf.get(field) or 默认`` 有两个错：
+    ① 合法的 0（模型明说"我完全不确定"）被顶成默认值 ⇒ 置信度被系统性高估；
+    ② "字段缺失"被记成 0，而 0 的真实含义是"模型说了概率为零"。
+    """
+    assert service.coerce_confidence(0.0) == 0.0
+    assert service.coerce_confidence(0) == 0.0
+    assert service.coerce_confidence("0") == 0.0
+    assert service.coerce_confidence(0.8) == 0.8
+    assert service.coerce_confidence(1) == 1.0
+    for bad in (None, True, False, "abc", -0.1, 1.5, float("nan"), [], {}):
+        assert service.coerce_confidence(bad) is None, bad
+
+
+def test_confidence_zero_is_not_swallowed_by_default():
+    """端到端：模型给 ``cargo_name`` 报 0.0 ⇒ 该字段**不算**"缺失"，默认值只顶另外 7 个。
+
+    这条是"有没有真修到"的判据：若 0 仍被 ``or`` 顶掉，
+    ``confidence_defaulted`` 会是 **8** 而不是 7，且 confidence 会变成 0.9。
+    """
+    from types import SimpleNamespace
+
+    content = {
+        "cargo_name": "水泥",
+        "cargo_type": "bulk",
+        "weight_t": 800,
+        "origin_port": "NNG",
+        "dest_port": "GGU",
+        "expect_date": "2026-12-01",
+        "offer_price": 25000,
+        "field_confidence": {"cargo_name": 0.0},  # 只报了一个，且**是合法的 0**
+    }
+
+    async def _fake(*, system, user, temperature=0.1):
+        return SimpleNamespace(content=content, mocked=False, latency_ms=7, raw='{"x":1}')
+
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+
+    original = service.llm_gateway.chat_json
+    service.llm_gateway.chat_json = staticmethod(_fake)
+    try:
+        result = asyncio.run(service.parse_cargo(db, user_id=1, text="发水泥"))
+    finally:
+        service.llm_gateway.chat_json = original
+
+    # 7 个字段里只有 1 个是模型给的 ⇒ 兜底了 6 个（若 0 被 ``or`` 顶掉会是 **7**）
+    assert result.confidence_defaulted == 6
+    # confidence = (0.0 + 6×0.9) / 7 = 0.7714 ⇒ 0.77；若 0 被顶成 0.9 则会是 0.9
+    assert result.confidence == 0.77
+
+
+def test_non_structured_response_keeps_failure_kind_and_audit():
+    """非结构化响应 ⇒ 报 ``bad_response``，**失败类型与原始审计都要留**。
+
+    HO 0917：「保留失败类型、原始审计与失败统计；**不把解析失败当成合法全 null 成功**；
+    网络、鉴权、额度等错误也不应统一吞成『未识别』」。
+
+    ⚠️ 本用例锁的是**当前**行为（向调用方抛出、kind=bad_response、审计行留 error_kind）。
+    将来若按裁定改成"可恢复的 parse_incomplete"，**这条要同步改写成一个新断言**，
+    **不得删掉它来"保持绿"** —— 否则"失败没有被伪装成成功"这件事就没人再守着。
+    """
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+
+    async def _unstructured(*, system, user, temperature=0.1):
+        raise LLMError("bad_response", "未能在响应中找到完整 JSON 对象: content=抱歉，我不太明白")
+
+    original = service.llm_gateway.chat_json
+    service.llm_gateway.chat_json = staticmethod(_unstructured)
+    try:
+        with pytest.raises(service.AgentServiceError) as excinfo:
+            asyncio.run(service.parse_cargo(db, user_id=1, text="今天天气怎么样"))
+    finally:
+        service.llm_gateway.chat_json = original
+
+    # ① 失败类型**没有被吞成"未识别"**
+    assert excinfo.value.kind == "bad_response"
+    # ② 原始审计仍在（success=False + error_kind + 响应开头）
+    row = db.execute(select(AgentCall).order_by(AgentCall.id)).scalars().one()
+    assert row.success is False
+    assert row.error_kind == "bad_response"
+    assert row.response_digest  # 原始响应开头仍在，不是空串
+    assert "bad_response" in row.response_digest or "JSON" in row.response_digest
