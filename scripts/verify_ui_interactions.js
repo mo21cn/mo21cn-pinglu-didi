@@ -2289,6 +2289,50 @@ section('⑤ 静态防线')
       '详情页受理失败：403 / 409 刷新页面（裁定 §5「显示明确提示并刷新状态，不得静默失败」）',
       /status === 403 \|\| status === 409[\s\S]{0,140}self\.load\(\)/.test(dbk)
     )
+
+    // —— ⑥ 详情页的**交互形态**：关键路径一律页内 DOM（2026-09-16 统一）——
+    // 判据只有一条：**原生弹层不在渲染树里**（`.weui-dialog*` 命中 0），走查工具点不到
+    // 它的确认键 ⇒ 弹层承担的关键路径 = 不可验证的路径（⑧b / ㉕D 的 LIMITATION 即此）。
+    // 所以这两条断言是"设备证据能不能拿到"的前置条件，而不是代码风格偏好。
+    const dbw = fs.readFileSync(path.join(MP, 'pages/entrust/detail/detail.wxml'), 'utf8')
+    check(
+      '详情页**整页**不再出现 `wx.showModal`（受理确认与任务标题输入都已改页内 DOM）',
+      dbk.indexOf('showModal') === -1
+    )
+    check(
+      '详情页不再用**可编辑弹层**收关键输入（`editable: true` 已消失）',
+      dbk.indexOf('editable') === -1
+    )
+    const claimAnchors = ['data-act-claim-open', 'data-act-claim-submit', 'data-act-claim-cancel']
+    check(
+      '详情页受理确认条是**页内 DOM**（展开 / 确认 / 取消三个锚点齐备，模板里能点到）',
+      claimAnchors.every((a) => dbw.indexOf(a + '=') !== -1),
+      claimAnchors.filter((a) => dbw.indexOf(a + '=') === -1).join(',') + ' 缺失'
+    )
+    const atClaim = dbk.indexOf('onSubmitClaim() {')
+    const claimBody = atClaim >= 0 ? dbk.slice(atClaim, atClaim + 1200) : ''
+    check(
+      '详情页「确认受理」这条路**不走**原生弹层（源码切片区里没有 showModal）',
+      claimBody.length > 0 && claimBody.indexOf('showModal') === -1
+    )
+    check(
+      '详情页「确认受理」在飞期间不再受理第二次（防重复点击）',
+      /if \(this\.data\.claiming\) return/.test(claimBody)
+    )
+    const taskAnchors = ['data-act-task-submit', 'data-act-task-cancel']
+    check(
+      '详情页「记录任务」的输入条是**页内 DOM**（提交 / 取消锚点 + 输入框 + 绑定 onTaskInput）',
+      taskAnchors.every((a) => dbw.indexOf(a + '=') !== -1) &&
+        /class="slot-input"/.test(dbw) &&
+        /data-df="task-title"/.test(dbw) &&
+        /bindinput="onTaskInput"/.test(dbw)
+    )
+    const taskForms = dbw.match(/taskOpenKey\s*===\s*[^"}]+/g) || []
+    check(
+      '输入条的展开判据两侧同型（页面侧 `String(ds.key)` 归一，模板直接比 `item.key`）',
+      taskForms.length > 0 && taskForms.every((c) => !/item\.key\s*\+\s*''/.test(c)) &&
+        /String\(ds\.key \|\| ''\)/.test(dbk)
+    )
   }
 
   // ---------------------------------------------------------------- 汇总

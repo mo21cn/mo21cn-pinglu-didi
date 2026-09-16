@@ -24,6 +24,15 @@
 //   · 返回 / 回首页经 `go()`（`workbench → index` 声明为 `reset`，执行 `reLaunch`）；
 //   · 本页登记在 `MIGRATED_PAGES` 里，CI 会核对不得再出现裸 `wx.navigateTo /
 //     redirectTo / reLaunch`。
+//
+// 交互形态（2026-09-16 统一）：本页的**两个关键路径**都走**页内 DOM**，一律不用
+// `wx.showModal` ——
+//   · 「受理委托」= 页内确认条（`data.claimOpen`）；
+//   · 「记录任务」= 页内标题输入条（`data.taskOpenKey` / `data.taskForm`）。
+// 理由只有一条：**原生弹层不在渲染树里**（`.weui-dialog*` 命中 0、`page` 的 outerWXML
+// 读出来是空），走查工具**点不到它的确认键** ⇒ 由弹层承担的关键路径永远拿不到设备证据
+// （⑧b / ㉕D 的 `LIMITATION` 就是这么来的）。判据：**弹层承担的关键路径 = 不可验证的路径**。
+// 静态防线见 `scripts/verify_ui_interactions.js` ⑪ 章（断言这两条路都不出现 `showModal`）。
 const {
   VIEW,
   TASK_TYPE_LABELS,
@@ -93,6 +102,33 @@ Page({
     unassignedHint: '',
     /** 已展开类型选择的槽位 key（空串＝都收起） */
     pickKey: '',
+    /**
+     * 「记录任务」的**页内输入条**展开在哪个槽位（空串＝都收起）。
+     *
+     * 为什么**不用** `wx.showModal({ editable: true })`：原生弹层**不在渲染树里**
+     * （`.weui-dialog*` 全部命中 0、`page` 的 outerWXML 读出来是空），走查工具
+     * **点不到它的确认键** ⇒ 这条人工落点就永远拿不到设备证据。而"记录任务"
+     * 恰恰是本页承载的**关键输入**。判据：**弹层承担的关键路径 = 不可验证的路径**。
+     *
+     * 同一条理由此前已用过两次：本页 7 项任务类型选择从 `showActionSheet` 改成
+     * 页内展开条；案件页的「记录决定 / 关闭 / 重开」从可编辑弹层改成页内表单
+     * （见 `case.wxml` 的 `act-input` 注释）。这里是第三处，形态与案件页一致。
+     */
+    taskOpenKey: '',
+    /** 输入条内的任务类型与标题（标题由 `bindinput` 按**路径**写回，不整对象替换） */
+    taskForm: { type: '', typeLabel: '', title: '' },
+    /** 输入条的校验提示（在**页内**说清，不用 toast —— toast 会消失，而这句话要一直看得见） */
+    taskHint: '',
+    /**
+     * 「受理委托」的**页内确认条**（`true` ＝已展开）。
+     *
+     * 与队列卡片的确认条同一条理由：受理是本页唯一会**改变业务状态**、且**不可回退**
+     * 的动作（`submitted → claimed` 没有反向边），它必须可被真机验证。原生弹层的
+     * 确认键工具点不到 ⇒ 只能记 `LIMITATION`（⑧b / ㉕D 就是这么来的）。
+     */
+    claimOpen: false,
+    /** 受理请求在飞（防同一页重复点击；跨用户并发仍由服务端 409 兜住） */
+    claiming: false,
     taskTypes: TASK_TYPE_OPTIONS
   },
 
@@ -152,7 +188,19 @@ Page({
   load() {
     const self = this
     const id = this.data.assignmentId
-    this.setData({ view: VIEW.LOADING, viewTitle: '加载中', viewHint: '' })
+    // 重取时把两处页内交互面**复位**：整页刷新之后，展开着的确认条 / 输入条都已经
+    // 失去了它当初的判据（权限与委托状态都可能变了）⇒ 让它们回到"未展开"，
+    // 而不是留一个点了必然失败的按钮。复位只放在这里一处，页面别处不再各收一次。
+    this.setData({
+      view: VIEW.LOADING,
+      viewTitle: '加载中',
+      viewHint: '',
+      claimOpen: false,
+      claiming: false,
+      pickKey: '',
+      taskOpenKey: '',
+      taskHint: ''
+    })
     // 前两个请求是**页面内容**：工作台是主内容，委托本体是它的头卡。任一失败都按失败
     // 处理 ——「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
     //
@@ -224,39 +272,76 @@ Page({
    */
   onRecordTask(e) {
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const key = String(ds.key || '')
+    if (!key) return
     const taskType = ds.task || ''
     if (taskType) {
-      this.promptTaskTitle(taskType)
+      // 槽位自带固定类型（例如"记录异常"这类写死类型的槽）⇒ 直接进输入条，
+      // 不必先让用户在只有一项的选择条里点一下。
+      this.openTaskForm(key, taskType)
       return
     }
-    // 再点一次同一槽位即收起（不要留下一个"必须点别处才能取消"的面板）
-    this.setData({ pickKey: this.data.pickKey === ds.key ? '' : ds.key || '' })
+    // 再点一次同一槽位即收起（不要留下一个"必须点别处才能取消"的面板）；
+    // 同时收起**另一条**输入条 —— 同一时刻只允许一个编辑面展开。
+    this.setData({ pickKey: this.data.pickKey === key ? '' : key, taskOpenKey: '' })
   },
 
-  /** 选中任务类型 → 收起选择条并进入标题输入 */
+  /** 选中任务类型 → 收起选择条并进入**页内**标题输入条 */
   onPickTaskType(e) {
     const picked = (e && e.currentTarget && e.currentTarget.dataset.type) || ''
-    this.setData({ pickKey: '' })
-    if (picked) this.promptTaskTitle(picked)
+    // ⚠️ 槽位 key 取自**当前展开的选择条**（`pickKey`），必须在清空它**之前**读出来 ——
+    //    选择条是渲染在槽位卡内部的，选完之后"是哪一个槽位"只剩这一个来源。
+    const key = String(this.data.pickKey || '')
+    if (!picked || !key) {
+      this.setData({ pickKey: '' })
+      return
+    }
+    this.openTaskForm(key, picked)
   },
 
-  promptTaskTitle(taskType) {
-    const self = this
-    const label = TASK_TYPE_LABELS[taskType] || taskType
-    wx.showModal({
-      title: '记录任务 · ' + label,
-      editable: true,
-      placeholderText: '任务标题（1-128 字）',
-      success: function (res) {
-        if (!res.confirm) return
-        const title = (res.content || '').trim()
-        if (!title) {
-          wx.showToast({ title: '任务标题不能为空', icon: 'none' })
-          return
-        }
-        self.submitTask(taskType, title)
-      }
+  /**
+   * 打开某个槽位的页内输入条。
+   *
+   * **同一时刻只允许一条**：并排两条长得一样的输入条时，用户填错那一条也是一次
+   * 真实的任务记录（写端每次提交都是新意图、没有幂等键可救）。切换槽位时标题**清空**，
+   * 不留上一条的残余 —— 残留的标题会被当成"已经填好了"直接提交。
+   */
+  openTaskForm(key, taskType) {
+    this.setData({
+      pickKey: '',
+      taskOpenKey: key,
+      taskForm: { type: taskType, typeLabel: TASK_TYPE_LABELS[taskType] || taskType, title: '' },
+      taskHint: ''
     })
+  },
+
+  /** 标题输入：按**路径**写回（不整对象替换，避免输入法组字被打断） */
+  onTaskInput(e) {
+    this.setData({
+      'taskForm.title': (e && e.detail && e.detail.value) || '',
+      taskHint: ''
+    })
+  },
+
+  /** 收起输入条（取消）。用户打过的标题**不保留** —— 取消就是取消，不做"半保存"。 */
+  onCancelTask() {
+    this.setData({ taskOpenKey: '', taskForm: { type: '', typeLabel: '', title: '' }, taskHint: '' })
+  },
+
+  /**
+   * 提交任务。空标题在**页内**说清。
+   *
+   * 不用 `wx.showToast`：toast 几秒后消失，而「为什么没提交」正是用户此刻需要
+   * 一直看到的那句话；且它同样不可被走查断言（不在渲染树里的东西都一样）。
+   */
+  onSubmitTask() {
+    const form = this.data.taskForm || {}
+    const title = String(form.title || '').trim()
+    if (!title) {
+      this.setData({ taskHint: '任务标题不能为空（1–128 字）' })
+      return Promise.resolve()
+    }
+    return this.submitTask(form.type, title)
   },
 
   submitTask(taskType, title) {
@@ -272,50 +357,66 @@ Page({
       .then(function () {
         wx.hideLoading()
         wx.showToast({ title: '任务已记录', icon: 'success' })
+        // 成功走整页 `load()`，输入条由 `load()` 统一复位（不在两处各收一次，
+        // 否则"哪一处负责收"会变成一个要靠记忆维持的约定）。
         return self.load()
       })
       .catch(function (err) {
         wx.hideLoading()
         // 服务端失败原因（无权限 / 委托未受理 / 校验不通过）已由请求层提示；
         // 这里只兜底网络层（没有 httpStatus 的那类），避免静默失败。
+        // ⚠️ 失败时**不**调 `load()` ⇒ 输入条与用户打好的标题都留着，重试不用重打。
         if (!(err && err.httpStatus)) {
-          wx.showToast({ title: '任务未记录：网络异常', icon: 'none' })
+          self.setData({ taskHint: '任务未记录：网络异常（标题已保留，可重试）' })
         }
       })
   },
 
   // ── 人工落点：受理委托（待受理时）────────────────────────────────────
 
-  onClaim() {
+  /**
+   * 展开 / 收起页内确认条。**不弹原生层**（理由见 `data.claimOpen` 的说明）。
+   *
+   * 与队列卡片的 `onToggleClaim` 同一形态，区别只是本页只有一张委托 ——
+   * 所以不需要 `claimOpenId` 那种"展开在哪一张"的记账。
+   */
+  onToggleClaim() {
+    if (this.data.claiming) return
+    this.setData({ claimOpen: !this.data.claimOpen })
+  },
+
+  /**
+   * 确认受理（页内确认条上的那一下）。
+   *
+   * 失败按状态码决定要不要刷新。D-4 裁定 §5：入口展示之后**权限被撤销（403）或
+   * 委托已被他人认领（409）**，一律「以后端结果为准」—— 提示已由请求层按服务端
+   * `detail` 如实发出，这里必须把页面刷成最新状态（重取**权限投影** + 委托本体），
+   * 否则用户会对着一个已经不可能成功的按钮反复点。
+   * ⚠️ 其余错误（400 / 网络层）**不**刷新：状态没变，刷新只会让用户丢掉当前位置感，
+   *    还可能把真正该看的那条提示顶掉。
+   */
+  onSubmitClaim() {
     const self = this
-    wx.showModal({
-      title: '受理委托',
-      content: '受理后该委托进入组织队列，可以派发任务。确认受理？',
-      success: function (res) {
-        if (!res.confirm) return
-        wx.showLoading({ title: '受理中', mask: true })
-        claimAssignment(self.data.assignmentId, newIdempotencyKey('claim'))
-          .then(function () {
-            wx.hideLoading()
-            wx.showToast({ title: '已受理', icon: 'success' })
-            return self.load()
-          })
-          .catch(function (err) {
-            wx.hideLoading()
-            // D-4 裁定 §5：入口展示之后**权限被撤销（403）或委托已被他人认领（409）**，
-            // 一律「以后端结果为准」—— 提示已由请求层按服务端 `detail` 如实发出，
-            // 这里必须把页面刷成最新状态（重取权限投影 + 委托本体），
-            // 否则用户会对着一个已经不可能成功的按钮反复点。
-            // ⚠️ 其余错误（400 / 网络层）**不**刷新：状态没变，刷新只会让用户丢掉
-            //    当前位置感，还可能把真正该看的那条提示顶掉。
-            const status = (err && err.httpStatus) || 0
-            if (status === 403 || status === 409) {
-              return self.load()
-            }
-            return null
-          })
-      }
-    })
+    if (this.data.claiming) return
+    this.setData({ claimOpen: false, claiming: true })
+    wx.showLoading({ title: '受理中', mask: true })
+    // 幂等键每次新生成：用户重新点击＝一次新的意图。同一次网络重试复用同键是请求层的事。
+    return claimAssignment(this.data.assignmentId, newIdempotencyKey('claim'))
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ claiming: false })
+        wx.showToast({ title: '已受理', icon: 'success' })
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        self.setData({ claiming: false })
+        const status = (err && err.httpStatus) || 0
+        if (status === 403 || status === 409) {
+          return self.load()
+        }
+        return null
+      })
   },
 
   // ── 人工落点：登记案件（已受理时）────────────────────────────────────
