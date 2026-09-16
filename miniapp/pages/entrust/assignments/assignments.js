@@ -32,6 +32,17 @@ Page({
     viewHint: '',
     items: [],
     total: 0,
+    /** 已加载到第几页（触底时 +1）。 */
+    page: 1,
+    /** 是否还有更早的一页。判据是「已显示 < 总数」，见 `applyState`。 */
+    hasMore: false,
+    loadingMore: false,
+    /**
+     * `onReachBottom` 被调用过几次。**不参与渲染**，只服务于 DR-0018 的 A.P-2 探针：
+     * 触底后列表若没变长，必须能分清"工具压根没造出滚动"与"造出了滚动但加载失败" ——
+     * 没有这个计数，两种完全不同的原因会长成同一个失败。
+     */
+    reachCount: 0,
     pageHint: ''
   },
 
@@ -82,6 +93,42 @@ Page({
     })
   },
 
+  /**
+   * 触底加载更早一页（第 2 页起）。
+   *
+   * 为什么必须有：`load()` 只取第 1 页（`PAGE_SIZE = 20`）。没有本方法时，
+   * 货主若提了 25 张单，**第 21 张之后永远看不到** —— 更糟的是界面会诚实地
+   * 显示「第 1/2 页」，让这个缺陷看起来像"分页提示"。**分页提示不是分页能力。**
+   */
+  onReachBottom() {
+    const self = this
+    this.setData({ reachCount: this.data.reachCount + 1 })
+    if (this.data.view !== VIEW.READY || this.data.loadingMore || !this.data.hasMore) return
+    const next = this.data.page + 1
+    this.setData({ loadingMore: true })
+    fetchMine({ page: next, size: PAGE_SIZE })
+      .then(function (res) {
+        // ⚠️ **追加**而不是替换：替换会把用户已经看到的 20 张清掉，
+        //    而"下一页"的语义是接着看，不是从头看。
+        const merged = self.data.items.concat(decorateList(res && res.items))
+        const total = (res && res.total) || 0
+        self.setData({
+          items: merged,
+          total: total,
+          page: next,
+          hasMore: merged.length < total,
+          loadingMore: false,
+          pageHint: pageHint(total, next, PAGE_SIZE)
+        })
+      })
+      .catch(function () {
+        // ⚠️ 第 2 页失败**不清空已加载的**：用户已经看到 20 张，
+        //    把列表清空比"这一页没加载上"严重得多。
+        self.setData({ loadingMore: false })
+        wx.showToast({ title: '加载更多失败', icon: 'none' })
+      })
+  },
+
   /** 取数：一切结果（含失败）都进 `viewState` 裁决，**不 catch 成空列表**。 */
   load() {
     const self = this
@@ -122,14 +169,20 @@ Page({
     )
   },
 
-  applyState(state, items, total) {
+  applyState(state, items, total, page) {
+    const p = page || 1
+    const shown = (items || []).length
     this.setData({
       view: state.state,
       viewTitle: state.title,
       viewHint: state.hint,
       items: items,
       total: total,
-      pageHint: pageHint(total, 1, PAGE_SIZE)
+      page: p,
+      // ⚠️ `hasMore` 判的是「已显示 < 总数」，**不是**「本页满 20 张」：
+      //    总数恰好 = 页长时本页是满的，但下一页是空的 —— 用页长判断会白请求一次。
+      hasMore: shown < (total || 0),
+      pageHint: pageHint(total, p, PAGE_SIZE)
     })
   },
 

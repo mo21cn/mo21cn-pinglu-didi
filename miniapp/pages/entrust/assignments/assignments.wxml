@@ -89,6 +89,15 @@
           <text class="mine-meta">#{{item.assignmentId}} · {{item.createdAt}}</text>
         </view>
       </view>
+
+      <!-- 触底加载更早一页。⚠️ 这一块**不替代**上面的 `pageHint`：
+           `pageHint` 说的是"你在第几页"（分页提示），这一块说的是
+           "还能不能继续看"（加载能力）。两者缺一个的时候，界面看起来都还是正常的。 -->
+      <view wx:if="{{loadingMore}}" class="mine-more">正在加载更早的委托…</view>
+      <view
+        wx:elif="{{items.length && !hasMore}}"
+        class="mine-more mine-more-end"
+      >已经到底了</view>
     </block>
   </view>
 </view>
