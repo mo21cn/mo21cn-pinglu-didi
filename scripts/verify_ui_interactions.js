@@ -1545,13 +1545,20 @@ section('⑤ 静态防线')
       // 详情页 = 委托本体（头卡）+ 单委托工作台（七槽位，UI-05），合法 id 下**两路都取**。
       // 断言锁定"取了什么"而不是"只取一样"：页面成为工作台后只调 fetchAssignment
       // 反而是缺陷（槽位全空），若沿用"必须恰好一次"的写法，会让正确实现变红。
-      // 同时要求所有取数都落在同一个编号上 —— 取错单、或重复取数同样要被拦下。
+      // 第三个取数是 `fetchMyOrgs`（组织权限投影，D-4 裁定 §2）—— 它按定义**不带**
+      // 委托编号，所以"同一编号"这条只约束**带编号**的那些取数（否则会让正确实现变红）。
+      // 同时**要求**它存在：删掉它受理入口的判据就失效，那种退化必须被拦下。
       '详情页：合法 id 放行并取数（委托本体 + 工作台，同一编号）',
       logDtOk.indexOf('fetchAssignment:A-1_2') >= 0 &&
         logDtOk.indexOf('fetchWorkbench:A-1_2') >= 0 &&
-        logDtOk.every(function (s) {
-          return /:A-1_2$/.test(s)
-        }),
+        logDtOk.indexOf('fetchMyOrgs') >= 0 &&
+        logDtOk
+          .filter(function (s) {
+            return s.indexOf(':') >= 0
+          })
+          .every(function (s) {
+            return /:A-1_2$/.test(s)
+          }),
       JSON.stringify(logDtOk)
     )
 
@@ -2068,35 +2075,78 @@ section('⑤ 静态防线')
   }
 
   // ---------------------------------------------------------------- ⑪ 队列受理
-  section('⑪ 组织受理队列的受理入口（S1 工作项 4 / D1-02）')
+  section('⑪ 受理入口判据（队列卡片 + 详情页 · S1 工作项 4 / D-4）')
   {
     const WB = path.join(MP, 'pages/entrust/workbench/workbench.js')
     const WW = path.join(MP, 'pages/entrust/workbench/workbench.wxml')
     const wbk = stripComments(fs.readFileSync(WB, 'utf8'))
     const wbw = fs.readFileSync(WW, 'utf8')
 
-    // —— ① 投影层：`canClaim` 只看**委托状态**，不看权限 ——
-    // 前端不假装知道当前身份有没有 `entrust:assignment:claim`（那取决于组织成员
-    // 资格与授权，只有服务端知道）。反过来若这里恒 true，界面上就会出现一个
-    // 必然 403 的按钮，用户点完只看到拒绝、不知道是自己没权限还是单据有问题。
+    // —— ① 投影层：`canClaim` = 可认领状态 ∧ **该委托所属组织**内的认领权限 ——
+    // D-4 裁定 §1：两个条件必须**同时**满足；不得只看委托状态，也不得只看全局角色
+    // 或"用户在**别的**组织里的权限"（后端 `access.py` 记过一次真实的跨组织越权：
+    // 权限做并集后，在 A 组织是经理、在 B 组织只是成员的用户认领了 B 的委托）。
+    // 裁定 §4：权限未加载 / 加载失败 ⇒ 一律不展示可执行按钮。
     {
       const EB = require(path.join(MP, 'utils', 'entrust.js'))
-      const row = (st) =>
-        EB.decorateAssignment({
-          assignment_id: 7,
-          title: 't',
-          cargo_summary: 'c',
-          quantity: '1',
-          quantity_unit: '吨',
-          status: st,
-          revision: 1,
-          created_at: '2026-09-16 10:00',
-          org_id: 3
-        })
-      check('投影：待受理的委托给 canClaim（受理入口出现）', row('submitted').canClaim === true)
+      const row = (st, permitted) =>
+        EB.decorateAssignment(
+          {
+            assignment_id: 7,
+            title: 't',
+            cargo_summary: 'c',
+            quantity: '1',
+            quantity_unit: '吨',
+            status: st,
+            revision: 1,
+            created_at: '2026-09-16 10:00',
+            org_id: 3
+          },
+          permitted
+        )
+      const PERM = { 3: true }
+      check(
+        '投影：可认领状态 + **该组织**有认领权限 ⇒ canClaim（受理入口出现）',
+        row('submitted', PERM).canClaim === true
+      )
       for (const st of ['draft', 'claimed', 'cancelled']) {
-        check(`投影：${st} 不给 canClaim（受理入口不出现）`, row(st).canClaim === false)
+        check(`投影：${st} 不给 canClaim（受理入口不出现）`, row(st, PERM).canClaim === false)
       }
+      // —— D-4 裁定图 2 的"最低验收覆盖"里，有三条在投影层即可判定 ——
+      check(
+        'D-4 ① 同组织**只读成员**（有 view 无 claim）⇒ 不显示受理入口',
+        row('submitted', { 3: false }).canClaim === false
+      )
+      check(
+        'D-4 ③ 只有**别的组织**有认领权限 ⇒ 不得据此显示（跨组织并集是已修过的越权，不得在展示层重造）',
+        row('submitted', { 9: true }).canClaim === false
+      )
+      check(
+        'D-4 §4 权限投影尚未加载 / 加载失败 ⇒ 一律不显示（不得提前摆出可执行按钮）',
+        row('submitted').canClaim === false && row('submitted', {}).canClaim === false
+      )
+
+      // 权限投影本身：必须**按 org_id 分域**，且只认原始权限码
+      const RAWT = [
+        { org_id: 3, permissions: ['entrust:view', 'entrust:assignment:claim'] },
+        { org_id: 9, permissions: ['entrust:view'] }
+      ]
+      const map = EB.permittedOrgIds(RAWT, EB.ORG_PERM_CLAIM)
+      check(
+        '权限投影按 org_id 分域：有 claim 权码的组织进集合，只有 view 的不进',
+        map['3'] === true && map['9'] === undefined,
+        JSON.stringify(map)
+      )
+      check(
+        '权限投影只认**原始权限码**，不认中文标签（把 `decorateOrgs()` 的产出喂进去会是空集）',
+        Object.keys(EB.permittedOrgIds(EB.decorateOrgs(RAWT), EB.ORG_PERM_CLAIM)).length === 0
+      )
+      check(
+        '详情页与队列卡片共用**同一份**判据 `canClaimAssignment`（裁定 §4「统一判据」）',
+        typeof EB.canClaimAssignment === 'function' &&
+          EB.canClaimAssignment('submitted', 3, PERM) === true &&
+          EB.canClaimAssignment('claimed', 3, PERM) === false
+      )
     }
 
     // —— ② 页面：三段式的状态机（真页面模块驱动）——
@@ -2124,6 +2174,10 @@ section('⑤ 静态防线')
       CASE_KIND_ORDER: ['exception'],
       CASE_ORG_SCOPE_LABELS: { unclosed: '未关闭', all: '全部' },
       CASE_ORG_SCOPE_ORDER: ['unclosed', 'all'],
+      // D-4：`load()` 现在会用这两项算权限投影。桩必须提供 —— 缺了
+      // `permittedOrgIds(...)` 就是"调用 undefined"（TypeError），而那种失败
+      // 发生在异步链里，断言只会看到一句与本意无关的报错。
+      ORG_PERM_CLAIM: 'entrust:assignment:claim',
       claimAssignment: (id, key) => {
         claimed.push({ id: id, key: key })
         return Promise.resolve({})
@@ -2136,6 +2190,7 @@ section('⑤ 静态防线')
       fetchQueue: () => Promise.resolve({ total: 0, items: [] }),
       fetchCaseOrgList: () => Promise.resolve({ total: 0, items: [] }),
       pageHint: () => '',
+      permittedOrgIds: () => ({}),
       pickOrg: () => ({ orgId: '3', reason: 'only' }),
       viewState: () => ({ state: 'empty', title: '', hint: '' })
     }
@@ -2185,7 +2240,15 @@ section('⑤ 静态防线')
     const body = at >= 0 ? wbk.slice(at, at + 1400) : ''
     check('受理的收口方法存在（submitClaim）', at >= 0)
     check('受理成功后重取队列（否则本地列表还显示「待受理」，用户以为没生效）', /\.then\(function \(\)[\s\S]{0,320}loadQueue\(\)/.test(body))
-    check('受理失败（409 已被别人受理）也重取队列 —— 本地列表已过期，不刷新用户会以为"点了没反应"', /httpStatus === 409[\s\S]{0,200}loadQueue\(\)/.test(body))
+    check(
+      '受理失败后把 **403（权限被撤销）与 409（被抢先受理）** 都纳入刷新条件（D-4 裁定 §5：以后端结果为准）',
+      /status === 403 \|\| status === 409/.test(body)
+    )
+    check(
+      '刷新走 `load()`（整页，会重取权限投影）而**不是**只刷队列 —— ' +
+        '只刷队列拿不到新权限，按钮会留在页面上继续骗人去点',
+      /status === 403 \|\| status === 409[\s\S]{0,140}self\.load\(\)/.test(body)
+    )
     check('受理这条路**不走**原生弹层（wx.showModal 不在渲染树里，工具点不到它的确认键）', body.length > 0 && body.indexOf('showModal') === -1)
 
     // —— ④ 模板：三段式 + 三个锚点两两不同 ——
@@ -2203,6 +2266,28 @@ section('⑤ 静态防线')
       'claimOpenId 的比较两侧同型（模板把卡片 id 字符串化：`item.assignmentId + \'\'`）',
       cmps.length > 0 && cmps.every((c) => /\+\s*''/.test(c)),
       JSON.stringify(cmps)
+    )
+
+    // —— ⑤ 详情页：同一份判据 + 裁定 §5 的刷新（D-4 裁定 §4「统一判据」）——
+    // 两个受理入口必须同判据：不一致会出现"列表里能受理、点进去没有入口"
+    // （或反过来）这种自相矛盾的界面，而两边单看都是对的。
+    const DB = path.join(MP, 'pages/entrust/detail/detail.js')
+    const dbk = stripComments(fs.readFileSync(DB, 'utf8'))
+    check(
+      '详情页受理入口用**同一份**判据 `canClaimAssignment`（不得再自己写一遍状态判断）',
+      /canClaim:\s*canClaimAssignment\(/.test(dbk)
+    )
+    check(
+      "详情页不再出现只看状态的单条件判据（`status === 'submitted'` 那条已删）",
+      dbk.indexOf("status === 'submitted'") === -1
+    )
+    check(
+      '详情页自己取权限投影（fetchMyOrgs + permittedOrgIds），且该请求失败**降级**而不是把整页打成错误',
+      /fetchMyOrgs\(\)[\s\S]{0,40}\.catch\(/.test(dbk) && /permittedOrgIds\(/.test(dbk)
+    )
+    check(
+      '详情页受理失败：403 / 409 刷新页面（裁定 §5「显示明确提示并刷新状态，不得静默失败」）',
+      /status === 403 \|\| status === 409[\s\S]{0,140}self\.load\(\)/.test(dbk)
     )
   }
 

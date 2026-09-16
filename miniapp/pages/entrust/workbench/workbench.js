@@ -21,6 +21,7 @@ const {
   CASE_KIND_ORDER,
   CASE_ORG_SCOPE_LABELS,
   CASE_ORG_SCOPE_ORDER,
+  ORG_PERM_CLAIM,
   STATUS_META,
   STATUS_ORDER,
   VIEW,
@@ -33,6 +34,7 @@ const {
   fetchQueue,
   newIdempotencyKey,
   pageHint,
+  permittedOrgIds,
   pickOrg,
   viewState
 } = require('../../../utils/entrust')
@@ -168,6 +170,11 @@ Page({
     // 但两者都只是"默认值"，最终仍要由服务端清单确认它**仍然有效**（见 pickOrg）。
     const fromQuery = rawOrg
     this.savedOrgId = fromQuery || wx.getStorageSync(STORAGE_ORG_KEY) || ''
+    // 组织权限投影（D-4 裁定 §2）—— 在取数**之前**先置空：
+    // 空表 ⇒ 任何卡片都不显示「受理」入口。裁定 §4 要求"权限尚未加载或加载失败时，
+    // 不提前展示可执行按钮"，显式置空就是这句话的代码形态 ——
+    // 而不是依赖"恰好还没取到"这种偶然。
+    this.permittedOrgIds = {}
     this.load()
   },
 
@@ -191,7 +198,14 @@ Page({
     this.setData({ view: VIEW.LOADING, viewTitle: '加载中', viewHint: '' })
     return fetchMyOrgs()
       .then(function (res) {
-        const orgs = decorateOrgs(res && res.items)
+        const rawOrgs = (res && res.items) || []
+        const orgs = decorateOrgs(rawOrgs)
+        // 权限投影（D-4 裁定 §2）：必须用**原始载荷**算 —— `decorateOrgs()` 的产出
+        // 已把权限码翻成中文标签（`decorateOrg`），拿它查权限码永远查不到，
+        // 而且是**静默**的（表现为"按钮从来不出现"，看起来像权限不足）。
+        // 存实例属性而不是 `data`：它是判据、不是渲染数据；进 `data` 既白跑一次
+        // setData，又会诱导模板绕过 `canClaim` 直接消费它。
+        self.permittedOrgIds = permittedOrgIds(rawOrgs, ORG_PERM_CLAIM)
         const picked = pickOrg(orgs, self.savedOrgId)
         self.savedOrgId = picked.orgId
         self.setData({ orgs: orgs, activeOrgId: picked.orgId, orgReason: picked.reason })
@@ -260,7 +274,9 @@ Page({
     })
       .then(function (res) {
         const total = (res && res.total) || 0
-        const items = decorateList(res && res.items)
+        // 传权限投影：卡片上「受理」入口 = 可认领状态 ∧ **该卡所属组织**的认领权限
+        // （`canClaimAssignment`，D-4 裁定 §4）。不传 ⇒ 该卡一律不显示受理入口。
+        const items = decorateList(res && res.items, self.permittedOrgIds)
         self.applyState(viewState({ status: 200, total: total }), items, total)
       })
       .catch(function (err) {
@@ -461,9 +477,12 @@ Page({
   },
 
   /**
-   * 受理委托。失败时**一律重取队列** —— 最常见的失败是 409「已被别的人受理」，
-   * 那意味着本地这份列表已经过期；不刷新的话用户看到的还是「待受理」，
-   * 会以为"点了没反应"，然后再点一次。
+   * 受理委托。失败时按状态码决定要不要刷新 —— 最常见的失败是 409「已被别人受理」，
+   * 其次是 403「权限被撤销」；两者都意味着本地这份列表（乃至本地那份**权限投影**）
+   * 已经过期。不刷新的话用户看到的还是「待受理」，会以为"点了没反应"，然后再点一次。
+   *
+   * 刷新走 `load()`（整页）而不是只重取队列：`load()` 会把组织清单与**权限投影**
+   * 一并重取。只刷队列的话，按钮会留在页面上继续骗人去点（D-4 裁定 §5）。
    *
    * 不在这里弹失败原因：请求层已按服务端 `detail` / 网络分级如实提示过，
    * 页面再弹一遍就是两句话描述同一件事（`detail.js` 的 catch 也是这个取向）。
@@ -485,8 +504,11 @@ Page({
       .catch(function (err) {
         wx.hideLoading()
         self.setData({ claimingId: '' })
-        if (err && err.httpStatus === 409) {
-          return self.loadQueue()
+        // D-4 裁定 §5：权限被撤销（403）或已被他人抢先认领（409）⇒ 以后端结果为准。
+        // 其余错误（400 / 网络层）不刷新：状态没变，刷新只会让用户丢掉当前位置感。
+        const status = (err && err.httpStatus) || 0
+        if (status === 403 || status === 409) {
+          return self.load()
         }
         return null
       })

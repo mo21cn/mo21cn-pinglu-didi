@@ -90,6 +90,18 @@ const ORG_PERMISSION_LABELS = {
   'org:entrustment:manage': '管理授权'
 }
 
+/**
+ * 「受理委托」权限码。
+ *
+ * 单独取一个常量，是因为它有一个**非展示**的用途（D-4 裁定 §2）：队列卡片与
+ * 详情页拿它去本地的组织权限投影里查"我在**这张委托所属的**组织里能不能受理"。
+ *
+ * ⚠️ 上面那张 `ORG_PERMISSION_LABELS` 表**只做展示**，判定不得读它：
+ *    标签与权限码是两种东西，读混了会让"改一次文案"变成"改一次判据"，
+ *    而且改坏了**不报错** —— 只是按钮不再出现，看起来像权限不足。
+ */
+const ORG_PERM_CLAIM = 'entrust:assignment:claim'
+
 function statusLabel(status) {
   const meta = STATUS_META[status]
   return meta ? meta.label : '未知状态'
@@ -189,10 +201,11 @@ function viewState(input) {
 }
 
 /** 把接口载荷整理成模板直接可用的形状（模板不做事，避免 wxml 里写表达式）。 */
-function decorateAssignment(row) {
+function decorateAssignment(row, permitted) {
   const data = row || {}
   const quantity = data.quantity === null || data.quantity === undefined ? '' : String(data.quantity)
   const unit = data.quantity_unit || ''
+  const orgId = data.org_id === null || data.org_id === undefined ? '' : String(data.org_id)
   return {
     assignmentId: data.assignment_id,
     title: data.title || '未命名委托',
@@ -201,22 +214,30 @@ function decorateAssignment(row) {
     status: data.status,
     statusLabel: statusLabel(data.status),
     statusClass: statusClass(data.status),
-    // 队列卡片上「受理」入口是否出现。**只看委托状态**，不看权限 ——
-    // 与详情页 `canClaim` 同一条判据（`detail.js` 的 applyState）。前端不假装
-    // 知道当前身份有没有 `entrust:assignment:claim`：那取决于组织成员资格与
-    // 授权，只有服务端知道；无权限时服务端给 403，请求层如实提示。
+    // 队列卡片上「受理」入口是否出现 —— 与详情页**同一份判据**
+    // （`canClaimAssignment`，D-4 裁定 §4：两个入口不得各写一份）。
     //
-    // 反过来若这里硬编码「有权限」，就会出现"摆一个必然 403 的按钮"，
-    // 用户点完只看到一句拒绝，却不知道是自己没权限还是单据有问题。
-    canClaim: data.status === 'submitted',
+    // ⚠️ 第二参数是**该委托所属组织的权限投影**（`permittedOrgIds()` 的产出）。
+    //    缺席（未传 / 权限还没加载 / 加载失败）⇒ 一律不显示：裁定 §4 要求
+    //    "权限尚未加载或加载失败时，不提前展示可执行按钮"。保守方向是安全的 ——
+    //    隐藏按钮**不等于**放行（写端 `claim_assignment` 仍按同一个 org_id 独立
+    //    校验成员资格与权限），而猜成"有权限"会摆出一个必然被拒的按钮：
+    //    用户点完只知道被拒，分不清是自己没权限还是单据有问题。
+    canClaim: canClaimAssignment(data.status, orgId, permitted),
     revision: data.revision,
     createdAt: data.created_at || '',
-    orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id)
+    orgId: orgId
   }
 }
 
-function decorateList(rows) {
-  return (rows || []).map(decorateAssignment)
+// ⚠️ 必须显式包一层，**不能**写成 `rows.map(decorateAssignment)`：`map` 会把
+// `(item, index, array)` 三个参数都传进去，于是 `index`（数字）被当成权限投影 ——
+// 而 `isPermittedOrg(0, …)` 恒为 false ⇒ 表现是"受理按钮从来不出现"，
+// 静默、且与真实权限无关。加第二参数的那一刻这行就从"无害"变成了"bug"。
+function decorateList(rows, permitted) {
+  return (rows || []).map(function (row) {
+    return decorateAssignment(row, permitted)
+  })
 }
 
 /** 分页提示：只反映当前页，不臆造总数文案（避免"共 N 条"与筛选条件脱节）。 */
@@ -291,6 +312,64 @@ function decorateOrgs(rows) {
 }
 
 /**
+ * 从 `/my-orgs` 的**原始载荷**抽出「在这个组织里有 `perm` 权限」的集合（裁定 §1–§2）。
+ *
+ * 返回 `{ '3': true, '7': true }` —— 按 org_id 索引的表，不是数组也不是布尔：
+ *
+ *   · **按 org_id 索引**是硬要求。后端 `access.py` 记录过一次真实越权：把各组织的
+ *     权限做**并集**后，"在 A 组织是经理、在 B 组织只是成员"的用户能认领 B 组织的
+ *     委托。前端若做并集，就等于把那个**已经修掉的漏洞**在展示层重造一遍 ——
+ *     而且是更坏的一种：界面说"你能受理"，服务端说"你不能"，用户无从理解。
+ *   · **表而非布尔**：一次取数要能服务一整页（可能跨组织的）委托。
+ *
+ * ⚠️ 入参必须是**原始载荷**，不是 `decorateOrgs()` 的产出 —— 后者已把权限码翻成
+ *    中文标签（`decorateOrg`），拿它查权限码**永远查不到**，且是静默的。
+ *
+ * 缺省（载荷缺失 / 加载失败）⇒ 空表 ⇒ 谁都不显示入口。这是**保守**方向：隐藏按钮
+ * 不等于放行（写端仍独立校验），猜成"有权限"才会摆出必然被拒的按钮。
+ */
+function permittedOrgIds(rawOrgs, perm) {
+  const map = {}
+  ;(rawOrgs || []).forEach(function (row) {
+    const data = row || {}
+    const key = data.org_id === null || data.org_id === undefined ? '' : String(data.org_id)
+    if (!key) return
+    if ((data.permissions || []).indexOf(perm) >= 0) map[key] = true
+  })
+  return map
+}
+
+/** 在 `permittedOrgIds()` 的产出里查某个组织；`orgId` 先归一成字符串（两侧同型再比）。 */
+function isPermittedOrg(permitted, orgId) {
+  const key = orgId === null || orgId === undefined ? '' : String(orgId)
+  return !!key && !!(permitted || {})[key]
+}
+
+/**
+ * 「受理」入口可不可显示 —— 队列卡片与详情页**共用这一份判据**（D-4 裁定 §4）。
+ *
+ * 两个条件**必须同时**满足（裁定 §1）：
+ *   1. 委托处于**可认领**状态（`submitted`）；
+ *   2. 当前操作者在**该委托所属组织**内有 `entrust:assignment:claim`。
+ *
+ * 裁定 §1 同时禁掉两条捷径：不得只看委托状态，不得只看全局角色或"用户在别的组织
+ * 里的权限"（后者正是 `access.py` 记的那个越权）。所以签名里必须带 `orgId`。
+ *
+ * 为什么不让两个调用方各写一遍 `status === 'submitted' && …`：写法一旦漂移，就会出现
+ * "列表里能受理、点进去没有入口"（或反过来）这种自相矛盾的界面，而两边单看都对 ——
+ * 这正是裁定 §4「统一判据」要消除的东西。
+ *
+ * ⚠️ 这里**不**判"当前用户是不是已经是该委托的负责人"之类的前置条件：认领是**建立**
+ *    负责人关系的动作，要求"已经是负责人"会形成循环前置（裁定 §3）。
+ * ⚠️ 这里**不是**权限判定。真正的判定在写端：`claim_assignment` 会按同一个 `org_id`
+ *    再查一次 `ctx.can(PERM_ASSIGN_CLAIM, org_id=…)`。本函数只决定按钮显不显示 ——
+ *    隐藏按钮**不能**代替服务端鉴权（裁定 §3）。
+ */
+function canClaimAssignment(status, orgId, permitted) {
+  return status === 'submitted' && isPermittedOrg(permitted, orgId)
+}
+
+/**
  * 决定「当前该用哪个组织」。
  *
  * 规则顺序不可调换：
@@ -324,10 +403,15 @@ function pickOrg(orgs, savedOrgId) {
  * **只投影货主自己填的字段**：受理价、成本口径、内部比价一律不出现在这里 ——
  * 经理侧的读写动作（受理、任务、成果、Agent）属于后续批次，本切片不做，
  * 也就不需要提前把这些内部字段拉出来。
+ *
+ * `permitted` 是组织权限投影（`permittedOrgIds()` 的产出），只用来算 `canClaim`
+ * 这一个入口字段（D-4 裁定 §4）。**不传 ⇒ `canClaim` 恒 false**，那是保守缺省：
+ * 详情页实际显示的受理入口取自工作台载荷（见 `detail.js`），这里保持一致语义，
+ * 免得留下一个"看起来是判据、实际恒假"的字段把人读进沟里。
  */
-function decorateDetail(row) {
+function decorateDetail(row, permitted) {
   const data = row || {}
-  const decorated = decorateAssignment(data)
+  const decorated = decorateAssignment(data, permitted)
   decorated.cargoSummary = data.cargo_summary || '未填写货类'
   decorated.quantityText = decorated.quantityText
   decorated.statusHint = STATUS_HINT[data.status] || ''
@@ -2582,6 +2666,7 @@ module.exports = {
   CASE_TRANSITIONS,
   CHANGE_CATEGORY_LABELS,
   ISSUE_KIND_LABELS,
+  ORG_PERM_CLAIM,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
   REF_PROJECTORS,
@@ -2609,6 +2694,7 @@ module.exports = {
   artifactStatusClass,
   artifactStatusLabel,
   buildPayload,
+  canClaimAssignment,
   caseClosureOptions,
   caseCreateBody,
   caseDecideAvailable,
@@ -2662,6 +2748,7 @@ module.exports = {
   isDispositionWithoutApplication,
   newIdempotencyKey,
   pageHint,
+  permittedOrgIds,
   pickEntrustment,
   pickOrg,
   probeEntry,
