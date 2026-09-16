@@ -226,7 +226,14 @@ function decorateAssignment(row, permitted) {
     canClaim: canClaimAssignment(data.status, orgId, permitted),
     revision: data.revision,
     createdAt: data.created_at || '',
-    orgId: orgId
+    orgId: orgId,
+    // 承接组织（S1 工作项 5「客户侧看到真实状态与承接组织」）。
+    // `org_name` 为空**只有两种情况**：草稿还没选组织，或组织记录已不存在。
+    // 两者对货主是同一件事 —— **还不知道谁会接手** —— 所以合成一句
+    // 「尚未委托组织」，而不是把 null 渲染成空白（空白看起来像界面没渲染出来，
+    // 而这恰恰是最需要说清楚的一格）。
+    orgName: data.org_name || '',
+    orgLabel: data.org_name || '尚未委托组织'
   }
 }
 
@@ -266,11 +273,58 @@ function probeEntry(orgId) {
     })
 }
 
+/**
+ * 静默探测「我的委托」入口的可见性（AC-02 的**货主侧**）。
+ *
+ * 与 `probeEntry()` 的差别**不在实现，而在语义**：那一个探的是 `view=org`
+ * （"我是不是某个组织里能受理委托的人"），这一个探的是 `view=owner`
+ * （"委托这个能力对我开不开放"）。两个问题不同，答案也可以不同 ——
+ * 一个账号完全可以"作为货主能提单、但不是任何组织的经理"。
+ *
+ * ⚠️ **空列表必须算可见**：`view=owner` 是恒可用的自有查询，`total=0` 只说明
+ * "你还没提过委托"，那是**正常起点**，不是权限问题。把 0 当成不可见会让
+ * **每一个新货主**都看不到入口 —— 这个功能在真实使用中等于不存在，
+ * 而 CI 与真机走查都察觉不到（它们用的是有种子数据的账号）。
+ * 判据因此只取 `entryDecision()` 的 status 分支，`total` 只作参考值返回。
+ */
+function probeOwnerEntry() {
+  return request({
+    url: BASE + '/assignments',
+    method: 'GET',
+    data: { view: 'owner', page: 1, size: 1 },
+    silent: true
+  })
+    .then(function (res) {
+      const decision = entryDecision({ status: 200 })
+      decision.total = (res && res.total) || 0
+      return decision
+    })
+    .catch(function (err) {
+      const status = (err && err.httpStatus) || 0
+      return entryDecision({ status: status, netError: !status })
+    })
+}
+
 /** 拉取组织委托队列（经理工作台的数据源）。 */
 function fetchQueue(options) {
   const opts = options || {}
   const data = { view: 'org', page: opts.page || 1, size: opts.size || 20 }
   if (opts.orgId) data.org_id = opts.orgId
+  if (opts.status) data.status = opts.status
+  return request({ url: BASE + '/assignments', method: 'GET', data: data })
+}
+
+/**
+ * 拉取「我的委托」（货主视角 `view=owner`）。界面「我的委托」的数据源。
+ *
+ * ⚠️ 与 `fetchQueue()` 是**两个视角，不是两个筛选**：`view=org` 的范围是
+ * "我所属组织的队列"（可见性由组织成员资格 + 授权 + 权限码判定），
+ * `view=owner` 的范围是"我作为货主提交的单"。两者都不接受无范围查询 ——
+ * 服务端在两者都给不出范围时返回空集，不做全表浏览。
+ */
+function fetchMine(options) {
+  const opts = options || {}
+  const data = { view: 'owner', page: opts.page || 1, size: opts.size || 20 }
   if (opts.status) data.status = opts.status
   return request({ url: BASE + '/assignments', method: 'GET', data: data })
 }
@@ -416,7 +470,17 @@ function decorateDetail(row, permitted) {
   decorated.quantityText = decorated.quantityText
   decorated.statusHint = STATUS_HINT[data.status] || ''
   decorated.createdAt = data.created_at || ''
-  decorated.orgText = decorated.orgId ? '组织 #' + decorated.orgId : '未指定组织'
+  // 归属组织（S1 工作项 5）：优先用**组织名**。
+  //
+  // 此前这里只能给出 `组织 #7` —— 那不是设计，而是"后端没把名字交过来"的直接后果：
+  // 货主看不懂一个编号，也不该被要求记住它。退回编号的分支**保留**（不是死代码），
+  // 它覆盖真名确实取不到的情形（组织记录已不存在），而那时`未指定组织`会谎称
+  // "没人接手"、编一个组织名更糟 —— **未知就说未知**。
+  decorated.orgText = data.org_name
+    ? data.org_name
+    : decorated.orgId
+      ? '组织 #' + decorated.orgId
+      : '未指定组织'
   return decorated
 }
 
@@ -2736,6 +2800,7 @@ module.exports = {
   fetchAssignment,
   fetchCase,
   fetchCaseOrgList,
+  fetchMine,
   fetchMyEntrustments,
   fetchMyOrgs,
   fetchQueue,
@@ -2752,6 +2817,7 @@ module.exports = {
   pickEntrustment,
   pickOrg,
   probeEntry,
+  probeOwnerEntry,
   removeCaseLink,
   reopenCase,
   revisionSourceLabel,

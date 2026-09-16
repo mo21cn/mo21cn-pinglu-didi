@@ -41,7 +41,10 @@ Page({
     functions: FUNCTIONS,
     // 委托发货入口：默认隐藏，仅当服务端静默探测放行才显示（AC-02）
     showEntrust: false,
-    entrustHint: ''
+    entrustHint: '',
+    // 「我的委托」入口（S1 工作项 5）：**独立**探测、独立门控，与上面的经理入口
+    // 不共用一个开关 —— 理由见 probeMineEntrust()。
+    showMineEntrust: false
   },
 
   onLoad() {
@@ -77,6 +80,7 @@ Page({
       })
     }
     this.probeEntrust()
+    this.probeMineEntrust()
   },
 
   /**
@@ -101,6 +105,34 @@ Page({
 
   onEntrust() {
     wx.navigateTo({ url: '/pages/entrust/workbench/workbench' })
+  },
+
+  /**
+   * 静默探测「我的委托」入口的可见性（S1 工作项 5，AC-02 的**货主侧**）。
+   *
+   * ⚠️ 它与 `probeEntrust()` **各探一次、互不代替**，这是本函数存在的全部理由。
+   * 二者问的不是同一个问题：
+   *   · `probeEntrust()`  → `view=org`：「我在某个组织里能**受理**委托吗」；
+   *   · `probeMineEntrust()` → `view=owner`：「**委托这个能力**对我开不开放」。
+   * 一个货主账号通常**只**满足后者（他不是任何组织的经理）—— 若两个入口共用
+   * 一个开关，货主就永远看不到自己的委托列表，而这类"入口从不出现"的缺陷
+   * 不会报错、也不会被任何后端用例发现（它们只测接口）。
+   *
+   * 判据由 `utils/entrust.probeOwnerEntry()` 独占：它按 HTTP 状态判定
+   * （404 = 功能未启用、401 = 登录过期 ⇒ 隐藏），而**空列表算可见** ——
+   * "你还没提过委托"是正常起点，不是权限问题。
+   *
+   * 探测失败一律保持隐藏：显示一个点进去必然失败的入口比不显示更糟。
+   */
+  probeMineEntrust() {
+    const self = this
+    entrust.probeOwnerEntry().then(function (decision) {
+      self.setData({ showMineEntrust: !!decision.visible })
+    })
+  },
+
+  onMineEntrust() {
+    wx.navigateTo({ url: '/pages/entrust/assignments/assignments' })
   },
 
   getInitials(name) {

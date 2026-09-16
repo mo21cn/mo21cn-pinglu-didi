@@ -1,0 +1,130 @@
+/* 委托发货 · 我的委托（S1 工作项 5）—— 只写本页特有排版，其余复用 app.wxss
+   （`.card` / `.row-between` / `.result-count` / `.chip` / `.empty` / `.err-*` 都是全局类） */
+
+.head-bg {
+  background: linear-gradient(135deg, #3B5BDB, #7048E8);
+  padding-bottom: 24rpx;
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  height: 88rpx;
+  padding: 0 24rpx;
+}
+
+.nav-back {
+  width: 64rpx;
+  font-size: 48rpx;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.nav-spacer {
+  width: 64rpx;
+}
+
+.head-sub {
+  padding: 0 28rpx;
+  font-size: 25rpx;
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── 列表 ───────────────────────────────────────────────────────────── */
+
+.mine-head {
+  padding: 4rpx 4rpx 12rpx;
+}
+
+.mine-card {
+  margin-bottom: 16rpx;
+}
+
+.mine-title {
+  flex: 1;
+  padding-right: 16rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.mine-line {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: #4A5A6E;
+}
+
+.mine-line-weak {
+  color: #98A6B8;
+}
+
+/* 承接组织：本页要回答的核心问题，所以它独占一行、带底纹，
+   与上面两行货物信息在**视觉层级**上分开 —— 挤成第三行会被读成
+   "又一个货物字段"，而它是"这单现在归谁"。 */
+.mine-org {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 10rpx;
+  background: #F1F4F8;
+}
+
+.mine-org-label {
+  font-size: 24rpx;
+  color: #6B7A8C;
+}
+
+.mine-org-known {
+  background: #EDF2FF;
+}
+
+.mine-org-unknown {
+  background: #FFF7E6;
+}
+
+.mine-org-name {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #0F2540;
+}
+
+.mine-foot {
+  margin-top: 12rpx;
+}
+
+.mine-meta {
+  font-size: 22rpx;
+  color: #98A6B8;
+}
+
+.empty-hint {
+  margin-top: 12rpx;
+  padding: 0 48rpx;
+  font-size: 24rpx;
+  color: #98A6B8;
+  line-height: 1.6;
+}
+
+/* ---- 本页 hover 反馈 ----
+   `hover-dim` / `row-hover` 是页面级类（app.wxss 未定义），用到就自带一份；
+   漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */
+.hover-dim {
+  opacity: .6;
+}
+
+.row-hover {
+  opacity: .85;
+}

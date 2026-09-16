@@ -137,6 +137,15 @@ ORG_WORKBENCH = "演示经营主体·工作台"
 #: （`TITLE_A`），而它已被 ㊳ 章受理掉 ⇒「被抢认领」要另找一张。不新造**种子**
 #: （不必动 `seed_entrust_orgpicker.py`），只在本章运行时经 API 建一张。
 TITLE_RACE_DETAIL = "走查·详情页被抢认领（本章 API 建单）"
+#: ㊶ 章**自己造**的载体单标题（S1 工作项 5：客户侧「我的委托」列表）。
+#: 用 API 建单的理由见 `sec_41` 的 docstring：本章断言的对象是**列表页**与
+#: **重载之后**，不是建单表单；而经界面建单会与 ㉞ 章的"在途草稿"状态互相消耗
+#: （㉞ 会在 `seed-shipper` 名下留草稿/已提交单），两章就不再各自独立成立。
+#: 标题取唯一值：列表里同时有种子单与本轮新单，靠标题才能把它们分开。
+TITLE_MINE_LIST = "走查·我的委托列表可见性（㊶ 章 API 建单）"
+#: ㊶ 章的第二张载体单：**草稿**（`org_id` 为空）。它承载「承接组织未知」这一格 ——
+#: 只有真的有这么一张单，才能证界面上的「尚未委托组织」不是一句编出来的文案。
+TITLE_MINE_DRAFT = "走查·我的委托·草稿（㊶ 章 API 建单，无承接组织）"
 
 CODE_SHIPPER = "seed-shipper"
 CODE_OWNER = "seed-owner"
@@ -652,6 +661,8 @@ DETAIL = "pages/entrust/detail/detail"
 CASE = "pages/entrust/case/case"
 CASE_CREATE = "pages/entrust/case-create/case-create"
 SESSION = "pages/entrust/session/session"
+#: S1 工作项 5：货主侧「我的委托」列表（真实状态 + 承接组织）。
+MINE_LIST = "pages/entrust/assignments/assignments"
 
 # ㉖/㉗/㉘ 章（ENT-030 切四之六：登记案件 → 记录决定 → 关闭）依赖的演示数据。
 # 委托 `#1` 是 `seed_entrust_demo.py` 的 `ASSIGNMENT_MAIN`，状态 `claimed`
@@ -6521,6 +6532,310 @@ def sec_40(w: Walker) -> None:
     )
 
 
+def sec_41(w: Walker) -> None:
+    """㊶ 「我的委托」客户侧状态屏 —— 出口判据①的**独立**断言 ＋ 承接组织。
+
+    本章补的是哪一格（以及**不**补哪一格）
+    ------------------------------------
+    S1 出口判据① 原文：`A fresh UI-created assignment survives reload`。
+    「survives reload」这一半此前**只有两类证据**，都不是它字面要求的那一条：
+
+    * ㉞ 章：换页面实例后**续接同一张草稿** —— 证的是"在途草稿没丢"，
+      不是"已提交的单重新加载后仍在**列表 / 详情**里看得见"；
+    * 后端（`test_exit_a_*`）：**换新会话读数据库** —— 证的是"真的落库了"，
+      但它绕过了界面：界面完全可能因为可见性 / 投影 / 入口问题**看不见**它。
+
+    ⇒ 本章补的正是缺的那一格：**重新加载后，这一单仍在列表里、也仍能打开详情**。
+    ⚠️ 而「**UI-created**」那一半由 **㉞ 章** 覆盖（它在真机界面上建草稿并提交）。
+    两半**互不替代**：㉞ 没有"重进之后"的断言，本章的载体单是经 API 建的。
+    合起来才构成整句 —— **本章单独不成立这条判据**，汇报时不得说成"判据①已通过"。
+
+    同时取证 S1 工作项 5「客户侧看到真实状态与**承接组织**」
+    --------------------------------------------------------
+    承接组织此前在界面上只能显示 `组织 #7` 这样的**裸编号**（`decorateDetail.orgText`），
+    因为后端载荷里**只有 `org_id`、没有名字**。本切片给载荷补了 `org_name`，
+    于是货主能看到的是组织名。本章在设备侧钉住两件事：
+
+    * 有承接方 → 列表 / 详情显示**组织名**（本例 = `演示经营主体·甲`）；
+    * 还没有承接方（**草稿**，`org_id` 为空）→ 显示「**尚未委托组织**」，
+      **不是**空白、也不是编出来的名字。「未知保持未知」是这一格的重点：
+      空白看起来像界面没渲染出来，而编一个名字会让货主以为已经有人接手了。
+
+    载体单为什么经 API 建、而不是点界面表单
+    --------------------------------------
+    本章断言的对象是**列表页**与**重载之后**，不是建单表单（那是 ㉞ 的职责）。
+    而经界面建单会在 `seed-shipper*` 名下留下**在途草稿**，与 ㉞ 章的持久化草稿
+    互相消耗 —— 两章就不再各自独立成立。故本章只经 API 造**两张运行期载体单**
+    （一张 submitted、一张 draft），不新增任何**种子**。
+
+    ⚠️ 本章**零业务写入副作用**（只有建单，不改任何已存在的单据、不改库）；
+    放在全量序列最末，且不依赖其它章节留下的状态。
+    """
+    print("\n== ㊶ 「我的委托」客户侧状态屏（出口判据① 的独立断言 + 承接组织）==", flush=True)
+    base_err = w.c.errors()
+
+    tok_op = (api_login(CODE_SHIPPER_ORGPICKER) or {}).get("access_token") or ""
+    # ⚠️ 必须是 `/my-entrustments`（「我**授权出去**的组织」），**不是** `/my-orgs`
+    #    （「我**所在**的组织」）。`seed-shipper-orgpicker` 是**货主** —— 它对甲 / 乙
+    #    有生效的委托授权，但**不是**这两个组织的成员 ⇒ `/my-orgs` 对它返回**空列表**。
+    #    本轮首跑正是在这里 FAIL（`授权组织数=0`）：拿"归属"去问"授权"，两个问题的
+    #    答案当然不同（DR-0012「归属 ≠ 权限边界」）。受理屏自己用的也是这一个端点。
+    ents = (api_get("/entrust/my-entrustments", tok_op) or {}).get("items") or []
+    oa = next((r or {} for r in ents if str((r or {}).get("org_name") or "") == ORG_A), {})
+    org_a_id = str(oa.get("org_id") or "")
+    w.rep.rec(
+        "㊶ 前置①：`seed-shipper-orgpicker` 对**甲组织**有生效委托授权（取 "
+        "`/my-entrustments`，不是 `/my-orgs`）⇒ 它能把单提交到甲，"
+        "而甲的组织名正是本章要断言的「承接组织」",
+        bool(org_a_id),
+        f"授权组织数={len(ents)} 甲#{org_a_id} 授权组织名="
+        f"{[str((r or {}).get('org_name') or '') for r in ents]}",
+    )
+    if not org_a_id:
+        w.rep.not_run(
+            "㊶ 我的委托（客户侧状态屏）",
+            "甲组织不在该身份的**授权**清单里（`/my-entrustments` 为空或不含甲）。"
+            "先跑 backend/scripts/seed_entrust_orgpicker.py 再重跑。"
+            "⚠️ 别拿 `/my-orgs`（我**所在**的组织）代替它 —— 货主不在组织里，那个端点对它恒为空。",
+        )
+        return
+
+    # ---- 载体单 ×2：一张提交到甲（有承接组织）、一张留草稿（没有承接组织）----
+    ts = int(time.time() * 1000)
+    st_new, created = api_post(
+        "/entrust/assignments",
+        tok_op,
+        {"title": TITLE_MINE_LIST, "cargo_summary": "㊶ 章载体单：客户侧列表可见性与承接组织"},
+        f"walk41-new-{ts}",
+    )
+    new_id = str((created or {}).get("assignment_id") or "")
+    rev = int((created or {}).get("revision") or 0)
+    st_sub, submitted = (0, None)
+    if new_id and rev:
+        st_sub, submitted = api_post(
+            f"/entrust/assignments/{new_id}/submit",
+            tok_op,
+            {"org_id": int(org_a_id), "expected_revision": rev},
+            f"walk41-sub-{ts}",
+        )
+    w.rep.rec(
+        "㊶ 前置②：载体单已建成并**提交到甲组织**（`submitted`）。标题取唯一值 —— "
+        "列表里同时有种子单与本轮新单，靠标题 / id 才能把它们分开",
+        st_new in (200, 201)
+        and st_sub in (200, 201)
+        and str((submitted or {}).get("status") or "") == "submitted",
+        f"建单 HTTP={st_new} id={new_id!r} 提交 HTTP={st_sub} "
+        f"status={(submitted or {}).get('status')!r}",
+    )
+    if not new_id or st_sub not in (200, 201):
+        w.rep.not_run("㊶ 我的委托（客户侧状态屏）", "载体单未建成，链路断在这里")
+        return
+
+    st_draft, draft = api_post(
+        "/entrust/assignments",
+        tok_op,
+        {"title": TITLE_MINE_DRAFT, "cargo_summary": "㊶ 章草稿载体单：承接组织为空"},
+        f"walk41-draft-{ts}",
+    )
+    draft_id = str((draft or {}).get("assignment_id") or "")
+    w.rep.rec(
+        "㊶ 前置③：另建一张**草稿**载体单（`org_id` 为空）—— 它是「承接组织未知」"
+        "这一格的载体：只有真的有这么一张单，才能证「尚未委托组织」不是编出来的文案",
+        st_draft in (200, 201) and bool(draft_id) and (draft or {}).get("org_name") is None,
+        f"建单 HTTP={st_draft} id={draft_id!r} org_name={(draft or {}).get('org_name')!r}",
+    )
+
+    # ============ 一、「我的」页上的货主侧入口（**真实点击**，不是脚本 navigate）============
+    print("\n-- 一、「我的」页的货主侧入口（真实点击）--", flush=True)
+    # ⚠️ `login_as()` 只做三件事：写 `dev_login_code`、清 token、`reLaunch` 回首页 ——
+    #    **它本身不登录**。登录发生在 `enterRole()` 里，也就是**首页身份卡被点的那一刻**。
+    #    只调 `login_as()` 会停在**未登录**状态（页面显示「未登录」、无 token）⇒
+    #    `view=owner` 与 `view=org` 两个探测各拿一个 **401** ⇒ 两个入口一起隐藏。
+    #    ⚠️ 此时断言会失败，但**失败的原因不是入口该不该显示**（隐藏反而是对的），
+    #    而是**前置条件压根没建立** —— 本轮首跑正是这样踩的（截图 `41-1` 上是「未登录」）。
+    #    故本前置必须与 `enter_role()` 成对（全脚本其它章节都如此，见 `open_workbench()`）。
+    path = w.login_as(CODE_SHIPPER_ORGPICKER)
+    if path != INDEX or not w.enter_role("shipper", SHIPPER):
+        w.rep.rec(
+            "㊶ 前置④：以 `seed-shipper-orgpicker`（**货主**）真的**登录进**小程序"
+            "（`login_as` + `enter_role` 成对；只有 `login_as` ＝ 未登录）",
+            False,
+            f"停在 {path!r}、当前 {w.c.current_path()!r}",
+        )
+        w.rep.not_run("㊶ 我的委托（客户侧状态屏）", "货主身份没进到货主端，链路断在登录这一步")
+        return
+    w.c.nav("switchTab", "/" + MINE, MINE)
+    n_entry = 0
+    d_mine: dict = {}
+    for _ in range(3):
+        d_mine = w.wait_data(lambda x: x.get("showMineEntrust") is True, tries=20, gap=0.5)
+        n_entry = w.c.count('[data-act-mine-entrust="1"]')
+        if n_entry == 1:
+            break
+        # 探测由 `onShow` 触发；重新进「我的」让它再探一次（token 可能刚落地）
+        w.c.navigate("reLaunch", "/" + INDEX)
+        w.c.nav("switchTab", "/" + MINE, MINE)
+    w.rep.rec(
+        "㊶ ① 「我的」页上**货主侧**入口可见并真实渲染出来（`showMineEntrust=true` + 锚点命中 1）。"
+        "⚠️ 它由**独立**探测驱动（`view=owner`），与同页的经理入口（`view=org`）不共用一个开关 ——"
+        "共用一个开关时货主永远看不到自己的委托列表，而这类缺陷不会报错",
+        d_mine.get("showMineEntrust") is True and n_entry == 1,
+        f"showMineEntrust={d_mine.get('showMineEntrust')!r} 锚点命中={n_entry}",
+    )
+    w.shot("41-1-我的-货主侧入口-可见")
+    if n_entry != 1:
+        w.rep.not_run(
+            "㊶ 我的委托（客户侧状态屏）",
+            "货主侧入口未渲染（探测未放行）。先确认后端在 8000 上、且 `ENTRUST_ENABLED=true`。",
+        )
+        return
+
+    t_entry = w.c.tap('[data-act-mine-entrust="1"]')
+    d_list0 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    items0 = d_list0.get("items") or []
+    row_new0 = next((it for it in items0 if str(it.get("assignmentId")) == new_id), None)
+    row_draft0 = next((it for it in items0 if str(it.get("assignmentId")) == draft_id), None)
+    w.rep.rec(
+        "㊶ ② 真实点击入口 ⇒ 进入「我的委托」列表，五态落到 ready，且**刚提交的那一单在列表里**"
+        "（这就是此前缺的那条：它证明界面能看见这张单，而不只是数据库里有它）",
+        bool(t_entry) and d_list0.get("view") == "ready" and row_new0 is not None,
+        f"tap={t_entry} view={d_list0.get('view')!r} 条目数={len(items0)} "
+        f"命中={row_new0 is not None}",
+    )
+    w.shot("41-2-我的委托-列表-已提交单在列")
+
+    # ============ 二、承接组织：有承接方 ⇒ 组织名；无承接方 ⇒ 显式说「尚未委托组织」============
+    print("\n-- 二、承接组织两格（有 / 无）--", flush=True)
+    w.rep.rec(
+        "㊶ ③ 列表上该单的**承接组织显示为组织名**（不是 `组织 #7` 这类裸编号）。"
+        "⚠️ 补这条断言是必然的：后端此前只给 `org_id`，界面只能把编号端给货主看",
+        row_new0 is not None and str(row_new0.get("orgLabel")) == ORG_A,
+        f"orgName={row_new0.get('orgName')!r} orgLabel={row_new0.get('orgLabel')!r}"
+        if row_new0
+        else "该单不在列表里",
+    )
+    w.rep.rec(
+        "㊶ ④ **未知保持未知**：草稿载体单（没有承接组织）在列表上显示「尚未委托组织」，"
+        "既**不是**空白、也**不是**一个编出来的组织名 —— 空白看起来像界面没渲染，"
+        "而编一个名字会让货主以为已经有人接手了",
+        row_draft0 is not None
+        and str(row_draft0.get("orgName")) == ""
+        and str(row_draft0.get("orgLabel")) == "尚未委托组织",
+        f"orgName={row_draft0.get('orgName')!r} orgLabel={row_draft0.get('orgLabel')!r}"
+        if row_draft0
+        else "草稿载体单不在列表里",
+    )
+    w.shot("41-3-我的委托-承接组织两格")
+
+    # ============ 三、**重进**（换页面实例）⇒ 仍在列表可见（出口判据① 的独立断言）============
+    print("\n-- 三、reLaunch 重进列表 ⇒ 该单仍在 --", flush=True)
+    w.c.navigate("reLaunch", "/" + MINE_LIST)
+    d_list1 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    w.c.navigate("reLaunch", "/" + MINE_LIST)
+    d_list2 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    items2 = d_list2.get("items") or []
+    row_new2 = next((it for it in items2 if str(it.get("assignmentId")) == new_id), None)
+    w.rep.rec(
+        "㊶ ⑤ **出口判据① 的独立断言**：`reLaunch`（换页面实例、清空页面栈）**两次**之后，"
+        "这一单**仍在返回的列表载荷里**，且状态仍是 `submitted`、承接组织仍是甲 ——"
+        '⚠️ 这是本章存在的理由：㉞ 证的是"草稿续接"、后端证的是"落库"，'
+        '**都不是**"重新加载后界面仍看得见它"',
+        d_list1.get("view") == "ready"
+        and d_list2.get("view") == "ready"
+        and row_new2 is not None
+        and str(row_new2.get("status")) == "submitted"
+        and str(row_new2.get("orgLabel")) == ORG_A,
+        f"两次 view={d_list1.get('view')!r}/{d_list2.get('view')!r} "
+        f"第二次条目数={len(items2)} 命中={row_new2 is not None} "
+        f"status={(row_new2 or {}).get('status')!r}",
+    )
+    w.shot("41-4-我的委托-reLaunch-重进后仍在")
+
+    # ============ 四、从列表**真实点击**该行 ⇒ 详情页；再重进详情 ============
+    print("\n-- 四、真点击该行 ⇒ 详情；详情再重进 --", flush=True)
+    t_row = w.c.tap(f'[data-mine-id="{new_id}"]')
+    # ⚠️ `tap()` 只保证"这一点位被点到了"，**不保证页面已经切过去**（导航是异步的）。
+    #    紧接着 `wait_data(view != loading)` 会**读到列表页自己的 data** —— 列表页此刻的
+    #    `view` 正好是 `ready` ⇒ 谓词**立刻为真** ⇒ 拿回来的是**上一页**的载荷
+    #    （`assignmentId` / `detail` 全为 `None`），表现得像"详情页坏了"。
+    #    （本轮第 2 跑正是这样 FAIL 的：`tap=True view='ready' assignmentId=None`。）
+    #    ⇒ 先 `wait_path` 钉住**页面真的切到详情页**，再读 data。
+    #    ⚠️ 别用 `nav(...)` 代替：那会把**真实点击**这条证据换成程序化导航（H2），
+    #       本章第 ⑥ 格的全部价值就在"**点**这一下"。故这里是**修读数**，不是换入口。
+    #    ⚠️ 判据本身一个字没动：照样要求 真点击 ∧ 编号对得上 ∧ 状态与承接组织一致。
+    landed = w.c.wait_path(DETAIL, tries=40)
+    d_det0 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    det0 = d_det0.get("detail") or {}
+    w.rep.rec(
+        "㊶ ⑥ 从列表**真实点击这一行** ⇒ 落到**这一张**的详情（编号对得上，而不是「列表第一条」），"
+        "且状态与承接组织与服务端真相一致",
+        bool(t_row)
+        and landed
+        and d_det0.get("view") == "ready"
+        and str(d_det0.get("assignmentId")) == new_id
+        and str(det0.get("status")) == "submitted"
+        and str(det0.get("orgText")) == ORG_A,
+        f"tap={t_row} 落点={'detail' if landed else '未切页'} "
+        f"view={d_det0.get('view')!r} page 的 assignmentId="
+        f"{d_det0.get('assignmentId')!r} status={det0.get('status')!r} orgText={det0.get('orgText')!r}",
+    )
+    w.shot("41-5-详情页-来自列表真实点击")
+
+    w.c.navigate("reLaunch", f"/{DETAIL}?assignment_id={new_id}")
+    # 与 ⑥ 同一种读数竞态：`reLaunch` 是异步的，紧接着读 data 可能拿到**上一页**的载荷。
+    # 故同样先钉住落点（这一步是**程序化导航**，只用于验"重进后详情仍可见"，不承担"真实点击"）
+    w.c.wait_path(DETAIL, tries=40)
+    d_det1 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    det1 = d_det1.get("detail") or {}
+    w.rep.rec(
+        "㊶ ⑦ **详情页也重进一次**：换页面实例后详情仍可见、状态与承接组织不变 ——"
+        '判据① 说的是 `survives reload`，而"列表看得见"与"详情看得见"是**两条**独立通路'
+        "（列表走投影列表接口，详情走单张接口 + 工作台载荷）",
+        d_det1.get("view") == "ready"
+        and str(det1.get("status")) == "submitted"
+        and str(det1.get("orgText")) == ORG_A,
+        f"view={d_det1.get('view')!r} status={det1.get('status')!r} orgText={det1.get('orgText')!r}",
+    )
+    w.shot("41-6-详情页-reLaunch-重进后仍在")
+
+    # ============ 五、负例：这不是"全表浏览"============
+    print("\n-- 五、负例：另一个货主的列表里不含它 --", flush=True)
+    tok_other = (api_login(CODE_SHIPPER) or {}).get("access_token") or ""
+    other = api_get("/entrust/assignments?view=owner&page=1&size=20", tok_other) or {}
+    other_ids = [str((it or {}).get("assignment_id")) for it in (other.get("items") or [])]
+    w.rep.rec(
+        "㊶ ⑧ 负例：**另一个货主**（`seed-shipper`）的 `view=owner` 列表里**不含**这张单 ——"
+        '`view=owner` 的可见性边界是"我自己的"，不是"所有人的"。'
+        '⚠️ 没有这条，上面所有"看得见"的断言都可能是"列表其实是全表"',
+        new_id not in other_ids,
+        f"对方 total={other.get('total')!r} 含本章载体单={new_id in other_ids}",
+    )
+
+    # ============ 六、诚实边界 ============
+    w.rep.rec(
+        "㊶ 去向记录（**复用**，不是本章新证）：出口判据① 里「**UI-created**」那一半由 "
+        "**㉞ 章**覆盖（真机走真实入口建草稿 → 提交 → 落到详情），本章补的是"
+        "「**重进后仍在列表 / 详情可见**」那一半。两半**互不替代** ⇒"
+        "本章**单独不构成**判据① 通过；整句是否成立由 HO 判",
+        True,
+        "去向：㉞ = UI-created · 本章 = survives reload（列表 + 详情两条通路）",
+    )
+    w.rep.rec(
+        "㊶ 本章 console 无未豁免 error（页面自身的运行期错误）",
+        len(w.new_errors(base_err)) == 0,
+        str(w.new_errors(base_err))[:200],
+    )
+    w.rep.limitation(
+        "㊶ **下拉刷新（真手势）与分页第 2 页**无法由本工具触发",
+        "本页 `enablePullDownRefresh=true`（`onPullDownRefresh` → `load()`），"
+        "但下拉是**真实触摸手势**，走查工具只能发 tap / 程序化导航，造不出这个手势；"
+        "分页第 2 页需要 >20 张单（`PAGE_SIZE=20`），而种子里没有那么多。"
+        "⇒ `onPullDownRefresh` 与 `pageHint` 的多页分支**未取得设备证据**（与产品无关，"
+        "是工具边界）。本章能证的是：首屏取数、五态、列表三项内容、真实点击进详情、"
+        "两条通路各自的 reLaunch 重进、以及 `view=owner` 的可见性负例。",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -6547,6 +6862,7 @@ SECTIONS = {
     "38": sec_38,
     "39": sec_39,
     "40": sec_40,
+    "41": sec_41,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -6631,6 +6947,13 @@ DEFAULT_ORDER = [
     #    与 ㊴ 的选址**恰好相反** —— 理由见 sec_40 docstring。
     #    本章**会改库**（成员角色），自带 `finally` 还原；排在 ㊴ 之后，单跑也成立。
     "40",
+    # ㊶ S1 工作项 5「我的委托」（货主侧状态屏）＋ 出口判据① 里「重进后仍在列表 / 详情
+    #    可见」那一半的**独立**断言。
+    # ⚠️ 本章**零副作用**（只经 API 建两张载体单，不改任何已存在的单据、不改库），
+    #    且不依赖其它章节留下的状态 ⇒ 单跑也成立。放在最末是因为它会给
+    #    `seed-shipper-orgpicker` 名下多出两张单（一张 submitted、一张 draft），
+    #    排在前面会让按条数断言的章节变脆。
+    "41",
 ]
 
 
