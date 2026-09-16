@@ -565,3 +565,89 @@ def test_denied_submit_is_403_not_500(env):
     assert still is not None
     assert still["status"] == "draft", "被拒的提交改动了状态"
     assert still["org_id"] is None, "被拒的提交写入了组织"
+
+
+# ── 工作项 5：客户侧看到真实状态与**承接组织** ─────────────────────────────
+
+
+def test_owner_view_carries_real_status_and_owning_org_name(env):
+    """S1 工作项 5：货主的列表与详情必须带**真实状态**和**承接组织名**。
+
+    为什么「承接组织」必须落到**名字**而不只是 `org_id`：界面拿一个整数没法给
+    货主看 —— 他不知道也不该记组织 ID。缺名字只有两条出路：界面上显示一个裸数字，
+    或者前端自建一张 id→名字的映射表；后者等于把「谁是承接方」这个事实复制到
+    客户端，与服务端漂移是迟早的事（`org` 改名/停用/换主体，页面不会知道）。
+
+    ⚠️ 三条边界都钉住了：
+    1. 草稿态（未选组织）→ `org_name` 是 **None**，不是空串、不是占位名；
+       「未知保持未知」—— 编一个名字会让货主以为已经有人接手。
+    2. 提交后 → 名字来自 `ent_organization.name`，且**换新会话**读仍是同一个值
+       （证明它来自 JOIN，不是内存里挂上去的临时字段，DR-0002）。
+    3. 别人的列表里**不出现**这一单（`view=owner` 的可见性边界仍在）。
+    """
+    s = _scene(env)
+    created = _create_via_api(env.client, s.owner, cargo_summary="螺纹钢", quantity="800")
+    assert created["org_name"] is None, "草稿态没有承接组织，不能编一个名字出来"
+
+    submitted = _submit_via_api(env.client, s.owner, created, s.org_a)
+    assert submitted["org_id"] == s.org_a
+    assert submitted["org_name"] == "甲组织"
+
+    # 货主列表：界面「我的委托」的数据源（`view=owner`，与 `utils/entrust.fetchMine` 同形）
+    listing = env.client.get(
+        "/api/v1/entrust/assignments",
+        params={"view": "owner", "page": 1, "size": 20},
+        headers=_headers(s.owner),
+    )
+    assert listing.status_code == 200, listing.text
+    row = next(
+        (r for r in listing.json()["items"] if r["assignment_id"] == created["assignment_id"]),
+        None,
+    )
+    assert row is not None, "货主自己的列表里读不到刚提交的委托"
+    assert row["status"] == "submitted"
+    assert row["org_name"] == "甲组织"
+
+    # 详情页同源：同一份投影，不该只在列表里带名字
+    detail = env.client.get(
+        f"/api/v1/entrust/assignments/{created['assignment_id']}", headers=_headers(s.owner)
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["org_name"] == "甲组织"
+
+    # 换新会话读：名字来自 JOIN，不是内存里的临时字段
+    reloaded = _fresh_read(env.make_session, created["assignment_id"])
+    assert reloaded is not None
+    assert reloaded["org_name"] == "甲组织"
+
+    # 负例：与这张委托无关的另一个货主，列表里不该出现它
+    bystander = _login(env.client, "shipper")
+    other = env.client.get(
+        "/api/v1/entrust/assignments",
+        params={"view": "owner"},
+        headers=_headers(bystander),
+    )
+    assert other.status_code == 200, other.text
+    assert other.json()["items"] == [], "`view=owner` 泄漏了别人的委托"
+
+
+def test_owner_list_keeps_org_less_draft_visible(env):
+    """承接组织缺失时，委托**仍然在货主自己的列表里**（LEFT JOIN 而不是 INNER JOIN）。
+
+    这不是"顺手加的反例"：草稿还没选组织、或组织被停用/删除时，INNER JOIN 会让
+    这张委托**从货主自己的列表里消失** —— 那等于把「组织没了」渲染成
+    「我的委托没了」。后者是个更严重、且更难被发现的错误结论（用户会重新提单）。
+    """
+    s = _scene(env)
+    created = _create_via_api(env.client, s.owner, title="尚未委托的草稿")
+    assert created["org_id"] is None
+    assert created["org_name"] is None
+
+    listing = env.client.get(
+        "/api/v1/entrust/assignments",
+        params={"view": "owner"},
+        headers=_headers(s.owner),
+    )
+    assert listing.status_code == 200, listing.text
+    ids = [r["assignment_id"] for r in listing.json()["items"]]
+    assert created["assignment_id"] in ids, "没有承接组织的草稿从货主列表里消失了"

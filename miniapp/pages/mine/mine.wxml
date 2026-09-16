@@ -65,6 +65,26 @@
       <view wx:if="{{entrustHint}}" class="entrust-entry-hint">{{entrustHint}}</view>
     </view>
 
+    <!-- 「我的委托」入口（S1 工作项 5）——**货主侧**，与上面那块经理入口并列，
+         但由**另一个**服务端探测驱动（`showMineEntrust` ← `view=owner`）。
+         为什么不是同一块：两块回答的问题不同（"我能受理委托吗" vs
+         "我提的单现在怎么样了"），一个货主账号通常只满足后者。 -->
+    <view
+      wx:if="{{showMineEntrust}}"
+      class="section-card entrust-entry"
+      data-act-mine-entrust="1"
+      bindtap="onMineEntrust"
+      hover-class="row-hover"
+    >
+      <view class="row-between">
+        <view class="entrust-entry-main">
+          <view class="entrust-entry-title">📦 我的委托</view>
+          <view class="entrust-entry-sub">提交的委托 · 真实状态与承接组织</view>
+        </view>
+        <text class="entrust-entry-caret">›</text>
+      </view>
+    </view>
+
     <!-- 资产行 -->
     <view class="section-card assets">
       <view class="asset-cell" data-key="balance" bindtap="onAssetTap" hover-class="row-hover">

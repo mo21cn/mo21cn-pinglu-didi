@@ -269,7 +269,11 @@ const ENTRUST_PAGES = [
   // S1 / DEMO-1 §3.3：客户受理屏（UI-07）。它从 utils/entrust 解构导入 10 个成员，
   // 列进来才会被下面那三项现成检查扫到：解构的每个成员都被导出、已在 app.json 注册、
   // 模板里的类名都有定义 —— 这三件漏掉都不报错，只是静默不生效。
-  'pages/entrust/intake/intake'
+  'pages/entrust/intake/intake',
+  // S1 工作项 5：「我的委托」（货主侧状态屏）。它从 utils/entrust 解构导入 5 个成员，
+  // 列进来才会被下面那三项现成检查扫到：解构的每个成员都被导出、已在 app.json 注册、
+  // 模板里的类名都有定义 —— 这三件漏掉都不报错，只是静默不生效。
+  'pages/entrust/assignments/assignments'
 ]
 
 /**
@@ -289,6 +293,7 @@ const PAGE_CSS_CHECKS = [
   { path: 'pages/entrust/case-create/case-create', knownEmpty: [] },
   { path: 'pages/entrust/session/session', knownEmpty: [] },
   { path: 'pages/entrust/intake/intake', knownEmpty: [] },
+  { path: 'pages/entrust/assignments/assignments', knownEmpty: [] },
   { path: 'pages/mine/mine', knownEmpty: ['nav', 'bell-icon', 'role-chip-label'] }
 ]
 

@@ -95,10 +95,21 @@ def _text_ts(raw: Any) -> str | None:
 
 def _row_to_assignment(row: Any) -> dict[str, Any]:
     quantity = row["quantity"]
+    # `org_name` 来自 LEFT JOIN（见 `_ASSIGNMENT_FROM`）：委托还在草稿态（`org_id` 为空）
+    # 或组织记录已不存在时是 NULL ⇒ **未知保持未知**，不编占位名。
+    #
+    # ⚠️ 用 `.get()` 而不是 `row["org_name"]`：单测会手工构造行（`test_entrust_assignments.py`
+    #    的 `_row()`），那种行本来就没有这一列。缺列应当退化成"未知"，
+    #    而不是让所有只关心其它字段的用例一起 KeyError。
+    org_name = row.get("org_name") if hasattr(row, "get") else None
     return {
         "assignment_id": int(row["id"]),
         "owner_user_id": int(row["owner_user_id"]),
         "org_id": int(row["org_id"]) if row["org_id"] is not None else None,
+        # 承接组织名（S1 工作项 5）。界面要显示给货主看的是**组织名**而不是 id ——
+        # 货主不知道也不该记组织 ID，而让前端自己维护 id→名字的映射等于把
+        # "谁是承接方"这个事实复制到客户端，必然与服务端漂移。
+        "org_name": str(org_name) if org_name is not None else None,
         "title": str(row["title"]),
         "cargo_summary": row["cargo_summary"],
         # 数量保持原样返回（str/None）：Decimal 精度不在这里做二次加工
@@ -115,18 +126,26 @@ def _row_to_assignment(row: Any) -> dict[str, Any]:
     }
 
 
+# ⚠️ 列名**一律**带 `a.` 前缀，这不是风格问题：`ent_organization` 与 `ent_assignment`
+#    有四个同名"通用列"（`id` / `status` / `created_at` / `updated_at`），join 之后
+#    不带限定符的写法会直接变成 SQL 的 ambiguous column 错误。
 _ASSIGNMENT_COLS = (
-    "id, owner_user_id, org_id, title, cargo_summary, quantity, quantity_unit, "
-    "status, revision, claimed_by, claimed_at, submitted_at, cancelled_at, "
-    "created_at, updated_at"
+    "a.id, a.owner_user_id, a.org_id, a.title, a.cargo_summary, a.quantity, a.quantity_unit, "
+    "a.status, a.revision, a.claimed_by, a.claimed_at, a.submitted_at, a.cancelled_at, "
+    "a.created_at, a.updated_at, o.name AS org_name"
 )
+
+# LEFT JOIN（而不是 INNER JOIN）：草稿态 `org_id` 为 NULL、组织被停用/删除都不能
+# 让这张委托**从货主自己的列表里消失** —— 那会把"组织没了"渲染成"我的委托没了"，
+# 而后者是个更严重、且更难被发现的结论。
+_ASSIGNMENT_FROM = "ent_assignment a LEFT JOIN ent_organization o ON o.id = a.org_id"
 
 
 def get_assignment(session: Session, assignment_id: int) -> dict[str, Any] | None:
     """按 ID 读取委托单；不存在返回 None。"""
     row = (
         session.execute(
-            text(f"SELECT {_ASSIGNMENT_COLS} FROM ent_assignment WHERE id = :aid"),
+            text(f"SELECT {_ASSIGNMENT_COLS} FROM {_ASSIGNMENT_FROM} WHERE a.id = :aid"),
             {"aid": assignment_id},
         )
         .mappings()
@@ -522,23 +541,25 @@ def list_assignments(
     where = ["1 = 1"]
     params: dict[str, Any] = {}
     if owner_user_id is not None:
-        where.append("owner_user_id = :owner")
+        where.append("a.owner_user_id = :owner")
         params["owner"] = owner_user_id
     if org_id is not None:
-        where.append("org_id = :org")
+        where.append("a.org_id = :org")
         params["org"] = org_id
     if status is not None:
-        where.append("status = :status")
+        where.append("a.status = :status")
         params["status"] = status
     pattern = _like_pattern(keyword)
     if pattern is not None:
         # 标题或货物概述命中即算（经理找人时通常记得其中一个，记不全两个）。
-        where.append("(title LIKE :kw ESCAPE '!' OR cargo_summary LIKE :kw ESCAPE '!')")
+        where.append("(a.title LIKE :kw ESCAPE '!' OR a.cargo_summary LIKE :kw ESCAPE '!')")
         params["kw"] = pattern
     clause = " AND ".join(where)
 
     total_row = (
-        session.execute(text(f"SELECT COUNT(*) AS c FROM ent_assignment WHERE {clause}"), params)
+        session.execute(
+            text(f"SELECT COUNT(*) AS c FROM {_ASSIGNMENT_FROM} WHERE {clause}"), params
+        )
         .mappings()
         .first()
     )
@@ -546,8 +567,8 @@ def list_assignments(
 
     rows = session.execute(
         text(
-            f"SELECT {_ASSIGNMENT_COLS} FROM ent_assignment WHERE {clause} "
-            "ORDER BY updated_at DESC, id DESC LIMIT :limit OFFSET :offset"
+            f"SELECT {_ASSIGNMENT_COLS} FROM {_ASSIGNMENT_FROM} WHERE {clause} "
+            "ORDER BY a.updated_at DESC, a.id DESC LIMIT :limit OFFSET :offset"
         ),
         {**params, "limit": size, "offset": (page - 1) * size},
     ).mappings()

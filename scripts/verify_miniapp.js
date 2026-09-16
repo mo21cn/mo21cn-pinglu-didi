@@ -303,6 +303,19 @@ const WALK_ANCHORS = [
     value: '1', handler: 'onSubmitApply' },
   { kind: 'act', file: 'pages/entrust/case/case.wxml', attr: 'data-act-apply-cancel',
     value: '1', handler: 'onToggleApply' },
+  // S1 工作项 5（第 ㊶ 章）：「我的委托」列表行的身份锚点。
+  // 走查要断言的是"**我提交的那一单**重新进入后仍在列表里可见"，
+  // 而列表里通常**不止一张**委托（种子 + 本轮新提交的都在）——
+  // 没有锚点时 `tap('.mine-card')` 只能点到第一张，那条断言就建立在
+  // "它恰好排在首位"这个巧合上（排序是 `updated_at DESC`，会随其它动作变化）。
+  { kind: 'row', file: 'pages/entrust/assignments/assignments.wxml', class: 'mine-card',
+    attr: 'data-mine-id', value: '{{item.assignmentId}}' },
+  // 同上，「我的」页上的**货主侧**入口。⚠️ 本页有**两块** `.entrust-entry`
+  // （经理入口 / 货主入口，由两个独立的服务端探测分别门控），
+  // 走查要真实点击的是后者 —— 没有这个属性，`tap('.entrust-entry')` 会落到
+  // 先渲染的那一块（经理入口）上，把断言建立在"它恰好先出现"这个巧合上。
+  { kind: 'act', file: 'pages/mine/mine.wxml', class: 'entrust-entry',
+    attr: 'data-act-mine-entrust', value: '1', handler: 'onMineEntrust' },
 ]
 
 // 把 wxml 切成「标签」块：先剥掉注释（注释里的撇号会被当成引号，导致整个标签块

@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "我的委托",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
+}

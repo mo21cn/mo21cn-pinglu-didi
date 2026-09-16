@@ -51,6 +51,14 @@ class AssignmentOut(BaseModel):
     assignment_id: int
     owner_user_id: int
     org_id: int | None
+    #: 承接组织名（`ent_organization.name`，S1 工作项 5「客户侧看到真实状态与承接组织」）。
+    #:
+    #: ⚠️ 可能为 `None`，且这是**正确**的取值：草稿还没选组织（`org_id` 为空）、
+    #:    或组织记录已不存在时就是 None。界面据此显示「尚未委托组织」——
+    #:    未知就报未知，不编一个占位组织名（那会让货主以为已经有人接手了）。
+    #:    取值来自 `_ASSIGNMENT_FROM` 的 LEFT JOIN，因此**不是**可选输出：
+    #:    字段始终存在，只是值可能为空。
+    org_name: str | None = None
     title: str
     cargo_summary: str | None
     quantity: str | None

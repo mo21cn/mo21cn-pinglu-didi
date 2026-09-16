@@ -129,6 +129,16 @@ const NAV_EDGES = [
   },
   { from: 'pages/mine/mine', to: 'pages/publish/ship/ship', strategy: 'push' },
   { from: 'pages/mine/mine', to: 'pages/assistant/assistant', strategy: 'push' },
+  // S1 工作项 5：「我的委托」。它与上面那条「委托发货」**不是同一件事的两个入口** ——
+  // 上面那条是**经理**入口（可见性由 `view=org` 探测决定：我能受理委托），
+  // 这条是**货主**入口（由 `view=owner` 探测决定：我能提交委托、也能看它的状态）。
+  // 同一个账号可以只满足其中一个，所以两个入口各有自己的探测，不共用一个可见性开关。
+  {
+    from: 'pages/mine/mine',
+    to: 'pages/entrust/assignments/assignments',
+    strategy: 'push',
+    reason: '「我的委托」入口挂在「我的」——货主回来看"我提的单现在是什么状态、被谁接了"'
+  },
 
   // ── 发布域 / 交易域 ────────────────────────────────────────────────
   { from: 'pages/assistant/assistant', to: 'pages/publish/cargo/cargo', strategy: 'push' },
@@ -242,6 +252,17 @@ const NAV_EDGES = [
     strategy: 'replace',
     reason: '提交成功后替换掉表单，落到这张委托的详情（待受理）'
   },
+  {
+    // S1 工作项 5：从「我的委托」列表点开某一张的详情。
+    // **push 而不是 replace**：货主看完一单还要回列表看下一单 ——
+    // 替换掉列表等于把人踢出上下文（与 `workbench --push--> detail` 同一条口径）。
+    // 复用键含 `assignment_id`（见 `ROUTES` 的 paramSchema），所以"再点同一张"
+    // 会复用栈里那一页而不是再压一层。
+    from: 'pages/entrust/assignments/assignments',
+    to: 'pages/entrust/detail/detail',
+    strategy: 'push',
+    reason: '从「我的委托」列表进入某张委托的详情'
+  },
 
   // ── 重置栈（回首页重走身份链路）────────────────────────────────────
   { from: 'pages/mine/mine', to: 'pages/index/index', strategy: 'reset' },
@@ -251,6 +272,7 @@ const NAV_EDGES = [
   { from: 'pages/entrust/case/case', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/case-create/case-create', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/intake/intake', to: 'pages/index/index', strategy: 'reset' },
+  { from: 'pages/entrust/assignments/assignments', to: 'pages/index/index', strategy: 'reset' },
 
   // ── 工作台 ↔ 会话：产品要求「经理人可在会话/工作台/成果之间反复切换」────
   //    HO 明确指出：有循环的业务导航不一定无限压栈，不能把所有循环判成错误。
@@ -511,6 +533,19 @@ const ROUTES = {
     //    它是用户在本页选出来的（不是全局上下文），算进复用键会让同一张受理屏
     //    在换目标后被当成两个页面、白压一层栈（与 case / session 同理）。
     note: '客户委托草稿 / 提交（UI-07；从「发布货源」的「委托发货」进入）'
+  },
+  'pages/entrust/assignments/assignments': {
+    kind: 'detail',
+    // ⚠️ `allow` + **空** `paramSchema`：本页不接受调用方指定范围 ——
+    //    它列的是"我自己的委托"，范围由服务端按登录身份决定（`view=owner`）。
+    //    因此没有任何"必需参数"可声明；声明一个就会逼着调用方编一个出来。
+    deepLink: 'allow',
+    domain: 'entrust',
+    paramSchema: {},
+    // ⚠️ 与其余委托页同理，**不**声明 `keyContext: ['org']`：本页根本没有组织上下文
+    //    （货主可以不属于任何组织）。把组织算进复用键只会让同一页在不同组织上下文
+    //    下被当成两个页面，白压一层栈。
+    note: '我的委托（S1 工作项 5；从「我的」进入，列真实状态与承接组织）'
   }
 }
 
@@ -560,7 +595,13 @@ const MIGRATED_PAGES = [
   // S1 客户受理屏（UI-07）：它是**带未保存状态的表单页**，而且有一条
   // 「已建草稿但没提交」的中间态（见 intake.js 文件头）—— 脱离 go() 直接
   // navigateTo 会让那条中间态的保护变成只写在注释里的声明
-  'pages/entrust/intake/intake'
+  'pages/entrust/intake/intake',
+  // S1 工作项 5「我的委托」（货主侧状态屏）从落地起接入。它虽然是只读列表、
+  // 没有表单，但**恰恰是最该被预算管住的一类**：货主会在这里反复"列表 → 详情 →
+  // 返回 → 再点下一张"，一次脱离 `go()` 的裸 navigateTo 就会让同一个页面在栈里
+  // 叠出多份，而预算（`STACK_BUDGET`）与复用（同一张委托只该有一页）正是
+  // 这条来回走的核心体验。
+  'pages/entrust/assignments/assignments'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */

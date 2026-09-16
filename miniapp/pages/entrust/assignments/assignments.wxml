@@ -1,0 +1,94 @@
+<!--
+  委托发货 · 我的委托（S1 工作项 5 / D1-01）
+  货主视角：我提交的委托现在是什么状态、被谁接了。
+
+  五态（AC-21）由 `view` 一个字段驱动，判定集中在 utils/entrust.js 的 `viewState()`
+  （可被 scripts/verify_entrust_ui.js 在 CI 里直接驱动）：loading / expired / denied /
+  error / empty / ready。模板本身**不做判断，只做映射** —— 判定顺序只有一份，
+  而"错误优先于空"是那条顺序里最重要的一格（把失败渲染成"没有委托"，
+  是这类页面最常见、也最难被发现的错误）。
+-->
+<view class="page">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" hover-class="hover-dim">‹</view>
+      <text class="nav-title">我的委托</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub">我提交的委托 · 真实状态与承接组织</view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      {{viewTitle}}
+    </view>
+
+    <!-- 登录过期：要引导重新登录，不能显示成"没有委托" -->
+    <view wx:elif="{{view === 'expired'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRelogin" hover-class="hover-dim">返回首页重新进入</view>
+    </view>
+
+    <!-- 功能未开放（`ENTRUST_ENABLED` 关闭时整组 404）/ 无权限 -->
+    <view wx:elif="{{view === 'denied'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+    </view>
+
+    <!-- 其它失败：必须给"重试"，否则用户只能退出去再进来 -->
+    <view wx:elif="{{view === 'error'}}" class="err-card">
+      <view class="err-title">{{viewTitle}}</view>
+      <view class="err-detail">{{viewHint}}</view>
+      <view class="err-btn" bindtap="onRetry" hover-class="hover-dim">重试</view>
+    </view>
+
+    <!-- 空 -->
+    <view wx:elif="{{view === 'empty'}}" class="empty">
+      <text class="empty-icon">📭</text>
+      {{viewTitle}}
+      <view class="empty-hint">{{viewHint}}</view>
+    </view>
+
+    <!-- 正常 -->
+    <block wx:else>
+      <view class="mine-head row-between">
+        <text class="result-count">{{pageHint}}</text>
+        <text class="chip chip-muted">只读列表</text>
+      </view>
+
+      <view
+        wx:for="{{items}}"
+        wx:key="assignmentId"
+        class="card mine-card"
+        data-mine-id="{{item.assignmentId}}"
+        bindtap="onOpen"
+        hover-class="row-hover"
+      >
+        <view class="row-between">
+          <text class="mine-title">{{item.title}}</text>
+          <!-- 状态标签来自后端取值域（两侧由 verify_entrust_ui.js 逐格比对），
+               不在这里硬编码任何状态字面量 -->
+          <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+        </view>
+        <view class="mine-line">{{item.cargoSummary}}</view>
+        <view class="mine-line mine-line-weak">{{item.quantityText}}</view>
+
+        <!-- 承接组织 —— 本页存在的理由。
+             `orgLabel` 在真名为空时是「尚未委托组织」（投影层合成），
+             所以这里**不会**出现空白格：空白看起来像界面没渲染出来，
+             而这一格恰恰是最需要说清楚的一格。 -->
+        <view class="mine-org {{item.orgName ? 'mine-org-known' : 'mine-org-unknown'}}">
+          <text class="mine-org-label">承接组织</text>
+          <text class="mine-org-name">{{item.orgLabel}}</text>
+        </view>
+
+        <view class="mine-foot">
+          <text class="mine-meta">#{{item.assignmentId}} · {{item.createdAt}}</text>
+        </view>
+      </view>
+    </block>
+  </view>
+</view>
