@@ -2702,6 +2702,289 @@ function assignmentWriteError(err) {
   }
 }
 
+// ── 会话 / 消息 / 作业（S2 首片：真实报价会话）────────────────────────────
+//
+// 后端这条链路（会话 / 消息 / 作业 / run / 接管 / 附件 / 提取）在 ENT-011 就已落库，
+// 但前端**一个函数都没有** —— 会话屏因此只有成果卡、没有消息与作业（UI-03 缺一半）。
+// 本段补的正是这个缺口。
+//
+// 三条纪律与既有各段一致：
+//   1. 枚举表与后端取值域逐字对齐（AGENTS.md §3.5 ⇒ 由 verify_entrust_ui.js 交叉断言）；
+//   2. 投影函数不接触 wx，CI 可在 Node 里直接驱动；
+//   3. 写操作一律带 Idempotency-Key，由调用方生成并在重试时复用。
+//
+// ⚠️ **fixture 与真实模型必须分开标注**：`LLM_MOCK=true` 时后端走本地规则模板，
+// 结构同构但不是真实模型输出。`mocked` 字段由后端给出，界面必须显示模式，
+// **不得**把 fixture 结果当作模型质量的证据（DR-0005「未覆盖」第一条）。
+
+/** 会话状态取值域 —— 与后端 `sessions.STATUS_*` 对齐 */
+const SESSION_STATUS_LABELS = {
+  active: '进行中',
+  archived: '已归档'
+}
+
+/** 消息角色取值域 —— 与后端 `sessions.ROLE_*` 对齐 */
+const MESSAGE_ROLE_LABELS = {
+  user: '我',
+  agent: 'Agent',
+  system: '系统'
+}
+
+/** 消息来源取值域 —— 与后端 `sessions.SOURCE_*` 对齐（界面必须标注来源） */
+const MESSAGE_SOURCE_LABELS = {
+  manual: '手发',
+  agent: 'Agent 产出',
+  deterministic: '规则生成'
+}
+
+/** 作业状态取值域 —— 与后端 `agentjobs.STATUS_*` 对齐 */
+const JOB_STATUS_LABELS = {
+  queued: '排队中',
+  running: '执行中',
+  succeeded: '已完成',
+  failed: '失败',
+  cancelled: '已取消'
+}
+
+/**
+ * 作业状态样式类 —— 与既有 `statusClass` 同口径：**返回完整类名串**（`chip chip-x`），
+ * 模板里写 `class="{{item.statusClass}}"`。
+ *
+ * ⚠️ 取值必须落在 `app.wxss` 已定义的 `chip-*` 内（现测：muted / warn / success /
+ * danger / purple）。在页面 wxss 里另起一份 `chip-ok` 就是第二份真相 ——
+ * 全局那份改了颜色，本页不会跟着变。
+ */
+const JOB_STATUS_CLASS = {
+  queued: 'chip chip-muted',
+  running: 'chip chip-warn',
+  succeeded: 'chip chip-success',
+  failed: 'chip chip-danger',
+  cancelled: 'chip chip-muted'
+}
+
+function sessionStatusLabel(status) {
+  return SESSION_STATUS_LABELS[status] || status || '未知'
+}
+
+function messageRoleLabel(role) {
+  return MESSAGE_ROLE_LABELS[role] || role || '未知'
+}
+
+function messageSourceLabel(source) {
+  return MESSAGE_SOURCE_LABELS[source] || source || '未知'
+}
+
+function jobStatusLabel(status) {
+  return JOB_STATUS_LABELS[status] || status || '未知'
+}
+
+function jobStatusClass(status) {
+  return JOB_STATUS_CLASS[status] || 'chip chip-muted'
+}
+
+function _sid(v) {
+  return v === null || v === undefined ? '' : String(v)
+}
+
+function decorateSession(row) {
+  const data = row || {}
+  return {
+    sessionId: _sid(data.session_id),
+    entrustmentId: _sid(data.entrustment_id),
+    assignmentId: _sid(data.assignment_id),
+    specialty: data.agent_specialty || '',
+    specialtyLabel: data.agent_specialty_label || '通用会话',
+    title: data.title || '未命名会话',
+    status: data.status || '',
+    statusLabel: sessionStatusLabel(data.status)
+  }
+}
+
+function decorateMessage(row) {
+  const data = row || {}
+  return {
+    messageId: _sid(data.message_id),
+    seq: data.seq === null || data.seq === undefined ? 0 : Number(data.seq),
+    role: data.role || '',
+    roleLabel: messageRoleLabel(data.role),
+    source: data.source || '',
+    sourceLabel: messageSourceLabel(data.source),
+    content: data.content || '',
+    jobId: _sid(data.job_id),
+    createdAt: data.created_at || ''
+  }
+}
+
+/**
+ * 作业投影。
+ *
+ * ⚠️ `envelope` 是**提案**，不是成果（AC-09）：它只有被 `adopt` 之后才成为成果。
+ * 界面把它显示成"解析结果"会让人以为已经落库 —— 所以卡上必须写"提案"。
+ */
+function decorateJob(row) {
+  const data = row || {}
+  const env = data.envelope || null
+  // ⚠️ 键名是 **`artifact_proposals`**（见后端 `envelope.project_envelope_for_operator`
+  // 的返回），不是 `proposals`。写成 `proposals` 不会报错，只会让"提案 N 条"
+  // **永远是 0** —— 界面上看起来像"模型没给出任何提案"，而事实是读错了键。
+  // 这条是靠 e2e 的"作业成功 ⇒ 页面必须列出提案"断言抓到的。
+  const proposals = (env && env.artifact_proposals) || []
+  return {
+    jobId: _sid(data.job_id),
+    sessionId: _sid(data.session_id),
+    status: data.status || '',
+    statusLabel: jobStatusLabel(data.status),
+    statusClass: jobStatusClass(data.status),
+    errorKind: data.error_kind || '',
+    errorMessage: data.error_message || '',
+    mocked: !!data.mocked,
+    finishedAt: data.finished_at || '',
+    proposalCount: proposals.length,
+    envelope: env,
+    // 迟到写入作废时后端会给 lease_lost —— 界面必须能说"跑过但没生效"
+    leaseLost: !!data.lease_lost
+  }
+}
+
+/** 作业失败原因的一句话（失败必须**明确**，不能只写"失败"） */
+function jobFailureText(job) {
+  const j = job || {}
+  if (j.status !== 'failed') return ''
+  if (j.leaseLost) return '本次执行结果已作废（租约已被接管），未产生任何业务变更'
+  const kind = j.errorKind || 'unknown'
+  const msg = j.errorMessage ? '：' + j.errorMessage : ''
+  return '失败类型 ' + kind + msg
+}
+
+/** 会话列表（`view=mine` 或 `org`；S2 首片用 mine + assignment_id 定位本单会话） */
+function fetchSessions(options) {
+  const o = options || {}
+  const q = []
+  q.push('view=' + encodeURIComponent(o.view || 'mine'))
+  if (o.orgId) q.push('org_id=' + encodeURIComponent(o.orgId))
+  if (o.assignmentId) q.push('assignment_id=' + encodeURIComponent(o.assignmentId))
+  if (o.status) q.push('status=' + encodeURIComponent(o.status))
+  q.push('page=' + encodeURIComponent(o.page || 1))
+  q.push('size=' + encodeURIComponent(o.size || 20))
+  return request({ url: BASE + '/sessions?' + q.join('&'), method: 'GET' })
+}
+
+/**
+ * 创建会话。挂在委托授权下 —— 权限边界由授权链决定，
+ * 所以**必须**先拿到 `entrustment_id`（页面从工作台进来时只有委托单号）。
+ */
+function createSession(entrustmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/entrustments/' + entrustmentId + '/sessions',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 会话详情（含消息时间线）。可见性由服务端判定，不可见 404。 */
+function fetchSession(sessionId) {
+  return request({ url: BASE + '/sessions/' + sessionId, method: 'GET' })
+}
+
+/**
+ * 会话上下文：**为这单开会话该用哪条委托授权**。
+ *
+ * ⚠️ 这个端点的存在，就是为了让页面**不必猜** `entrustment_id`。
+ * 建会话的路径参数要求先知道授权 id，而 `/my-orgs` 只回成员身份、
+ * `/my-entrustments` 只回货主自己授权出去的授权 —— 经理两边都拿不到本单那一条。
+ * 曾经想在前端"取第一个组织"顶上，那等于拿一个**恰好长得像**的 id
+ * 去撞权限（撞不中就表现为"能进页面但建不了会话"）。
+ *
+ * 返回值：`{assignment_id, org_id, entrustment_id, note}`。
+ * `entrustment_id` 为 `null` 时**不是**"禁止"，是"定位不到唯一一条"，
+ * 原因在 `note` 里（未指定组织 / 无生效授权 / 多条需显式指定）。
+ */
+function fetchSessionContext(assignmentId) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/session-context',
+    method: 'GET'
+  })
+}
+
+/** 追加一条操作者消息（角色固定 user，防伪造 agent 消息） */
+function appendMessage(sessionId, content, idempotencyKey) {
+  return request({
+    url: BASE + '/sessions/' + sessionId + '/messages',
+    method: 'POST',
+    data: { content: content },
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 本单附件（引用用；提取状态由服务端给） */
+function fetchEntrustmentAttachments(entrustmentId) {
+  return request({
+    url: BASE + '/entrustments/' + entrustmentId + '/attachments',
+    method: 'GET'
+  })
+}
+
+function decorateAttachment(row) {
+  const data = row || {}
+  return {
+    attachmentId: _sid(data.attachment_id),
+    name: data.name || data.filename || '未命名附件',
+    extractStatus: data.extract_status || '',
+    extractLabel:
+      data.extract_status === 'done'
+        ? '已提取文本'
+        : data.extract_status
+          ? '未提取'
+          : '状态未知'
+  }
+}
+
+/** 提交作业（**不执行**；执行要再调 runJob —— 两步分开是刻意的） */
+function submitJob(sessionId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/sessions/' + sessionId + '/jobs',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 推进一次作业（worker 单步）。
+ *
+ * ⚠️ 本端点**不要求** Idempotency-Key —— 它的幂等来自作业状态机与租约：
+ * 重复调用会被判为"已结束"或"租约仍被持有"而 409，连一次尝试都不会多消耗。
+ */
+function runJob(jobId) {
+  return request({ url: BASE + '/agent/jobs/' + jobId + '/run', method: 'POST', data: {} })
+}
+
+function fetchJob(jobId) {
+  return request({ url: BASE + '/agent/jobs/' + jobId, method: 'GET' })
+}
+
+/** 作业列表（本单全部作业，用于"离开重进仍可恢复"） */
+function fetchJobs(options) {
+  const o = options || {}
+  const q = []
+  if (o.sessionId) q.push('session_id=' + encodeURIComponent(o.sessionId))
+  if (o.assignmentId) q.push('assignment_id=' + encodeURIComponent(o.assignmentId))
+  q.push('page=' + encodeURIComponent(o.page || 1))
+  q.push('size=' + encodeURIComponent(o.size || 20))
+  return request({ url: BASE + '/agent/jobs?' + q.join('&'), method: 'GET' })
+}
+
+/** 采纳提案为成果（人工发起；payload 是**人工确认过**的内容） */
+function adoptJobProposal(jobId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/agent/jobs/' + jobId + '/adopt',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
 module.exports = {
   BASE,
   ARTIFACT_FIELD_KINDS,
@@ -2730,6 +3013,10 @@ module.exports = {
   CASE_TRANSITIONS,
   CHANGE_CATEGORY_LABELS,
   ISSUE_KIND_LABELS,
+  JOB_STATUS_CLASS,
+  JOB_STATUS_LABELS,
+  MESSAGE_ROLE_LABELS,
+  MESSAGE_SOURCE_LABELS,
   ORG_PERM_CLAIM,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
@@ -2738,6 +3025,7 @@ module.exports = {
   REVALIDATION_STATUS_LABELS,
   REVISION_ROLE,
   REVISION_SOURCE_LABELS,
+  SESSION_STATUS_LABELS,
   SLOT_EMPTY_TEXT,
   SLOT_FIELD_LABELS,
   STATUS_HINT,
@@ -2750,7 +3038,9 @@ module.exports = {
   VIEW,
   WORKBENCH_SLOTS,
   addCaseLink,
+  adoptJobProposal,
   applyCase,
+  appendMessage,
   appendRevision,
   assignmentDraftBody,
   assignmentWriteError,
@@ -2776,9 +3066,11 @@ module.exports = {
   confirmCard,
   createAssignment,
   createCase,
+  createSession,
   createTask,
   decideCase,
   decorateAssignment,
+  decorateAttachment,
   decorateArtifact,
   decorateCase,
   decorateCaseLinkTargets,
@@ -2787,10 +3079,13 @@ module.exports = {
   decorateDetail,
   decorateEntrustment,
   decorateEntrustments,
+  decorateJob,
   decorateList,
+  decorateMessage,
   decorateOrg,
   decorateOrgs,
   decorateRevisions,
+  decorateSession,
   decorateSlot,
   decorateWorkbench,
   entryDecision,
@@ -2800,17 +3095,28 @@ module.exports = {
   fetchAssignment,
   fetchCase,
   fetchCaseOrgList,
+  fetchEntrustmentAttachments,
+  fetchJob,
+  fetchJobs,
   fetchMine,
   fetchMyEntrustments,
   fetchMyOrgs,
   fetchQueue,
   fetchRevisions,
+  fetchSession,
+  fetchSessionContext,
+  fetchSessions,
   fetchTaskCandidates,
   fetchWorkbench,
   fieldDrafts,
   fieldKindHint,
   isArtifactDirty,
   isDispositionWithoutApplication,
+  jobFailureText,
+  jobStatusClass,
+  jobStatusLabel,
+  messageRoleLabel,
+  messageSourceLabel,
   newIdempotencyKey,
   pageHint,
   permittedOrgIds,
@@ -2821,8 +3127,11 @@ module.exports = {
   removeCaseLink,
   reopenCase,
   revisionSourceLabel,
+  runJob,
+  sessionStatusLabel,
   statusClass,
   statusLabel,
   submitAssignment,
+  submitJob,
   viewState
 }
