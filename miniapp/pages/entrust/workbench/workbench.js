@@ -3,6 +3,10 @@
 // 数据源：
 //   · 委托队列 `GET /api/v1/entrust/assignments?view=org`
 //   · 异常 / 变更队列 `GET /api/v1/entrust/exceptions?view=org&org_id=…`（UI-04，切片四之六）
+// 写动作（一个）：
+//   · **受理委托** `POST /api/v1/entrust/assignments/{id}/claim`（S1 工作项 4 / D1-02）
+//     入口挂在委托卡片上、只在**待受理**状态时出现，且**页内二次确认**
+//     （见 `data.claimOpenId` 的说明）。权限由服务端判定，前端不假装知道。
 // 两个队列的可见性都由服务端按「组织成员 + 该货主授权 + 权限码」判定；
 // 前端不做任何"我是不是经理"的本地判断（那只能靠可篡改的本地角色字段），
 // 也不自行拼组织范围（缺 `org_id` 后端直接 422，不提供无范围查询）。
@@ -20,12 +24,14 @@ const {
   STATUS_META,
   STATUS_ORDER,
   VIEW,
+  claimAssignment,
   decorateCaseList,
   decorateList,
   decorateOrgs,
   fetchCaseOrgList,
   fetchMyOrgs,
   fetchQueue,
+  newIdempotencyKey,
   pageHint,
   pickOrg,
   viewState
@@ -101,7 +107,21 @@ Page({
     pageHint: '',
     orgs: [],
     activeOrgId: '',
-    orgReason: ''
+    orgReason: '',
+    /**
+     * 队列卡片上「受理」的**页内二次确认**当前展开在哪一张上（空串＝都收起）。
+     *
+     * 为什么不用 `wx.showModal`：原生弹层**不在渲染树里**，走查工具点不到它的
+     * 确认键 ⇒ "确认之后"那一步永远拿不到设备证据（与 ENT-041「应用变更」把
+     * 确认条改成页内 DOM 同一个原因，也是 ㉞ 章原生弹层只能记 `LIMITATION` 的原因）。
+     * 受理是本页**唯一会改变业务状态**的动作，它必须可被真机验证。
+     *
+     * 同一时刻只允许一张展开：并排两条长得一样的小字确认条，用户按错的那条
+     * 也是一个真实的受理动作，而受理不可回退（`submitted → claimed` 没有反向边）。
+     */
+    claimOpenId: '',
+    /** 受理请求在飞的委托 id（空串＝没有在飞）。防同一张卡重复点击；跨用户并发仍由服务端 409 兜住 */
+    claimingId: ''
   },
 
   onLoad(query) {
@@ -412,6 +432,66 @@ Page({
     R.go('/pages/index/index', { from: SELF })
   },
 
+  // ── 队列里的受理入口（S1 工作项 4 / D1-02）──────────────────────────
+
+  /**
+   * 展开 / 收起某张卡的受理确认条。
+   *
+   * 两个锚点共用本方法（`data-act-claim` 展开、`data-act-claim-cancel` 收起），
+   * 与案件页 `onToggleApply()` 同一形态；但队列是**列表**，所以必须带 id ——
+   * 不带 id 就分不清"要展开哪一张"。
+   */
+  onToggleClaim(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    // 显式 `String()` 归一：投影层的 `assignmentId` 是数字，而这个 id 要拿到模板里
+    // 与 `claimOpenId` 做**严格**比较 —— 两边不同型会让确认条永远不显示
+    // （表现是"点了受理没反应"）。归一放在这一侧，模板那边补 `+ ''`。
+    const id = String(ds.actClaim || ds.actClaimCancel || '')
+    if (!id) return
+    // 再点一次同一张即收起（不要留下"必须点别处才能取消"的面板）
+    this.setData({ claimOpenId: this.data.claimOpenId === id ? '' : id })
+  },
+
+  /** 确认受理（页内确认条上的那一下）。在飞期间对同一张卡不再受理第二次。 */
+  onSubmitClaim(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const id = String(ds.actClaimSubmit || '')
+    if (!id || this.data.claimingId === id) return
+    this.submitClaim(id)
+  },
+
+  /**
+   * 受理委托。失败时**一律重取队列** —— 最常见的失败是 409「已被别的人受理」，
+   * 那意味着本地这份列表已经过期；不刷新的话用户看到的还是「待受理」，
+   * 会以为"点了没反应"，然后再点一次。
+   *
+   * 不在这里弹失败原因：请求层已按服务端 `detail` / 网络分级如实提示过，
+   * 页面再弹一遍就是两句话描述同一件事（`detail.js` 的 catch 也是这个取向）。
+   */
+  submitClaim(assignmentId) {
+    const self = this
+    this.setData({ claimingId: assignmentId, claimOpenId: '' })
+    wx.showLoading({ title: '受理中', mask: true })
+    // 幂等键每次新生成：用户重新点击＝一次新的意图。同一次网络重试复用同键是
+    // 请求层的事（`claimAssignment` 只发一次），这里不复用键是对的 ——
+    // 复用反而会让"点两次"被服务端当成同一次。
+    return claimAssignment(assignmentId, newIdempotencyKey('claim'))
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ claimingId: '' })
+        wx.showToast({ title: '已受理', icon: 'success' })
+        return self.loadQueue()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        self.setData({ claimingId: '' })
+        if (err && err.httpStatus === 409) {
+          return self.loadQueue()
+        }
+        return null
+      })
+  },
+
   /**
    * 打开该委托的**专业会话屏**（DR-0015 / AC-05 的聊天侧入口）。
    *
@@ -457,8 +537,10 @@ Page({
    * 本页是否有未保存的编辑。
    *
    * ⚠️ 当前恒为 `false`，而且**这是事实而不是遗漏**：本页只有组织选择（选中即落本地，
-   *    不存在"改了没提交"）、队列切换与筛选条（都是纯视图状态，丢了不算数据丢失）。
-   *    第一个真正的编辑面（登记案件表单 / 成果编辑 / 任务派发）出现时，**必须**改这里，
+   *    不存在"改了没提交"）、队列切换与筛选条（都是纯视图状态，丢了不算数据丢失），
+   *    以及受理（点「确认受理」就是一次服务端写，展开确认条本身不承载任何待提交内容
+   *    —— 它随时可点「取消」收起，收起不丢东西）。
+   *    第一个**真正的**编辑面（成果编辑 / 任务派发表单）出现时，**必须**改这里，
    *    否则 `go()` 的 confirm-unsaved 分支永远走不到。登记案件表单因此**没有**做在本页
    *    的弹层里，而是独立的 `pages/entrust/case-create/case-create`：本页有两个队列、
    *    两套筛选与两套行形状，"再来一个带未保存状态的表单"会让这一页的三件事互相纠缠。

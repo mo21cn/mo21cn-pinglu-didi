@@ -295,6 +295,37 @@ def api_get(path: str, token: str, tries: int = 3) -> dict | None:
     return None
 
 
+def api_status(path: str, token: str) -> int:
+    """只取 **HTTP 状态码**的读探测（专供「期望被拒绝」的负例）。
+
+    为什么不复用 `api_get`：它把一切非 200 折成 `None`，调用方就再也分不清
+    「404 不可见」「403 无权限」「500 炸了」—— 而对负例来说**状态码本身就是
+    被测事实**，折成 `None` 等于把结论丢掉，只剩一句「没通过」。
+
+    也**刻意不重试**：重试会让一次真实的 404 与一次瞬时网络故障在日志里长得
+    一模一样，而这两件事的处置完全不同（前者是设计，后者要排查）。
+
+    返回 `0` 表示请求根本没发出去（网络层异常），与「发出去了但被拒」不同 ——
+    别把 `0` 当成拒绝。
+
+    ⚠️ **必须单独捕 `HTTPError`**（2026-09-16 实测踩到）：`_http` 走的是
+    `_OPENER.open()`，而 `urlopen` 对 **4xx / 5xx 是抛异常、不是返回响应** ——
+    状态码挂在 `exc.code` 上。只写 `except Exception: return 0` 的话，一个真实的
+    404 会被记成「请求未发出」，负例于是**永远失败**（首跑就撞上：`HTTP=0`）。
+    这也顺带解释了 `api_get` 为什么分不清 404 与 500 —— 它把这个异常吞成了 `None`。
+    """
+    req = urllib.request.Request(
+        API_BASE + path, headers={"Authorization": "Bearer " + token}, method="GET"
+    )
+    try:
+        status, _ = _http(req)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+    except Exception:  # noqa: BLE001
+        return 0
+    return int(status)
+
+
 def api_post(
     path: str,
     token: str,
@@ -939,15 +970,19 @@ class Walker:
         val = self.c.evaluate("function(){return wx.getWindowInfo().windowHeight;}")
         return float(val) if isinstance(val, (int, float)) else 0.0
 
-    def open_workbench(self, code: str) -> bool:
-        """登录指定身份 → 「我的」页委托入口 → 经理工作台（⑯ 章前置）。"""
+    def open_workbench(self, code: str, tag: str = "⑯") -> bool:
+        """登录指定身份 → 「我的」页委托入口 → 经理工作台（⑯ 章前置）。
+
+        `tag` 只改断言记录的**前缀**：㉟ 章复用这段前置时传 `tag="㉟"`，
+        免得 ㉟ 的结论被记成 ⑯ 的行（章级统计按前缀分）。
+        """
         path = self.login_as(code)
         if path != INDEX:
-            self.rep.rec(f"⑯ [{code}] 前置登录", False, f"未停在身份选择页（{path}）")
+            self.rep.rec(f"{tag} [{code}] 前置登录", False, f"未停在身份选择页（{path}）")
             return False
         if not self.enter_role("shipper", SHIPPER):
             self.rep.rec(
-                f"⑯ [{code}] 前置登录",
+                f"{tag} [{code}] 前置登录",
                 False,
                 f"未进入货主工作台（{self.c.current_path()}）",
             )
@@ -957,7 +992,7 @@ class Walker:
         mine = self.c.page_data()
         # 入口是否可见由服务端决定 —— 这也是在验「我的」页的权限投影
         if not self.rep.rec(
-            f"⑯ [{code}] 「我的」页委托入口可见（服务端放行）",
+            f"{tag} [{code}] 「我的」页委托入口可见（服务端放行）",
             mine.get("showEntrust") is True,
             f"showEntrust={mine.get('showEntrust')}",
         ):
@@ -965,7 +1000,7 @@ class Walker:
         self.c.tap(".entrust-entry")
         time.sleep(5)
         path2 = self.c.current_path()
-        return self.rep.rec(f"⑯ [{code}] 点击入口进入经理工作台", path2 == WORKBENCH, path2)
+        return self.rep.rec(f"{tag} [{code}] 点击入口进入经理工作台", path2 == WORKBENCH, path2)
 
     def reenter_workbench(self) -> str:
         """不重新登录，直接再进工作台 —— 验「上次选择是否被沿用」。"""
@@ -3993,6 +4028,22 @@ INTAKE_CARRY_NAME = "走查货物·铁矿石"
 INTAKE_CARRY_QTY = "2400"
 INTAKE_EMPTY_TITLE = "还没有可委托的服务主体"
 
+# ㉟ 章（S1 出口判据 ②③④ 的**设备侧**取证）用的身份与数据。
+#
+# `CODE_MGR_ONLY_B` 是**仅乙组织**的经理：出口判据 ④（unrelated organization B
+# 不可见）必须用"不属于甲"的身份才验得出来 —— `seed-mgr-multi` 同时属于甲、乙，
+# 而详情可见性判据是「该委托的组织 ∈ 调用者的**任一**组织」，拿它验会得到假绿。
+# 这个身份是随本章一起补进 `seed_entrust_orgpicker.py` 的。
+CODE_MGR_ONLY_B = "seed-mgr-only-b"
+# `CODE_MGR_SINGLE` 与 `seed-mgr-multi` 同是甲组织经理 —— 并发负例里的"另一个写者"。
+CODE_MGR_SINGLE = "seed-mgr-single"
+# 本章会**真写**两张委托（都走界面真实点击提交到甲组织）：
+#   · QUEUE —— 用来验「出现在正确的队列」+「队列上受理成功」；
+#   · RACE  —— 用来验「别人抢先受理后，界面那一下拿 409 并刷新成真实状态」。
+# 两张都要，因为一张单只能被受理一次：受理成功之后就没有"待受理"可点了。
+INTAKE_TITLE_QUEUE = "走查·队列可见与受理（界面提交）"
+INTAKE_TITLE_RACE = "走查·并发受理（外部先受理）"
+
 
 def sec_34(w: Walker) -> None:
     """㉞ UI-07 客户委托草稿 / 提交屏（S1 出口判据的**前置**）。
@@ -4599,6 +4650,330 @@ def sec_34(w: Walker) -> None:
     )
 
 
+def sec_35(w: Walker) -> None:
+    """㉟ S1 出口判据 ②③④ 的**设备侧**取证。
+
+    为什么另起一章、且换一条支线
+    ----------------------------
+    ㉞ 章验的是**客户侧**（能不能建草稿并提交），数据落在 `seed-shipper` 名下、
+    目标是「演示经营主体·工作台」。本判据要的是**组织侧**：这张单进的是**哪个**
+    队列、谁能受理、谁看不到。所以本章用 `seed-shipper-orgpicker`（在**甲**组织
+    持有 `entrust:view` + `entrust:assignment:claim` 授权）把单提交到**甲**组织，
+    再用甲组织的经理身份去看。三句话都要由设备侧证据回答：
+
+    * ② `appears in the correct queue` —— 队列里出现的是**组织**的那一张；
+    * ③ `can be claimed once` —— 队列上真实点击受理成功；别人抢先受理后，界面上
+      迟到的那一下拿 **409** 并刷新成服务端的真实状态；
+    * ④ `inaccessible to unrelated organization B` —— 仅乙组织的经理在队列里看不到
+      它，直访详情拿 404。
+
+    为什么"乙组织不可见"必须用 `seed-mgr-only-b`（不是 `seed-mgr-multi`）
+    ------------------------------------------------------------------
+    详情可见性判据是「该委托的组织 ∈ 调用者的**任一**组织」，而 `seed-mgr-multi`
+    同时属于甲、乙 ⇒ 它切到乙视角照样看得到甲的单，拿它验这条会得到**假绿**。
+    `seed-mgr-only-b`（仅乙，随本章补进种子）才验得出来。
+
+    ⚠️ 本章**会真写**：两张委托（界面真实点击提交）+ 一次受理。故排在默认顺序末尾，
+    且断言一律按 **assignment_id** 定位（不按标题、不按位置），历史数据再多也不干扰。
+    """
+    print("\n== ㉟ S1 出口判据 ②③④：队列可见 / 受理 / 并发 409 / 乙组织不可见 ==", flush=True)
+    base_err = w.c.errors()
+
+    def clear_draft_state() -> None:
+        """清掉当前身份留在 storage 的在途载荷。
+
+        ⚠️ 不清的话，上一次跑剩下的草稿会被受理屏**续接**，"新提交一张"就变成
+        "续接旧的那张"，两张单实际是同一张 —— 那种失败看起来像"服务端没建单"。
+        """
+        uid = w.c.evaluate(
+            "function(){var r=wx.getStorageSync('user_info');if(!r)return '';"
+            "var u=null;try{u=JSON.parse(r)}catch(e){return ''}"
+            "return (u&&u.user_id!=null)?String(u.user_id):'';}"
+        )
+        if uid:
+            w.c.remove_storage("entrust_intake_draft_" + str(uid))
+
+    def submit_to_org_a(title: str) -> str:
+        """受理屏选**甲组织** → 真实输入标题 → 真实点击提交；返回新单 id（失败给空串）。"""
+        w.c.nav("reLaunch", "/" + INTAKE, INTAKE)
+        time.sleep(2.4)
+        pg = w.wait_data(lambda x: x.get("view") in ("ready", "empty"), tries=30)
+        if pg.get("view") != "ready":
+            return ""
+        org_a_id = ""
+        for t in pg.get("targets") or []:
+            if str((t or {}).get("orgName") or "") == ORG_A:
+                org_a_id = str((t or {}).get("orgId") or "")
+                break
+        if not org_a_id:
+            return ""
+        # 双授权 ⇒ `needPick` 为真且不预选（㉞ 第三节已验），这里必须**显式选甲**。
+        if pg.get("needPick"):
+            w.c.tap(f'[data-org-id="{org_a_id}"]')
+            time.sleep(0.9)
+        w.c.input_text('[data-field="title"]', title)
+        time.sleep(0.9)
+        w.c.tap('[data-act-submit-intake="1"]')
+        w.c.wait_path(DETAIL, 60)
+        time.sleep(2.2)
+        pd = w.wait_data(lambda x: x.get("view") == "ready" and bool(x.get("detail")), tries=30)
+        return str(pd.get("assignmentId") or "")
+
+    # ============ 一、把两张单经界面提交到甲组织（本章的取证数据源）============
+    print("\n-- 一、界面提交到甲组织 --", flush=True)
+    path = w.login_as(CODE_SHIPPER_ORGPICKER)
+    if path != INDEX or not w.enter_role("shipper", SHIPPER):
+        w.rep.rec(
+            "㉟ 前置 · seed-shipper-orgpicker 登录并进入货主工作台", False, w.c.current_path()
+        )
+        w.rep.not_run("㉟ 全部断言", "前置登录失败，链路断在这里")
+        return
+
+    clear_draft_state()
+    id_race = submit_to_org_a(INTAKE_TITLE_RACE)
+    clear_draft_state()
+    id_queue = submit_to_org_a(INTAKE_TITLE_QUEUE)
+    w.rep.rec(
+        "㉟ 前置 · 两张委托都经**界面真实点击**提交到甲组织"
+        "（合同要的是 a fresh **UI-created** assignment，不能用 API 代劳）",
+        bool(id_race) and bool(id_queue) and id_race != id_queue,
+        f"race={id_race!r} queue={id_queue!r}",
+    )
+    if not (id_race and id_queue):
+        w.rep.not_run("㉟ 队列与受理相关断言", "界面提交未成功，链路断在这里")
+        return
+    w.shot("35-1-界面提交完成")
+
+    # ============ 二、甲组织经理（单组织）进工作台 ============
+    if not w.open_workbench(CODE_MGR_SINGLE, tag="㉟"):
+        w.rep.not_run("㉟ 队列与受理相关断言", "甲组织经理未能进入工作台")
+        return
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+
+    # ============ 三、② appears in the correct queue ============
+    print("\n-- 三、② 出现在正确的队列 --", flush=True)
+    by_id = {str(x.get("assignmentId")): x for x in (d.get("items") or [])}
+    row_q = by_id.get(id_queue) or {}
+    w.rep.rec(
+        "㉟ ② 刚提交的那张出现在**组织**队列里（`view=org`、按 org_id 限定的那个队列）",
+        bool(row_q),
+        f"队列 total={d.get('total')} 命中 queue={bool(row_q)} race={bool(by_id.get(id_race))}",
+    )
+    w.rep.rec(
+        "㉟ ② 队列里的状态是「待受理」——受理是显式动作，进队列不会自动发生",
+        row_q.get("status") == "submitted",
+        f"status={row_q.get('status')!r} label={row_q.get('statusLabel')!r}",
+    )
+    sel_claim_q = f'[data-act-claim="{id_queue}"]'
+    n_claim_q = w.c.count(sel_claim_q)
+    w.rep.rec(
+        "㉟ ② 待受理的卡上有「受理」入口且锚点**唯一命中**"
+        "（多张卡都有这个按钮 ⇒ 必须按 id 定位，工具没有 index 参数）",
+        n_claim_q == 1,
+        f"命中 {n_claim_q}",
+    )
+    w.shot("35-2-组织队列-刚提交的那张")
+
+    # ============ 四、③ 队列上真实点击受理（正例）============
+    print("\n-- 四、③ 队列上受理（真实点击）--", flush=True)
+    w.scroll_into(sel_claim_q)
+    t_ask = w.c.tap(sel_claim_q)
+    time.sleep(0.9)
+    d_ask = w.c.page_data()
+    w.rep.rec(
+        "㉟ ③ 点「受理」在**页内**展开确认条（刻意不用原生弹层 —— 弹层不在渲染树里、"
+        "工具点不到它的确认键，受理这条唯一改变业务状态的链路就永远拿不到设备证据）",
+        bool(t_ask) and d_ask.get("claimOpenId") == id_queue,
+        f"tap={t_ask} claimOpenId={d_ask.get('claimOpenId')!r} 期望={id_queue!r}",
+    )
+    sel_sub_q = f'[data-act-claim-submit="{id_queue}"]'
+    n_sub_q = w.c.count(sel_sub_q)
+    w.rep.rec(
+        "㉟ ③ 确认条里「确认受理」锚点唯一命中（与「取消」是两个不同属性，"
+        "共用一个属性名会让两者在断言里同形）",
+        n_sub_q == 1,
+        f"命中 {n_sub_q}",
+    )
+    w.shot("35-3-队列-确认条已展开")
+
+    t_sub = w.c.tap(sel_sub_q)
+    w.wait_data(
+        lambda x: any(
+            str(i.get("assignmentId")) == id_queue and i.get("status") == "claimed"
+            for i in (x.get("items") or [])
+        ),
+        tries=40,
+        gap=0.5,
+    )
+    time.sleep(1.0)
+    tok_single = (api_login(CODE_MGR_SINGLE) or {}).get("access_token") or ""
+    me_single = api_get("/auth/me", tok_single) or {}
+    uid_single = str(me_single.get("id") or me_single.get("user_id") or "")
+    truth_q = api_get(f"/entrust/assignments/{id_queue}", tok_single) or {}
+    w.rep.rec(
+        "㉟ ③ 受理成功，且**服务端真相**对得上：状态已受理、受理人＝这名甲组织经理"
+        "（不只看界面渲染的那一行字）",
+        bool(t_sub)
+        and truth_q.get("status") == "claimed"
+        and uid_single != ""
+        and str(truth_q.get("claimed_by") or "") == uid_single,
+        f"tap={t_sub} status={truth_q.get('status')!r} "
+        f"claimed_by={truth_q.get('claimed_by')!r} 期望={uid_single!r}",
+    )
+    n_claim_after = w.c.count(sel_claim_q)
+    w.rep.rec(
+        "㉟ ③ 受理后那张卡**不再有**受理入口（界面上不留一个必然 409 的按钮）",
+        n_claim_after == 0,
+        f"命中 {n_claim_after}",
+    )
+    w.shot("35-4-受理成功")
+
+    # ============ 五、③ 并发负例：别人抢先受理，界面那一下拿 409 ============
+    print("\n-- 五、③ 并发负例：外部先受理，界面迟到的那一下 --", flush=True)
+    sel_claim_r = f'[data-act-claim="{id_race}"]'
+    w.scroll_into(sel_claim_r)
+    t_ask_r = w.c.tap(sel_claim_r)
+    time.sleep(0.9)
+    d_race = w.c.page_data()
+    w.rep.rec(
+        "㉟ ③ 并发就位：界面上已展开另一张的确认条（**尚未**点确认）",
+        bool(t_ask_r) and d_race.get("claimOpenId") == id_race,
+        f"tap={t_ask_r} claimOpenId={d_race.get('claimOpenId')!r} 期望={id_race!r}",
+    )
+    tok_multi = (api_login(CODE_MGR_MULTI) or {}).get("access_token") or ""
+    st_race, _ = api_post(
+        f"/entrust/assignments/{id_race}/claim",
+        tok_multi,
+        {},
+        idem_key=f"walk35-race-{int(time.time() * 1000)}",
+    )
+    w.rep.rec(
+        "㉟ ③ 并发前置：**另一名**甲组织经理经 API 抢先受理成功"
+        "（这一步刻意不走界面 —— 单模拟器做不出第二个界面实例）",
+        st_race in (200, 201),
+        f"HTTP {st_race}",
+    )
+    t_late = w.c.tap(f'[data-act-claim-submit="{id_race}"]')
+    time.sleep(3.4)
+    d_late = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=30)
+    late_row = next(
+        (x for x in (d_late.get("items") or []) if str(x.get("assignmentId")) == id_race), {}
+    )
+    n_claim_race = w.c.count(sel_claim_r)
+    w.shot("35-5-并发-迟到的那一下之后")
+    w.rep.rec(
+        "㉟ ③ 迟到的那一下拿 **409**：队列被刷新成**服务端的真实状态**"
+        "（该卡已受理、受理入口消失）—— 不是静默失败，也没把界面留在「点了没反应」",
+        bool(t_late) and late_row.get("status") == "claimed" and n_claim_race == 0,
+        f"tap={t_late} status={late_row.get('status')!r} 受理入口={n_claim_race}",
+    )
+
+    # ============ 六、④ inaccessible to unrelated organization B ============
+    print("\n-- 六、④ 无关组织乙看不到 --", flush=True)
+    if not w.open_workbench(CODE_MGR_ONLY_B, tag="㉟"):
+        w.rep.not_run("㉟ ④ 乙组织不可见", "仅乙组织的经理未能进入工作台")
+    else:
+        # 仅乙组织经理的 token（**纯 API 调用，不动界面**）：本节要用它做
+        # 「界面看不到」之外的**第二层直证** —— 界面证据可能被分页/筛选偶然
+        # 掩盖，服务端载荷不会。
+        tok_only_b = (api_login(CODE_MGR_ONLY_B) or {}).get("access_token") or ""
+        d_b = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+        b_items = d_b.get("items") or []
+        b_ids = [str(x.get("assignmentId")) for x in b_items]
+        b_titles = [str(x.get("title") or "") for x in b_items]
+        w.rep.rec(
+            "㉟ ④ 仅乙组织的经理，队列里**看不到**甲组织的那两张"
+            "（出口判据原文：remains inaccessible to unrelated organization B）",
+            id_queue not in b_ids and id_race not in b_ids,
+            f"乙队列 total={d_b.get('total')} 含甲单={id_queue in b_ids or id_race in b_ids}",
+        )
+        w.rep.rec(
+            "㉟ ④ 但**看得到乙组织自己的**委托 —— 证明上一条是「跨组织隔离」，"
+            "而不是「这个身份什么都看不到」那种假隔离",
+            TITLE_B in b_titles,
+            f"乙队列标题={b_titles[:4]}",
+        )
+        # 第二层直证：**服务端载荷**里也不含甲的两张。界面那一层可能被分页或
+        # 前端筛选偶然掩盖（"没显示"不等于"没返回"），载荷不会。
+        #
+        # ⚠️ `view=org` **必须**带 `org_id`：后端明确不提供「我所属全部组织」这种
+        #    无范围查询（DR-0014 §3.1，HO 禁止跨组织拼接），缺了它不是返回空表
+        #    而是 400/422。这里用**界面正在用的那个组织**（页面 state 的
+        #    `activeOrgId`）—— 与界面同源，避免我在测试侧重新解析一遍组织 id，
+        #    两边解析逻辑一旦分叉就会互相掩盖。
+        org_b = str(d_b.get("activeOrgId") or "")
+        org_list_b = (
+            api_get(f"/entrust/assignments?view=org&org_id={org_b}&size=50", tok_only_b) or {}
+        )
+        rows_b = org_list_b.get("items") or []
+        # 后端 schema 是 `AssignmentOut.assignment_id`（已核对 `schemas.py`），
+        # **不是** `id` / `assignmentId`。字段名写错会让 ids_b 变成空集 ——
+        # 靠下面的 `len(ids_b) > 0` 前置拦住，否则 `id not in set()` **恒真**，
+        # 就是一条永远通过的假绿断言。
+        ids_b = {str((r or {}).get("assignment_id") or "") for r in rows_b}
+        ids_b.discard("")
+        w.rep.rec(
+            "㉟ ④ 同一队列由 **API 直证**：`view=org&org_id=<界面当前组织>` 的服务端载荷里"
+            "也不含甲组织那两张的 id（先断言载荷非空 —— 否则字段名不符时 `not in` 恒真，是假绿）",
+            len(ids_b) > 0 and id_queue not in ids_b and id_race not in ids_b,
+            f"org_id={org_b!r} 载荷行数={len(ids_b)} ids={sorted(ids_b)[:6]}",
+        )
+        w.shot("35-6-乙组织队列")
+        w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={id_queue}", DETAIL)
+        time.sleep(2.8)
+        pd_b = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=30)
+        # ⚠️ 分层取证（2026-09-16 修正）：首跑时这两层被混成**一条**断言 —— 文案写
+        #    「服务端 404」，证据却只是 `view == 'denied'`。而 `utils/entrust.js`
+        #    把 **400 / 403 / 404 三种都映射成 denied**，单看界面**区分不出**是哪一种：
+        #    那是**超证**（断言声称的比证据多）。现在拆成两条，各带各的证据。
+        w.rep.rec(
+            "㉟ ④ 乙组织的经理**直访**甲组织委托详情 ⇒ 界面呈现为「拒绝」态"
+            "（不是被渲染成「没有数据」那种业务空态，也不是白屏）",
+            pd_b.get("view") == "denied",
+            f"view={pd_b.get('view')!r} title={pd_b.get('viewTitle')!r} "
+            f"hint={pd_b.get('viewHint')!r}",
+        )
+        # 直证：**状态码**。⚠️ 服务端对「开关关闭 / 不存在 / 非参与方」**刻意同码 404**
+        #    （不泄漏存在性）⇒ 这里证的是「被服务端拒绝、且不泄漏存在性」，
+        #    **不是**「这张委托不存在」。两者不可互换，文案也不许写成后者。
+        code_b = api_status(f"/entrust/assignments/{id_queue}", tok_only_b)
+        w.rep.rec(
+            "㉟ ④ 同一访问由 **API 直证**：服务端 HTTP **404**"
+            "（与「开关关闭 / 不存在」刻意同码、不泄漏存在性 ⇒ 界面**只能**说"
+            "「功能未开放」，不得替服务端下「这张委托不存在」的结论）",
+            code_b == 404,
+            f"HTTP={code_b}（0＝请求未发出，不算被拒）",
+        )
+        w.shot("35-7-乙组织直访甲组织详情")
+
+    # ============ 七、诚实边界（不计入通过）============
+    print("\n-- 七、诚实边界（不计入通过）--", flush=True)
+    w.rep.rec(
+        "㉟ 本章运行期无新增 console error",
+        not w.new_errors(base_err),
+        str(w.new_errors(base_err))[:200],
+    )
+    w.rep.limitation(
+        "㉟ 并发负例里的「另一个写者」是**同进程的 API 调用**，不是第二个真机客户端",
+        "单模拟器只有一个页面实例。本章证的是「界面上那一下迟到时拿 409、并把队列"
+        "刷新成真实状态」这条**界面行为**；「两个真机同时提交只成功一次」的判据在"
+        "后端层（`test_entrust_s1_exit_criteria.py` 的条件 UPDATE rowcount 用例）。"
+        "两者是不同的东西，不能互相顶替。",
+    )
+    w.rep.limitation(
+        "㉟ 「成员（只读）身份也会看到受理按钮」这一 UI 口径未修正、未取证",
+        "`canClaim` 只看委托状态、不判权限（与详情页同一条既有判据）⇒ 只有 "
+        "`entrust:view` 的 member 也能看到「受理」，点下去服务端 403。"
+        "这是**既有口径**（detail 页一直如此），不是本章引入；已登记为待评审项 D-4，"
+        "本章不擅自改语义。",
+    )
+    w.rep.not_run(
+        "㉟ 受理后**迟到写入者**的终局（abandoned / lease_lost）在界面上的可见性",
+        "那两个终局是服务端内部状态，本期没有面向经理的界面出口 ⇒ 真机侧无从观察。"
+        "其断言完全在后端用例里（㉞ 章第五节亦同）。",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "0": sec_00,
@@ -4619,6 +4994,7 @@ SECTIONS = {
     "32": sec_32,
     "33": sec_33,
     "34": sec_34,
+    "35": sec_35,
     "4b": sec_4b,
     "5": sec_05,
     "7": sec_07,
@@ -4676,6 +5052,12 @@ DEFAULT_ORDER = [
     "11",
     "13",
     "14",
+    # S1 出口判据 ②③④ 的**设备侧**取证：真写两张委托（甲组织）并在界面上受理一张，
+    # 再换「仅乙组织」身份验越权负例（判据 ④）。
+    # ⚠️ 放**全量序列最末**：它会给甲组织队列添两张 submitted、其中一张转 claimed，
+    #    排在前面会让后面按条数/按状态断言的章节变脆（"34" 也真写委托，但它在
+    #    "4b"～"14" 之前；本节的增量写在它们之后，不再叠加污染）。
+    "35",
 ]
 
 
