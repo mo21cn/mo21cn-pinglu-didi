@@ -343,6 +343,130 @@
         </view>
       </view>
 
+      <!-- 合同核对稿（§10.1 第 7 步 / BP-03 第 8 条 / D1-08）。
+           三件必须说清的事：
+           ① **合同是派生出来的，不是手编的**：入口只发一个空请求体（`note` 之外
+              没有任何业务入参），金额 / 费用范围 / 有效期全部来自**客户接受的那一版**
+              —— 界面上因此**没有**金额输入框（有，就等于允许手编一份合同）。
+           ② **能检查它怎么来的**（D1-08 那句 inspection）：报价与合同各自的
+              **精确版本**都摆出来，再给一张逐字段来源表。来源行带 `release:12@v3`
+              这类内部编号 ⇒ 它是**审计面**，默认收起。
+           ③ **签署证据绑版本 + 常驻标注**：每行都写「第 N 版」，且页面上常驻一句
+              「不构成实时电子签署」—— 不写这句，「有证据」就会被读成「签过了」。
+           ⚠️ 这里是 WXML **文本节点**，不是 Markdown：文案里不能出现成对星号，
+              否则会原样渲染出多余字符（静态闸见 scripts/verify_entrust_ui.js）。 -->
+      <view wx:if="{{canDeriveContract}}" class="card slot-card contract-card">
+        <view class="row-between slot-head">
+          <text class="slot-title">合同核对稿</text>
+          <text wx:if="{{contract}}" class="slot-note">{{contract.contractRevisionNoText}}</text>
+        </view>
+
+        <block wx:if="{{contract}}">
+          <view class="contract-line">
+            派生自 {{contract.quoteRevisionNoText}} · 合同 {{contract.contractRevisionNoText}} · 模板 {{contract.templateText}}
+          </view>
+          <view class="slot-note">
+            生效日 {{contract.effectiveDateText}} · 派生于 {{contract.derivedAtText}} · 备注 {{contract.noteText}}
+          </view>
+          <!-- 缺失项**如实列出**：列出来而不是编默认值，这是「派生」与「编造」的分界 -->
+          <view wx:if="{{contract.hasAbsent}}" class="slot-note slot-warn">
+            报价未提供、因而合同未写：{{contract.absentText}}
+          </view>
+
+          <view class="slot-actions">
+            <view
+              class="slot-btn"
+              data-act-contract-sources="1"
+              bindtap="onToggleContractSources"
+              hover-class="hover-dim"
+            >{{contractSourcesOpen ? '收起字段来源' : '看它怎么来的（' + contract.sourceCount + ' 行来源）'}}</view>
+          </view>
+          <block wx:if="{{contractSourcesOpen}}">
+            <view
+              wx:for="{{contract.sources}}"
+              wx:key="rowKey"
+              class="contract-src"
+              data-contract-src="{{item.fieldPath}}"
+            >
+              <text class="contract-src-path">{{item.fieldPath}}</text>
+              <text class="contract-src-value">{{item.valueText}}</text>
+              <text class="contract-src-from">来自 {{item.sourceText}}</text>
+            </view>
+          </block>
+
+          <view class="contract-sub">签署证据（绑在版本上）</view>
+          <!-- 常驻声明：由服务端给出，措辞只有一份（合同 §3.2 / D1-08） -->
+          <view wx:if="{{sig && sig.disclaimer}}" class="slot-note slot-warn">{{sig.disclaimer}}</view>
+          <block wx:if="{{sig && sig.hasItems}}">
+            <view
+              wx:for="{{sig.items}}"
+              wx:key="evidenceIdText"
+              class="sig-row"
+              data-sig-row="{{item.evidenceIdText}}"
+            >
+              <text class="sig-rev">{{item.revisionNoText}}</text>
+              <text class="sig-kind">{{item.kindText}}</text>
+              <text class="sig-mode">{{item.modeText}}</text>
+              <text class="sig-note">{{item.noteText}} · {{item.recordedAtText}}</text>
+            </view>
+          </block>
+          <view wx:else class="slot-note">这份合同还没有记过签署证据</view>
+
+          <view class="slot-actions">
+            <view
+              class="slot-btn"
+              data-act-sig-open="1"
+              bindtap="onToggleSig"
+              hover-class="hover-dim"
+            >{{sigOpen ? '取消' : '记一条签署证据'}}</view>
+          </view>
+          <view wx:if="{{sigOpen}}" class="slot-form">
+            <view class="slot-note">形态（由服务端给出，只收这三个取值）</view>
+            <view class="slot-actions">
+              <view
+                wx:for="{{sig.kindOptions}}"
+                wx:for-item="opt"
+                wx:key="key"
+                class="slot-btn"
+                data-act-sig-kind="{{opt.key}}"
+                bindtap="onPickSigKind"
+                hover-class="hover-dim"
+              >{{opt.label}}</view>
+            </view>
+            <input
+              class="slot-input"
+              data-df="sig-note"
+              value="{{sigForm.note}}"
+              placeholder="说明（选填）"
+              placeholder-class="input-ph"
+              bindinput="onSigInput"
+            />
+            <view wx:if="{{sigHint}}" class="slot-note slot-warn">{{sigHint}}</view>
+            <view class="slot-actions">
+              <view
+                class="slot-btn slot-btn-strong"
+                data-act-sig-submit="1"
+                bindtap="onSubmitSig"
+                hover-class="hover-dim"
+              >记录这条证据</view>
+            </view>
+          </view>
+        </block>
+
+        <block wx:else>
+          <view class="slot-actions">
+            <view
+              class="slot-btn slot-btn-strong"
+              data-act-contract-derive="1"
+              bindtap="onDeriveContract"
+              hover-class="hover-dim"
+            >生成合同核对稿</view>
+          </view>
+        </block>
+
+        <view wx:if="{{contractHint}}" class="slot-note slot-warn">{{contractHint}}</view>
+      </view>
+
       <!-- 待受理：给真实可执行的受理入口（无权限时服务端会如实拒绝）。
            确认条做成**页内 DOM** 而不是 `wx.showModal`：原生弹层不在渲染树里、
            工具点不到它的确认键 ⇒ 受理这条**唯一会改变业务状态、且不可回退**的路径

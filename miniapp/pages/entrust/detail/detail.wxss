@@ -550,6 +550,95 @@
   color: #6B7A8C;
 }
 
+/* ---- 合同核对稿（§10.1 第 7 步）----
+   这一块的排版取向与「运输计划」一致：**一行一个事实**，不做合并排版。
+   版本的那一列（`contractRevisionNoText` / `sig-rev`）必须单独占位置 ——
+   「有合同」与「合同是第几版」是两个问题，挤在一起就没法一眼看出绑的是哪一版。 */
+
+/* 卡片本身不新增视觉（沿用 `.card` + `.slot-card`），声明出来是为了让
+   「这张卡在不在」成为渲染树里**数得出来的事实** —— 走查按 `.contract-card` 计数，
+   而这类标记类若不在样式表里，静态闸（样式定义检查）会直接把它判为漏定义。 */
+.contract-card {
+  margin-top: 20rpx;
+}
+
+.contract-line {
+  margin-top: 8rpx;
+  font-size: 25rpx;
+  color: #0F2540;
+}
+
+.contract-sub {
+  margin-top: 24rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+/* 逐字段来源：三行一块（字段 / 值 / 出处）。出处那行带内部编号
+   （`release:12@v3`），是审计信息 —— 所以整表默认收起，只在点了才展开。 */
+.contract-src {
+  margin-top: 10rpx;
+  padding: 10rpx 14rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 10rpx;
+  background: #F7F9FC;
+}
+
+.contract-src-path {
+  display: block;
+  font-size: 22rpx;
+  color: #6B7A8C;
+}
+
+.contract-src-value {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 25rpx;
+  color: #0F2540;
+}
+
+.contract-src-from {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 21rpx;
+  color: #93A0B2;
+}
+
+/* 一条签署证据 = 一行四个事实：第几版 / 什么形态 / 什么标注 / 说明与时间。 */
+.sig-row {
+  margin-top: 10rpx;
+  padding: 10rpx 14rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 10rpx;
+  background: #FFFFFF;
+}
+
+.sig-rev {
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.sig-kind {
+  margin-left: 12rpx;
+  font-size: 24rpx;
+  color: #0F2540;
+}
+
+.sig-mode {
+  margin-left: 12rpx;
+  font-size: 22rpx;
+  color: #C2410C;
+}
+
+.sig-note {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 21rpx;
+  color: #6B7A8C;
+}
+
 /* ---- 本页 hover 反馈 ----
    `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */

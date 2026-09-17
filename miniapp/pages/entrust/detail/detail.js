@@ -66,26 +66,34 @@ const {
   decorateCapacityCandidate,
   decorateCapacityConfirmation,
   decorateCapacityRecheck,
+  decorateContractDerivation,
   decorateCustomerOffer,
   decorateDetail,
   decorateLegRevisions,
+  decorateSignatureEvidence,
   decorateWorkbench,
+  deriveContract,
   downloadOfferAttachment,
   fetchAssignment,
   fetchAssignmentPlan,
   fetchCapacityCandidates,
   fetchCapacityConfirmations,
+  fetchContractDerivation,
+  fetchEntrustmentOfferReleases,
   fetchLegRevisions,
   fetchMyOfferReleases,
   fetchMyOrgs,
   fetchSessionContext,
+  fetchSignatureEvidence,
   fetchWorkbench,
   isPermittedOrg,
   newIdempotencyKey,
   permittedOrgIds,
+  pickAcceptedQuoteRelease,
   pickOfferForAssignment,
   respondOffer,
   recordCapacityCandidate,
+  recordSignatureEvidence,
   recheckCapacityConfirmation,
   updateLeg,
   viewState
@@ -371,7 +379,46 @@ Page({
      */
     legHistoryId: '',
     legHistory: null,
-    legHistoryHint: ''
+    legHistoryHint: '',
+
+    // ── 合同派生与签署证据（§10.1 第 7 步 / BP-03 第 8 条 / D1-08）─────────
+    /**
+     * 该不该**显示这一块**：授权能被唯一定位（`ctx.entrustment_id`）∧ 我在该组织内
+     * 有 `entrust:quote:create`。与 `canRecordCapacity` **同一判据** —— 合同那两条
+     * 端点用的就是同一条写权限。隐藏不等于放行，服务端仍独立判定。
+     */
+    canDeriveContract: false,
+    /**
+     * 派生来源的那条**已接受发布**（`''` ＝ 本单还没有客户已接受的对客报价）。
+     *
+     * 它不是「前置是否已满足」的按钮开关，而是**派生请求要带的那个 id** ——
+     * 合同内容来自「客户接受的那一版」，所以派生的落点必须是「那一条发布」。
+     */
+    contractReleaseId: '',
+    /**
+     * 已派生出的合同核对稿（`null` ＝ 尚未派生）。
+     *
+     * ⚠️ `null` 只有**一个**含义：还没派生（服务端对「未派生」回 404，前端把它翻成
+     * null）。取数失败要落在 `contractHint` 上而不是这里 —— 把「读不到」说成「没有」，
+     * 用户就不知道该查什么（与 `plan` / `planHint` 同一条纪律）。
+     */
+    contract: null,
+    /** 页内常驻提示（服务端拒绝的原话 / 读取失败的原因） */
+    contractHint: '',
+    /** 派生请求在飞 */
+    contractDeriving: false,
+    /** 逐字段来源表是否展开（默认**收起**：它是审计面，不是主内容） */
+    contractSourcesOpen: false,
+    /** 签署证据清单（`null` ＝ 还没读到；合同尚未派生时必然是 null） */
+    sig: null,
+    /** 记证据的表单是否展开（页内；理由同「受理委托」—— 原生弹层工具点不到确认键） */
+    sigOpen: false,
+    /** 表单草稿：`kind` 由**服务端给的选项**填，`note` 选填 */
+    sigForm: { kind: '', note: '' },
+    /** 表单内的校验 / 失败提示（页内常驻） */
+    sigHint: '',
+    /** 提交在飞 */
+    sigSubmitting: false
   },
 
   onLoad(query) {
@@ -477,7 +524,20 @@ Page({
       legSubmitting: false,
       legHistoryId: '',
       legHistory: null,
-      legHistoryHint: ''
+      legHistoryHint: '',
+      // 合同那块同样复位（理由同上：整页刷新后，展开着的证据表单已经失去判据）。
+      // ⚠️ `contractReleaseId` **不清**：它是「派生请求要带的那个 id」，是这一次
+      //    取数要重新求出的值；清了就等于把「本单还没有已接受报价」当成初始态显示，
+      //    与真事实同形（而 `loadContract` 很快就会把它填回来）。
+      contract: null,
+      contractHint: '',
+      contractDeriving: false,
+      contractSourcesOpen: false,
+      sig: null,
+      sigOpen: false,
+      sigForm: { kind: '', note: '' },
+      sigHint: '',
+      sigSubmitting: false
     })
     // 前两个请求是**页面内容**：工作台是主内容，委托本体是它的头卡。任一失败都按失败
     // 处理 ——「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
@@ -531,7 +591,11 @@ Page({
         // 运输计划（§10.1 第 4 步）也在这一轮取。它**不依赖权限投影**（设计上两侧都可见，
         // 见 `data.plan`），放在这里只是"同一次 `load()` 的第二次取数"这个位置。
         // 两块**互不依赖** ⇒ 并行，失败各消化各的：一块读不到不该把另一块也清掉。
-        return Promise.all([self.loadCapacity(), self.loadPlan()])
+        // 合同那一块也在这第二轮取（§10.1 第 7 步）。它**依赖授权定位**
+        // （`canDeriveContract` 要等 `session-context` 回来才定得下来），
+        // 与运力同一条理由：不该发的请求一次都不发。
+        // 三块**互不依赖** ⇒ 并行，失败各消化各的。
+        return Promise.all([self.loadCapacity(), self.loadPlan(), self.loadContract()])
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -584,6 +648,12 @@ Page({
       canViewCapacity: isPermittedOrg(this.permittedViewOrgs, detail && detail.orgId),
       // 写：授权可唯一定位 ∧ 我在该组织内有 `entrust:quote:create`。
       canRecordCapacity:
+        !!(ctx && ctx.entrustment_id) &&
+        isPermittedOrg(this.permittedQuoteOrgs, detail && detail.orgId),
+      // 合同派生 / 记证据：**同一判据**（授权可唯一定位 ∧ 有制作报价权限）——
+      // 后端这两条端点要的就是 `entrust:quote:create`。写在这里而不是在模板里再判
+      // 一次角色，是因为"谁能派生合同"只有一个答案，它由授权决定。
+      canDeriveContract:
         !!(ctx && ctx.entrustment_id) &&
         isPermittedOrg(this.permittedQuoteOrgs, detail && detail.orgId),
       // 候选与确认**不在这里清**：紧接着的 `loadCapacity()` 会重取。
@@ -1141,6 +1211,105 @@ Page({
       })
   },
 
+  /**
+   * 取合同派生 + 签署证据（§10.1 第 7 步）。
+   *
+   * 三次请求串成一条链，**每一环的空态都不一样**，必须分开处置：
+   *   ① 没有「客户已接受的对客报价」⇒ 正常中间态（还没有可派生的东西）；
+   *   ② 派生读取 404 ⇒ 还没派生（正常中间态 ⇒ 显示派生入口）；
+   *   ③ 其它失败 ⇒ **读不到**（要说清原因，不能说成「没有」）。
+   *
+   * ⚠️ 把 ② ③ 合并是本块最容易犯的错：那样「合同其实派生了、但这次读失败」
+   *    会显示成「可以派生」，用户点下去拿到 409，而 409 的原话他看不懂 ——
+   *    表现就是"点了没反应 + 一句看不懂的提示"。
+   */
+  loadContract() {
+    const self = this
+    if (!this.data.canDeriveContract) {
+      this.setData({ contract: null, contractHint: '', sig: null })
+      return Promise.resolve()
+    }
+    const eid = String(this.data.entrustmentId || '')
+    if (!eid) {
+      this.setData({ contract: null, contractHint: '', sig: null })
+      return Promise.resolve()
+    }
+    return fetchEntrustmentOfferReleases(eid)
+      .then(function (res) {
+        const rel = pickAcceptedQuoteRelease((res && res.items) || [])
+        if (!rel) {
+          // 中间态，**不是失败**：「客户还没接受报价」与「合同读不到」必须长得不一样。
+          self.setData({
+            contract: null,
+            contractHint: '还没有客户已接受的对客报价 —— 合同只能从已接受事实派生',
+            sig: null
+          })
+          return null
+        }
+        const rid = String(rel.release_id == null ? '' : rel.release_id)
+        self.setData({ contractReleaseId: rid })
+        return fetchContractDerivation(rid)
+          .then(function (payload) {
+            self.setData({ contract: decorateContractDerivation(payload), contractHint: '' })
+            return self.loadSignatureEvidence(payload && payload.contract_artifact_id)
+          })
+          .catch(function (err) {
+            const status = (err && err.httpStatus) || 0
+            if (status === 404) {
+              // 还没派生：正常中间态（显示派生入口），**不是**失败
+              self.setData({ contract: null, contractHint: '', sig: null })
+              return null
+            }
+            self.setData({
+              contract: null,
+              contractHint: status
+                ? '合同派生未能读取（服务端返回 ' + status + '）'
+                : '合同派生未能读取：网络异常',
+              sig: null
+            })
+            return null
+          })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          contract: null,
+          contractHint: status
+            ? '发布记录未能读取（服务端返回 ' + status + '）'
+            : '发布记录未能读取：网络异常',
+          sig: null
+        })
+      })
+  },
+
+  /**
+   * 取该合同的签署证据清单（合同尚未派生时不会被调用）。
+   *
+   * 清单里带 `kindOptions`（形态选项）与 `disclaimer`（常驻声明）—— 两者都来自
+   * 服务端：取值域与措辞各只有一份，前端不另存。
+   */
+  loadSignatureEvidence(contractArtifactId) {
+    const self = this
+    const aid = String(contractArtifactId == null ? '' : contractArtifactId)
+    if (!aid) {
+      this.setData({ sig: null })
+      return Promise.resolve()
+    }
+    return fetchSignatureEvidence(aid)
+      .then(function (payload) {
+        self.setData({ sig: decorateSignatureEvidence(payload), sigHint: '' })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          sig: null,
+          sigHint: status
+            ? '签署证据未能读取（服务端返回 ' + status + '）'
+            : '签署证据未能读取：网络异常'
+        })
+      })
+  },
+
   // ── 建段 / 改段 / 版本历史（§10.1 第 4 步的**写侧**）─────────────────────
   //
   // 判权**不在前端**：能打开这一页就说明调用方看得见这张委托，而后端
@@ -1406,6 +1575,150 @@ Page({
             ? '版本历史未能读取（服务端返回 ' + status + '）'
             : '版本历史未能读取：网络异常'
         })
+      })
+  },
+
+  // ── 合同派生 / 记签署证据（§10.1 第 7 步的**写侧**）───────────────────────
+  //
+  // ⛔ 派生**不带业务入参**：请求体只有可选的 `note`，界面上也就没有金额/当事方
+  //    输入框。合同内容只能来自「客户接受的那一版」—— 让界面能填金额，
+  //    第 7 步就退化成"手打一份合同"。
+  // ⛔ 证据的 `mode` **不出现在请求体里**：它恒为 `labeled_sample`，由服务端写死。
+  //    让界面传就等于允许界面自称"已完成电子签署"（合同 §3.2 / D1-08）。
+
+  /** 展开 / 收起逐字段来源表（审计面，默认收起） */
+  onToggleContractSources() {
+    this.setData({ contractSourcesOpen: !this.data.contractSourcesOpen })
+  },
+
+  /**
+   * 派生一份合同核对稿。
+   *
+   * 请求体**恒为空对象**：这不是"还没做表单"，而是这条命令的语义 ——
+   * 合同内容全部由服务端从已接受事实派生。将来有人想在这里加 `amount`，
+   * 那等于允许手工编造合同条款（与 BP-03 第 8 条直接冲突）。
+   */
+  onDeriveContract() {
+    const self = this
+    if (this.data.contractDeriving) return Promise.resolve()
+    const rid = String(this.data.contractReleaseId || '')
+    if (!rid) {
+      this.setData({ contractHint: '还没有可派生的已接受报价' })
+      return Promise.resolve()
+    }
+    this.setData({ contractDeriving: true, contractHint: '' })
+    wx.showLoading({ title: '派生中', mask: true })
+    // 幂等键每次新生成：用户重新点击＝一次新的意图。
+    return deriveContract(rid, {}, newIdempotencyKey('contract'))
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ contractDeriving: false })
+        return self.loadContract()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const status = (err && err.httpStatus) || 0
+        // ⚠️ 取 `err.message` 而**不是** `err.detail`：本条端点的 409 用的是
+        // **结构体** detail（`{message, existing_contract_artifact_id}`）——
+        // 按字符串判会把它整个丢掉，页面就只剩"服务端返回 409"，而
+        // "已经派生了、那份合同的 id 是几"恰恰是最有用的那句。
+        // `request.js` 的 `httpError` 已经把 `detailText(detail)` 放进 `message`，
+        // 所以这里对"字符串 detail"与"结构体 detail"是同一个写法。
+        // ⛔ 不要 `String(err.detail)` —— 那会渲染出 `[object Object]`。
+        const reason = status && err && err.message ? String(err.message) : ''
+        self.setData({
+          contractDeriving: false,
+          contractHint: reason
+            ? '合同未派生：' + reason
+            : status
+              ? '合同未派生（服务端返回 ' + status + '）'
+              : '合同未派生：网络异常（可重试）'
+        })
+        return null
+      })
+  },
+
+  /** 展开 / 收起「记一条签署证据」表单（页内；理由见文件头「交互形态」）。 */
+  onToggleSig() {
+    if (this.data.sigSubmitting) return
+    this.setData({ sigOpen: !this.data.sigOpen, sigHint: '' })
+  },
+
+  /** 收起并清空（取消就是取消，不留半份草稿）。 */
+  onCancelSig() {
+    this.setData({ sigOpen: false, sigForm: { kind: '', note: '' }, sigHint: '' })
+  },
+
+  /**
+   * 选中一种证据形态。取值来自**服务端给的** `sig.kindOptions` ——
+   * 前端不另存一份取值域：另存一份就等于允许界面给出服务端不收的形态。
+   */
+  onPickSigKind(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const kind = String(ds.actSigKind == null ? '' : ds.actSigKind)
+    if (!kind) return
+    this.setData({ 'sigForm.kind': kind, sigHint: '' })
+  },
+
+  /**
+   * 表单输入：按 `data-df` 写回。
+   *
+   * ⚠️ 模板上每一个 `data-df` 都必须在这张表里被认领 —— 查不到就**静默空转**
+   * （`bindinput` 照常触发、`ds.df` 也读得到，只是没人接），表现成"这一格永远填不上"。
+   */
+  onSigInput(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    if (String(ds.df || '') !== 'sig-note') return
+    this.setData({ 'sigForm.note': (e && e.detail && e.detail.value) || '', sigHint: '' })
+  },
+
+  /** 提交一条签署证据。形态未选在**页内**说清（不用会消失的 toast）。 */
+  onSubmitSig() {
+    const self = this
+    if (this.data.sigSubmitting) return Promise.resolve()
+    const cart = String((this.data.contract && this.data.contract.contractArtifactId) || '')
+    const kind = String((this.data.sigForm || {}).kind || '')
+    if (!cart) {
+      this.setData({ sigHint: '还没有派生出合同（没有可绑证据的版本）' })
+      return Promise.resolve()
+    }
+    if (!kind) {
+      this.setData({ sigHint: '先选一种证据形态（服务端只收这三个取值）' })
+      return Promise.resolve()
+    }
+    this.setData({ sigSubmitting: true, sigHint: '' })
+    wx.showLoading({ title: '记录中', mask: true })
+    // `revision_no` **不传** ⇒ 记到合同的当前版本（界面主路径）。
+    // ⛔ 也不传 `mode` —— 它由服务端写死。
+    return recordSignatureEvidence(
+      cart,
+      { evidence_kind: kind, note: String((this.data.sigForm || {}).note || '').trim() || null },
+      newIdempotencyKey('sig-evidence')
+    )
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ sigSubmitting: false, sigOpen: false, sigForm: { kind: '', note: '' } })
+        return self.loadSignatureEvidence(cart)
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const status = (err && err.httpStatus) || 0
+        // ⚠️ 同 `onDeriveContract`：409 的 detail 是**结构体**
+        // （`{message, existing_evidence_id}`）⇒ 必须取 `err.message`（请求层已
+        // 用 `detailText(detail)` 把那句人话放进去），按字符串判会把它整个丢掉，
+        // 页面上就只剩"服务端返回 409"，而"这一版这一形态已经记过了"才是要说的那句。
+        const reason = status && err && err.message ? String(err.message) : ''
+        // 失败时**不**收表单：同一版同一形态已记过时，用户要的是"换一种形态"或
+        // "去看已记的那条"，而不是重打一遍说明。
+        self.setData({
+          sigSubmitting: false,
+          sigHint: reason
+            ? '证据未记录：' + reason
+            : status
+              ? '证据未记录（服务端返回 ' + status + '）'
+              : '证据未记录：网络异常（说明已保留，可重试）'
+        })
+        return null
       })
   },
 
