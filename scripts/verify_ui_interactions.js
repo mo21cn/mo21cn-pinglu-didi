@@ -2480,6 +2480,168 @@ section('⑤ 静态防线')
     )
   }
 
+  // ---------------------------------------------------------------- ⑧ data-df 输入通道
+  section('⑧ `data-df` 输入通道：模板里的输入框必须真的接上 handler 的认领表')
+  {
+    /**
+     * 为什么需要这一节（这是**真缺陷的形态**，不是代码风格偏好）：
+     *
+     * `data-df="x"` 与 `bindinput="onInput"` 是**两个独立的事实** —— 模板说"这个框叫 x"，
+     * handler 说"我认哪几个名字"。两者对不上时，`bindinput` **照常触发**、`ds.df`
+     * **照常读到**，只是查表查不到 ⇒ **静默空转**：输入框一个字符都写不进去，
+     * 而页面看起来一切正常（不报错、不 toast、控制台无输出）。
+     *
+     * 2026-09-17 实锤：`pages/entrust/detail/detail.wxml` 的 `cap-scope` / `cap-note`
+     * 不在 `onCapInput` 的映射表里 ⇒ 真机上「本次确认覆盖的范围」填不进去 ⇒
+     * `onSubmitCapConfirm` 在页内校验处直接返回 ⇒ **运力确认永远提交不了**。
+     * ⚠️ 当时另外三个静态门禁**全绿**，只有本地复现的 e2e 抓到了它。
+     *
+     * 判据（打在**行为**上，不是打在写法上）：
+     *   ① 每个 `data-df="x"` 绑的 handler，用 `{dataset:{df:'x'}}` 驱动一次，
+     *      必须让该 df 的**哨兵值出现在 `data` 里**；
+     *   ② 同一个 handler 下的**不同 df 必须落在不同位置** —— 抓的是另一种静默失败：
+     *      handler 根本不读 `df`（写死一个字段），两个框互相覆盖，而逐框断言各自"通过"。
+     *
+     * ⚠️ 为什么**不查**「df 的字面量出现在 handler 源文本里」：`onQuoteInput` 用
+     * `'quoteForm.' + ds.df` 拼路径（任何 df 都能写）、`onTaskInput` 干脆不读 `df`
+     * （模板里只有它一个框）—— 两者都**正确**，而字面量检查会把它们判红。
+     * 那种"写法检查"会逼着后来的人为了过闸门去改本来正确的代码。
+     */
+    const SENT = (df) => '__DF__' + df + '__'
+
+    const walkWxml = (dir, out) => {
+      for (const n of fs.readdirSync(dir)) {
+        const p = path.join(dir, n)
+        if (fs.statSync(p).isDirectory()) walkWxml(p, out)
+        else if (n.endsWith('.wxml')) out.push(p)
+      }
+      return out
+    }
+
+    /**
+     * 取出模板里 `(data-df, bindinput)` 的配对。
+     * 标签范围一直取到该标签的 `>` —— 属性的书写顺序不定，取固定窗口会漏（本轮实测漏过 3 处）。
+     */
+    const dfPairs = (src) => {
+      const out = []
+      const re = /data-df="([^"]*)"/g
+      let m
+      while ((m = re.exec(src)) !== null) {
+        const st = src.lastIndexOf('<', m.index)
+        const gt = src.indexOf('>', m.index)
+        const tag = src.slice(st, gt > m.index ? gt : m.index + m[0].length)
+        const h = /bindinput="([^"]+)"/.exec(tag)
+        out.push({ df: m[1], handler: h ? h[1] : '' })
+      }
+      return out
+    }
+
+    /** 深度找出值等于 `v` 的所有路径（哨兵值唯一 ⇒ 命中数就是"写没写进去"）。 */
+    const pathsOf = (obj, v, prefix, out) => {
+      const acc = out || []
+      const pre = prefix || ''
+      Object.keys(obj || {}).forEach((k) => {
+        const val = obj[k]
+        if (val === v) acc.push(pre + k)
+        else if (val && typeof val === 'object') pathsOf(val, v, pre + k + '.', acc)
+      })
+      return acc
+    }
+
+    // 本节的页面加载**不桩取数**：它只驱动输入 handler、不碰 `onLoad` ⇒ 不需要 entrustStub。
+    // （⑥ 的 `loadEntrustPage` 定义在那个 block 的作用域里，这里取不到；自带一份最小构造，
+    //  而不是把既有符号提到外层 —— 挪动既有作用域的风险比重复这几行大。）
+    const REAL_ROUTES = require(path.join(MP, 'utils', 'routes.js'))
+    const REAL_ENTRUST_MOD = require(path.join(MP, 'utils', 'entrust.js'))
+    const loadPage = (file) =>
+      loadConfig(file, 'page', makeWx(), [], undefined, {
+        'utils/routes': REAL_ROUTES,
+        'utils/entrust': REAL_ENTRUST_MOD
+      })
+
+    let checked = 0
+    let skippedDyn = 0
+    const landing = {}
+
+    walkWxml(path.join(MP, 'pages'), []).forEach((wxmlPath) => {
+      const src = fs.readFileSync(wxmlPath, 'utf8')
+      const pairs = dfPairs(src)
+      if (pairs.length === 0) return
+
+      const rel = path.relative(ROOT, wxmlPath).replace(/\\/g, '/')
+      const jsPath = wxmlPath.replace(/\.wxml$/, '.js')
+      if (!fs.existsSync(jsPath)) {
+        fail(rel + ' 有 data-df 但同目录没有页面 js')
+        return
+      }
+
+      let page
+      try {
+        page = instantiate(loadPage(jsPath))
+      } catch (err) {
+        fail(rel + ' 实例化失败：' + (err && err.message))
+        return
+      }
+      const baseData = JSON.parse(JSON.stringify(page.data))
+
+      pairs.forEach(({ df, handler }) => {
+        if (df.indexOf('{{') !== -1) {
+          skippedDyn += 1
+          return
+        }
+        const label = rel + ' · data-df="' + df + '"'
+        if (!handler) {
+          fail(label + ' 没有绑 bindinput（这个框根本没有输入通道）')
+          return
+        }
+        if (typeof page[handler] !== 'function') {
+          fail(label + ' 绑的 handler `' + handler + '` 在页面 js 里不存在')
+          return
+        }
+        const sent = SENT(df)
+        page[handler].call(page, {
+          detail: { value: sent },
+          currentTarget: { dataset: { df } }
+        })
+        const hits = pathsOf(page.data, sent)
+        check(
+          label + ' → ' + handler + ' 认领（哨兵落在 data 的某处）',
+          hits.length > 0,
+          hits.length === 0 ? '键入被静默丢弃：handler 没往任何地方写' : ''
+        )
+        if (hits.length > 0) {
+          // ① 的落点记录下来，交给下面 ② 的"互不相同"判据
+          const key = rel + '|' + handler
+          landing[key] = landing[key] || {}
+          landing[key][df] = hits[0]
+        }
+        // 复原：下一个 df 从同一份初始 data 出发（否则前一个的残留会影响落点判定）
+        page.data = JSON.parse(JSON.stringify(baseData))
+        checked += 1
+      })
+    })
+
+    // ② 同一 handler 下的不同 df 必须各写各的
+    Object.keys(landing).forEach((key) => {
+      const [rel, handler] = key.split('|')
+      const map = landing[key]
+      const dfs = Object.keys(map)
+      if (dfs.length < 2) return
+      const spots = dfs.map((d) => map[d])
+      const dup = spots.filter((s, i) => spots.indexOf(s) !== i)
+      check(
+        rel + ' · ' + handler + ' 下 ' + dfs.length + ' 个 df 各写各的（落点互不相同）',
+        dup.length === 0,
+        dup.length ? '落点重复：' + JSON.stringify(map) : ''
+      )
+    })
+
+    check('本节确实覆盖到了含 data-df 的页面（否则上面的断言全是空转）', checked > 0)
+    if (skippedDyn > 0) {
+      ok('跳过 ' + skippedDyn + ' 处动态 data-df（值由插值决定，静态配不了对）')
+    }
+  }
+
   // ---------------------------------------------------------------- 汇总
   console.log('\n' + '='.repeat(72))
   console.log(`UI 交互契约校验：OK ${N_OK} · FAIL ${FAILS.length}`)
