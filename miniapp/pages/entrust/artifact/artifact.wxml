@@ -182,13 +182,36 @@
                    不显示 ⇒ 那个必填项在界面上根本无值可填（2026-09-14 走查发现）。 -->
               <view class="tl-time">{{item.createdAt}} · 版本 id {{item.revisionId}}</view>
               <view class="tl-note">{{item.summary}}</view>
+              <!-- 「设为生效版本」= **页内二次确认**（2026-09-17 由原生弹层改过来）。
+                   原生弹层的确认键不在渲染树里、工具点不到；而"更正一个字段后跨视图
+                   可见"要先让更正的版本生效 ⇒ 这条路径必须可被设备验证。
+                   样式复用全局 `app.wxss` 的 .bar-note / .bar-actions / .btn-*。 -->
               <view
-                wx:if="{{artifact.canConfirm && !item.isCurrent && !editing}}"
+                wx:if="{{artifact.canConfirm && !item.isCurrent && !editing && confirmRevNo !== item.revisionNo}}"
                 class="slot-btn"
                 data-no="{{item.revisionNo}}"
+                data-act-confirm-revision="1"
                 bindtap="onConfirm"
                 hover-class="hover-dim"
               >设为生效版本</view>
+
+              <view wx:if="{{confirmRevNo === item.revisionNo}}" class="bar-note">
+                {{confirmText}}
+                <view class="bar-actions">
+                  <view
+                    class="btn-ghost"
+                    data-act-confirm-revision-cancel="1"
+                    bindtap="onConfirmCancel"
+                    hover-class="hover-dim"
+                  >取消</view>
+                  <view
+                    class="btn-primary"
+                    data-act-confirm-revision-submit="1"
+                    bindtap="onConfirmSubmit"
+                    hover-class="hover-dim"
+                  >确认切换</view>
+                </view>
+              </view>
             </view>
           </view>
         </view>
@@ -199,13 +222,13 @@
            （与详情页的受理入口同一口径：前端不做权限判定，也不假装知道）。 -->
       <view wx:if="{{artifact.canEdit}}" class="card">
         <view wx:if="{{!editing}}" class="bar-actions">
-          <view class="btn-primary" bindtap="onEdit" hover-class="hover-dim">编辑内容</view>
+          <view class="btn-primary" data-act-edit="1" bindtap="onEdit" hover-class="hover-dim">编辑内容</view>
         </view>
         <block wx:else>
           <view class="bar-note">保存会追加一个新版本；生效版本要另行确认才会切换。</view>
           <view class="bar-actions">
-            <view class="btn-ghost" bindtap="onCancelEdit" hover-class="hover-dim">取消</view>
-            <view class="btn-primary" bindtap="onSave" hover-class="hover-dim">保存新版本</view>
+            <view class="btn-ghost" data-act-cancel-edit="1" bindtap="onCancelEdit" hover-class="hover-dim">取消</view>
+            <view class="btn-primary" data-act-save="1" bindtap="onSave" hover-class="hover-dim">保存新版本</view>
           </view>
         </block>
       </view>
