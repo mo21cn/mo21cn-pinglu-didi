@@ -1,16 +1,18 @@
-// 委托发货 · 专业会话屏（UI-03 / DR-0015 / ENT-033 / **S2 首片**）
+// 委托发货 · 专业会话屏（UI-03 / DR-0015 / ENT-033 / **S2 首片 + 第二片 + 第三片**）
 //
-// 本页两件事，都得是真的：
+// 本页三件事，都得是真的：
 //
 // 1. **AC-05 的聊天侧**：成果卡与工作台、成果页**同源同版本** —— 字段来自
 //    `utils/entrust.js` 的 `decorateArtifact`，本页不复写任何字段名映射。
-// 2. **S2 首片的真实纵向增量**（HO 0917-2 定为首要任务）：
-//    已认领委托 → 进入专属会话 → 发送报价文本 → 创建并执行**持久化作业** →
-//    展示结果或明确失败 → 离开后重新进入仍可恢复。
+// 2. **S2 首片 + 第二片**（HO 0917-2 定为首要任务）：
+//    已认领委托 → 进入专属会话 → 发送报价文本 / 引用附件 → 创建并执行**持久化作业** →
+//    展示结果或明确失败 → 提案**人工采纳**为成果 → 离开后重新进入仍可恢复。
+// 3. **S2 第三片**：上传样报价单 → 提取文本 → 引用它让 AG-02 解析
+//    （BP-02 的 attachment selection，也就是主演示脚本第 2 步）。
 //
 // 关键是"真"在哪：
-//   * 会话、消息、作业全部**落库**，由后端 `ent_session` / `ent_session_message` /
-//     `ent_agent_job` 承载；**不在页面里保存一份消息数组**当作聊天记录
+//   * 会话、消息、作业、附件全部**落库**，由后端 `ent_session` / `ent_session_message` /
+//     `ent_agent_job` / `ent_attachment` 承载；**不在页面里保存一份消息数组**当作聊天记录
 //     （那叫假聊天：刷新就没，换个设备也没有，审计更无从谈起）。
 //   * 发消息与跑作业是**两个动作**：`submitJob` 只建作业，`runJob` 才执行。
 //     合成一步会让人以为"点了就跑完了"，而作业其实可能还在排队。
@@ -18,6 +20,9 @@
 //     写成"解析结果"会让人以为已经落库。
 //   * `mocked=true` 时后端走的是本地规则模板（fixture），结构与真实模式同构，
 //     但**不是真实模型输出** —— 界面必须显示模式，不得拿它充当模型质量证据。
+//   * ⚠️ **「已上传」≠「Agent 读得到」**：只有提取完成（`extract_status='done'`）的
+//     附件才有文本进 Agent 的来源目录。上传后必须立刻提取，并把结果如实报出来 ——
+//     否则用户以为"传上去就完事了"，而 Agent 那边只看到一个文件名。
 //
 // 运行期导航治理与其它委托页同口径：`onLoad` 走 `guardEntry()`，跳转走 `go()`，
 // 本页登记在 `MIGRATED_PAGES`（CI 会核对不得出现裸 `wx.navigateTo` 等）。
@@ -38,10 +43,13 @@ const {
   adoptJobProposal,
   appendMessage,
   createSession,
+  extractAttachment,
+  extractStatusLabel,
   jobFailureText,
   newIdempotencyKey,
   runJob,
   submitJob,
+  uploadAttachment,
   viewState
 } = require('../../../utils/entrust')
 
@@ -79,6 +87,11 @@ Page({
     attachmentText: '',
     draft: '',
     sending: false,
+    /** 上传报价单：进行中标记（上传 + 提取是一串动作，全程只能有一个在跑） */
+    uploading: false,
+    attachNotice: '',
+    /** 引用附件跑作业时的进行中标记（与「发消息」区分开） */
+    referencing: false,
     /** 采纳：待确认的作业与提案类型（页内确认条的两个键） */
     adoptingJobId: '',
     adoptingType: '',
@@ -306,15 +319,29 @@ Page({
       const atts = (res[1] && res[1].items) || []
       const messages = ((detail && detail.messages) || []).map(decorateMessage)
       const attachments = atts.map(decorateAttachment)
+      // ⚠️ 摘要必须把「有几份」与「有几份 Agent 真读得到」分开：
+      //    未提取的附件对 Agent 而言只是文件名，把它们算进"已提供给 Agent"
+      //    是拿一件没发生的事当事实说。
       const done = attachments.filter(function (a) {
-        return a.extractStatus === 'done'
+        return a.hasText
       }).length
+      let attachmentText
+      if (!attachments.length) {
+        attachmentText = '本单暂无附件'
+      } else if (done === attachments.length) {
+        attachmentText = '本单附件 ' + attachments.length + ' 份，文本均已提取（随上下文提供给 Agent）'
+      } else {
+        attachmentText =
+          '本单附件 ' +
+          attachments.length +
+          ' 份，其中已提取文本 ' +
+          done +
+          ' 份（未提取的附件对 Agent 只是文件名）'
+      }
       self.setData({
         messages: messages,
         attachments: attachments,
-        attachmentText: attachments.length
-          ? '本单附件 ' + attachments.length + ' 份，其中已提取文本 ' + done + ' 份（随上下文提供给 Agent）'
-          : '本单暂无附件'
+        attachmentText: attachmentText
       })
       // ⚠️ 会话已存在时**不**让 total=0 落进"空状态"：空状态会把对话区整块藏掉，
       // 于是"还没有消息。粘贴一段报价文本…"这句引导也一起消失 ——
@@ -484,6 +511,157 @@ Page({
               : status === 409
                 ? '作业尚未成功，暂不能采纳'
                 : '采纳失败' + (status ? '（' + status + '）' : '')
+        })
+      })
+  },
+
+  /**
+   * 选一份本地文件作为"样报价单"（BP-02 的 attachment selection / 演示第 2 步）。
+   *
+   * 用 `chooseMessageFile` 而不是 `chooseMedia`：报价单是**文档**不是图片。
+   * 选完立刻走 `uploadQuote`，两者分开是为了让"取消选择"不产生任何请求。
+   */
+  onPickQuote() {
+    const self = this
+    if (this.data.uploading) return
+    if (!this.data.sessionId) {
+      // 附件要挂在**委托授权**下（参与方协作），而授权 id 来自会话上下文 ——
+      // 会话还没就绪就上传，只会得到一个注定 400 的请求。
+      wx.showToast({ icon: 'none', title: '会话尚未就绪，请稍后重试' })
+      return
+    }
+    wx.chooseMessageFile({
+      count: 1,
+      type: 'file',
+      success(res) {
+        const f = (res.tempFiles || [])[0]
+        if (!f || !f.path) return
+        self.uploadQuote(f)
+      },
+      fail() {
+        // 用户取消选择：不是错误，不提示、不报错
+      }
+    })
+  },
+
+  /**
+   * 上传 → 立刻提取。两步**不能省第二步**。
+   *
+   * 只上传不提取的话，附件在 Agent 眼里只是"一个文件名"
+   * （后端 `agentjobs._attach_text_excerpts` 只收 `extract_status='done'` 的文本），
+   * 而用户会以为"传上去就完事了"。所以这里把提取并进来，并把**结果**如实报出来：
+   * 提取成功说"Agent 已能读到"，提取没成功就说清楚是哪一档（需人工转录 / 格式不支持 / 提取失败）。
+   */
+  uploadQuote(file) {
+    const self = this
+    this.setData({ uploading: true, attachNotice: '' })
+    const opts = this.data.entrustmentId
+      ? { entrustmentId: this.data.entrustmentId }
+      : { assignmentId: this.data.assignmentId }
+    // ⚠️ 返回整条链的 promise：不返回的话，`await this.uploadQuote(f)` 等到的
+    //    是 `undefined` —— 调用方（含 e2e 的页面驱动）会立刻往下走，
+    //    读到的是"上传完、提取还没回来"的中间态，表现成"上传了但没提取"。
+    return uploadAttachment(file.path, opts, newIdempotencyKey('att'))
+      .then(function (row) {
+        const one = decorateAttachment(row)
+        return extractAttachment(one.attachmentId, newIdempotencyKey('ext')).then(function (out) {
+          return { one: one, out: out || {} }
+        })
+      })
+      .then(function (r) {
+        self.setData({ uploading: false })
+        const status = String((r.out && r.out.extract_status) || '')
+        const chars = (r.out && r.out.extracted_chars) || 0
+        const name = r.one.name
+        let notice
+        if (status === 'done') {
+          notice = '已上传「' + name + '」并提取 ' + chars + ' 字 —— Agent 已能读到这份报价单'
+        } else {
+          // ⚠️「上传成功」与「Agent 读得到」是两件事，分开说：
+          //    合成一句"上传成功"会让人以为下一步一定解析得出来。
+          notice =
+            '已上传「' +
+            name +
+            '」，但' +
+            extractStatusLabel(status) +
+            '。' +
+            ((r.out && r.out.detail) || '') +
+            '（Agent 暂时只能看到文件名）'
+        }
+        self.setData({ attachNotice: notice })
+        return self.loadRest(self.data.sessionId)
+      })
+      .catch(function (err) {
+        self.setData({ uploading: false })
+        const status = (err && err.httpStatus) || 0
+        const detail = (err && err.detail) || ''
+        wx.showToast({
+          icon: 'none',
+          title:
+            status === 401
+              ? '登录已过期，请重新登录'
+              : status
+                ? '上传失败（' + status + '）' + (detail ? '：' + String(detail).slice(0, 30) : '')
+                : '上传失败：请确认后端已启动'
+        })
+      })
+  },
+
+  /**
+   * 用已上传的附件让 Agent 执行一次解析（**引用**这条链的界面入口）。
+   *
+   * ⚠️ 这里**只传 `attachment_id`，绝不传 `quote_text`**：
+   * 后端 `ag02._quote_source` 的优先序是「操作者粘贴文本 > 附件已提取文本」，
+   * 只要带上了 `quote_text`，附件就会被**静默忽略** —— 页面上看起来一切正常，
+   * 但 Agent 读的根本不是那份附件。这也让 `source_refs` 里
+   * `attachment_text` 这个来源标记失去意义。
+   */
+  onUseAttachment(e) {
+    const self = this
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const id = ds.attachment_id != null ? String(ds.attachment_id) : ''
+    if (!id || this.data.referencing || !this.data.sessionId) return
+    const one = (this.data.attachments || []).filter(function (a) {
+      return String(a.attachmentId) === id
+    })[0]
+    if (!one) {
+      wx.showToast({ icon: 'none', title: '该附件已不在本页，请下拉刷新' })
+      return
+    }
+    // 双保险：按钮在未提取时是禁用的，但这条判断不能只靠"按钮藏起来了"。
+    // 未提取的附件没有文本，引用它只会让 Agent 把它当成"一个文件名"。
+    if (!one.canReference) {
+      wx.showToast({ icon: 'none', title: one.referenceHint })
+      return
+    }
+    this.setData({ referencing: true, attachNotice: '' })
+    appendMessage(
+      this.data.sessionId,
+      '【引用附件 #' + id + '】请解析这份报价单',
+      newIdempotencyKey('msg')
+    )
+      .then(function () {
+        return submitJob(
+          self.data.sessionId,
+          { input: { attachment_id: Number(id) } },
+          newIdempotencyKey('job')
+        )
+      })
+      .then(function (job) {
+        const jid = job && (job.job_id || job.jobId)
+        if (!jid) throw new Error('作业提交未返回 job_id')
+        return runJob(jid)
+      })
+      .then(function () {
+        self.setData({ referencing: false })
+        return self.refresh()
+      })
+      .catch(function (err) {
+        self.setData({ referencing: false })
+        const status = (err && err.httpStatus) || 0
+        wx.showToast({
+          icon: 'none',
+          title: status === 409 ? '作业已在执行中' : '解析失败' + (status ? '（' + status + '）' : '')
         })
       })
   },

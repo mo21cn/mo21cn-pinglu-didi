@@ -456,3 +456,86 @@
   font-size: 25rpx;
   color: #1f7a36;
 }
+
+/* 附件区：上传 / 提取状态 / 引用入口。
+   ⚠️ 状态与"能不能被引用"分成两行显示：只有提取完成（done）的附件才有文本
+   进 Agent 的来源目录，未提取的附件对 Agent 只是文件名。合成一行会让人
+   以为"传上去就完事了"。 */
+.attach-note {
+  margin: 0 0 14rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 10rpx;
+  background: #fff4e0;
+}
+
+.attach-note-text {
+  font-size: 25rpx;
+  color: #b26a00;
+}
+
+.att {
+  padding: 16rpx 0;
+  border-bottom: 1rpx solid #f0f0f2;
+}
+
+.att-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.att-name {
+  flex: 1;
+  font-size: 27rpx;
+  color: #1a1a1a;
+}
+
+.att-size {
+  margin-left: 12rpx;
+  font-size: 23rpx;
+  color: #8a8a8a;
+}
+
+.att-meta {
+  margin-top: 8rpx;
+}
+
+.att-status {
+  font-size: 24rpx;
+  color: #576b95;
+}
+
+.att-hint-row {
+  margin-top: 6rpx;
+}
+
+.att-hint {
+  font-size: 23rpx;
+  color: #8a8a8a;
+}
+
+.att-actions {
+  margin-top: 12rpx;
+}
+
+.att-btn {
+  display: inline-block;
+  padding: 10rpx 26rpx;
+  border-radius: 28rpx;
+  background: #eef1f8;
+  font-size: 25rpx;
+  color: #2b4b8f;
+}
+
+.att-upload {
+  margin-top: 16rpx;
+  padding: 18rpx 0;
+  border-radius: 12rpx;
+  border: 1rpx dashed #c8c8cc;
+  text-align: center;
+}
+
+.att-upload-text {
+  font-size: 26rpx;
+  color: #4a4a4a;
+}
