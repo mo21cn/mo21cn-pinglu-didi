@@ -109,12 +109,15 @@ let shipperToken = ''                   // seed-shipper（货主本人）：⑰ 
 const pageWrites = []                   // 真实发出的写请求，供"该不该写"的断言使用
 let lastWx = null                       // 最近一次页面装载用的 wx 桩（读取弹层文案）
 
-async function pageWrite(method, p, body, key) {
+async function pageWrite(method, p, body, key, token) {
   if (!WRITE_ENABLED) {
     return { rejected: true, reason: '取数阶段不得发写请求：' + method + ' ' + p }
   }
   const res = await api(method, p, {
-    token: ownerToken,
+    // 身份可覆盖（缺省＝经理）：航段命令的判据是"参与方"，货主与经理**都**该能写，
+    // 而"货主也能建段"这条只在用他的 token 时才成立 —— 拿经理的 token 跑去断言
+    // 货主的能力，正是那种"绿着但没测到"的写法。
+    token: token || ownerToken,
     body: body,
     // ⚠️ 有的推进类端点在契约里**不要求**幂等键（如 `POST /agent/jobs/{jid}/run`：
     // 幂等来自作业状态机与租约，重复调用会 409）。此时必须**不带**这个头 ——
@@ -1141,6 +1144,30 @@ function loadPage(file, ctx) {
         // 为什么不用 `route()` 回放：本块要证的是"页面拿到的**就是这张委托的行**"，
         // 回放表只会把我自己写进去的那几行再读回来 —— 那是自证。
         fetchAssignmentPlan: (id) => live('GET', '/entrust/assignments/' + id + '/plan'),
+        // 航段命令（§10.1 第 4 步的**写侧**）：建段 / 改段 / 版本历史。
+        //
+        // 取数走**真 HTTP**：本块要证的是"经页面写完 ⇒ 读回来的是服务端的事实"
+        // （版本历史尤其 —— 回放只能把我自己写进去的行再读出来，那是自证）。
+        // ⚠️ 这条同样受"新增取数函数必须登记"约束：漏登记的后果是**静默**
+        // （落到真实 `utils/request.js` ⇒ Node 里没有 `wx.request` ⇒ 页面 `.catch`
+        // 把它吞成 null ⇒ 版本历史整块不渲染，而脚本毫不知情）。
+        fetchLegRevisions: (id, legId) =>
+          live('GET', '/entrust/assignments/' + id + '/legs/' + legId + '/revisions'),
+        // 两条写命令与其它写命令**同一条闸门**（只在 WRITE_ENABLED 的段里真发）：
+        // 段是这张委托的**事实**，在"读"的段里建一段，后面的断言就会拿到一个被自己
+        // 污染过的世界（段数、段序、模板核对的数据域全变）。
+        // 身份传**货主**：判据是"参与方"，而"货主也能建段"只在用他的 token 时才成立。
+        createLeg: (id, body, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/legs', body, key, shipperToken)
+            .then(rejectIfNotOk),
+        updateLeg: (id, legId, body, key) =>
+          pageWrite(
+            'PATCH',
+            '/entrust/assignments/' + id + '/legs/' + legId,
+            body,
+            key,
+            shipperToken
+          ).then(rejectIfNotOk),
         // 两条写命令：与其它写命令**同一条闸门**（只在 WRITE_ENABLED 的段里真发）——
         // 登记候选会改库（新候选会出现在清单里），在"读"的段里发生它，后面的断言
         // 就会拿到一个被自己污染过的世界。
@@ -3531,6 +3558,137 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
             + tasksSrv.length + ' 条，其中无前置 ' + noPreSrv + ' 条）'
             + '——经理与货主两种身份都逐项同源，段行渲染已被本段覆盖')
           ok()
+        }
+      }
+
+      // ── ①d 航段命令经**页面**走一遍：建段 ⇒ 改段（留版本）⇒ 读版本历史 ──
+      //
+      // 三条纪律：
+      //   · 写命令**只在 `WRITE_ENABLED` 段里真发**（与运力那几条同一条闸门）——
+      //     段是这张委托的事实，在"读"的段里建一段，后面的断言就会拿到一个被自己
+      //     污染过的世界（段数、段序、模板核对的数据域全变）；
+      //   · 身份取**货主**：HO 的口径是"任意验收者/测试者都能建段"，而货主正是最容易
+      //     被人以为"只能看"的那个身份。页面驱动 + 货主 token 同时成立，才说明这条
+      //     判据在页面上真的走到了（拿经理的 token 断言货主的能力＝绿着但没测到）；
+      //   · 断言比的是"页面 ⇄ 服务端事实"，不是"等于几段"。
+      if (planAid) {
+        const sw = await walk('⑰ 计划写侧 · 货主侧建段与改段',
+          'pages/entrust/detail/detail', null,
+          { role: 'shipper', arg: { assignment_id: planAid } }, ['onLoad'])
+        const PW = '⑰ 计划写侧 #' + planAid + ' · '
+        if (!sw) {
+          fail(PW + '详情页未装载，本块断言无意义（显式失败，不静默跳过）')
+        } else {
+          await waitUntil(() => !!sw._final().plan, 4000)
+          const legs0 = ((sw._final().plan || {}).legs) || []
+          const seqNew = String(legs0.reduce((m, l) => {
+            const n = Number(l.seqText)
+            return isFinite(n) && n > m ? n : m
+          }, 0) + 1)
+          // ⭐ 预填必须是"**最大序号 + 1**"：契约只要求 seq 唯一、不要求连续，
+          //    夹具/历史数据里有空洞时，"段数 + 1"会给出一个必然 409 的默认值。
+          sw.onOpenLeg()
+          if (String((sw._final().legForm || {}).seq) !== seqNew) {
+            fail(PW + '建段表单的顺序号预填不是「最大序号 + 1」',
+              String((sw._final().legForm || {}).seq) + ' vs ' + seqNew)
+          } else ok()
+          WRITE_ENABLED = true
+          try {
+            sw.onLegInput(ev('leg-seq', seqNew))
+            // ⚠️ 送一个**未登记**的运输方式（`air`）：它必须**原样**显示。
+            //    投影侧若把未知取值硬塞成"公路"，下面那条断言就红了 —— 这是
+            //    "未知保持未知"在页面上的判据（与 mode_label 的兜底同一件事）。
+            sw.onLegInput(ev('leg-mode', 'air'))
+            sw.onLegInput(ev('leg-from', 'e2e 甲地'))
+            sw.onLegInput(ev('leg-to', 'e2e 乙地'))
+            sw.onLegInput(ev('leg-note', 'e2e 建段'))
+            await sw.onSubmitLeg()
+            await waitUntil(() => (((sw._final().plan || {}).legs) || []).length ===
+              legs0.length + 1, 6000)
+          } finally {
+            WRITE_ENABLED = false
+          }
+          const legs1 = ((sw._final().plan || {}).legs) || []
+          const added = legs1.filter((l) => String(l.seqText) === seqNew)[0]
+          if (!added) {
+            fail(PW + '经页面建段后，页面清单里没有那一段',
+              '段数 ' + legs1.length + '（建段前 ' + legs0.length + '）· legHint='
+              + JSON.stringify(sw._final().legHint))
+          } else if (added.modeText !== 'air' ||
+            added.routeText !== 'e2e 甲地 → e2e 乙地') {
+            fail(PW + '段行不是服务端事实的原样投影（未登记方式必须原样显示）',
+              JSON.stringify([added.modeText, added.routeText]))
+          } else ok()
+          const legId = added ? added.legId : ''
+
+          // ② 改段：回填**原值**（不是显示文案）+ 空改动在本地就被拦下
+          sw.onEditLeg({ currentTarget: { dataset: { actLegEdit: legId } } })
+          const ef = sw._final().legForm || {}
+          // ⭐ `mode` 必须是 `air`（原值）而不是 `air`/`公路` 这类标签：
+          //    回填标签会让提交把标签当 `mode` 写回，库里于是同时存在 `road` 与 `公路`。
+          if (ef.mode !== 'air' || ef.from !== 'e2e 甲地' || ef.to !== 'e2e 乙地') {
+            fail(PW + '改段表单没有回填服务端原值', JSON.stringify([ef.mode, ef.from, ef.to]))
+          } else ok()
+          const writesBefore = pageWrites.length
+          await sw.onSubmitLeg()
+          if (pageWrites.length !== writesBefore) {
+            fail(PW + '一个字段都没改却仍发了写请求（服务端会 400，页面该先在本地拦）')
+          } else if (String(sw._final().legHint || '').indexOf('完全相同') < 0) {
+            fail(PW + '空改动的页内提示没说清原因', JSON.stringify(sw._final().legHint))
+          } else ok()
+
+          // ③ 真改一段：方式换成 water（快捷项）+ 终点改掉 ⇒ 必须留出新版本
+          sw.onPickLegMode({ currentTarget: { dataset: { actLegMode: 'water' } } })
+          if ((sw._final().legForm || {}).mode !== 'water') {
+            fail(PW + '快捷项没有写进表单', JSON.stringify((sw._final().legForm || {}).mode))
+          } else ok()
+          sw.onLegInput(ev('leg-to', 'e2e 丙地'))
+          sw.onLegInput(ev('leg-note', 'e2e 改段'))
+          WRITE_ENABLED = true
+          try {
+            await sw.onSubmitLeg()
+            await waitUntil(() => (((sw._final().plan || {}).legs) || [])
+              .some((l) => String(l.legId) === String(legId) && l.modeText === '内河'), 6000)
+          } finally {
+            WRITE_ENABLED = false
+          }
+          const after = (((sw._final().plan || {}).legs) || [])
+            .filter((l) => String(l.legId) === String(legId))[0] || {}
+          if (after.modeText !== '内河' || after.routeText !== 'e2e 甲地 → e2e 丙地') {
+            fail(PW + '改段后段行未变（或方式标签没走服务端的标签表）', JSON.stringify(after))
+          } else ok()
+
+          // ④ 版本历史：**旧版本必须还是当时的取值**（这就是"改段留版本"要回答的问题）
+          sw.onToggleLegHistory({ currentTarget: { dataset: { actLegHist: legId } } })
+          await waitUntil(() => !!sw._final().legHistory, 6000)
+          const hist = sw._final().legHistory || {}
+          const revs = hist.items || []
+          if (revs.length < 2) {
+            fail(PW + '改段后版本历史不足两版（留版本没生效）',
+              'revisions=' + revs.length + ' · hint=' + JSON.stringify(sw._final().legHistoryHint))
+          } else if (revs[0].kindText !== '建段' || revs[0].modeText !== 'air' ||
+            revs[0].routeText !== 'e2e 甲地 → e2e 乙地') {
+            // ⭐ 这一条是**留版本**的核心判据：第 1 版必须仍是建段那一刻的取值
+            //   （`air` 与当时的终点），而不是被当前值覆盖 —— 覆盖了也能显示"2 版"。
+            fail(PW + '第 1 版不是建段当时的取值（历史被当前值覆盖了）',
+              JSON.stringify([revs[0].kindText, revs[0].modeText, revs[0].routeText]))
+          } else if (revs[revs.length - 1].kindText !== '改段' ||
+            revs[revs.length - 1].modeText !== '内河' ||
+            revs[revs.length - 1].routeText !== 'e2e 甲地 → e2e 丙地') {
+            fail(PW + '最新一版不是这次改动的取值', JSON.stringify(revs[revs.length - 1]))
+          } else if (revs.some((r) => !r.revisionNoText || !r.noteText || !r.changedAtText)) {
+            fail(PW + '有版本行的字段是空的（版号/说明/时间三样都必须自己说话）',
+              JSON.stringify(revs.filter((r) => !r.revisionNoText || !r.noteText || !r.changedAtText)[0]))
+          } else {
+            note(PW + '建段 ⇒ 改段 ⇒ 版本历史：' + revs.length + ' 版（'
+              + revs.map((r) => r.revisionNoText + r.kindText).join(' / ') + '）'
+              + '，第 1 版仍是建段当时的取值 —— 未登记方式「air」全程原样显示')
+            ok()
+          }
+          // 模板核对的落点：把**有段行 + 有版本历史**的这一态并进该页的数据域
+          // （`legHistory.*` 只在展开历史时 setData，不 collect 就永远进不了数据域）。
+          collect('pages/entrust/detail/detail',
+            path.join(ROOT, 'miniapp/pages/entrust/detail/detail.js'), sw._final())
         }
       }
 
