@@ -93,6 +93,20 @@ class AttachmentStorageError(AttachmentError):
     """落盘或读取失败。→500（这是环境问题，不是业务拒绝）。"""
 
 
+class AttachmentTranscriptionOverwriteError(AttachmentError):
+    """重抽会覆盖**人工转录**的文本，且调用方没有明确确认。→409。
+
+    为什么必须是拒绝而不是"静默覆盖 + 提示"（HO 0917-3 裁定四）：
+
+    * 人工转录的内容**不可再生成** —— 重抽能拿回来的只有机器能读的那部分
+      （扫描件通常是"没有"），覆盖一次就永久丢了人的劳动；
+    * 提取失败分支还会 `drop_text` 删掉旧文本 ⇒ 一次失败的重抽足以让一份
+      已存在的人工转录**凭空消失**，而界面上只看到"提取失败"。
+
+    所以默认拒绝，要求调用方（界面）先提示覆盖影响再显式确认。
+    """
+
+
 def utcnow_naive() -> datetime:
     """当前 UTC 朴素时间（与 ent_ 表时间字段存储格式一致）。"""
     return datetime.now(UTC).replace(tzinfo=None)
@@ -208,6 +222,16 @@ _COLS = (
     "extract_error, extracted_chars, source_event_at, created_at, updated_at"
 )
 
+#: 文本来源要跟着附件一起投影（LEFT JOIN 一行，不是每条再查一次 text 端点）。
+#: 它有两个用处：① 界面区分"机读提取 / 人工转录"；
+#: ② 重抽**会覆盖**同一行文本 ⇒ 界面必须先知道"覆盖掉的是不是人写的"
+#: （HO 0917-3 裁定四）。缺了它，界面只能靠再发一次请求猜，或干脆不提示。
+_TEXT_JOIN = "LEFT JOIN ent_attachment_text t ON t.attachment_id = a.id"
+
+
+def _select_cols(alias: str = "a") -> str:
+    return ", ".join(f"{alias}.{c.strip()}" for c in _COLS.split(",")) + ", t.source AS text_source"
+
 
 def _row_to_attachment(row: Any) -> dict[str, Any]:
     return {
@@ -232,13 +256,16 @@ def _row_to_attachment(row: Any) -> dict[str, Any]:
         "source_event_at": _text_ts(row["source_event_at"]),
         "created_at": _text_ts(row["created_at"]),
         "updated_at": _text_ts(row["updated_at"]),
+        # 当前文本的来源（没有文本时 None）。`manual_transcription` 表示这份文本
+        # 是人写的 ⇒ 重抽会覆盖它且不可恢复。
+        "text_source": row["text_source"],
     }
 
 
 def get_attachment(session: Session, attachment_id: int) -> dict[str, Any] | None:
     row = (
         session.execute(
-            text(f"SELECT {_COLS} FROM ent_attachment WHERE id = :aid"),
+            text(f"SELECT {_select_cols()} FROM ent_attachment a {_TEXT_JOIN} WHERE a.id = :aid"),
             {"aid": attachment_id},
         )
         .mappings()
@@ -277,8 +304,8 @@ def list_attachments(
     rows = (
         session.execute(
             text(
-                f"SELECT {', '.join('a.' + c.strip() for c in _COLS.split(','))} "
-                f"FROM ent_attachment a {join}WHERE {clause} "
+                f"SELECT {_select_cols()} "
+                f"FROM ent_attachment a {join}{_TEXT_JOIN} WHERE {clause} "
                 "ORDER BY a.id DESC LIMIT :limit OFFSET :offset"
             ),
             {**params, "limit": size, "offset": (page - 1) * size},
@@ -293,9 +320,10 @@ def list_for_artifact(session: Session, artifact_id: int) -> list[dict[str, Any]
     rows = (
         session.execute(
             text(
-                f"SELECT {', '.join('a.' + c.strip() for c in _COLS.split(','))} "
+                f"SELECT {_select_cols()} "
                 "FROM ent_attachment a "
                 "JOIN ent_artifact_attachment l ON l.attachment_id = a.id "
+                f"{_TEXT_JOIN} "
                 "WHERE l.artifact_id = :art ORDER BY a.id ASC"
             ),
             {"art": artifact_id},
@@ -692,6 +720,7 @@ __all__ = [
     "AttachmentError",
     "AttachmentNotFoundError",
     "AttachmentStorageError",
+    "AttachmentTranscriptionOverwriteError",
     "AttachmentValidationError",
     "allowed_types",
     "assert_allowed_type",

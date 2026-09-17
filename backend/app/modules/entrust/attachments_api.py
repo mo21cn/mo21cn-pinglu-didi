@@ -76,6 +76,10 @@ def map_attachment_error(exc: Exception) -> HTTPException | None:
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, svc.AttachmentValidationError):
         return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, svc.AttachmentTranscriptionOverwriteError):
+        # 409 而不是 400：请求本身合法，是与**当前状态**冲突（那份附件上有人工转录的
+        # 文本，覆盖它不可再生成）。界面据此给"先确认覆盖影响"的分支。
+        return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, svc.AttachmentStorageError):
         # 存储故障是服务端问题，不能伪装成"业务拒绝"
         return HTTPException(status_code=500, detail=str(exc))
