@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（72 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（80 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -743,6 +743,68 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "（回空壳会让「还没派生」与「派生了一份空合同」长得一样，而后者最该被发现）。"
         "⚠️ 有意**不**给货主本人放行：来源表里是 release:12@v3 / leg:4 这类**内部编号**，"
         "客户看合同走已有发布通路（冻结快照）。故用 assert_can_view_org（无货主旁路）",
+    ),
+    # ── 运力确认与有效期（capacity_api.py / S3 / BP-03 第 3 条 / D1-06）───────
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/capacity-candidates",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:create",
+        idempotent=True,
+        note="登记候选运力事实（吨位/船数/是否拆批/单价口径/有效期/证据）。"
+        "**登记不是确认** —— 本端点不产生任何「已确认运力」（BP-03 Exit evidence："
+        "A chosen quotation alone does not create confirmed capacity）。"
+        "只拒绝结构上不可能有意义的输入（承运人空、吨位非正数、单价与计价单位半边缺）；"
+        "「还没有证据/还没有效期」不在这里拒 —— 它们在**确认时**由规则判，"
+        "压到登记上会让 expired cannot be confirmed 那条规则永远触发不了",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/capacity-candidates",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="候选运力清单（第 2 条「两家可比」要看的运力/单价口径/有效期/证据）。"
+        "⚠️ 有意**不**给货主本人放行：候选行带承运人与**供应商单价**（供应商侧成本口径），"
+        "客户侧只有对客报价的冻结快照",
+    ),
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/capacity-confirmations",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:create",
+        idempotent=True,
+        note="**确认运力**：确定性规则闸门（需求口径/证据/有效期/容量适用性四条，"
+        "全部评估、逐条带比较值）通过才产出 procurement_confirm 成果 + 确认记录。"
+        "过期或不适用 ⇒ 409 并回逐条判定（不是一句「不适用」）；"
+        "已确认过 ⇒ 409 并回已存在的那条（判据是 UNIQUE(candidate_id)，不是先查后写）。"
+        "请求体只带 candidate_id 与 agreed_scope：事实一律从候选行读，"
+        "否则「确认的内容」与「候选运力」可以不一致而界面上看不出来",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/capacity-confirmations",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="该委托的运力确认清单（含逐规则判定）。同一理由不给货主放行："
+        "判定里写着需求量、运力、缺口这些内部比较过程",
+    ),
+    _r(
+        "GET",
+        "/capacity-confirmations/{confirmation_id}",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="确认详情：**冻结输入**（确认那一刻的吨位/有效期/证据快照）+ 逐规则判定。"
+        "不存在 ⇒ 404，不回空壳（空壳会让「没做过确认」与「做了一条空确认」长得一样）",
+    ),
+    _r(
+        "GET",
+        "/capacity-confirmations/{confirmation_id}/recheck",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="**只读复算**：用当前事实重跑同一套规则，回答「这条确认现在还成立吗」，"
+        "并把当前值与冻结值的差异列出来（changed_fields）。**不写任何行** —— "
+        "正式重做属 S4 变更流程；这里只是让 D1-09 的「900 吨候选变更后不再适用」"
+        "可被看到，而不是只存在于模型意见里",
     ),
 )
 
