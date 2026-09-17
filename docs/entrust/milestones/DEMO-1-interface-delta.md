@@ -357,4 +357,21 @@ S3 的 A、B / 发布前来源核验 / S3、S4 排期）。本节只登记与**�
 | 98 | 随本分支携带：**第十二、第十三切片未合并**（PR #138 / #139 等授权） | `S3-quote-assemble`（#138）与 `S3-contract-derive`（#139）均仍 `OPEN`；本切片叠在 #139 之上 ⇒ **合并顺序不能反**（`required_linear_history=true` ⇒ 只能 squash 且逐个来）。 |
 | 99 | ⚠️ **本切片继承了 #139 的首轮 CI 红，已同步修复**（2026-09-17 补记） | #139 引入的 MySQL 语法错误（`ent_contract_field_source.source_kind` 的列注释折成两行相邻字面量 ⇒ `1064`）让**两个 MySQL job 双红**；本切片从 #139 旧 head 建出 ⇒ **同因**红。已把 #139 的三笔修正 **cherry-pick** 进本分支（`e03dff0` / `4a6355b` / `64ae978`）⇒ 两分支 CI 现均 **6/6 绿**。⭐ 副产物：`并发集成（MySQL 8.0）` job 本轮**第一次真正执行**（上一轮全是 setup 阶段的 `ERROR`）—— 本切片的 `test_capacity_confirmation_race_exactly_one_confirmation` 与 #139 的 `test_contract_derivation_race_exactly_one_contract` **首次获得实测证据**。合并顺序仍为 **#138 → #139 → #140**。 |
 
+### 7.14 第十五切片（S4-a 委托结案结构：只落结构与迁移；2026-09-17）
 
+触发：`DEMO-1-runbook.md` §7 第 3 行「已完成历史委托」夹具的阻塞理由 —— 不是缺一条命令，
+而是**委托状态机没有终态**（`claimed` 是死状态、无出边）。HO 0917 Q4 裁定「必须进 S4」，
+口径见 `docs/entrust/S4-委托结案状态机口径设计.md`，本切片是其 **S4-a**（结构部分）。
+出口与判据见 `docs/entrust/S4-a-结构与迁移切片.md`。本条只登记与**接口面**有关的部分。
+
+| # | 项 | 性质与处置 |
+| --- | --- | --- |
+| 100 | **`ent_assignment` 追加两列 + 一条索引**（本切片唯一的表结构变更） | `completed_at DATETIME NULL`、`financial_status VARCHAR(16) NOT NULL DEFAULT 'not_started'`、`idx_ent_assignment_status_completed (status, completed_at)`。三条迁移**只做 DDL**：无 `UPDATE/INSERT/DELETE`（由用例强制）⇒ 历史 `claimed` 行**不被推断成 completed**（§5.6：旧数据不推测完成）。 |
+| 101 | ⚠️ **迁移条目 2 是一条方言不对称的条目**（MySQL 真做、SQLite 显式空操作） | `status` 列注释要同步为五个取值，而**列注释是 MySQL 概念**：SQLite 的列定义存在 `sqlite_master` 的 DDL 文本里，无法 ALTER。处理：MySQL 走 `MODIFY COLUMN ... COMMENT`，SQLite 分支写成**显式空操作** `SELECT 1`（**不重建表、不搬数据**）。为什么不用「省略 sqlite 键」：省略会让 `resolve_sql` 在**运行期**才抛错，而显式空操作是**静态可见**的。 |
+| 102 | **模块名 `ent_assignment_completion` 就是执行顺序契约** | 执行器按**模块名字典序**应用（`migrate.py:load_entries`，**无声明式依赖**）⇒ 名字必须落在 `ent_assignment` 之后、`ent_attachment` 之前。排错会让迁移在**空库上**先于建表执行，而**既有库因为表已在而全绿**（同类缺陷见 #94 ①）。用例第 4 组把顺序变成断言。 |
+| 103 | ⚠️ **代码取值域与前端镜像本切片不动**（待 HO 认可的口径解释） | 口径设计 §7 把 S4-a 写作「状态与迁移」。本切片把「状态」落在 **schema 与列注释**（五个取值），**没有**在 `assignments.py` 加 `STATUS_COMPLETED`。连锁反应是必然的：`verify_entrust_ui.js` 强制前端 `STATUS_META` / `STATUS_ORDER` / `STATUS_HINT` 与后端 `STATUS_*` **逐格一致**，而 `STATUS_ORDER` 派生**工作台筛选条** ⇒ 加常量的必然结果是界面上出现一个「已完成」筛选片，而**此刻没有任何数据能处于该状态**（等于暗示一条不存在的路径）。⇒ 留到 **S4-b 与 `complete` 命令同一个提交**里一起改。改起来是一个常量 + 前端三张表，**无迁移代价**。 |
+| 104 | ⛔ **委托层不新增任何结案 / 重开端点** | `/assignments/` 前缀下无 `complete` / `close` / `reopen`（用例第 6 组）。⚠️ **判据必须限定层级**：`/tasks/{id}/complete`、`/exceptions/{id}/close` 是**任务层与案件层**的既有能力，一直都在，且**不得互相替代**（§5.7）。首版断言写宽（对全支线路径查关键词）⇒ **当场红**，真因正是这三层被混在一起 —— 断言的价值恰恰在于区分层级。 |
+| 105 | **`financial_status` / `completed_at` 不进服务层投影** | `assignments.get_assignment()` 的返回字典里没有这两个键（用例第 7 组）。该模块本来就用**显式列清单**（`_ASSIGNMENT_COLS`）取数，新列不会自动漏出；用例把这条**钉住**，防以后有人图省事改成 `SELECT *`。理由：派生未接通时展示 `not_started` 等于把「还不知道」渲染成一个结论（§5.3.2 末条 / 规范 3.3）。 |
+| 106 | **8 条闸门用例**（`test_entrust_s4a_schema_only.py`） | 把 §2 的边界写成可执行断言，而不是叙述。⚠️ **这类切片的失效方式是没有下游症状**：列加上了、默认值填上了，一切「看起来做完了」；而顺手多做的两件事（加常量、塞投影）在任何既有用例里都不会红。 |
+| 107 | ⚠️ **界面与设备侧走查 `NOT_RUN`；「已完成历史委托」夹具仍不产出** | 本切片**没有可点的界面**（能力未开放 ⇒ 正确表现就是「没有入口」）。HO 0917 硬约束：该夹具必须走**真实业务命令**、不得直接改状态造出来 ⇒ 只能等 S4-b。**不得**把本切片读成「结案能力已就绪」，也**不得**据此声称合同 §10.1 第 8–12 步有任何进展。 |
+| 108 | 随本轮携带：**#138 / #139 / #140 已按 HO 授权按序合并**（2026-09-17） | HO 指令「授权合并」⇒ 三支按 `#138 → #139 → #140` squash 合入 develop（`3ebc9af` / `82e600d` / `86b76430`），三条分支（本地 + 远端）已清理。⚠️ #140 合并前**因堆叠 + squash 产生 9 文件冲突**（`mergeable_state=dirty`），处置是**重建分支**（丢弃 patch-id 相同的冗余修正提交后 cherry-pick 自有提交），**不是**手工解冲突 —— 处理依据与无损证明见 PR #140 正文与 §7.15。 |
