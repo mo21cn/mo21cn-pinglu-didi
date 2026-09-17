@@ -724,7 +724,13 @@ IDE / uvicorn 随发起 shell 结束被回收）。
 * **未声称任何 AC 通过**（CI 绿 / PR 可合并 / R1 可验收三者不等价）。
 * 合同 §10.1 第 4–7 步属 S3、第 8–13 步属 S4。逐条（对照合同正文的 13 步原文）：
   * 第 4 步 `road–water–road plan and required task prerequisites` —— **未开始**；
-  * 第 5 步 `Compare two quotations … evidence-backed procurement confirmation` —— **未开始**；
+  * 第 5 步 `Compare two quotations … evidence-backed procurement confirmation` ——
+    **部分（2026-09-17 更新）**：**前半"两家可比"仍是部分**（`supplier_compare` + AG-02
+    比价提案已有；本切片把**运力 / 价格口径 / 数量单位 / 有效期 / 证据**的可见性落到了
+    数据与判定上）。**后半"evidence-backed procurement confirmation"后端已落** ——
+    `capacity.confirm_capacity` + **6 条端点** + 四条确定性规则 + 规则闸门，
+    见 `S3-运力确认与有效期切片.md` 与 §9.15；⚠️ **界面未做、设备侧走查 `NOT_RUN`**
+    ⇒ **第 5 步不是 PASS**；
   * 第 6 步 `Release the offer; customer accepts its exact revision` —— **后端与界面均已落地**
     （见 §9.13）；**设备侧走查仍为 `NOT_RUN`**；
   * 第 7 步 `Create the contract and record labeled sample signature evidence` —— **部分（2026-09-17 更新）**：
@@ -839,5 +845,60 @@ IDE / uvicorn 随发起 shell 结束被回收）。
   理由是"受理即批准范围"且 BP-03 第 3 条（采购确认）尚未实现。若 HO 认为它特指采购确认，
   处置是**追加** `source_kind`（取值域本身是常量，**无迁移代价**）——
   见 `S3-合同派生切片.md` §6，不要让后来者以为是漏读；
+* **未声称任何 AC 通过，未声称任何 D1 通过**。
+
+### 9.15 本轮执行记录（2026-09-17，HO 授权「授权合并；然后继续做 3-4-5」的**第 4 条**）
+
+> 第 1/2 条见 §9.14（合同派生 / 合并授权）；§9.15 记的是**第 4 条：运力确认与有效期**
+> （合同 §10.1 **第 5 步**）。逐条设计与判据见 `docs/entrust/S3-运力确认与有效期切片.md`。
+
+#### ① 开工前的**反向审计**（先问"是真缺后端，还是前端零调用"）
+
+| 问题 | 结论 |
+| --- | --- |
+| 后端有没有"确认运力"的能力？ | **没有**。grep 全仓：`procurement_confirm` 只作为**类型名**出现在 `revalidation.py` 的影响映射与 `workbench.py` 的槽位定义里，**没有任何命令、端点或数据载体** ⇒ 与 §9.14 同族，是**真·后端缺口** |
+| 有没有现成的确定性规则可抄？ | 有 —— `demo1_canonical.json` 的 `deterministic_capacity_rule`（`owner: S4`）与 `DEMO-1-fixture-manifest.md`:25。本条**不发明口径**，逐字照抄 |
+
+#### ② 落地内容（可枚举）
+
+| 类型 | 内容 |
+| --- | --- |
+| 迁移 | `ent_commitment_capacity:1` → `ent_capacity_confirmation`（`UNIQUE(candidate_id)`）；`:2` → `ent_capacity_rule_check`；`:3` → 给 `ent_capacity_candidate` **补一列** `evidence_ref`。**只新增**，既有行不改不填 |
+| 服务层 | `capacity.py`：`record_candidate` / `confirm_capacity` / `recheck_confirmation` + 纯函数 `evaluate`（四条规则**全跑**、不 fail-fast）+ **闸门** `_assert_every_rule_reported` |
+| 端点 | **6 条**（`scope_matrix` **74 → 80**） |
+| 用例 | `test_entrust_capacity_confirmation.py`（**25 条**）+ `test_mysql_integration.py::test_capacity_confirmation_race_exactly_one_confirmation`（真 MySQL 并发，4 轮） |
+
+#### ③ 本轮最该被记住的两件事
+
+1. ⭐ **"确认 ≠ 选中"靠的不是两个端点，而是一条规则闸门**。确认是**独立只增记录**：
+   把 `evaluate` 读到的每个值**整体冻结**（`an authorized action` 要 actor 与时间、
+   `identified evidence` 要**引用**、判据要能**复算** —— 候选行上的一个 `status` 值这三条
+   一条都承载不了）；写库前每规则必须产出判定且无 fail，**缺一条即中止**。
+2. ⚠️ **`CapacityInvariantError` 刻意不接进 `_map_errors`**（⇒ 500）。把"规则没跑全"映射成
+   4xx 等于**把代码缺陷伪装成一句业务拒绝** —— 这正是本轮实测缺陷 ② 的原形
+   （`IntegrityError` 一律说成"已被确认过"）。同一条立场，落在两个不同的层。
+
+#### ④ 门禁与实测（本轮）
+
+| 项 | 结果 |
+| --- | --- |
+| 规则纯函数探针 | **20/20**（含 C-900 / 950t ⇒ 缺口 50.000 吨、900×2 船 ⇒ 通过、允许拆批 ⇒ 需 2 趟） |
+| `scope_matrix` | **13/13**（证明 6 条新路径与 openapi 逐条对上） |
+| 运力用例 | **25/25**（含闸门红绿对照与 1 条回归） |
+| pytest（junitxml 判据） | **804 项 = 通过 790 + 跳过 14 + 失败 0 + 错误 0**（较 §9.14 的 779 **+25**） |
+| 13 项本机门禁 | **PASS 13 / FAIL 0**（含 `ruff format --check` 与 `mypy` —— 首次跑时这两项分别红了 **3 个文件** 与 **4 处**，见下） |
+| mypy | `Success: no issues found in 108 source files`（+3：两个新模块 + 一个迁移）。本轮为**类型收窄**修了 4 处（`demand_ok` 是 bool，mypy 不从它反推 `demand`；`_as_date` 双调用同理） |
+| ruff（**CI 同 CWD `backend/`**） | `check rc=0` / `format --check rc=0`（142 files）。⚠️ **`check` 绿不等于 `format` 绿**：新写的 3 个文件全部被判"would be reformatted" |
+| 迁移冒烟 | **全新库**建成 34 条；三条新迁移排在 `ent_commitment:4` **之后**（`ORDER = OK`）；**复跑待执行 0** |
+| 跳过项 | **14 条全部是 `test_mysql_integration`**（未设 `MYSQL_TEST_URL`）⇒ 并发用例在本机是 **`NOT_RUN`**，由 CI 第 6 job 真跑 |
+| 并发**预跑**（文件版 SQLite 双线程，4 轮） | **1 赢 1 输**（输家是 `CapacityStateError`，不是 500）；终局恒为 **确认 = 1 / 判定 = 4 / 成果 = 1** —— 按技能纪律，**不把"从没跑过的测试"推上去** |
+
+#### ⑤ 如实标注（**不得据此声称已按业务结果演示**）
+
+* **界面未做** ⇒ 本条目前**只能用 API 走通**；
+* 第 5 步的**设备侧走查仍为 `NOT_RUN`** ⇒ **第 5 步不是 PASS**；
+* §10.2 负例 `unsuitable/expired resource confirmation` 现有证据**只有自动化**；
+* **夹具缺口（未擅自补）**：canonical 的候选是 900 吨**单船**，要演"拆批 / 多船 ⇒ 950 装得下"
+  需要新候选，补它会**动 CI 共用的那份夹具** ⇒ 待 HO 定口径；
 * **未声称任何 AC 通过，未声称任何 D1 通过**。
 

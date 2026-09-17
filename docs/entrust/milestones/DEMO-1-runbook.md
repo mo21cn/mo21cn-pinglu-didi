@@ -477,6 +477,26 @@ python scripts/verify_miniapp_devtools.py --section 43
 `data-act-withdraw-*` / `data-act-offer-*`，共 12 条）—— **登记不等于取证**：
 设备走查仍是 `NOT_RUN`，**不得**据本文声称该链"已按业务结果演示"。
 
+### 8.3 主演示第 5 步的**后半**：证据支撑的采购确认（API 通路，**暂无界面**）
+
+> 合同 §10.1 第 5 步：*`Compare two quotations and record evidence-backed procurement confirmation.`*
+> ⚠️ **本节如实登记一条缺口**：这条链**没有走查章节号** —— 界面上还没有入口。
+
+**通路（6 条端点）**
+
+| 步 | 命令 | 关键点 |
+| --- | --- | --- |
+| 1 | `POST /assignments/{aid}/capacity-candidates` | 登记**候选事实**（承运人 / 船名 / 吨位 / 船数 / 是否允许拆批 / 单价与计价单位 / 有效期 / 证据类别 + **引用**）。**登记不产生任何确认痕迹** |
+| 2 | `GET  /assignments/{aid}/capacity-candidates` / `GET  /assignments/{aid}/capacity-confirmations` | 两家并排看：运力、价格口径、数量单位、有效期、证据是否**有引用**；确认列表看"这条委托确认过什么" |
+| 3 | `POST /assignments/{aid}/capacity-confirmations` | 确认。规则过不了 ⇒ **409 且回逐条判定**（通过的也在内）；`UNIQUE(candidate_id)` 兜住并发（真 MySQL 用例） |
+| 4 | `GET  /capacity-confirmations/{cid}` | 读**冻结**的判定输入 + 逐规则判定 |
+| 5 | `GET  /capacity-confirmations/{cid}/recheck` | 用**当前事实**重跑同一套规则，回答"这条确认现在还成立吗"（**只读**） |
+
+⚠️ **夹具缺口（未擅自补）**：`demo1_canonical.json` 的候选是 900 吨**单船**；要演出夹具第 25 行的
+「若允许拆批或多船承运，950 吨未必装不下」，需要**多船或允许拆批**的候选。补它要动 CI 共用的那份
+夹具 ⇒ 已入档待 HO 定口径，**本切片没有夹带**。
+在没有界面之前，第 5 步的证据只能到**后端用例 + 本地 e2e**，**不是设备走查**。
+
 ---
 
 ## 9. 本切片（S1）未闭合的项
