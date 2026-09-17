@@ -205,3 +205,15 @@ S1 就是第一处。计划里那条备注应当按此修正（已在 §5 提出
 | 22 | **前端缺陷（本轮修）**：`ensureSession` 用了组织选择器的 `pickEntrustment` | ✅ 它返回 `{orgId, needPick}`，**不是** `entrustmentId` ⇒ `entrustmentId` 恒 `undefined`，页面**必然**掉进"没有可用的委托授权"这一支，而真原因是取错了函数。改为只走 `session-context`（第 15 条） |
 | 23 | e2e harness：新增取数函数**必须登记进 `requireStub`** | ✅ 漏登记的会落到真实 `request.js`，在 Node 里（无 `wx.request`）直接抛错、被页面 `.catch` 吞成空数组 ⇒ 字段永不产出。本轮 5 条取数 + 4 条写命令全部登记；bootstrap 新增 S2 真写段（真建会话 → 真发消息 → 真提交作业 → 真推进一次 → **复读**成回放载荷），走查新增 9 条断言（含"重进恢复"与"取数阶段不得发写请求"） |
 
+### 7.5 第六切片（S2 第二片：人工采纳与跨视图同一份成果）
+
+触发：BP-02 出口证据"**A correction appears in all shared views; stale output cannot
+overwrite it**"；合同 §10.1 第 3 步。本节只登记与**接口面**有关的部分。
+
+| # | 条目 | 状态 |
+| --- | --- | --- |
+| 24 | 作业投影新增 **`mocked`**（三态 `true/false/null`） | ✅ 补上 §7.4 第 20 条的缺口。实现取**最近一次尝试**的 `mocked`（重试后只有最后一次决定 envelope 是谁产出的）；**还没有尝试行 ⇒ `None`**，不补 `False` —— "没跑过"与"跑过且不是桩"是两句不同的话。此前投影完全没有这个字段 ⇒ 界面**无从判断**，只能把桩显示成真实结果（那是"数据没下发"，不是"界面没做"） |
+| 25 | 采纳提案 = **复用既有** `POST /agent/jobs/{id}/adopt` | ✅ **端点未改、`scope_matrix` 63 条不变** —— 这是**新增消费方**，不是新增接口。前端 `adoptJobProposal` 此前后端已有、页面零调用：作业卡写着"需人工采纳"却**没有任何采纳入口**，是"后端就绪、前端未接"的又一例 |
+| 26 | ⚠️ **本机 `.env.local` 会让本地复现的端到端真调模型**（不入库，含真 `LLM_API_KEY`，且把 `LLM_MOCK` 顶成 false） | 已在本地复现脚本里强制 `LLM_MOCK=true` + 清空 `LLM_API_KEY`（环境变量优先级高于 env_file）。**由此定一条判据纪律**：模式类断言**不得写死"必须是桩"**，要判"页面与后端**一致**" —— 写死会让同一份代码**本地红、CI 绿**，而那是环境差异、不是产品缺陷。原则同"评测要先还原成外部人的环境" |
+| 27 | BP-02 要求"attachment selection"（§10.1 第 2 步"上传样报价单"） | ⚠️ **本轮未做**。`POST /attachments` **已在**（multipart：`file` + `entrustment_id`（或 `assignment_id`）二选一 + 可选 `source_event_at`，权限 `entrust:quote:create`，幂等键必填），但**前端没有任何上传入口**（`chooseMessageFile` / `uploadFile` 全仓 0 处）。列为下一片 —— 它是演示第 2 步的**字面要求** |
+
