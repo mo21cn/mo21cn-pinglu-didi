@@ -217,3 +217,23 @@ overwrite it**"；合同 §10.1 第 3 步。本节只登记与**接口面**有�
 | 26 | ⚠️ **本机 `.env.local` 会让本地复现的端到端真调模型**（不入库，含真 `LLM_API_KEY`，且把 `LLM_MOCK` 顶成 false） | 已在本地复现脚本里强制 `LLM_MOCK=true` + 清空 `LLM_API_KEY`（环境变量优先级高于 env_file）。**由此定一条判据纪律**：模式类断言**不得写死"必须是桩"**，要判"页面与后端**一致**" —— 写死会让同一份代码**本地红、CI 绿**，而那是环境差异、不是产品缺陷。原则同"评测要先还原成外部人的环境" |
 | 27 | BP-02 要求"attachment selection"（§10.1 第 2 步"上传样报价单"） | ⚠️ **本轮未做**。`POST /attachments` **已在**（multipart：`file` + `entrustment_id`（或 `assignment_id`）二选一 + 可选 `source_event_at`，权限 `entrust:quote:create`，幂等键必填），但**前端没有任何上传入口**（`chooseMessageFile` / `uploadFile` 全仓 0 处）。列为下一片 —— 它是演示第 2 步的**字面要求** |
 
+### 7.6 第七切片（S2 第三片：上传报价单 → 提取 → 引用进 AG-02）
+
+触发：BP-02 的 attachment selection 与 §10.1 第 2 步「A1 uploads the sample quotation and
+invokes AG-02」；编号接 §7.5（第 27 条）列出的那个缺口。本节只登记与**接口面**有关的部分。
+
+| # | 条目 | 状态 |
+| --- | --- | --- |
+| 28 | **不新增任何端点、不改任何端点** | ✅ `scope_matrix` **63 条不变**。本片全部复用既有三条：`POST /attachments`（multipart）、`POST /attachments/{id}/extract`、`GET /entrustments/{eid}/attachments`。它们是**新增消费方**（此前只有后端/脚本在用，页面零调用） |
+| 29 | ⚠️ 「**已上传**」≠「**Agent 读得到**」是**既有后端事实**，不是本片新增的规则 | ✅ `agentjobs._attach_text_excerpts` 只收 `extract_status='done'` 的附件文本；`runner.build_source_catalog` 也只在 `done` 时才把 `(attachment_text, <id>)` 放进来源目录 ⇒ **上传后不提取，附件对 Agent 只是"一个文件名"**。界面上因此必须把"上传"与"能读到"分成两句说 |
+| 30 | 引用附件的作业**只能传 `input.attachment_id`，绝不能同时传 `quote_text`** | ✅ 后端 `ag02._quote_source` 的优先序刻意固定为「操作者粘贴文本 > 附件已提取文本」：带上 `quote_text` 时附件会被**静默忽略**，页面上一切正常而 Agent 读的根本不是那份附件。**界面口径由此确定**，并由后端用例 + e2e 双向钉住 |
+| 31 | 前端**新增 `extract_status` 七态标签表**（`EXTRACT_STATUS_LABELS` / `EXTRACT_STATUS_ORDER`） | ✅ 原写法只有「`done` / 其它」两支 ⇒ `needs_transcription`（要找人转录）与 `failed`（提取真的坏了）在界面上**长得一模一样**，都显示"未提取"，而这两件事该做的下一步完全不同。七态取自后端 `attachments.EXTRACT_*`，并在 `verify_entrust_ui.js` 里**逐格比对**（含"顺序表与标签键集合相等"与"未知取值照实回显"两条） |
+| 32 | `decorateAttachment` 新增 `hasText` / `canReference` / `referenceHint` / `sizeText` | ✅ 纯**展示**字段，**不参与判权**：能不能引用由后端来源目录决定（见第 29 条），前端只是把"能不能"和"为什么不能"说出来。未提取时界面**不摆出**可点的引用按钮（与"权限未加载就不摆按钮"同一条处置） |
+| 33 | 合成夹具**落仓库受版本控制路径**并带数据标签 | ✅ `backend/scripts/fixtures/DEMO1-SYNTHETIC-sample-quotation.txt`（合成钢铁货报价单）+ `docs/entrust/milestones/DEMO-1-fixture-manifest.md`（合同 §7 要求的 labeled fixture manifest）。**演示与 CI 用同一个文件** —— 不存在"演示用 A、CI 用 B"的分叉 |
+| 34 | CI 的端到端 job 里**真 multipart 上传 + 真提取** | ✅ harness 新增 `apiUpload()`（`fetch` + `FormData` + `Blob`；**不能**带 `Content-Type: application/json`，否则 FastAPI 按 JSON 解 multipart 体直接 422）；bootstrap 用夹具真上传并提取，走查再**驱动页面的上传路径**（`uploadQuote` → 真 multipart → 真提取），判据取**后端事实**而非页面文案 |
+| 35 | ⚠️ **e2e 的固定 `tick(n)` 换成「等终态标志」**（新增 `waitUntil`） | ✅ **本轮实测**：页面驱动的写走真网络，链路越长（消息 → 作业 → 推进 → 重新取数）固定休眠越像赌博 —— 机器慢一点，断言就在"写还没落地"时读结果，报成**"页面少写了一笔"**，与真缺陷长得一模一样（本轮一次运行 6 条这样的假红）。判据改为"这件事到底成没成" |
+| 36 | ⚠️ **页面方法必须 `return` 自己的 promise 链** | ✅ `uploadQuote` 原先没 `return` ⇒ `await this.uploadQuote(f)` 等到的是 `undefined`，调用方（含 e2e）立刻往下走，读到"上传完、提取还没回来"的中间态，表现成**"上传了但没提取"**。这是一条通用约定：**异步动作方法返回值就是它的完成信号** |
+| 37 | 新导出登记进两处 harness 的桩 | ✅ `verify_frontend_e2e.js` 的 `requireStub`（新增 `uploadAttachment` / `extractAttachment`，两者都走**真网络**而非回放）+ `verify_ui_interactions.js` 的 `entrustStub`（`Object.assign({}, REAL_ENTRUST, …)` 派生，新增导出自动可用）。漏登记的后果见 §7.4 第 23 条 |
+| 38 | ⚠️ **夹具与种子之间存在口径偏离，本片不自行裁定** | 合同 §3.1 写「初期 **800 吨** → 变更后 **950 吨**」，而演示种子 `ASSIGNMENT_MAIN` 是 **1200 吨**，且当前变更样本是**收货港变化**而非数量变化。两侧**均保持原状**，登记为待裁决（`DEMO-1-fixture-manifest.md` §4 的 F-Q1/F-Q2）。⇒ 在此之前**不得**声称"§3.1 夹具已完全对齐" |
+
+

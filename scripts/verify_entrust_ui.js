@@ -1003,6 +1003,68 @@ check(
   })
 )
 
+// ── 附件提取状态取值域：前端标签表 ⇄ 后端 `attachments.EXTRACT_*` 逐格对齐 ──
+// 这一格曾经只有「done / 其它」两支，于是 `needs_transcription`（要找人转录）
+// 与 `failed`（提取真的坏了）在界面上**长得一模一样**。这两件事该做的下一步
+// 完全不同，少一档就是把它们混成一件。所以这里做**逐格**比对。
+const attPy = read(path.join(REPO, 'backend/app/modules/entrust/attachments.py'))
+const backendExtractStatuses = pyValueConsts(attPy, 'EXTRACT_')
+const frontExtractStatuses = Object.keys(E.EXTRACT_STATUS_LABELS || {}).sort()
+check(
+  '[附件] 提取状态标签覆盖后端 EXTRACT_* 全部取值（七态逐格，少一个那一行就只剩原始英文码）',
+  backendExtractStatuses.length > 0 &&
+    backendExtractStatuses.join(',') === frontExtractStatuses.join(','),
+  `后端 [${backendExtractStatuses.join('/')}] vs 前端 [${frontExtractStatuses.join('/')}]`
+)
+check(
+  '[附件] 提取状态顺序表与标签键集合相等',
+  (E.EXTRACT_STATUS_ORDER || [])
+    .slice()
+    .sort()
+    .join(',') === frontExtractStatuses.join(','),
+  `ORDER [${(E.EXTRACT_STATUS_ORDER || []).join('/')}] / LABELS [${frontExtractStatuses.join('/')}]`
+)
+check(
+  '[附件] 「需人工转录」与「提取失败」必须是两句不同的话（旧写法把两者都显示成"未提取"）',
+  E.extractStatusLabel('needs_transcription') !== E.extractStatusLabel('failed') &&
+    E.extractStatusLabel('needs_transcription') !== E.extractStatusLabel('not_requested'),
+  `${E.extractStatusLabel('needs_transcription')} / ${E.extractStatusLabel('failed')} / ` +
+    `${E.extractStatusLabel('not_requested')}`
+)
+check(
+  '[附件] 未知提取状态照实回显，不折成某个已知标签（折了会让人以为是"还没点提取"）',
+  E.extractStatusLabel('brand_new_status').indexOf('brand_new_status') !== -1,
+  E.extractStatusLabel('brand_new_status')
+)
+// ⚠️ 本片最要紧的一条：「**已上传**」≠「**Agent 读得到**」。
+// 只有提取完成（done）的附件才有文本进 Agent 的来源目录。
+;(function () {
+  const done = E.decorateAttachment({
+    attachment_id: 1,
+    filename: 'q.txt',
+    extract_status: 'done',
+    size_bytes: 2048
+  })
+  const pendingText = E.decorateAttachment({
+    attachment_id: 2,
+    filename: 'scan.png',
+    extract_status: 'needs_transcription',
+    size_bytes: 1024
+  })
+  check(
+    '[附件] 只有 done 才 canReference（未提取的附件对 Agent 只是"一个文件名"）',
+    done.canReference === true && pendingText.canReference === false,
+    `done=${done.canReference} / needs_transcription=${pendingText.canReference}`
+  )
+  check(
+    '[附件] 引用提示要说明"为什么不能用"，且按状态给不同的下一步',
+    pendingText.referenceHint.indexOf('转录') !== -1 &&
+      E.decorateAttachment({ attachment_id: 3, extract_status: 'failed', extract_error: '编码错' })
+        .referenceHint.indexOf('编码错') !== -1,
+    pendingText.referenceHint
+  )
+})()
+
 /**
  * 字段标签必须覆盖注册表里出现的**每一个** required + optional 字段名。
  * 回退值是字段名本身（看得见但不该出现），少一个就意味着界面上会冒出英文键。

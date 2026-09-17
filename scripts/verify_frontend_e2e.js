@@ -23,6 +23,13 @@ const path = require('path')
 const ROOT = path.resolve(__dirname, '..')
 const BASE = (process.argv.find((a) => a.indexOf('--base=') === 0) || '').split('=')[1] || 'http://127.0.0.1:8000'
 
+//: DEMO-1 合成样报价单（合同 §3.1 的 canonical fixture / 演示第 2 步的输入）。
+//: ⚠️ 演示与 CI **必须用同一个文件** —— 否则会出现"演示能过、CI 用的是另一份"
+//: 这种两边都对不上的分叉。清单见 `docs/entrust/milestones/DEMO-1-fixture-manifest.md`。
+const FIXTURE_QUOTE = path.join(
+  ROOT, 'backend', 'scripts', 'fixtures', 'DEMO1-SYNTHETIC-sample-quotation.txt'
+)
+
 let N_OK = 0
 const FAILS = []
 const NOTES = []
@@ -119,6 +126,49 @@ function rejectIfNotOk(res) {
 }
 
 /**
+ * 页面驱动的**上传**（S2 第三片）。
+ *
+ * 与 `pageWrite` 走**同一条闸门**：取数阶段一律不真发 —— 上传会改库（新附件会
+ * 出现在委托授权的附件清单里），在读的段里发生它，后面的断言就会拿到一个被自己
+ * 污染过的世界。真的发出去时用 `apiUpload`（multipart），并把结果记进
+ * `pageWrites`，让"该不该写、写了几笔"的断言仍然成立。
+ */
+async function pageUpload(filePath, opts, key) {
+  if (!WRITE_ENABLED) {
+    // 与 `pageWrite` 的 `{rejected}` 同义，只是这里**直接拒**而不是回一个标记对象：
+    // `uploadAttachment` 后面没有 `rejectIfNotOk` 这道包装，回标记会被页面
+    // 当成"上传成功"继续往下走（拿到一个没有 attachment_id 的对象）。
+    const e = new Error('取数阶段不得发上传请求：POST /attachments')
+    e.rejected = true
+    throw e
+  }
+  const o = opts || {}
+  const res = await apiUpload('/entrust/attachments', {
+    token: ownerToken,
+    fields: { entrustment_id: o.entrustmentId, assignment_id: o.assignmentId },
+    filePath: filePath,
+    filename: o.filename || path.basename(String(filePath)),
+    contentType: o.contentType || 'text/plain',
+    key: key
+  })
+  pageWrites.push({
+    method: 'POST',
+    path: '/entrust/attachments',
+    body: null,
+    status: res.status,
+    data: res.data
+  })
+  if (res.status !== 200) {
+    const detail = String(((res.data || {}).detail) || '上传失败')
+    const err = new Error(detail)
+    err.httpStatus = res.status
+    err.detail = detail
+    throw err
+  }
+  return res.data
+}
+
+/**
  * 写之后把回放快照换成**真事实**。
  *
  * route() 回放的是 bootstrap 那一份静态快照 —— 页面自己写完之后再 `load()`，
@@ -153,6 +203,40 @@ async function api(method, p, { token, body, headers } = {}) {
       headers || {}
     ),
     body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const text = await res.text()
+  let data = null
+  try { data = text ? JSON.parse(text) : null } catch (e) { data = null }
+  return { status: res.status, data }
+}
+
+/**
+ * 真 multipart 上传（S2 第三片 / 演示第 2 步）。
+ *
+ * 为什么单独一个函数而不是扩展 `api()`：上传体是 `FormData`，**不能**再
+ * `JSON.stringify`，也不能带 `Content-Type: application/json`（那会让 FastAPI
+ * 按 JSON 去解析 multipart 体，直接 422）。`fetch` 会自己补上带 boundary 的头。
+ *
+ * 这一步值得真跑：它同时穿过鉴权、类型白名单、归属二选一、幂等键四道关，
+ * 而"上传成功但 Agent 读不到内容"这种半成品只有真发请求才暴露得出来。
+ */
+async function apiUpload(p, { token, fields, filePath, filename, contentType, key } = {}) {
+  const form = new FormData()
+  form.append(
+    'file',
+    new Blob([fs.readFileSync(filePath)], { type: contentType || 'text/plain' }),
+    filename || 'file.bin'
+  )
+  Object.keys(fields || {}).forEach(function (k) {
+    if (fields[k] !== undefined && fields[k] !== null) form.append(k, String(fields[k]))
+  })
+  const res = await fetch(BASE + '/api/v1' + p, {
+    method: 'POST',
+    headers: Object.assign(
+      token ? { Authorization: 'Bearer ' + token } : {},
+      key ? { 'Idempotency-Key': key } : {}
+    ),
+    body: form
   })
   const text = await res.text()
   let data = null
@@ -498,6 +582,57 @@ async function bootstrap() {
         }
       }
 
+      // ── 报价单附件：**真 multipart** 上传 + 提取（S2 第三片 / 演示第 2 步）──
+      // 判据不看"上传接口回了 200"，看**提取之后 Agent 到底读不读得到**：
+      // 后端只把 `extract_status='done'` 的附件文本放进来源目录，所以"传上去就
+      // 完事了"是错的，这一段就是把这个区别变成可断言的事实。
+      const attList0 = await api('GET', '/entrust/entrustments/' + eid + '/attachments',
+        { token: tok.owner })
+      const pickQuote = function (rows) {
+        return (rows || []).filter(function (a) {
+          return String(a.filename).indexOf('DEMO1-SYNTHETIC') !== -1
+        })[0]
+      }
+      let quoteAtt = pickQuote(((attList0.data || {}).items) || [])
+      if (!quoteAtt) {
+        const up = await apiUpload('/entrust/attachments', {
+          token: tok.owner,
+          fields: { entrustment_id: eid },
+          filePath: FIXTURE_QUOTE,
+          filename: 'DEMO1-SYNTHETIC-sample-quotation.txt',
+          contentType: 'text/plain',
+          key: rid()
+        })
+        if (up.status === 200) {
+          quoteAtt = up.data
+          const ex = await api('POST', '/entrust/attachments/' + up.data.attachment_id + '/extract',
+            { token: tok.owner, body: {}, headers: { 'Idempotency-Key': rid() } })
+          console.log('报价单附件：上传 #%s（%s）→ 提取 %s（%s 字）',
+            String(up.data.attachment_id), String(up.data.extract_status),
+            String((ex.data || {}).extract_status), String((ex.data || {}).extracted_chars))
+          if ((ex.data || {}).extract_status !== 'done') {
+            note('S2 附件 · 提取未完成（' + String((ex.data || {}).extract_status) + '）：'
+              + JSON.stringify(ex.data).slice(0, 160))
+          }
+        } else {
+          note('S2 附件 · 上传被拒（' + up.status + '）：'
+            + JSON.stringify(up.data).slice(0, 160))
+        }
+      } else if (quoteAtt.extract_status !== 'done') {
+        // 复用上一轮铺下的那份，但它的文本可能还没提取（重跑时状态可能被复位过）。
+        // ⚠️ 不把提取响应**赋回** `quoteAtt`：那个模型的字段集与附件投影不同
+        // （没有 filename/content_type），覆盖之后名字类断言会莫名其妙取到 undefined。
+        const ex = await api('POST', '/entrust/attachments/' + quoteAtt.attachment_id + '/extract',
+          { token: tok.owner, body: {}, headers: { 'Idempotency-Key': rid() } })
+        if ((ex.data || {}).extract_status !== 'done') {
+          note('S2 附件 · 复用旧附件但提取未完成：'
+            + String((ex.data || {}).extract_status))
+        }
+      }
+      if (quoteAtt && quoteAtt.attachment_id) {
+        entrustWriteProof.quoteAttachmentId = quoteAtt.attachment_id
+      }
+
       // 复读成回放载荷：页面看到的必须是**写之后**的库。
       const sList = await api('GET',
         '/entrust/sessions' + qs({ view: 'mine', assignment_id: aid, size: 20 }),
@@ -835,6 +970,13 @@ function loadPage(file, ctx) {
         },
         fetchEntrustmentAttachments: (eid) =>
           fetchVia('/entrust/entrustments/' + eid + '/attachments'),
+        // 附件上传与提取（S2 第三片）。**不是**回放式桩：它们真的发 multipart 请求
+        // 并真的触发提取 —— 这两步是本片唯一能证明"上传的报价单 Agent 读得到"的地方，
+        // 桩成回放就等于把被测对象换成我自己写的假货。
+        uploadAttachment: (filePath, opts, key) => pageUpload(filePath, opts, key),
+        extractAttachment: (id, key) =>
+          pageWrite('POST', '/entrust/attachments/' + id + '/extract', {}, key)
+            .then(rejectIfNotOk),
         fetchRevisions: (id) => fetchVia('/entrust/artifacts/' + id + '/revisions'),
         // 写端点：**只放行显式用户动作**（见 WRITE_ENABLED）。走真网络，
         // 失败时抛带 `httpStatus` 的错误 —— 与 utils/request.js 的拒绝形状一致，
@@ -983,6 +1125,26 @@ function instantiate(cfg, ctx) {
 }
 
 const tick = (ms) => new Promise((r) => setTimeout(r, ms || 60))
+
+/**
+ * 等一个**终态标志**成立，而不是睡固定时长。
+ *
+ * 页面驱动的写走真网络，链路还可能很长（发消息 → 提交作业 → 推进 → 重新取数）。
+ * 固定 `tick(n)` 在这种链路上就是赌博：机器慢一点，断言就会在"写还没落地"的
+ * 时刻去读结果，报出来的是**"页面少写了一笔"** —— 而页面只是**还没写完**。
+ * 这种假红与真缺陷长得一模一样（都表现为"少一笔写"），极难分辨，
+ * 所以判据一律换成"这件事到底成没成"。
+ */
+async function waitUntil(pred, ms) {
+  const deadline = Date.now() + (ms || 6000)
+  while (Date.now() < deadline) {
+    try {
+      if (pred()) return true
+    } catch (e) { /* 谓词读的可能是尚未就绪的状态：继续等，别把它当成失败 */ }
+    await tick(25)
+  }
+  return false
+}
 
 /** 走一个页面：可选先跑 onLoad/onShow，再调取数方法，最后断言基础不变量 */
 async function walk(label, page, entry, ctx, pre) {
@@ -2189,7 +2351,11 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
                   String(s._final().adoptingJobId))
               } else ok()
               s.onAdoptConfirm()
-              await tick(200)
+              // 等**终态标志**（这一笔写真的落地了）而不是睡固定时长：
+              // 采纳要连打两三个真 HTTP（采纳 → 重新取数），睡 200ms 在慢机器上
+              // 会读到"还没写完"的中间态，报成"采纳没产生写请求"。
+              await waitUntil(function () { return pageWrites.length > w0 }, 8000)
+              await tick(60)
             } finally {
               WRITE_ENABLED = false
             }
@@ -2254,6 +2420,199 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           if (pageWrites.length !== w0 + 1) {
             fail(P2 + '重进触发了额外的写请求', pageWrites.length + ' vs ' + (w0 + 1))
           } else ok()
+
+          // ── 报价单附件：上传 → 提取 → 引用（S2 第三片 / 演示第 2 步）──────
+          // 本片最要紧的一件事是「**已上传** ≠ **Agent 读得到**」：只有提取完成
+          // 的附件才有文本进 Agent 的来源目录。下面三段各取一份真事实：
+          //   ① 页面把附件列出来，且已提取的才可引用；
+          //   ② 页面的「上传报价单」走**真 multipart**（不是回放桩），并真触发提取；
+          //   ③ 页面的「让 Agent 解析这份报价单」真跑出一个作业，后端信封里
+          //      `attachment_text` 被记为来源 —— 这才叫"引用"成立。
+          const qAtt = entrustWriteProof.quoteAttachmentId
+          const pageAtt = (d.attachments || []).filter(function (a) {
+            return String(a.attachmentId) === String(qAtt)
+          })[0]
+          if (!qAtt) {
+            note(P2 + '本次没有样报价单附件（bootstrap 未铺出），附件链跳过')
+          } else if (!pageAtt) {
+            fail(P2 + '页面没列出那份样报价单附件',
+              'att=' + String(qAtt) + '，页面有 ' + (d.attachments || []).length + ' 条')
+          } else {
+            ok()
+            if (String(pageAtt.extractLabel) !== '已提取文本' || pageAtt.canReference !== true) {
+              fail(P2 + '已提取的附件在页面上却不可引用（Agent 读得到、界面说不行）',
+                String(pageAtt.extractLabel) + ' / canReference=' + String(pageAtt.canReference))
+            } else ok()
+          }
+
+          if (qAtt) {
+            // ② 关着写闸门时，页面的上传路径**一发都不能发**（上传会改库）
+            const wUp = pageWrites.length
+            try {
+              await s.uploadQuote({ path: FIXTURE_QUOTE, name: 'DEMO1-SYNTHETIC-sample-quotation.txt' })
+              await tick(40)
+            } catch (e) { /* 被闸门拒掉正是期望行为 */ }
+            if (pageWrites.length !== wUp) {
+              fail(P2 + '未开写闸门时上传仍发出去了', pageWrites.length + ' vs ' + wUp)
+            } else ok()
+
+            // ②b 开闸：真 multipart 上传 + 真提取。判据取**后端事实**，不取页面文案。
+            const attBefore = await api('GET',
+              '/entrust/entrustments/' + entrustWriteProof.entrustmentId + '/attachments',
+              { token: ownerToken })
+            const nAttBefore = (((attBefore.data || {}).items) || []).length
+            const wUp2 = pageWrites.length
+            let upErr = null
+            WRITE_ENABLED = true
+            try {
+              // `uploadQuote` 返回的是**整条链**的 promise（上传 → 提取 → 重新取数），
+              // 所以 `await` 它本身就已经等到终态；再补一个"写有没有落地"的等待，
+              // 免得某次网络抖动把"还没写完"报成"没写"。
+              await s.uploadQuote({
+                path: FIXTURE_QUOTE,
+                name: 'DEMO1-SYNTHETIC-sample-quotation.txt'
+              })
+              // 判据取**链尾那一笔**（`/extract`）：只看 `/attachments` 会在
+              // "传完了但提取还在飞"的时刻就往下断言，报成"上传的报价单没有被提取"。
+              await waitUntil(function () {
+                return pageWrites.slice(wUp2).some(function (x) {
+                  return String(x.path).indexOf('/attachments/') !== -1 &&
+                    String(x.path).indexOf('/extract') !== -1
+                })
+              }, 10000)
+              await tick(60)
+            } catch (e) {
+              // ⚠️ 必须**报出来**：把异常吞掉，"上传路径根本没接上"（方法名写错、
+              // 页面没有这个方法）就会表现成一句含糊的"没发出上传请求"，
+              // 让人去查后端，而真因在前端。
+              upErr = e
+            } finally {
+              WRITE_ENABLED = false
+            }
+            if (upErr) {
+              fail(P2 + '页面上传路径抛错', String((upErr && upErr.message) || upErr))
+            }
+            const upWrites = pageWrites.slice(wUp2)
+            const upRec = upWrites.filter(function (x) {
+              return x.path === '/entrust/attachments'
+            })[0]
+            if (!upRec) {
+              fail(P2 + '页面没发出上传请求（上传入口没接上）',
+                upWrites.map(function (x) { return x.method + ' ' + x.path }).join(' | '))
+            } else if (upRec.status !== 200) {
+              fail(P2 + '上传被拒', upRec.status + ' → '
+                + JSON.stringify(upRec.data).slice(0, 140))
+            } else {
+              ok()
+              const newAttId = upRec.data && upRec.data.attachment_id
+              const attAfter = await api('GET',
+                '/entrust/entrustments/' + entrustWriteProof.entrustmentId + '/attachments',
+                { token: ownerToken })
+              const rows = (((attAfter.data || {}).items) || [])
+              if (rows.length !== nAttBefore + 1) {
+                fail(P2 + '上传后后端附件数没有 +1',
+                  nAttBefore + ' → ' + rows.length)
+              } else ok()
+              const fresh = rows.filter(function (x) {
+                return String(x.attachment_id) === String(newAttId)
+              })[0]
+              // ⚠️ 这一条才是本片的重点：**上传成功不算完，提取完成才算 Agent 读得到**。
+              //    上传后不提取时状态是 `not_requested`，此刻附件对 Agent 只是文件名。
+              if (!fresh || fresh.extract_status !== 'done') {
+                fail(P2 + '上传的报价单没有被提取（Agent 只会看到一个文件名）',
+                  (fresh ? String(fresh.extract_status) : '附件不在清单里')
+                  + '；err=' + String((fresh || {}).extract_error)
+                  + '；本轮写请求=' + upWrites.map(function (x) {
+                    return x.method + ' ' + x.path + '(' + x.status + ')'
+                  }).join(' | '))
+              } else ok()
+              if (String(s._final().attachNotice || '').indexOf('提取') === -1) {
+                fail(P2 + '上传后没有把"提取结果"告诉用户（只说上传成功会让人以为完事了）',
+                  'notice=' + JSON.stringify(String(s._final().attachNotice))
+                  + '；本轮写请求=' + upWrites.map(function (x) {
+                    return x.method + ' ' + x.path + '(' + x.status + ')'
+                  }).join(' | '))
+              } else ok()
+              // 回放快照换成写之后的真事实 —— 否则页面下一次 load() 会拿到旧清单。
+              entrustEntrustmentAttachments[String(entrustWriteProof.entrustmentId)] =
+                attAfter.data
+            }
+
+            // ③ 引用附件跑作业：**只带 attachment_id**。
+            //    带 `quote_text` 时后端优先用操作者文本、附件被**静默忽略**，
+            //    所以这里同时断言"来源是 attachment_text 而不是 operator_input"。
+            const jobsBefore = await api('GET',
+              '/entrust/agent/jobs' + qs({ assignment_id: aid, size: 50 }), { token: ownerToken })
+            const idsBeforeJobs = new Set((((jobsBefore.data || {}).items) || [])
+              .map(function (j) { return String(j.job_id) }))
+            const wRef = pageWrites.length
+            WRITE_ENABLED = true
+            try {
+              s.onUseAttachment({ currentTarget: { dataset: { attachment_id: String(qAtt) } } })
+              // 这条链最长：发消息 → 提交作业 → 推进（三次真 HTTP，再加一次取数）
+              // ⇒ 判据取**链尾那一笔**（`/run`）出现了没有，不取固定时长。
+              await waitUntil(function () {
+                return pageWrites.slice(wRef).some(function (x) {
+                  return String(x.path).indexOf('/jobs') !== -1 && x.method === 'POST'
+                })
+              }, 12000)
+              await waitUntil(function () {
+                return pageWrites.slice(wRef).some(function (x) {
+                  return String(x.path).indexOf('/run') !== -1
+                })
+              }, 12000)
+              await tick(60)
+            } finally {
+              WRITE_ENABLED = false
+            }
+            const refWrites = pageWrites.slice(wRef)
+            const jobWrite = refWrites.filter(function (x) {
+              return String(x.path).indexOf('/jobs') !== -1 && x.method === 'POST'
+            })[0]
+            if (!jobWrite || jobWrite.status !== 200) {
+              fail(P2 + '引用附件没有提交出作业',
+                refWrites.map(function (x) { return x.method + ' ' + x.path }).join(' | '))
+            } else {
+              ok()
+              const bodyInput = (jobWrite.body || {}).input || {}
+              // ⚠️ 界面**绝不能**在这条路径上带 `quote_text`：带了就把附件变成摆设。
+              if (bodyInput.quote_text !== undefined) {
+                fail(P2 + '引用附件的作业带了 quote_text（附件会被静默忽略）',
+                  JSON.stringify(bodyInput).slice(0, 120))
+              } else ok()
+              if (String(bodyInput.attachment_id) !== String(qAtt)) {
+                fail(P2 + '引用附件的作业没有把附件 id 带上',
+                  JSON.stringify(bodyInput).slice(0, 120))
+              } else ok()
+
+              const jobsAfter = await api('GET',
+                '/entrust/agent/jobs' + qs({ assignment_id: aid, size: 50 }), { token: ownerToken })
+              const freshJobs = ((((jobsAfter.data || {}).items) || [])).filter(function (j) {
+                return !idsBeforeJobs.has(String(j.job_id))
+              })
+              if (!freshJobs.length) {
+                fail(P2 + '引用附件后没有新作业落库（页面只是"看起来跑了"）')
+              } else ok()
+              const refJob = freshJobs[0]
+              const envR = refJob.envelope || {}
+              const parsedR = (envR.artifact_proposals || []).filter(function (p) {
+                return p.artifact_type === 'quote_parsed'
+              })
+              if (!parsedR.length) {
+                fail(P2 + '引用附件的作业没有产出报价解析提案',
+                  JSON.stringify(freshJobs.map(function (j) { return j.status })).slice(0, 120))
+              } else ok()
+              const kindsR = (envR.source_refs || []).map(function (r) { return String(r.kind) })
+              if (kindsR.indexOf('attachment_text') === -1) {
+                fail(P2 + 'Agent 没有把附件文本记为来源（附件没被真正读到）',
+                  kindsR.join(','))
+              } else ok()
+              if (kindsR.indexOf('operator_input') !== -1) {
+                fail(P2 + '本次没有操作者粘贴文本，来源里却出现 operator_input',
+                  kindsR.join(','))
+              } else ok()
+            }
+          }
         }
       }
     }

@@ -21,7 +21,9 @@
  * 不存在"能看到但一点就报错"的中间态。
  */
 
-const { request } = require('./request')
+// `getToken` / `BASE_URL` 是给**上传**用的：`wx.uploadFile` 走的是另一套 API，
+// 它既不自动带鉴权头、也不解析 JSON 响应 —— 这两件事必须在调用处自己做。
+const { request, getToken, BASE_URL } = require('./request')
 
 const BASE = '/api/v1/entrust'
 
@@ -2960,19 +2962,145 @@ function fetchEntrustmentAttachments(entrustmentId) {
   })
 }
 
+/**
+ * 附件提取状态取值域 —— 与后端 `attachments.EXTRACT_*` 一一对应（七态）。
+ *
+ * ⚠️ 这张表**必须覆盖全部取值**。旧写法只有"done / 其它"两支，于是
+ * `needs_transcription`（图片扫描件等人工转录）与 `failed`（提取真的坏了）
+ * 在界面上**长得一模一样**，都显示"未提取" —— 而这两种状态该做的事完全不同：
+ * 前者要找人转录，后者要排查文件或重抽。少一档就是把两件事混成一件。
+ */
+const EXTRACT_STATUS_LABELS = {
+  not_requested: '未提取',
+  pending: '提取排队中',
+  running: '提取中',
+  done: '已提取文本',
+  failed: '提取失败',
+  unsupported: '不支持该格式',
+  needs_transcription: '需人工转录'
+}
+
+/** 与后端取值域完全一致的顺序（断言用，勿随意增删） */
+const EXTRACT_STATUS_ORDER = [
+  'not_requested',
+  'pending',
+  'running',
+  'done',
+  'failed',
+  'unsupported',
+  'needs_transcription'
+]
+
+function extractStatusLabel(status) {
+  const s = String(status || '')
+  if (!s) return '状态未知'
+  // 未知取值**照实回显**，不折成某个已知标签：把后端新加的状态显示成"未提取"，
+  // 会让人以为是"还没点提取"，而真因是前端没跟上取值域。
+  return EXTRACT_STATUS_LABELS[s] || '未知状态（' + s + '）'
+}
+
+function _sizeText(bytes) {
+  const n = Number(bytes)
+  if (!isFinite(n) || n < 0) return ''
+  if (n < 1024) return n + ' B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+  return (n / 1024 / 1024).toFixed(1) + ' MB'
+}
+
 function decorateAttachment(row) {
   const data = row || {}
+  const status = String(data.extract_status || '')
+  // ⚠️「**已上传**」≠「**Agent 能看到内容**」：只有提取完成（`done`）的附件
+  // 才有文本进 Agent 的来源目录（见后端 `agentjobs._attach_text_excerpts`）。
+  // 未提取的附件对 Agent 而言只是"一个文件名"。`canReference` 就是这条区分
+  // 在界面上的落点 —— 少了它，用户会以为"传上去了 Agent 就该读到"。
+  const hasText = status === 'done'
   return {
     attachmentId: _sid(data.attachment_id),
     name: data.name || data.filename || '未命名附件',
-    extractStatus: data.extract_status || '',
-    extractLabel:
-      data.extract_status === 'done'
-        ? '已提取文本'
-        : data.extract_status
-          ? '未提取'
-          : '状态未知'
+    sizeText: _sizeText(data.size_bytes),
+    contentType: data.content_type || '',
+    extractStatus: status,
+    extractLabel: extractStatusLabel(status),
+    hasText: hasText,
+    canReference: hasText,
+    referenceHint: hasText
+      ? 'Agent 会读到这份附件的文本'
+      : status === 'needs_transcription'
+        ? '图片/扫描件须先人工转录，之后才能被引用'
+        : status === 'failed'
+          ? '提取失败：' + (data.extract_error || '原因未记录')
+          : status === 'unsupported'
+            ? '该格式不支持提取，Agent 只能看到文件名'
+            : '尚未提取文本，Agent 只能看到文件名'
   }
+}
+
+/**
+ * 上传一份附件（multipart）。
+ *
+ * 为什么不能复用 `request()`：上传走的是另一套 API（`wx.uploadFile` 自己拼
+ * multipart），它**不带鉴权头**、也**不解析 JSON 响应**（`res.data` 是字符串）。
+ * 这两件事漏掉任一件的表现分别是 401 与"200 却什么字段都取不到"。
+ *
+ * 归属**恰好给一个**：`entrustmentId`（委托授权，参与方协作）或
+ * `assignmentId`（私有未绑定草稿）。后端对"都不给"和"都给"都是 400 ——
+ * 归属含糊的附件没有可见性规则可言，所以这里**不替它挑默认值**。
+ */
+function uploadAttachment(filePath, opts, idempotencyKey) {
+  const o = opts || {}
+  return new Promise(function (resolve, reject) {
+    const form = {}
+    if (o.entrustmentId) form.entrustment_id = String(o.entrustmentId)
+    else if (o.assignmentId) form.assignment_id = String(o.assignmentId)
+    const header = {}
+    if (idempotencyKey) header['Idempotency-Key'] = idempotencyKey
+    const token = getToken()
+    if (token) header.Authorization = 'Bearer ' + token
+    wx.uploadFile({
+      url: BASE_URL + BASE + '/attachments',
+      filePath: filePath,
+      // 字段名必须是 `file`：后端按 `File()` 取它，换个名字就是 422
+      name: 'file',
+      formData: form,
+      header: header,
+      success(res) {
+        let data = null
+        try {
+          data = JSON.parse(res.data)
+        } catch (e) {
+          data = null
+        }
+        if (res.statusCode >= 200 && res.statusCode < 300 && data) {
+          resolve(data)
+          return
+        }
+        const detail = (data && data.detail) || '上传失败'
+        const err = new Error(String(detail))
+        err.httpStatus = res.statusCode
+        err.detail = String(detail)
+        reject(err)
+      },
+      fail(err) {
+        reject(err)
+      }
+    })
+  })
+}
+
+/**
+ * 触发附件文本提取（同步）。
+ *
+ * **可重复调用**（"重抽"就是同一个动作）：重复提取覆盖同一份文本，
+ * 不产生多份互相矛盾的结果，所以不需要 `?refresh=true` 之类的开关。
+ */
+function extractAttachment(attachmentId, idempotencyKey) {
+  return request({
+    url: BASE + '/attachments/' + attachmentId + '/extract',
+    method: 'POST',
+    data: {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
 }
 
 /** 提交作业（**不执行**；执行要再调 runJob —— 两步分开是刻意的） */
@@ -3047,6 +3175,8 @@ module.exports = {
   CASE_TARGET_LABELS,
   CASE_TRANSITIONS,
   CHANGE_CATEGORY_LABELS,
+  EXTRACT_STATUS_LABELS,
+  EXTRACT_STATUS_ORDER,
   ISSUE_KIND_LABELS,
   JOB_STATUS_CLASS,
   JOB_STATUS_LABELS,
@@ -3124,6 +3254,8 @@ module.exports = {
   decorateSlot,
   decorateWorkbench,
   entryDecision,
+  extractAttachment,
+  extractStatusLabel,
   fetchArtifact,
   fetchArtifactCandidates,
   fetchArtifactTypes,
@@ -3168,5 +3300,6 @@ module.exports = {
   statusLabel,
   submitAssignment,
   submitJob,
+  uploadAttachment,
   viewState
 }

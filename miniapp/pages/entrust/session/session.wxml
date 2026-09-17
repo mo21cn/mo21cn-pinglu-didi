@@ -1,9 +1,10 @@
 <!--
-  委托发货 · 专业会话屏（UI-03 / DR-0015 / ENT-033 / **S2 首片 + 第二片**）
+  委托发货 · 专业会话屏（UI-03 / DR-0015 / ENT-033 / **S2 首片 + 第二片 + 第三片**）
 
-  本页两块内容：
-    1. 真实会话：消息时间线 + 输入框 + 作业卡（S2 首片）；
-    2. 成果卡：与工作台、成果页同源同版本（AC-05 的聊天侧）。
+  本页三块内容：
+    1. 报价单附件：上传 → 提取 → 引用（BP-02 的 attachment selection，演示第 2 步）；
+    2. 真实会话：消息时间线 + 输入框 + 作业卡（S2 首片）；
+    3. 成果卡：与工作台、成果页同源同版本（AC-05 的聊天侧）。
 
   四处刻意的写法
   --------------
@@ -62,6 +63,51 @@
     <view class="state-hint">{{viewHint}}</view>
   </view>
   <view wx:else>
+    <!-- 报价单附件（BP-02 的 attachment selection / 演示第 2 步）。
+         ⚠️ 这里刻意把「已上传」与「Agent 读得到」做成两行不同的信息：
+         只有提取完成（done）的附件才有文本进 Agent 的来源目录，
+         未提取的附件对 Agent 而言只是"一个文件名"。
+         把这两件事合成一句"上传成功"，就是拿一件没发生的事当事实说。 -->
+    <view class="section">
+      <view class="section-title">报价单附件（{{attachments.length}}）</view>
+
+      <view wx:if="{{attachNotice}}" class="attach-note">
+        <text class="attach-note-text">{{attachNotice}}</text>
+      </view>
+
+      <block wx:for="{{attachments}}" wx:key="attachmentId">
+        <view class="att">
+          <view class="att-head">
+            <text class="att-name">{{item.name}}</text>
+            <text class="att-size">{{item.sizeText}}</text>
+          </view>
+          <view class="att-meta">
+            <text class="att-status">{{item.extractLabel}}</text>
+          </view>
+          <view class="att-hint-row">
+            <text class="att-hint">{{item.referenceHint}}</text>
+          </view>
+
+          <view wx:if="{{item.canReference}}" class="att-actions">
+            <view
+              class="att-btn"
+              data-attachment_id="{{item.attachmentId}}"
+              hover-class="hover-dim"
+              bindtap="onUseAttachment"
+            >让 Agent 解析这份报价单</view>
+          </view>
+        </view>
+      </block>
+
+      <view wx:if="{{attachments.length === 0}}" class="empty-line">
+        <text class="empty-line-text">还没有附件。上传一份样报价单，Agent 才能按文件内容解析，而不是靠手打</text>
+      </view>
+
+      <view class="att-upload" hover-class="hover-dim" bindtap="onPickQuote">
+        <text class="att-upload-text">{{uploading ? '上传并提取中…' : '上传报价单（文件）'}}</text>
+      </view>
+    </view>
+
     <view class="section">
       <view class="section-title">对话（{{messages.length}}）</view>
 
