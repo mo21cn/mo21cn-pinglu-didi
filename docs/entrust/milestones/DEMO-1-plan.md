@@ -144,8 +144,8 @@
 | **选择 ≠ 资源确认** 的门禁 | **缺连接** | `supplier_compare.selected_candidate` 与 `procurement_confirm` 是两个类型，但**无「选择→确认」门禁连接** |
 | 资源确认的授权 / 证据 / 有效期 | **缺连接** | `registry.py:procurement_confirm`（`evidence_kinds`/`effective_from`）**无专用确认端点** |
 | 服务端客户白名单投影 | **缺连接** | `registry.py:project_for_customer` 存在但**无调用方**（孤儿函数）；`envelope.py:project_envelope_for_operator` 只覆盖 Agent 侧 |
-| **释放不可变报价版本** | **缺失（表已落）** | `ent_offer_release`（精确 revision + 白名单快照 + 三态）已在迁移 `ent_commitment`；**命令/端点未实现**。口径 A/B **已裁定**（`S3-发布与客户响应数据设计.md`） |
-| 客户按精确版本接受/拒绝（含三类负例） | **缺失（表已落）** | `ent_offer_response`（`UNIQUE(release_id)`）已在；**无 `/customer` 端点、无客户侧入口** |
+| **释放不可变报价版本** | ✅ **后端已实现**（表已在；命令与端点在 S3 纵向切片落地） | `ent_offer_release` + `offers.release_offer` + `POST /entrustments/{eid}/offer-releases`。**界面未做** |
+| 客户按精确版本接受/拒绝（含三类负例） | ✅ **后端已实现**（三类负例均已验：未发布/已撤回/已被取代 ⇒ 409；经理冒充 ⇒ 403；重复 ⇒ 唯一约束） | `offers.respond_to_offer` + `POST /offer-releases/{id}/responses`。**界面未做** |
 | 从已接受事实生成合同草稿 | **缺失** | 未找到 |
 | 签名证据记录（来源/模式标注） | **缺失** | 只有 `registry.py` 的 `EVIDENCE_CONFIRMATION` 枚举 |
 | 客户查看/下载字段与附件裁剪 | **缺连接** | `project_for_customer` 游离，客户端点未接 |

@@ -8,7 +8,8 @@
 `attachments_api.py` 是附件上传与授权下载（ENT-009），`extraction_api.py` 是
 文档提取与人工转录（ENT-013），`agent_api.py` 是会话与 Agent 作业（ENT-011），
 `exceptions_api.py` 是异常与变更案件（ENT-030 / DR-0013），
-七者挂到同一个 `router` 下，`main.py` 只注册一次 `/api/v1/entrust`。
+`offers_api.py` 是对客发布与客户响应（S3 / BP-03 第 4/5/6/7/10 条），
+它们挂到同一个 `router` 下，`main.py` 只注册一次 `/api/v1/entrust`。
 
 挂载顺序：`extraction_api` 必须排在 `attachments_api` **之后** ——
 它复用后者的 `load_visible_attachment` / `map_attachment_error`（同一套可见性与
@@ -20,6 +21,7 @@ from app.modules.entrust.artifacts_api import router as artifacts_api_router
 from app.modules.entrust.attachments_api import router as attachments_api_router
 from app.modules.entrust.exceptions_api import router as exceptions_api_router
 from app.modules.entrust.extraction_api import router as extraction_api_router
+from app.modules.entrust.offers_api import router as offers_api_router
 from app.modules.entrust.router import router
 from app.modules.entrust.tasks_api import router as tasks_api_router
 
@@ -28,6 +30,7 @@ router.include_router(artifacts_api_router)
 router.include_router(attachments_api_router)
 router.include_router(exceptions_api_router)
 router.include_router(extraction_api_router)
+router.include_router(offers_api_router)
 router.include_router(tasks_api_router)
 
 __all__ = ["router"]

@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（62 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（70 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -641,7 +641,75 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         owner_scope=True,
         idempotent=True,
         note="采纳 = 创建成果，故权限同创建（assert_can_write_entrustment + entrust:quote:create）；"
-        "归属取自作业行的 assignment_id，不由请求体声明（DR-0012）",
+        "归属取自作业行的 assignment_id，不由请求体声明（DR-0012）；"
+        "同时把信封里声明过的来源记成待核验项（发布门槛的**对象**，见 offers.source_gate）",
+    ),
+    # ── 对客发布与客户响应（offers_api.py / S3 / BP-03 第 4/5/6/7/10 条）────
+    _r(
+        "POST",
+        "/entrustments/{entrustment_id}/offer-releases",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:publish",
+        idempotent=True,
+        note="经理人发布**指定成果版本**；额外做作用域自洽（路径授权 == 成果所属授权，"
+        "否则 404）。来源门槛在服务层（offers.source_gate）",
+    ),
+    _r(
+        "GET",
+        "/entrustments/{entrustment_id}/offer-releases",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        note="经理视角列表：含客户当初看到的快照、来源门槛与响应"
+        "（投影由服务端给，不是让前端藏字段）",
+    ),
+    _r(
+        "GET",
+        "/my-offer-releases",
+        GUARD_OWNER_SELF,
+        note="客户入口：只列 customer_user_id == 登录用户 的发布；"
+        "归属由服务端从登录身份推导，不接受客户端传入客户 id",
+    ),
+    _r(
+        "GET",
+        "/offer-releases/{release_id}",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        note="两条通道同一路径，由服务端按身份选投影：本人那条走**客户投影**，"
+        "其余按委托单可见性走经理投影；不可见一律 404。"
+        "⚠️ 客户投影不依赖 entrust:view（货主本人直接通过）",
+    ),
+    _r(
+        "POST",
+        "/offer-releases/{release_id}/responses",
+        GUARD_OWNER_SELF,
+        idempotent=True,
+        note="只有该委托货主本人可响应：局外人 404、**经理 403**（看得见但无权替客户确认）；"
+        "可响应状态只认 released（未发布/已撤回/已被取代一律 409）；"
+        "同一次发布只能响应一次，判据是 DB 唯一约束 UNIQUE(release_id)",
+    ),
+    _r(
+        "POST",
+        "/offer-releases/{release_id}/withdraw",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:publish",
+        idempotent=True,
+        note="显式撤回，理由必填；**已被客户响应的发布不能撤回**（接受事实永久保留）",
+    ),
+    _r(
+        "GET",
+        "/artifacts/{artifact_id}/source-checks",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        note="来源台账 + 门槛状态：界面要能回答'还差哪几条来源没核'",
+    ),
+    _r(
+        "POST",
+        "/artifacts/{artifact_id}/source-checks",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:publish",
+        idempotent=True,
+        note="登记核验：权限同发布（谁能发布谁负责核验）；**依据必填**，"
+        "且只能记 declared 的核验结果（verified/rejected），不能手工造声明",
     ),
 )
 

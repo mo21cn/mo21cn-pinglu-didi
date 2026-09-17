@@ -1055,3 +1055,173 @@ def exception_case_capabilities(data: dict[str, Any]) -> ExceptionCaseCapabiliti
 
 def exception_event_out(data: dict[str, Any]) -> ExceptionCaseEventOut:
     return ExceptionCaseEventOut.model_validate(data)
+
+
+# ── S3 对客发布与客户响应（BP-03 第 4/5/6/7/10 条；D1-07 / D1-11）────────────
+
+
+class OfferReleaseCreate(BaseModel):
+    """发布**指定的那一个**成果版本。
+
+    刻意**没有**"不传版本就发最新"的默认分支：D1-07 要证明客户接受的是"那一个版本"，
+    而"取最新"在并发编辑下会让证据退化成"反正是某一个版本"。
+    """
+
+    artifact_id: int = Field(ge=1)
+    revision_no: int = Field(ge=1)
+    #: 本发布**明确授权**客户下载的附件（冻结在发布记录上）。
+    #: 客户下载只限这些 —— 不能因为同属一条委托授权就把内部附件全开。
+    authorized_attachment_ids: list[int] | None = Field(default=None)
+    note: str | None = Field(default=None, max_length=255)
+
+
+class OfferWithdrawIn(BaseModel):
+    """撤回：理由必填（留痕，不靠猜）。"""
+
+    reason: str = Field(min_length=1, max_length=255)
+
+
+class OfferResponseCreate(BaseModel):
+    """客户响应（只有该委托的货主本人能发）。"""
+
+    decision: str = Field(min_length=1, max_length=16)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class SourceCheckCreate(BaseModel):
+    """人工核验留痕：**必须**给出核验依据。
+
+    `state` 只接受 `verified` / `rejected`：`declared`（待核验项）由服务端在采纳提案时
+    按作业信封写入，不允许人手工造"声明"（那等于自己给自己发一张待核验清单）。
+    """
+
+    revision_no: int = Field(ge=1)
+    source_kind: str = Field(min_length=1, max_length=32)
+    source_ref: str = Field(min_length=1, max_length=160)
+    state: str = Field(min_length=1, max_length=16)
+    method: str = Field(min_length=1, max_length=255)
+    note: str | None = Field(default=None, max_length=255)
+
+
+class SourceCheckOut(BaseModel):
+    check_id: int
+    artifact_id: int
+    revision_no: int
+    source_kind: str
+    source_ref: str
+    state: str
+    method: str | None = None
+    checked_by: int | None = None
+    checked_at: str | None = None
+    note: str | None = None
+
+
+class SourceGateOut(BaseModel):
+    """发布前来源门槛状态（`ok=False` 时 `pending` / `rejected` / `missing_declaration` 至少一个成立）。"""
+
+    artifact_id: int
+    revision_no: int
+    declared: list[dict[str, str]] = Field(default_factory=list)
+    verified: list[dict[str, str]] = Field(default_factory=list)
+    pending: list[dict[str, str]] = Field(default_factory=list)
+    rejected: list[dict[str, str]] = Field(default_factory=list)
+    #: 模型产出却**没有任何来源声明记录** ⇒ 无从核对、不得发布（见 `offers.source_gate`）。
+    missing_declaration: bool = False
+    ok: bool
+
+
+class OfferResponseOut(BaseModel):
+    response_id: int
+    release_id: int
+    assignment_id: int
+    artifact_id: int
+    responded_revision_id: int
+    decision: str
+    customer_user_id: int
+    note: str | None = None
+    responded_at: str
+
+
+class OfferReleaseOut(BaseModel):
+    """**经理视角**：含发布控制信息、客户当初看到的快照、来源门槛状态与响应。"""
+
+    release_id: int
+    assignment_id: int
+    entrustment_id: int | None = None
+    artifact_id: int
+    revision_id: int
+    revision_no: int
+    customer_user_id: int
+    status: str
+    released_by: int
+    released_at: str
+    closed_by: int | None = None
+    closed_at: str | None = None
+    close_reason: str | None = None
+    customer_snapshot: dict[str, Any] = Field(default_factory=dict)
+    authorized_attachment_ids: list[int] = Field(default_factory=list)
+    source_gate: SourceGateOut | None = None
+    response: OfferResponseOut | None = None
+
+
+class OfferReleaseCreatedOut(OfferReleaseOut):
+    """发布成功时额外回"被取代的旧发布"，让调用方不必自己再查一遍。"""
+
+    superseded_release_ids: list[int] = Field(default_factory=list)
+
+
+class OfferReleaseCustomerOut(BaseModel):
+    """**客户视角**：只回发布时冻结的那份投影。
+
+    刻意不含 `released_by` / `closed_by` / `artifact_id` 与来源台账 —— 客户不该看到
+    内部是谁发布的、有哪些内部来源待核验。
+    """
+
+    release_id: int
+    assignment_id: int
+    revision_no: int
+    status: str
+    released_at: str
+    content: dict[str, Any] = Field(default_factory=dict)
+    artifact_type: str | None = None
+    content_source: str | None = None
+    authorized_attachment_ids: list[int] = Field(default_factory=list)
+    can_respond: bool
+    response: OfferResponseOut | None = None
+
+
+class OfferReleaseListOut(BaseModel):
+    total: int
+    items: list[OfferReleaseOut]
+
+
+class OfferReleaseCustomerListOut(BaseModel):
+    total: int
+    items: list[OfferReleaseCustomerOut]
+
+
+class SourceCheckListOut(BaseModel):
+    artifact_id: int
+    total: int
+    items: list[SourceCheckOut]
+    gate: SourceGateOut
+
+
+def offer_release_out(data: dict[str, Any]) -> OfferReleaseOut:
+    return OfferReleaseOut.model_validate(data)
+
+
+def offer_release_created_out(data: dict[str, Any]) -> OfferReleaseCreatedOut:
+    return OfferReleaseCreatedOut.model_validate(data)
+
+
+def offer_release_customer_out(data: dict[str, Any]) -> OfferReleaseCustomerOut:
+    return OfferReleaseCustomerOut.model_validate(data)
+
+
+def offer_response_out(data: dict[str, Any]) -> OfferResponseOut:
+    return OfferResponseOut.model_validate(data)
+
+
+def source_check_out(data: dict[str, Any]) -> SourceCheckOut:
+    return SourceCheckOut.model_validate(data)

@@ -865,3 +865,148 @@ def test_extraction_api_timestamps_render_on_mysql(mysql):
         app.dependency_overrides.clear()
         settings.ENTRUST_ENABLED = previous_enabled
         settings.ATTACHMENT_STORAGE_DIR = previous_dir
+
+
+# ─────────────────────────────────────────── S3 客户响应并发（BP-03 / D1-07）
+
+
+def _seed_release_for_race(db, *, owner_id: int = 950, manager_id: int = 951) -> int:
+    """播种一条**可响应**的发布记录，返回 release_id。
+
+    走的是**生产同一条命令**（`offers.release_offer`），不是手写 INSERT ——
+    手写的话，一旦发布命令的写入逻辑变了，这条并发用例会继续绿着而实际已经失效。
+    """
+    from app.modules.entrust import artifacts as art
+    from app.modules.entrust import offers as offers_svc
+
+    ts = utcnow_naive().strftime(_TS)
+    org_id = int(
+        db.execute(
+            text("INSERT INTO ent_organization (name, status, created_at) VALUES (:n,'active',:c)"),
+            {"n": _unique("发布响应并发组织"), "c": ts},
+        ).lastrowid
+        or 0
+    )
+    db.execute(
+        text(
+            "INSERT INTO ent_org_member (org_id, user_id, member_role, status, created_at) "
+            "VALUES (:o, :u, 'manager', 'active', :c)"
+        ),
+        {"o": org_id, "u": manager_id, "c": ts},
+    )
+    eid = int(
+        db.execute(
+            text(
+                "INSERT INTO ent_entrustment (org_id, entrust_user_id, permissions, status, created_at) "
+                "VALUES (:o, :u, :p, 'active', :c)"
+            ),
+            {
+                "o": org_id,
+                "u": owner_id,
+                "p": '["entrust:view","entrust:quote:create","entrust:quote:publish"]',
+                "c": ts,
+            },
+        ).lastrowid
+        or 0
+    )
+    aid = int(
+        db.execute(
+            text(
+                "INSERT INTO ent_assignment (owner_user_id, org_id, title, status, revision, "
+                " created_at, updated_at) VALUES (:o, :g, :t, 'claimed', 1, :c, :c)"
+            ),
+            {"o": owner_id, "g": org_id, "t": _unique("并发响应委托"), "c": ts},
+        ).lastrowid
+        or 0
+    )
+    db.commit()
+    created = art.create_artifact(
+        db,
+        entrustment_id=eid,
+        artifact_type="customer_quote",
+        payload={"amount": 36000, "currency": "CNY", "includes": ["装船", "卸船"]},
+        created_by=manager_id,
+        source=art.SOURCE_MANUAL,
+        assignment_id=aid,
+    )
+    release = offers_svc.release_offer(
+        db,
+        artifact_id=int(created["artifact_id"]),
+        revision_no=1,
+        actor_user_id=manager_id,
+    )
+    return int(release["release_id"])
+
+
+def test_offer_response_race_exactly_one_accept(mysql):
+    """D1-07 的**并发**面：两个响应同时到达，恰好一个成功、库里恰好一行。
+
+    判据是 `ent_offer_response` 上的 `UNIQUE (release_id)` —— 应用层"先查后写"
+    在真并发下两个请求可以同时通过检查，于是同一次发布被接受两次，而两次都
+    "看起来"合法。SQLite 证明不了这条（整库一把写锁），所以放在本模块。
+    """
+    from app.modules.entrust import offers as offers_svc
+
+    owner_id = 950
+    winners: list[int] = []
+    for round_no in range(_ROUNDS):
+        db = mysql()
+        release_id = _seed_release_for_race(db, owner_id=owner_id)
+        db.close()
+
+        start = threading.Barrier(2)
+        outcomes: list[tuple[str, str]] = []
+
+        def respond(
+            *,
+            start=start,
+            release_id=release_id,
+            outcomes=outcomes,
+        ) -> None:
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                try:
+                    got = offers_svc.respond_to_offer(
+                        session,
+                        release_id=release_id,
+                        decision="accept",
+                        note=None,
+                        actor_user_id=owner_id,
+                    )
+                    outcomes.append(("won", str(got["response_id"])))
+                except Exception as exc:  # noqa: BLE001 —— 输家的**具体形态**要记录，不掩盖
+                    outcomes.append(("lost", f"{type(exc).__name__}: {exc}"))
+            finally:
+                session.close()
+
+        t1 = threading.Thread(target=respond)
+        t2 = threading.Thread(target=respond)
+        t1.start()
+        t2.start()
+        t1.join(timeout=30)
+        t2.join(timeout=30)
+
+        assert len(outcomes) == 2, f"第 {round_no} 轮有线程未完成: {outcomes}"
+        won = [o for o in outcomes if o[0] == "won"]
+        assert len(won) == 1, f"第 {round_no} 轮赢家数错误（同一次发布被响应了多次）: {outcomes}"
+        winners.append(int(won[0][1]))
+
+        verify = mysql()
+        try:
+            rows = (
+                verify.execute(
+                    text("SELECT COUNT(*) AS n FROM ent_offer_response WHERE release_id = :r"),
+                    {"r": release_id},
+                )
+                .mappings()
+                .first()
+            )
+            assert int(rows["n"]) == 1, (
+                f"第 {round_no} 轮库里出现了 {rows['n']} 行客户响应 —— "
+                "唯一约束没兜住，同一次发布被响应了多次"
+            )
+        finally:
+            verify.close()
+
+    assert len(winners) == _ROUNDS
