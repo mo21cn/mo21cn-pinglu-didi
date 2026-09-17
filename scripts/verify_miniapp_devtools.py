@@ -599,7 +599,10 @@ class Anchors:
                 a.notes["港口泊位"] = f"请求失败（{_LAST_API_ERROR or '未知'}）"
             else:
                 berths = got_berths.get("items") or []
-                demo = next((b for b in berths if "DEMO-01" in str(b.get("berth_no") or "")), None)
+                demo = next(
+                    (b for b in berths if "DEMO-01" in str(b.get("berth_no") or "")),
+                    None,
+                )
                 a.berth_id = (demo or (berths[0] if berths else {}) or {}).get("id")
                 a.notes["港口泊位"] = (
                     f"共 {len(berths)} 条 / 演示泊位 {'命中' if demo else '未命中'}"
@@ -3419,7 +3422,11 @@ def sec_13(w: Walker) -> None:
         str(rows[:1])[:120],
     )
     n_id = sum(1 for r in rows if not r.get("missing"))
-    w.rep.rec("⑬ 至少一行被识别（草稿确实解析出了内容）", n_id >= 1, f"识别 {n_id}/{len(rows)}")
+    w.rep.rec(
+        "⑬ 至少一行被识别（草稿确实解析出了内容）",
+        n_id >= 1,
+        f"识别 {n_id}/{len(rows)}",
+    )
     w.rep.rec(
         "⑬ 卡片含草稿（可带去发布页，Agent 未直写）",
         bool(card.get("draft")),
@@ -3794,7 +3801,11 @@ def sec_32(w: Walker) -> None:
     w.rep.rec("㉜ 成果页带上 needsRevalidation（派生自复核项）", bool(nr), str(nr)[:120])
     n_title = w.c.count(".art-rv-title")
     n_line = w.c.count(".art-rv-line")
-    w.rep.rec("㉜ 徽标标题真的渲染出「待复核」（有元素、不是空白）", n_title == 1, f"n={n_title}")
+    w.rep.rec(
+        "㉜ 徽标标题真的渲染出「待复核」（有元素、不是空白）",
+        n_title == 1,
+        f"n={n_title}",
+    )
     w.rep.rec(
         "㉜ 徽标给出复核区域与复核任务号（不是空壳）",
         bool(nr.get("areasText")) and bool(nr.get("reviewTaskIdsText")) and n_line >= 2,
@@ -3902,7 +3913,11 @@ def sec_33(w: Walker) -> None:
     for _ in range(hard + 3):
         cur = len(w.c.page_stack())
         j = w.c.tool(
-            "automation_navigate", "--action", "navigateTo", "--url", "/pages/preview/preview"
+            "automation_navigate",
+            "--action",
+            "navigateTo",
+            "--url",
+            "/pages/preview/preview",
         )
         time.sleep(0.6)
         nxt = len(w.c.page_stack())
@@ -4006,7 +4021,9 @@ def sec_33(w: Walker) -> None:
 
     card = f'[data-id="{aid}"]'
     w.rep.rec(
-        "㉝ 真实入口锚点唯一（工作台委托卡 data-id）", w.c.count(card) == 1, f"n={w.c.count(card)}"
+        "㉝ 真实入口锚点唯一（工作台委托卡 data-id）",
+        w.c.count(card) == 1,
+        f"n={w.c.count(card)}",
     )
     before = len(w.c.page_stack())
     w.c.tap(card)
@@ -4028,7 +4045,11 @@ def sec_33(w: Walker) -> None:
         return
 
     entry = '[data-act-create-case="create-case"]'
-    w.rep.rec("㉝ 真实入口锚点唯一（登记案件入口）", w.c.count(entry) == 1, f"n={w.c.count(entry)}")
+    w.rep.rec(
+        "㉝ 真实入口锚点唯一（登记案件入口）",
+        w.c.count(entry) == 1,
+        f"n={w.c.count(entry)}",
+    )
     before = len(w.c.page_stack())
     w.c.tap(entry)
     ok = w.c.wait_path(CASE_CREATE, 25)
@@ -4045,7 +4066,10 @@ def sec_33(w: Walker) -> None:
     if w.c.wait_path(CASE_CREATE, 5):
         w.c.set_data({"form.title": CASE_TITLE + "（栈深）", "form.cause": "走查㉝：验 replace"})
         time.sleep(1.2)
-        w.rep.rec("㉝ 真实入口锚点唯一（提交按钮）", w.c.count('[data-act-submit-case="1"]') == 1)
+        w.rep.rec(
+            "㉝ 真实入口锚点唯一（提交按钮）",
+            w.c.count('[data-act-submit-case="1"]') == 1,
+        )
         before = len(w.c.page_stack())
         w.c.tap('[data-act-submit-case="1"]')
         ok = w.c.wait_path(CASE, 30)
@@ -4202,7 +4226,8 @@ def sec_34(w: Walker) -> None:
         if not key:
             return ""
         val = w.c.evaluate(
-            "function(k){var v=wx.getStorageSync(k);return v?JSON.stringify(v):'';}", [key]
+            "function(k){var v=wx.getStorageSync(k);return v?JSON.stringify(v):'';}",
+            [key],
         )
         return str(val) if val else ""
 
@@ -4701,7 +4726,13 @@ def sec_34(w: Walker) -> None:
         ("empty", ".err-card", INTAKE_EMPTY_TITLE, 0),
     ]
     for state, sel, want, want_btn in branches:
-        w.c.set_data({"view": state, "viewTitle": want, "viewHint": "（走查注入状态，非真实到达）"})
+        w.c.set_data(
+            {
+                "view": state,
+                "viewTitle": want,
+                "viewHint": "（走查注入状态，非真实到达）",
+            }
+        )
         time.sleep(0.8)
         n_hit = w.c.count(sel)
         shown = want in text_of(sel)
@@ -4780,7 +4811,10 @@ def sec_35(w: Walker) -> None:
     ⚠️ 本章**会真写**：两张委托（界面真实点击提交）+ 一次受理。故排在默认顺序末尾，
     且断言一律按 **assignment_id** 定位（不按标题、不按位置），历史数据再多也不干扰。
     """
-    print("\n== ㉟ S1 出口判据 ②③④：队列可见 / 受理 / 并发 409 / 乙组织不可见 ==", flush=True)
+    print(
+        "\n== ㉟ S1 出口判据 ②③④：队列可见 / 受理 / 并发 409 / 乙组织不可见 ==",
+        flush=True,
+    )
     base_err = w.c.errors()
 
     def clear_draft_state() -> None:
@@ -4828,7 +4862,9 @@ def sec_35(w: Walker) -> None:
     path = w.login_as(CODE_SHIPPER_ORGPICKER)
     if path != INDEX or not w.enter_role("shipper", SHIPPER):
         w.rep.rec(
-            "㉟ 前置 · seed-shipper-orgpicker 登录并进入货主工作台", False, w.c.current_path()
+            "㉟ 前置 · seed-shipper-orgpicker 登录并进入货主工作台",
+            False,
+            w.c.current_path(),
         )
         w.rep.not_run("㉟ 全部断言", "前置登录失败，链路断在这里")
         return
@@ -4961,7 +4997,8 @@ def sec_35(w: Walker) -> None:
     time.sleep(3.4)
     d_late = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=30)
     late_row = next(
-        (x for x in (d_late.get("items") or []) if str(x.get("assignmentId")) == id_race), {}
+        (x for x in (d_late.get("items") or []) if str(x.get("assignmentId")) == id_race),
+        {},
     )
     n_claim_race = w.c.count(sel_claim_r)
     w.shot("35-5-并发-迟到的那一下之后")
@@ -5969,7 +6006,10 @@ def sec_38(w: Walker) -> None:
         slot_ok = cand_ok[0] if cand_ok else {}
         slot_ok_key = str(slot_ok.get("key") or "")
         tasks_wb0 = (
-            api_get(f"/entrust/tasks?assignment_id={ENTRUST_ASSIGNMENT_ID}&size=50", tok_owner)
+            api_get(
+                f"/entrust/tasks?assignment_id={ENTRUST_ASSIGNMENT_ID}&size=50",
+                tok_owner,
+            )
             or {}
         ).get("items") or []
         w.rep.rec(
@@ -5994,7 +6034,10 @@ def sec_38(w: Walker) -> None:
                 gap=0.5,
             )
             tasks_wb1 = (
-                api_get(f"/entrust/tasks?assignment_id={ENTRUST_ASSIGNMENT_ID}&size=50", tok_owner)
+                api_get(
+                    f"/entrust/tasks?assignment_id={ENTRUST_ASSIGNMENT_ID}&size=50",
+                    tok_owner,
+                )
                 or {}
             ).get("items") or []
             titles_wb = [str((x or {}).get("title") or "") for x in tasks_wb1]
@@ -6102,7 +6145,10 @@ def sec_39(w: Walker) -> None:
     st_new, created = api_post(
         "/entrust/assignments",
         tok_op,
-        {"title": TITLE_RACE_DETAIL, "cargo_summary": "㊴ 章载体单：详情页「被抢认领」路径"},
+        {
+            "title": TITLE_RACE_DETAIL,
+            "cargo_summary": "㊴ 章载体单：详情页「被抢认领」路径",
+        },
         f"walk39-new-{ts}",
     )
     new_id = str((created or {}).get("assignment_id") or "")
@@ -6590,7 +6636,10 @@ def sec_41(w: Walker) -> None:
     ⚠️ 本章**零业务写入副作用**（只有建单，不改任何已存在的单据、不改库）；
     放在全量序列最末，且不依赖其它章节留下的状态。
     """
-    print("\n== ㊶ 「我的委托」客户侧状态屏（出口判据① 的独立断言 + 承接组织）==", flush=True)
+    print(
+        "\n== ㊶ 「我的委托」客户侧状态屏（出口判据① 的独立断言 + 承接组织）==",
+        flush=True,
+    )
     base_err = w.c.errors()
 
     tok_op = (api_login(CODE_SHIPPER_ORGPICKER) or {}).get("access_token") or ""
@@ -6624,7 +6673,10 @@ def sec_41(w: Walker) -> None:
     st_new, created = api_post(
         "/entrust/assignments",
         tok_op,
-        {"title": TITLE_MINE_LIST, "cargo_summary": "㊶ 章载体单：客户侧列表可见性与承接组织"},
+        {
+            "title": TITLE_MINE_LIST,
+            "cargo_summary": "㊶ 章载体单：客户侧列表可见性与承接组织",
+        },
         f"walk41-new-{ts}",
     )
     new_id = str((created or {}).get("assignment_id") or "")
@@ -6980,7 +7032,10 @@ def sec_42(w: Walker) -> None:
     )
     w.shot("42-1-我的委托-第1页")
     if len(items1) != expect1:
-        w.rep.not_run("㊷ 触底分页探针", f"首屏条目数 {len(items1)} ≠ 期望 {expect1}，链路断在取数")
+        w.rep.not_run(
+            "㊷ 触底分页探针",
+            f"首屏条目数 {len(items1)} ≠ 期望 {expect1}，链路断在取数",
+        )
         return
 
     # ---- 触底：原生 `pageScrollTo`（页面级真滚动）----
@@ -7138,7 +7193,11 @@ def sec_43(w: Walker) -> None:
     # ==================== 一、第 1 步（前半）：客户提交 ====================
     print("\n-- 一、第 1 步 · 客户（seed-shipper）真实点击提交一张新委托 --", flush=True)
     if w.login_as(CODE_SHIPPER) != INDEX:
-        w.rep.rec("㊸ 前置 · seed-shipper 登录", False, f"未停在身份页（{w.c.current_path()}）")
+        w.rep.rec(
+            "㊸ 前置 · seed-shipper 登录",
+            False,
+            f"未停在身份页（{w.c.current_path()}）",
+        )
         return
     if not w.enter_role("shipper", SHIPPER):
         w.rep.rec("㊸ 前置 · 真点击身份卡进货主工作台", False, w.c.current_path())
@@ -7474,7 +7533,10 @@ def sec_43(w: Walker) -> None:
     )
 
     # —— 从工作台打开同一份成果 ——
-    print("\n-- 三、第 3 步 · 从工作台 → 委托卡 → 详情页 → 成果槽位 打开同一份 --", flush=True)
+    print(
+        "\n-- 三、第 3 步 · 从工作台 → 委托卡 → 详情页 → 成果槽位 打开同一份 --",
+        flush=True,
+    )
     if not w.open_workbench(CODE_OWNER, tag="㊸"):
         w.rep.not_run("㊸ 第3步 · 从工作台打开同一份成果", "未能回到经理工作台")
         return
@@ -7759,7 +7821,8 @@ def sec_44(w: Walker) -> None:
     eid = str(pg_art.get("entrustmentId") or "")
     if not eid:
         w.rep.not_run(
-            "㊹ 第6步 · 发布", f"成果页未给出 entrustmentId（页面上是 {w.c.current_path()}）"
+            "㊹ 第6步 · 发布",
+            f"成果页未给出 entrustmentId（页面上是 {w.c.current_path()}）",
         )
         return
 
@@ -7895,7 +7958,10 @@ def sec_44(w: Walker) -> None:
             if st in (200, 201):
                 fixed += 1
         gate2 = (
-            api_get(f"/entrust/artifacts/{aid_art}/source-checks?revision_no={rev}", tok_owner)
+            api_get(
+                f"/entrust/artifacts/{aid_art}/source-checks?revision_no={rev}",
+                tok_owner,
+            )
             or {}
         ).get("gate") or {}
         w.rep.rec(
@@ -8614,11 +8680,242 @@ def sec_45(w: Walker) -> None:
         w.rep.rec("㊺ 本章运行期 console 无未归因错误", True, "增量 0 条")
 
 
+def sec_46(w: Walker) -> None:
+    """㊻ 运输计划（合同 §10.1 第 4 步）——设备侧运行取证。
+
+    合同 §10.1 第 4 步的原文：
+
+        Show the road–water–road plan and required task prerequisites.
+
+    为什么单独一章
+    --------------
+    §7.21 / §7.22 把这一条的**读模型、界面、写命令**都做完了，证据全是**自动化**的
+    （后端用例 + e2e 真 HTTP + 三个前端静态门禁）。自动化答得了"逻辑对不对"，
+    答不了两件事：① 真机上那块卡到底渲染出来没有；② 写命令打到**真后端**之后，
+    **页面**读回来的是不是同一份事实。
+
+    本节覆盖（两条，各自对应一个可能静默失效的环节）
+    ------------------------------------------------
+    一、**写→读闭环，经 API 写、经界面读**：经写命令真建一段（并改一次留版本），
+        再让**页面**去读 —— 页面看到的段数、方式标签、段序必须与**服务端事实**逐项同源。
+        这一条把"命令落地了但界面看不到／界面读的是另一份"挡掉。
+    二、**两类行的渲染判据落在渲染树**：`count('[data-plan-leg]')` /
+        `[data-plan-task]` / `[data-plan-task-pre]`。⚠️ 刻意**不看**页面内部状态键 ——
+        状态键在"整块根本没渲染"时也可能被置上（㊺ 章实测过这种假绿）。
+
+    ⚠️ 诚实边界（按档登记，**不计入通过**）
+    * ⛔ **写侧界面不存在**：本切片只做了后端命令（§7.22）。所以本章的**写操作全部经 API**，
+      界面侧**只验渲染** ⇒ 「人工落点经界面走通」**没有**被本章覆盖，
+      **不得**把"写链路通"写成"界面能建段"。
+    * **载体运行期造**（不新造种子）：`run_walkthrough_devtools.py` 的种子
+      （`seed_demo` / `seed_entrust_demo` / `seed_entrust_orgpicker`）**不含**
+      `seed_entrust_canonical.py`，而临时库里唯一可能带航段的就是它
+      ⇒ 本章运行期经 API 建段（技能坑 48 的取向），并用一个**种子不会用到**的 `seq`。
+    * 本章**会写库**（1 段航段 + 1 条版本历史）。走查用临时库、跑完即弃；
+      共享库上重跑仍成立（读者按本次的 `seq` 定位），但会留下痕迹。
+    * 本章**自足**：只依赖 `seed_entrust_demo.py` 铺的组织（`演示经营主体·工作台`）、
+      `seed-owner` 与委托 `演示委托·工作台样本`（`claimed`），**刻意不依赖其它章节**
+      ⇒ 可单跑：`--section 46`。
+    """
+    print("\n-- ㊻ 运输计划（第 4 步 · 真实渲染）--", flush=True)
+
+    err_base = w.c.errors()
+
+    code_mgr = "seed-owner"
+    org_name = "演示经营主体·工作台"
+    title_main = "演示委托·工作台样本"
+    #: ⚠️ 取一个**种子不会用到**的 seq：种子那 7 个任务槽位与 canonical 的 1–3 都不占它，
+    #: 于是本章可重复运行（第二次会因唯一键撞号 ⇒ 走"改段"这条，见下）。
+    walk_seq = 88
+    mode_raw = "air"  # 故意用一个**未登记**的方式：顺带验"未知保持未知，不兜底成公路"
+    frm, to = "走查起点", "走查终点"
+
+    def _patch(path: str, token: str, payload: dict, idem: str) -> tuple[int, dict | None]:
+        """`api_post` 只发 POST，而改段是 PATCH ⇒ 这里就地补一个。
+
+        ⚠️ `_http(req)` 是**函数**、返回 `(status, data)`，**不是上下文管理器** ——
+        第一版在这里写了 `with _http(req):`，于是抛 TypeError 被兜底 `except` 吞掉、
+        一路 `return 0, None`，断言里读到 `HTTP=0`（"请求好像没发出去"），
+        而**服务端其实写成功了**（历史里两版都在）。
+        ⇒ 这正是技能坑 39 的形态：**状态码取不到时，别让它伪装成"请求没发出"**。
+        照抄 `api_post` 尾部那几行（同文件已有正确写法，别自己重想）。
+        """
+        body = json.dumps(payload or {}).encode("utf-8")
+        req = urllib.request.Request(
+            API_BASE + path,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + token,
+                "Idempotency-Key": idem,
+            },
+            method="PATCH",
+        )
+        try:
+            return _http(req)
+        except urllib.error.HTTPError as exc:  # 409/404 要拿到状态码，不当成异常
+            try:
+                raw = exc.read().decode("utf-8", "replace")
+                return int(exc.code), (json.loads(raw) if raw.strip() else None)
+            except Exception:  # noqa: BLE001
+                return int(exc.code), None
+        except Exception:  # noqa: BLE001
+            return 0, None
+
+    # ── 前置：全部经 API 取，不写死 id（种子重铺会变）─────────────────────
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊻ 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == org_name:
+            org_id = str((r or {}).get("org_id") or "")
+    if not org_id:
+        w.rep.not_run("㊻ 全部断言", f"seed-owner 的组织里没有「{org_name}」")
+        return
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
+    hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    if not hit:
+        w.rep.not_run("㊻ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
+        return
+    aid = str((hit[0] or {}).get("assignment_id") or "")
+
+    # ── 写①：建段（经 API —— 写侧没有界面，见 docstring）───────────────
+    st1, body1 = api_post(
+        f"/entrust/assignments/{aid}/legs",
+        tok,
+        {
+            "seq": walk_seq,
+            "mode": mode_raw,
+            "from_name": frm,
+            "to_name": to,
+            "change_note": "㊻ 章走查载体",
+        },
+        idem_key=f"walk46-create-{aid}",
+    )
+    if st1 == 409:
+        # 共享库上重跑：那一 `seq` 已被上一次占用 ⇒ 这不是失败，改走"改段"。
+        print("  （该 seq 已存在 ⇒ 走改段分支，属预期）", flush=True)
+        legs_now = (api_get(f"/entrust/assignments/{aid}/plan", tok) or {}).get("legs") or []
+        old = [x for x in legs_now if int((x or {}).get("seq") or 0) == walk_seq]
+        body1 = old[0] if old else {}
+        st1 = 200 if old else st1
+    leg_id = str((body1 or {}).get("leg_id") or "")
+    w.rep.rec(
+        "㊻ ① 写命令真建段（**经 API**）：建段 + 写下第 1 版历史。"
+        "⛔ 写侧界面不存在 ⇒ 这一格证明的是**写链路**，**不是**「界面能建段」",
+        st1 == 200 and bool(leg_id) and int((body1 or {}).get("revision_no") or 0) >= 1,
+        f"HTTP={st1} leg_id={leg_id!r} revision_no={(body1 or {}).get('revision_no')!r}",
+    )
+    if not leg_id:
+        w.rep.not_run("㊻ ② ～ ⑤", "建段没拿到 leg_id（后面的读侧断言没有锚点）")
+        return
+
+    # ── 写②：改段（必须**留版本**）─────────────────────────────────────
+    st2, body2 = _patch(
+        f"/entrust/assignments/{aid}/legs/{leg_id}",
+        tok,
+        {"to_name": to + "（改）", "change_note": "㊻ 章改段留版本"},
+        f"walk46-update-{aid}-{leg_id}",
+    )
+    hist = api_get(f"/entrust/assignments/{aid}/legs/{leg_id}/revisions", tok) or []
+    kinds = [str((r or {}).get("change_kind") or "") for r in hist]
+    w.rep.rec(
+        "㊻ ② 改段**留版本**（而不是覆盖）：改完之后历史里**两版都在**，"
+        "且第 1 版记的仍是**当时**的到达地（快照，不是回连当前行）",
+        st2 == 200 and len(hist) >= 2 and kinds[0] == "created" and kinds[-1] == "updated",
+        f"HTTP={st2} 历史={len(hist)} 版 kinds={kinds} 第1版到达地={(hist[0].get('to_name') if hist else None)!r}",
+    )
+
+    # ── 读：服务端事实（对照组）─────────────────────────────────────────
+    plan = api_get(f"/entrust/assignments/{aid}/plan", tok) or {}
+    legs_srv = plan.get("legs") or []
+    tasks_srv = plan.get("task_prerequisites") or []
+    mine = [x for x in legs_srv if int((x or {}).get("seq") or 0) == walk_seq]
+
+    if not w.open_workbench(code_mgr, tag="㊻"):
+        w.rep.not_run("㊻ ③ ～ ⑤", "未能以 seed-owner 进入经理工作台")
+        return
+    # 组织显式钉住（`pickOrg` 的 `saved` 分支跨 IDE 重启保留）
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    # 计划是**第二轮并行取数**（`load()` 里与运力块并行）⇒ 必须等到它落到 data，
+    # 否则会把"还没取回来"读成"没有计划"。
+    d = w.wait_data(lambda x: x.get("plan") is not None, tries=60, gap=0.5)
+
+    # ⚠️⚠️ 三条通道**同时**数行数：类选择器 / 裸属性 / 带值属性。
+    # 第一轮只用了裸属性 `[data-plan-leg]`，得 **0**；第二轮三条一起打，结果是：
+    #     段行 按类=1  裸属性=0  值属性=1     （服务端 1 段，hasLegs=True）
+    #     任务行 按类=7 裸属性=0 值属性=—      （服务端 7 条，hasTasks=True）
+    # ⭐ 结论：**这个工具链的 `querySelectorAll` 不认「裸属性选择器」`[attr]`** ——
+    #    `[attr="值"]` 认、类选择器认，而**不带 `=值` 的 `[attr]` 静默回 0**
+    #    （不是报错、不是 -1 ⇒ 与"元素不存在"同形）。
+    #    ㊺ 章一直用**带值**选择器（`[data-act-cap-open="1"]`），所以这条一直没暴露。
+    # ⇒ 走查里**禁止**用裸属性选择器数个数：要么带值（推荐，顺带验了锚点值），
+    #    要么用类名。否则 `count('[data-xxx]')` 恒为 0 ——
+    #    而反向写法（断言"不该有"）会**恒真**，变成假绿。
+    n_leg_cls = w.c.count(".plan-leg")
+    n_leg_attr = w.c.count("[data-plan-leg]")
+    n_leg_val = w.c.count(f'[data-plan-leg="{walk_seq}"]')
+    pl = d.get("plan") or {}
+    w.rep.rec(
+        "㊻ ③ 运输计划卡**真的渲染**：段行数 = 服务端段数（判据落渲染树，不看内部状态键）",
+        n_leg_cls == len(legs_srv) and n_leg_cls >= 1,
+        f"段行 按类={n_leg_cls} 裸属性={n_leg_attr} 值属性={n_leg_val}"
+        f" 服务端段数={len(legs_srv)} hasLegs={pl.get('hasLegs')!r}"
+        f" data.legs={len(pl.get('legs') or [])}",
+    )
+    ui_mine = [x for x in (pl.get("legs") or []) if str((x or {}).get("seqText")) == str(walk_seq)][
+        :1
+    ]
+    w.rep.rec(
+        "㊻ ④ 页面读到的那一段与**服务端事实**同源，且**未登记的运输方式原样回显**"
+        "（`air` ⇒ 显示 `air`，不兜底成「公路」）",
+        bool(ui_mine)
+        and bool(mine)
+        and str(ui_mine[0].get("modeText")) == str(mine[0].get("mode_label") or "")
+        and str(ui_mine[0].get("modeText")) == mode_raw
+        and str(ui_mine[0].get("routeText") or "").find(frm) >= 0,
+        f"页面段={ui_mine[0] if ui_mine else None!r} 服务端方式标签={[x.get('mode_label') for x in mine]!r}",
+    )
+    n_task_cls = w.c.count(".plan-task")
+    n_task_attr = w.c.count("[data-plan-task]")
+    n_pre_cls = w.c.count(".plan-task-pre")
+    n_pre_attr = w.c.count("[data-plan-task-pre]")
+    w.rep.rec(
+        "㊻ ⑤ 必需任务与**前置**逐行渲染（每一条任务行都带一行前置说明："
+        "「无固定前置」或有具体前置 —— 判不了的那一格也必须自己说话）",
+        n_task_cls == len(tasks_srv) and n_task_cls >= 1 and n_pre_cls == n_task_cls,
+        f"任务行 按类={n_task_cls} 裸属性={n_task_attr}（服务端 {len(tasks_srv)}）"
+        f" hasTasks={pl.get('hasTasks')!r}｜前置行 按类={n_pre_cls} 裸属性={n_pre_attr}",
+    )
+
+    w.shot("㊻-运输计划卡")
+    errs = w.new_errors(err_base)
+    w.rep.rec(
+        "㊻ ⑥ 本章运行期**无新增 console 报错**",
+        not errs.strip(),
+        (errs.strip()[:300] if errs.strip() else "无"),
+    )
+    w.rep.limitation(
+        "㊻ ⑦ 「经**界面**建段/改段」",
+        "写侧界面**尚未实现**（§7.22 如实登记）⇒ 本章的写操作全部经 API。"
+        "这一格**不是**「界面能建段」的证据；等写侧界面上线后另起章节取证。",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
     "44": sec_44,
     "45": sec_45,
+    "46": sec_46,
     "0": sec_00,
     "1": sec_01,
     "2": sec_02,
@@ -8762,6 +9059,13 @@ DEFAULT_ORDER = [
     #    + 4 行判定）。临时库跑完即弃；共享库上重跑会因候选累积而仍成立（断言按
     #    本次唯一的承运人名定位），但会在库里留下痕迹。
     "45",
+    # ㊻ 运输计划（合同 §10.1 第 4 步）——设备侧运行取证。
+    # ⚠️ **自足**：只依赖 `seed_entrust_demo.py` 的组织与委托 `演示委托·工作台样本`，
+    #    刻意不依赖其它章节 ⇒ 可单跑：`--section 46`。
+    # ⚠️ **写侧界面不存在**（§7.22）：本章的写操作**经 API**、界面侧只验渲染；
+    #    「经界面建段」记 `LIMITATION`，**不计入通过**。
+    # ⚠️ 副作用：会真建 1 段航段 + 1 条版本历史（`seq=88`，种子不占用）。临时库跑完即弃。
+    "46",
 ]
 
 
@@ -8904,11 +9208,16 @@ def main() -> int:
     ):
         if bucket:
             print(
-                f"[{label}] " + " ｜ ".join(x.replace("\n", " ")[:300] for x in bucket), flush=True
+                f"[{label}] " + " ｜ ".join(x.replace("\n", " ")[:300] for x in bucket),
+                flush=True,
             )
     if not (open_delta or biz_delta) and not collect_failed:
         print("[运行期 console error] 本轮增量：(无)", flush=True)
-    print("[console·原文（本轮增量）]", (open_delta + biz_delta)[:900] or "(空)", flush=True)
+    print(
+        "[console·原文（本轮增量）]",
+        (open_delta + biz_delta)[:900] or "(空)",
+        flush=True,
+    )
 
     unattributed = open_unwaived + biz_unwaived
     if collect_failed:
