@@ -316,6 +316,35 @@ const WALK_ANCHORS = [
   // 先渲染的那一块（经理入口）上，把断言建立在"它恰好先出现"这个巧合上。
   { kind: 'act', file: 'pages/mine/mine.wxml', class: 'entrust-entry',
     attr: 'data-act-mine-entrust', value: '1', handler: 'onMineEntrust' },
+  // ㊸ 主演示第 1–3 步（合同 §10.1）：会话屏与成果页的**关键动作**锚点。
+  // ⚠️ 这些不是"顺手加个属性"。㊸ 章要在这两页真实点击走完「上传 → 引用 → 采纳 →
+  //    更正 → 从工作台打开同一份成果」，而走查工具**没有 index 参数**：
+  //    同类元素（`.att-btn` 三个、`.btn-primary` 两个、`.confirm-ok` 多处）只能靠
+  //    可区分属性才能点到指定那一个。若不登记，下一次改模板把它们弄丢时不会有任何提示
+  //    —— 走查会在真机上退化成"点不到"，看起来像功能坏了。
+  { kind: 'act', file: 'pages/entrust/session/session.wxml', class: 'att-upload',
+    attr: 'data-act-pick-quote', value: '1', handler: 'onPickQuote' },
+  { kind: 'act', file: 'pages/entrust/session/session.wxml', class: 'att-sample',
+    attr: 'data-act-sample-quote', value: '1', handler: 'onUseSampleQuote' },
+  { kind: 'act', file: 'pages/entrust/session/session.wxml', class: 'att-btn',
+    attr: 'data-act-use-attachment', value: '1', handler: 'onUseAttachment' },
+  { kind: 'act', file: 'pages/entrust/session/session.wxml', class: 'adopt-btn',
+    attr: 'data-act-adopt', value: '1', handler: 'onAdoptAsk' },
+  { kind: 'act', file: 'pages/entrust/session/session.wxml', class: 'confirm-ok',
+    attr: 'data-act-adopt-confirm', value: '1', handler: 'onAdoptConfirm' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-primary',
+    attr: 'data-act-edit', value: '1', handler: 'onEdit' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-primary',
+    attr: 'data-act-save', value: '1', handler: 'onSave' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-ghost',
+    attr: 'data-act-cancel-edit', value: '1', handler: 'onCancelEdit' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'slot-btn',
+    attr: 'data-act-confirm-revision', value: '1', handler: 'onConfirm' },
+  // 确认条本体（页内）：`wx.showModal` 的确认键工具点不到，故确认动作走页内。
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-primary',
+    attr: 'data-act-confirm-revision-submit', value: '1', handler: 'onConfirmSubmit' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-ghost',
+    attr: 'data-act-confirm-revision-cancel', value: '1', handler: 'onConfirmCancel' },
 ]
 
 // 把 wxml 切成「标签」块：先剥掉注释（注释里的撇号会被当成引号，导致整个标签块
