@@ -413,6 +413,70 @@
   background: #B45309;
 }
 
+/* ---- 运输计划（三段航段）与必需任务前置（合同 §10.1 第 4 步）----
+   段与任务都**按行**渲染：段数是行的属性，样式只管"一行长什么样"，
+   不在样式层表达"一共三段"（那会让改数据变成改样式）。 */
+.plan-leg {
+  display: flex;
+  align-items: center;
+  margin-top: 12rpx;
+  padding: 12rpx 16rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 12rpx;
+  background: #FFFFFF;
+}
+
+.plan-leg-seq {
+  width: 36rpx;
+  font-size: 24rpx;
+  color: #6B7A8C;
+}
+
+.plan-leg-mode {
+  margin-right: 12rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  color: #0F2540;
+  background: #EEF2F8;
+}
+
+.plan-leg-route {
+  flex: 1;
+  font-size: 26rpx;
+  color: #0F2540;
+}
+
+.plan-task-head {
+  margin-top: 24rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.plan-task {
+  margin-top: 12rpx;
+  padding: 12rpx 16rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 12rpx;
+  background: #FFFFFF;
+}
+
+.plan-task-title {
+  font-size: 26rpx;
+  color: #0F2540;
+}
+
+/* 前置就是"必需任务前置"要看的**判据**，所以单独成行、不与状态挤在一处：
+   没有前置时写「无固定前置」，解析不到标题时写「前置：任务 #<id>」——
+   两种说法必须分得开（见 utils/entrust.js 的 decorateAssignmentPlan 第 3 条）。 */
+.plan-task-pre {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 23rpx;
+  color: #6B7A8C;
+}
+
 /* ---- 本页 hover 反馈 ----
    `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */

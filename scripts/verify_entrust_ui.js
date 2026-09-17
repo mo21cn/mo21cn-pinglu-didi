@@ -2942,6 +2942,83 @@ KEY_TYPE_PAIRS.forEach((p) => {
   )
 })
 
+// ─────────────────────────────────────────────────────────────
+// 13. 运输计划与必需任务前置（合同 §10.1 第 4 步 / BP-03 第 1 条）
+//
+// 本节钉的是**投影的三条取向**，不是"函数存在"：
+//   · 只搬运不推导（段数 = 行数，服务端与投影都不拼"三段"这类结论）；
+//   · 未知保持未知（未登记的 `mode` 原样显示，不兜底成"公路"）；
+//   · 判不了的那一格必须自己说话（"没有前置"≠"前置指向谁不知道"，两种说法必须分得开）。
+// 第 5 节已顺带覆盖"类名有定义 / 解构导入都有导出 / 页面已注册"，此处不重复。
+// ─────────────────────────────────────────────────────────────
+const planProj = E.decorateAssignmentPlan({
+  assignment_id: 7,
+  legs: [
+    { leg_id: 1, seq: 1, mode: 'road', mode_label: '公路', from_name: '厂区', to_name: '南宁港' },
+    { leg_id: 2, seq: 2, mode: 'air', mode_label: 'air', from_name: '南宁港', to_name: '贵港港' },
+  ],
+  task_prerequisites: [
+    { task_id: 11, task_type: 'quote', title: '取两家报价', status: 'pending',
+      precondition_task_id: null },
+    { task_id: 12, task_type: 'purchase', title: '采购确认', status: 'done',
+      precondition_task_id: 11 },
+    { task_id: 13, task_type: 'contract', title: '出合同', status: 'pending',
+      precondition_task_id: 99 },
+  ],
+})
+const planEmpty = E.decorateAssignmentPlan({})
+const planNull = E.decorateAssignmentPlan(null)
+
+check('[计划] decorateAssignmentPlan 是纯函数（不碰 wx；`null` 入参也不抛）',
+  typeof E.decorateAssignmentPlan === 'function' && !!planNull && planNull.legs.length === 0)
+
+check('[计划] 每一段只拼**自己**的起终点（不是"整条链" —— 链是行间关系）',
+  planProj.legs[0].routeText === '厂区 → 南宁港',
+  '实际 ' + JSON.stringify(planProj.legs[0].routeText))
+
+check('[计划] modeText **只搬运**服务端的 mode_label：未登记取值原样显示，不兜底成"公路"',
+  planProj.legs[0].modeText === '公路' && planProj.legs[1].modeText === 'air',
+  '实际 ' + JSON.stringify([planProj.legs[0].modeText, planProj.legs[1].modeText]))
+
+check('[计划] 没有前置（服务端 null）⇒ 「无固定前置」',
+  planProj.tasks[0].preText === '无固定前置',
+  '实际 ' + JSON.stringify(planProj.tasks[0].preText))
+
+check('[计划] 有前置 ⇒ 解析出**标题**（人读的是标题，不是 id）',
+  planProj.tasks[1].preText === '前置：取两家报价',
+  '实际 ' + JSON.stringify(planProj.tasks[1].preText))
+
+check('[计划] ⭐ 前置指到本单清单之外 ⇒ 退回 `任务 #<id>`，**不编标题也不留空**',
+  planProj.tasks[2].preText === '前置：任务 #99',
+  '实际 ' + JSON.stringify(planProj.tasks[2].preText))
+
+check('[计划] ⭐「无固定前置」与「前置：任务 #99」**两种说法不同**' +
+  '（否则"没有前置"会被读成"前置不知道是谁"）',
+  planProj.tasks[0].preText !== planProj.tasks[2].preText)
+
+check('[计划] 每一行任务都必须有一句前置文案（判不了的那一格必须自己说话）',
+  planProj.tasks.every((t) => !!t.preText),
+  '实际 ' + JSON.stringify(planProj.tasks.map((t) => t.preText)))
+
+check('[计划] 状态取 TASK_STATUS_LABELS；未登记状态原样回，不臆造成"待开始"',
+  planProj.tasks[1].statusText === E.TASK_STATUS_LABELS.done &&
+    E.decorateAssignmentPlan({ task_prerequisites: [{ task_id: 1, title: 'x', status: 'zzz' }] })
+      .tasks[0].statusText === 'zzz')
+
+check('[计划] 两种空态各自成态（`hasLegs` / `hasTasks` 分别判 —— ' +
+  '"没有计划"要落方案、"没有任务"要派单，处置不同）',
+  planEmpty.legs.length === 0 && planEmpty.tasks.length === 0 &&
+    planEmpty.hasLegs === false && planEmpty.hasTasks === false,
+  '实际 ' + JSON.stringify([planEmpty.legs.length, planEmpty.tasks.length,
+    planEmpty.hasLegs, planEmpty.hasTasks]))
+
+// 模板接线：三个行锚点必须真的在模板里，否则 WALK_ANCHORS 的登记会在
+// `verify_miniapp.js` 里红（那是同一个事实的第二道检查，这里明写更好定位）。
+const detailTpl = read(path.join(MINI, 'pages/entrust/detail/detail.wxml'))
+;['data-plan-leg', 'data-plan-task', 'data-plan-task-pre'].forEach(function (attr) {
+  check(`[计划] 模板 detail.wxml 里有行锚点 ${attr}`, detailTpl.indexOf(attr) !== -1)
+})
+
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)
 if (errors.length) {

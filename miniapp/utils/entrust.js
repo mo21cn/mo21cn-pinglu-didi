@@ -4023,6 +4023,75 @@ function confirmCapacity(assignmentId, body, idempotencyKey) {
   })
 }
 
+// ── 运输计划（三段航段）与必需任务前置（BP-03 第 1 条 / 合同 §10.1 第 4 步）──
+//
+// 一条取数：`GET /assignments/{aid}/plan` 回 `legs` + `task_prerequisites`。
+//
+// ⚠️ 服务端**不产出**"三段""公路—内河—公路"这类结论性文案 —— 段数是**行**的属性 ——
+//    所以投影也**不拼**它：这里只把**每一段自己的**展示串拼好，段与段之间的关系
+//    由模板按行渲染。拼成一句话就多一个会与数据脱节的落点。
+//
+// ⚠️ 与运力块**取向相反**：这一块**客户侧也取数、也显示**（后端那条读通道
+//    `assert_can_view_assignment` 给货主本人放行）—— 航段是客户自己交进来的起讫路线，
+//    而承运人 / 单价 / 缺口那些内部成本口径在运力那组。判据是**数据**，不是**身份**。
+
+/** 该委托的三段计划 + 必需任务与固定前置。 */
+function fetchAssignmentPlan(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/plan', method: 'GET' })
+}
+
+/**
+ * 计划投影：航段逐段成行 + 必需任务（含**固定前置**的可读指向）。
+ *
+ * 四条处置：
+ * 1. `modeText` **只搬运**服务端的 `mode_label`（未登记取值时它等于原始 `mode` ——
+ *    界面上出现一个陌生的英文标识，好过被硬塞进"公路"）；
+ * 2. `routeText` 拼的是**这一段的**起终点，不是整条链 —— 整条链是行与行之间的关系；
+ * 3. ⚠️ **前置解析不出来时不猜**：指向本单清单之外（数据异常）就退回
+ *    `前置：任务 #<id>` —— id 是**事实**，标题是**猜的**。而 `precondition_task_id`
+ *    为 `null` 是后端文档写明的**"没有前置"** ⇒ 只有那一种显示「无固定前置」。
+ *    这两种必须长得不一样，否则"没有前置"与"前置指向谁不知道"会被读成同一件事；
+ * 4. **两种空态分别说话**：`legs` 为空 ⇒「本单还没有结构化运输计划」；
+ *    `tasks` 为空 ⇒「本单还没有派发任务」。两者的**处置完全不同**（前者要落方案、
+ *    后者要派单），一律显示"暂无数据"会让人不知道该动哪一步。
+ */
+function decorateAssignmentPlan(payload) {
+  const data = payload || {}
+  const legs = (data.legs || []).map(function (leg) {
+    const from = leg.from_name == null ? '' : String(leg.from_name)
+    const to = leg.to_name == null ? '' : String(leg.to_name)
+    return {
+      legId: leg.leg_id == null ? '' : String(leg.leg_id),
+      seqText: leg.seq == null ? '' : String(leg.seq),
+      modeText: leg.mode_label == null ? '' : String(leg.mode_label),
+      routeText: from + ' → ' + to
+    }
+  })
+  const rawTasks = data.task_prerequisites || []
+  // 前置**在本单清单内**解析：解析不到就不编标题（见上第 3 条）
+  const titleById = {}
+  rawTasks.forEach(function (t) {
+    titleById[String(t.task_id)] = t.title == null ? '' : String(t.title)
+  })
+  const tasks = rawTasks.map(function (t) {
+    const preId = t.precondition_task_id == null ? null : String(t.precondition_task_id)
+    const preTitle = preId === null ? '' : titleById[preId] || ''
+    return {
+      taskIdText: t.task_id == null ? '' : String(t.task_id),
+      titleText: t.title == null ? '' : String(t.title),
+      statusText: TASK_STATUS_LABELS[t.status] || (t.status == null ? '' : String(t.status)),
+      preText: preId === null ? '无固定前置' : '前置：' + (preTitle || '任务 #' + preId)
+    }
+  })
+  return {
+    assignmentId: data.assignment_id == null ? '' : String(data.assignment_id),
+    legs: legs,
+    tasks: tasks,
+    hasLegs: legs.length > 0,
+    hasTasks: tasks.length > 0
+  }
+}
+
 // ── 组装成果（人工定版；UI-06 / 计划 §5.2 S3）──────────────────────────────
 
 /**
@@ -4349,6 +4418,7 @@ module.exports = {
   createArtifact,
   decideCase,
   decorateAssignment,
+  decorateAssignmentPlan,
   decorateAttachment,
   decorateArtifact,
   decorateCase,
@@ -4377,6 +4447,7 @@ module.exports = {
   fetchArtifactCandidates,
   fetchArtifactTypes,
   fetchAssignment,
+  fetchAssignmentPlan,
   fetchCapacityCandidates,
   fetchCapacityConfirmation,
   fetchCapacityConfirmations,

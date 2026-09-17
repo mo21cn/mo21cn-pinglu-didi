@@ -268,6 +268,19 @@ const WALK_ANCHORS = [
     value: '{{item.candidateId}}', handler: 'onCancelCapConfirm' },
   { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-recheck',
     value: '{{item.confirmationId}}', handler: 'onCapRecheck' },
+  // 运输计划（三段航段）与必需任务前置（合同 §10.1 第 4 步；BP-03 第 1 条）。
+  // 三个**行**锚点，判据都是"渲染树里数得出来的事实"：
+  //   * 段数 = 段的行数（模板**不拼**"三段" —— 段数是数据的属性）；
+  //   * 任务数 = 派单事实；前置文案是"必需任务前置"这一条要看的**判据本身**，
+  //     且「无固定前置」与「前置：任务 #<id>」两种说法必须分得开（见 `decorateAssignmentPlan`）。
+  // ⚠️ 本组是**先登记、走查章节还没写**（与 §7.16 条目 126 同一处境）：
+  //    登记不等于取证 —— 计一档"已实现"，不计"已设备运行"。
+  { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'plan-leg',
+    attr: 'data-plan-leg', value: '{{item.seqText}}' },
+  { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'plan-task',
+    attr: 'data-plan-task', value: '{{item.taskIdText}}' },
+  { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'plan-task-pre',
+    attr: 'data-plan-task-pre', value: '{{item.preText}}' },
   // 页内输入框（文本靠 setData 注值，见走查脚本的声明），与案件页的 `act-input`+`data-df` 同形
   { kind: 'static', file: 'pages/entrust/detail/detail.wxml', class: 'slot-input', attr: 'data-df' },
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-toggle-links',
