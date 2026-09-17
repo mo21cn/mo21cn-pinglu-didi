@@ -539,3 +539,75 @@
   font-size: 26rpx;
   color: #4a4a4a;
 }
+
+/* 附件行的文本来源标记（机读提取 / 人工转录）。
+   它决定"重抽要不要先问"——所以不能省：省了用户就是在不知情下覆盖掉人写的内容。 */
+.att-src {
+  margin-left: 14rpx;
+  font-size: 23rpx;
+  color: #8a8a8a;
+}
+
+/* 多个动作按钮同行时的间距 */
+.att-btn + .att-btn {
+  margin-left: 12rpx;
+}
+
+/* 人工转录录入框 */
+.transcribe-input {
+  width: 100%;
+  min-height: 160rpx;
+  margin: 12rpx 0 4rpx;
+  padding: 12rpx;
+  box-sizing: border-box;
+  border: 1rpx solid #dcdce0;
+  border-radius: 8rpx;
+  background: #ffffff;
+  font-size: 25rpx;
+  color: #1a1a1a;
+}
+
+/* 来源行与未核验警告。
+   「附件」与「附件文本」在界面上必须是两种不同的东西：前者=附件存在，
+   后者=文本被读进来了。合成一个"来源"笼统显示，等于替 Agent 把"读了"说成"有"。 */
+.src-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 10rpx;
+}
+
+.src-label {
+  margin-right: 10rpx;
+  font-size: 23rpx;
+  color: #8a8a8a;
+}
+
+.src-chip {
+  margin: 0 10rpx 6rpx 0;
+  padding: 4rpx 12rpx;
+  border-radius: 6rpx;
+  background: #f0f0f2;
+  font-size: 22rpx;
+  color: #4a4a4a;
+}
+
+.src-warn {
+  margin-top: 10rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 8rpx;
+  background: #fdecec;
+}
+
+.src-warn-title {
+  display: block;
+  font-size: 24rpx;
+  color: #c0392b;
+}
+
+.src-warn-text {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  color: #c0392b;
+}

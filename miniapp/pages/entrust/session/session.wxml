@@ -83,18 +83,59 @@
           </view>
           <view class="att-meta">
             <text class="att-status">{{item.extractLabel}}</text>
+            <text class="att-src">文本来源：{{item.textSourceLabel}}</text>
           </view>
           <view class="att-hint-row">
             <text class="att-hint">{{item.referenceHint}}</text>
           </view>
 
-          <view wx:if="{{item.canReference}}" class="att-actions">
+          <!-- 三个动作各自带条件：可引用（有文本）/ 重抽 / 人工转录。
+               条件写在**子元素**上，不写在这个 wx:for 的元素上（编译禁形）。 -->
+          <view class="att-actions">
             <view
+              wx:if="{{item.canReference}}"
               class="att-btn"
               data-attachment_id="{{item.attachmentId}}"
               hover-class="hover-dim"
               bindtap="onUseAttachment"
             >让 Agent 解析这份报价单</view>
+            <view
+              class="att-btn"
+              data-attachment_id="{{item.attachmentId}}"
+              hover-class="hover-dim"
+              bindtap="onReextractAsk"
+            >{{item.extractStatus === 'not_requested' ? '提取文本' : '重新提取'}}</view>
+            <view
+              wx:if="{{item.canTranscribe}}"
+              class="att-btn"
+              data-attachment_id="{{item.attachmentId}}"
+              hover-class="hover-dim"
+              bindtap="onTranscribeOpen"
+            >人工转录</view>
+          </view>
+
+          <!-- 重抽前先问一句：这份文本是人工转录的，覆盖不可恢复 -->
+          <view wx:if="{{reextractId === item.attachmentId}}" class="confirm-bar">
+            <text class="confirm-text">这份附件的文本来自人工转录，重新提取会覆盖它且不可恢复（提取失败时还会删掉）。确认覆盖？</text>
+            <view class="confirm-actions">
+              <view class="confirm-cancel" bindtap="onReextractCancel">取消</view>
+              <view class="confirm-ok" bindtap="onReextractConfirm">确认重抽</view>
+            </view>
+          </view>
+
+          <!-- 人工转录录入（图片/扫描件的降级通道） -->
+          <view wx:if="{{transcribeId === item.attachmentId}}" class="confirm-bar">
+            <text class="confirm-text">人工转录：把这份文件的内容抄进来。提交后来源标记为「人工转录」，Agent 就能读到它。</text>
+            <textarea
+              class="transcribe-input"
+              value="{{transcribeDraft}}"
+              bindinput="onTranscribeInput"
+              placeholder="粘贴或输入报价单内容"
+            />
+            <view class="confirm-actions">
+              <view class="confirm-cancel" bindtap="onTranscribeCancel">取消</view>
+              <view class="confirm-ok" bindtap="onTranscribeSubmit">提交转录</view>
+            </view>
           </view>
         </view>
       </block>
@@ -152,6 +193,29 @@
             <text class="job-mock-text">fixture 输出（LLM_MOCK），不是真实模型结果</text>
           </view>
 
+          <!-- 来源（HO 0917-3 裁定二第 3 条）。
+               ⚠️「附件」与「附件文本」必须分开显示：前者说"这个附件存在"，
+               后者说"它的文本被读进来了"—— 画成一个样子等于替 Agent 把
+               "读了"说成"有"。 -->
+          <block wx:if="{{item.sources.length > 0}}">
+            <view class="src-row">
+              <text class="src-label">来源</text>
+              <block wx:for="{{item.sources}}" wx:key="key" wx:for-item="src">
+                <text class="src-chip">{{src.text}}</text>
+              </block>
+            </view>
+          </block>
+
+          <!-- 服务端**核不上**的引用（含 findings 内的嵌套引用）⇒ 必须警示 -->
+          <block wx:if="{{item.unverified.length > 0}}">
+            <view class="src-warn">
+              <text class="src-warn-title">以下来源在服务端核不上，采纳前请先核对</text>
+              <block wx:for="{{item.unverified}}" wx:key="key" wx:for-item="uv">
+                <text class="src-warn-text">· {{uv.text}}</text>
+              </block>
+            </view>
+          </block>
+
           <!-- 提案内容（类型化）。⚠️ 条件与循环分两层：外层 wx:if 的 block 只做判断，
                内层 block 只做循环 —— 写在同一个元素上会让 wx:else 绑不到 wx:if。 -->
           <block wx:if="{{item.proposalCount > 0}}">
@@ -171,6 +235,11 @@
 
                 <view wx:if="{{prop.note}}" class="prop-note">
                   <text class="prop-note-text">{{prop.note}}</text>
+                </view>
+
+                <!-- 采纳不等于已核实：有核不上的来源时，采纳条上也要说清 -->
+                <view wx:if="{{item.unverified.length > 0}}" class="src-warn">
+                  <text class="src-warn-text">采纳不等于已核实：这份提案有 {{item.unverified.length}} 条来源核不上，采纳后仍是待核对草稿</text>
                 </view>
 
                 <view
