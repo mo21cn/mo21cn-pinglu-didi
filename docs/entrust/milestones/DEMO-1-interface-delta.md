@@ -470,4 +470,16 @@ mypy 109 files；ruff 146 files）、CI 的「前端端到端」job 本地复现
 脚本看到 rc=1 而迁移其实成功（CI 是 Linux/UTF-8，不受影响）⇒ 本地复现要带
 `PYTHONIOENCODING=utf-8`（走查 runner 早已如此处理：`run_walkthrough_devtools.py:152`）。
 
+⚠️ **新踩到一道不在 13 项里的门禁：CI 的「后端 lint + test」job 第 8 步对根脚本 `scripts/*.py`
+跑 `ruff check` ＋ `ruff format --check`**，且显式带 `--config backend/pyproject.toml`。两个要点：
+① **不带 `--config` 时本机默认规则集只报 6 条、带上后同一份代码现出 9 条**（`N806` ×6 /
+`UP017` / `B905` ×2，**全部出在新增的 `sec_45`**）⇒ 本地 lint 绿不代表 CI 绿；
+② 该步还查"根脚本必须已纳入 lint 或已登记豁免"的**登记完整性**。
+⇒ **13/13 全绿仍会 CI 红**（本 PR 实证：唯一失败项、29s）。修法是纯惰性改动：id → 小写、
+删局部 `DETAIL` 复用模块级同值常量、`_dt.timezone.utc` → `_dt.UTC`、`zip` 补 `strict=True`、
+按 CI 规则重排 7 处换行（全落在 `sec_45` 区间内）。
+⭐ **修完复跑证据**：㊺ 章第 6 轮（`walk-20260917-220518`）与第 5 轮读数**归一化后逐行完全相同**
+（只归一会话内必然变化的三项：`pageId` / 探针耗时 / 输入框里的时间戳串）⇒
+那 22 条读数不是"某一次碰巧跑出来的"，改名与格式化对判定**无影响**。
+
 
