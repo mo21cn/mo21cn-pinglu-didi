@@ -1116,3 +1116,196 @@ def test_contract_derivation_race_exactly_one_contract(mysql):
             )
         finally:
             verify.close()
+
+
+# ────────────────────────────── S3 运力确认并发（BP-03 第 3 条 / D1-06）
+
+
+def _seed_candidate_for_race(
+    db, *, owner_id: int = 970, manager_id: int = 971
+) -> tuple[int, int, int]:
+    """播种一条**可确认**的候选运力，返回 `(assignment_id, candidate_id, entrustment_id)`。
+
+    候选走**生产同一条命令**（`capacity.record_candidate`），不是手写 INSERT ——
+    手写的话，一旦登记命令的写入逻辑变了（比如吨位规范化改了），这条并发用例
+    会继续绿着而实际已经失效（与上面两条同一纪律）。
+
+    有效期取"今天 +90 天"而不是写死日期：写死会让这条用例在某一天之后自动变成
+    "过期 ⇒ 判定不通过"的场景，而那时失败信息看起来像并发缺陷。
+    """
+    from datetime import timedelta
+
+    from app.modules.entrust import capacity as cap
+
+    ts = utcnow_naive().strftime(_TS)
+    org_id = int(
+        db.execute(
+            text("INSERT INTO ent_organization (name, status, created_at) VALUES (:n,'active',:c)"),
+            {"n": _unique("运力确认并发组织"), "c": ts},
+        ).lastrowid
+        or 0
+    )
+    db.execute(
+        text(
+            "INSERT INTO ent_org_member (org_id, user_id, member_role, status, created_at) "
+            "VALUES (:o, :u, 'manager', 'active', :c)"
+        ),
+        {"o": org_id, "u": manager_id, "c": ts},
+    )
+    eid = int(
+        db.execute(
+            text(
+                "INSERT INTO ent_entrustment (org_id, entrust_user_id, permissions, status, created_at) "
+                "VALUES (:o, :u, :p, 'active', :c)"
+            ),
+            {
+                "o": org_id,
+                "u": owner_id,
+                "p": '["entrust:view","entrust:quote:create","entrust:quote:publish"]',
+                "c": ts,
+            },
+        ).lastrowid
+        or 0
+    )
+    aid = int(
+        db.execute(
+            text(
+                "INSERT INTO ent_assignment (owner_user_id, org_id, title, cargo_summary, quantity, "
+                " quantity_unit, status, revision, created_at, updated_at) "
+                "VALUES (:o, :g, :t, '钢材', 800.000, '吨', 'claimed', 1, :c, :c)"
+            ),
+            {"o": owner_id, "g": org_id, "t": _unique("运力确认并发委托"), "c": ts},
+        ).lastrowid
+        or 0
+    )
+    db.commit()
+    candidate = cap.record_candidate(
+        db,
+        assignment_id=aid,
+        actor_user_id=manager_id,
+        carrier="桂平航 6688",
+        capacity_tonnes="900.000",
+        vessel_count=1,
+        allows_partial_load=False,
+        rate="45.00",
+        rate_unit="吨",
+        currency="CNY",
+        valid_until=(cap.today_utc() + timedelta(days=90)).isoformat(),
+        evidence_kind="document",
+        evidence_ref="att:race",
+    )
+    return aid, int(candidate["candidate_id"]), eid
+
+
+def test_capacity_confirmation_race_exactly_one_confirmation(mysql):
+    """两个确认请求同时到达同一个候选 ⇒ 恰好一个成功，库里恰好**一条**确认与**一套**判定。
+
+    判据是 `ent_capacity_confirmation` 上的 `UNIQUE (candidate_id)`。这条尤其需要真 MySQL：
+
+    * 确认**一次写四张表**（采购确认成果 / 成果版本 / 确认记录 / 逐规则判定）。靠"先查后写"
+      判重，并发下会确认两次，而两条都"看起来"合法 —— 于是**同一条运力被确认了两遍**，
+      各自的判定行也各写一套；
+    * 更硬的理由：确认除确认行外还写了**一份成果**（`procurement_confirm`）。两份成果
+      意味着"同一条候选运力"有两条独立的采购确认版本链，`recheck` 与后续的复核、
+      变更影响都会面对"哪一条才是那次确认"这个问题，而它无从回答。
+
+    SQLite 整库一把写锁，两线程必然串行，怎么跑都只有一个赢家，**证明不了任何事**，
+    所以这条只能放在本模块（与客户响应并发、合同派生并发同一条理由）。
+    """
+    from app.modules.entrust import capacity as cap
+
+    owner_id = 970
+    manager_id = 971
+    for round_no in range(_ROUNDS):
+        db = mysql()
+        aid, candidate_id, eid = _seed_candidate_for_race(
+            db, owner_id=owner_id, manager_id=manager_id
+        )
+        db.close()
+
+        start = threading.Barrier(2)
+        outcomes: list[tuple[str, str]] = []
+
+        def confirm(
+            *, start=start, aid=aid, candidate_id=candidate_id, eid=eid, outcomes=outcomes
+        ) -> None:
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                try:
+                    got = cap.confirm_capacity(
+                        session,
+                        assignment_id=aid,
+                        candidate_id=candidate_id,
+                        actor_user_id=manager_id,
+                        agreed_scope="南宁→贵港 水运段 900 吨舱位",
+                        entrustment_id=eid,
+                    )
+                    outcomes.append(("won", str(got["confirmation_id"])))
+                except Exception as exc:  # noqa: BLE001 —— 输家的**具体形态**要记录，不掩盖
+                    outcomes.append(("lost", f"{type(exc).__name__}: {exc}"))
+            finally:
+                session.close()
+
+        t1 = threading.Thread(target=confirm)
+        t2 = threading.Thread(target=confirm)
+        t1.start()
+        t2.start()
+        t1.join(timeout=60)
+        t2.join(timeout=60)
+
+        assert len(outcomes) == 2, f"第 {round_no} 轮有线程未完成: {outcomes}"
+        won = [o for o in outcomes if o[0] == "won"]
+        lost = [o for o in outcomes if o[0] == "lost"]
+        assert len(won) == 1, f"第 {round_no} 轮赢家数错误（同一候选被确认了多次）: {outcomes}"
+        # 输家必须是**业务态**（CapacityStateError ⇒ HTTP 409），不能是裸的
+        # IntegrityError / OperationalError —— 后者会变成 500，而"并发时偶发 500"
+        # 在演示里会被读成系统不稳，实际是唯一约束没被翻译。不掩盖具体形态。
+        assert lost[0][1].startswith("CapacityStateError"), (
+            f"第 {round_no} 轮输家的异常形态不对（应为 CapacityStateError）：{lost[0][1]}"
+        )
+
+        # ⚠️ 跨会话读取：MySQL 默认 REPEATABLE READ，同一个会话读过一次之后事务就一直开着，
+        #    后续读落在同一个快照上。终局一律用**新开的会话**去读（与上面两条同一纪律）。
+        verify = mysql()
+        try:
+            row = (
+                verify.execute(
+                    text(
+                        "SELECT COUNT(*) AS n FROM ent_capacity_confirmation "
+                        "WHERE candidate_id = :c"
+                    ),
+                    {"c": candidate_id},
+                )
+                .mappings()
+                .first()
+            )
+            assert int(row["n"]) == 1, (
+                f"第 {round_no} 轮库里出现了 {row['n']} 条确认记录 —— "
+                "唯一约束没兜住，同一候选被确认了多次"
+            )
+            checks = verify.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM ent_capacity_rule_check k "
+                    "JOIN ent_capacity_confirmation c ON c.id = k.confirmation_id "
+                    "WHERE c.candidate_id = :c"
+                ),
+                {"c": candidate_id},
+            ).scalar()
+            assert int(checks) == len(cap.ALL_RULE_CODES), (
+                f"第 {round_no} 轮判定行数为 {checks}（应为 {len(cap.ALL_RULE_CODES)}）—— "
+                "要么规则没跑全，要么确认被写了两遍"
+            )
+            artifacts = verify.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM ent_artifact WHERE assignment_id = :a "
+                    "AND artifact_type = 'procurement_confirm'"
+                ),
+                {"a": aid},
+            ).scalar()
+            assert int(artifacts) == 1, (
+                f"第 {round_no} 轮库里出现了 {artifacts} 份采购确认成果 —— "
+                "并发下同一候选产出了两条独立版本链，事后无法判断哪条是那次确认"
+            )
+        finally:
+            verify.close()
