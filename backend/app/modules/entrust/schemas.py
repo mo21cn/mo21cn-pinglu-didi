@@ -1235,3 +1235,86 @@ def offer_response_out(data: dict[str, Any]) -> OfferResponseOut:
 
 def source_check_out(data: dict[str, Any]) -> SourceCheckOut:
     return SourceCheckOut.model_validate(data)
+
+
+# ── 合同派生（contracts_api.py / S3 / BP-03 第 8 条 / D1-08）────────────────
+#
+# ⚠️ 这里**故意没有**"客户视角"的合同响应模型。客户要看合同走的是**已有的发布通路**
+# （把这份 `contract_review` 发布出去，客户在 `/my-offer-releases` 读冻结快照）——
+# 字段来源表里带 `release:12@v3` / `leg:4` 这类内部编号，那是审计信息。
+# 为"客户看合同"新开一条通道会让"客户能看到什么"变成两个判据
+# （与 §6.3 的白名单下载同一条纪律：能下什么由**发布那一刻**决定）。
+
+
+class ContractDeriveIn(BaseModel):
+    """派生请求体。**整个请求体可选** —— 派生不需要调用方提供任何业务参数。
+
+    为什么不强制一个字段：合同内容**不能**由调用方给。它必须完全来自
+    "已接受的那一条发布"（金额、费用范围、有效期）与委托单（当事方）。
+    留一个可选 `note` 只是给经理写一句备注的位置；正文一律由服务端派生。
+    ⛔ 若将来有人想往这里加 `amount` / `parties` 之类的入参，那等于允许手工
+    编造合同条款 —— 与 BP-03 第 8 条"从已接受事实派生"直接冲突，**不要加**。
+    """
+
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ContractFieldSourceOut(BaseModel):
+    """**一行**字段来源：合同里某个字段的值是从哪来的（逐字段可核对的最小单位）。"""
+
+    #: 合同里的字段路径，如 `parties[1].name` / `clauses[0].text` / `effective_date`
+    field_path: str
+    #: 实际写进合同的**字面值**。与合同内容对不上 ⇒ 派生不可信（核对从这里开始）
+    value_text: str
+    #: 来源类别：`accepted_release` / `customer_response` / `assignment` / `leg` /
+    #: `organization` / `template`
+    source_kind: str
+    #: 来源标识（内部编号）。**只在本表出现，不进合同正文**
+    source_ref: str
+
+
+class ContractDerivationOut(BaseModel):
+    """一条派生记录（经理视角）：派生关系 + 逐字段来源 + 如实列出的缺失项。
+
+    D1-08 的判据原文是 `Contract version and linked evidence inspection` ——
+    要能"检查它怎么来的"。所以这里把报价与合同**各自**的精确版本都摆出来，
+    再逐字段给出出处，而不是只回一句"已派生"。
+    """
+
+    derivation_id: int
+    assignment_id: int
+    entrustment_id: int | None = None
+    #: **已接受**的那一条发布；连同下面的精确版本构成"派生自哪份已接受事实"
+    release_id: int
+    response_id: int
+    quote_artifact_id: int
+    quote_revision_id: int
+    quote_revision_no: int
+    #: 派生出的合同成果与其版本
+    contract_artifact_id: int
+    contract_revision_id: int
+    contract_revision_no: int
+    template_code: str
+    template_version: str
+    effective_date: str | None = None
+    derived_by: int
+    derived_at: str
+    note: str | None = None
+    #: 冻结快照里**没有**提供、因而合同未写的报价字段。列出来而不是编默认值 ——
+    #: "这份合同少写了什么"必须能一眼看到。
+    absent_quote_fields: list[str] = Field(default_factory=list)
+    field_sources: list[ContractFieldSourceOut] = Field(default_factory=list)
+
+
+class ContractDerivationCreatedOut(ContractDerivationOut):
+    """派生成功时额外回来源行数，让调用方一眼看到覆盖规模（少一行就说明漏登记）。"""
+
+    field_source_count: int = 0
+
+
+def contract_derivation_out(data: dict[str, Any]) -> ContractDerivationOut:
+    return ContractDerivationOut.model_validate(data)
+
+
+def contract_derivation_created_out(data: dict[str, Any]) -> ContractDerivationCreatedOut:
+    return ContractDerivationCreatedOut.model_validate(data)

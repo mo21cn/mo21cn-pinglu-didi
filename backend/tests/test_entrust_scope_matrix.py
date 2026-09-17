@@ -69,7 +69,7 @@ def test_matrix_keys_are_unique():
 
 
 def test_matrix_size_matches_baseline():
-    """条目数锁定为 63。
+    """条目数锁定为**基线值**（当前 74）。
 
     数量变化本身不是错误，但**必须是有意的**：增删端点时同时改这里，
     强制在 PR 里显式说明"为什么端点集合变了"。
@@ -105,8 +105,15 @@ def test_matrix_size_matches_baseline():
     `authorized_attachment_ids`，清单外 404。有意不复用
     `attachments_api.load_visible_attachment`：客户对整条授权下的附件都有可见性，
     复用会把内部底稿一并开给他（"客户能拿到什么"由**发布那一刻**决定，不由事后可见性决定）。
+    72 → 74（**S3 合同派生**，BP-03 第 8 条 / D1-08）：新增 2 条 ——
+    从已接受发布派生合同核对稿（1）、读派生关系与**逐字段来源表**（2）。
+    ⚠️ 读取那条**刻意不给货主本人放行**（`assert_can_view_org`，没有货主旁路）：
+    字段来源表里是 `release:12@v3` / `leg:4` 这类内部编号，客户看合同走的是
+    **已有的发布通路**（把这份 contract_review 发布出去、读冻结快照）。
+    这是上一轮修掉的那类投影泄漏的**结构性预防**：不是"两个入口判据不一致"，
+    而是"这条通道本就不该有客户面"。
     """
-    assert len(sm.SCOPE_MATRIX) == 72
+    assert len(sm.SCOPE_MATRIX) == 74
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────
