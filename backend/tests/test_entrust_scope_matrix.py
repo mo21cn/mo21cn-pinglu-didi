@@ -153,8 +153,19 @@ def test_matrix_size_matches_baseline():
     状态、其 `UNIQUE (assignment_id, seq)` **一个字不动**
     ⇒ 这也是"另开一张表、而不是给 `ent_leg` 加 `revision_no`"的原因
     （后者要重建表，越过"迁移只增不改"这条线）。
+
+    84 → 86（**合同签署证据**，§10.1 第 7 步后半 / D1-08 的 `linked evidence`；
+    口径正文见 `migrations/ent_contract_signature.py` 的模块文档）：
+
+    * `POST /contracts/{contract_artifact_id}/signature-evidence` —— 就合同的某个版本记一条；
+    * `GET  /contracts/{contract_artifact_id}/signature-evidence` —— 全部版本的清单。
+
+    ⛔ `mode` **不是入参**：恒为 `labeled_sample`，由服务端写死 —— 让调用方能传
+    `mode=live` 就等于让界面自称"已完成电子签署"，与合同 §3.2 / D1-08 直接冲突。
+    两条都**只有经理通道**（与派生同一口径：证据行带内部编号与审计措辞，
+    客户看合同走已有发布通路，不为它新开一条客户面）。
     """
-    assert len(sm.SCOPE_MATRIX) == 84
+    assert len(sm.SCOPE_MATRIX) == 86
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

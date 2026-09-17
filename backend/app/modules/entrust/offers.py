@@ -842,6 +842,15 @@ def project_release_for_manager(
         "assignment_id": release["assignment_id"],
         "entrustment_id": release["entrustment_id"],
         "artifact_id": release["artifact_id"],
+        # ⭐ **成果类型提到顶层**（客户视角早就给了同名字段，见
+        # `project_release_for_customer`）。不提的话它只藏在 `customer_snapshot` 里，
+        # 而客户端要回答「这条发布是不是对客报价」时只有两条路：读快照的内部布局
+        # （类别错误 —— 快照是"客户当初看到的内容"，不是元数据），或者去查成果清单
+        # 再按 artifact_id 对上（多一次请求）。
+        # ⚠️ 2026-09-18 实测的代价：第 7 步的派生前置判据读了一个**不存在**的顶层键
+        #    ⇒ "客户已接受的对客报价"恒为空 ⇒ 界面不给派生、走查整章 NOT_RUN，
+        #    而夹具其实铺好了。读错键名不会报错，只会静默为 0。
+        "artifact_type": release["snapshot"].get("artifact_type"),
         "revision_id": release["revision_id"],
         "revision_no": release["revision_no"],
         "customer_user_id": release["customer_user_id"],

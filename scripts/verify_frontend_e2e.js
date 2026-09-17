@@ -1153,6 +1153,25 @@ function loadPage(file, ctx) {
         // 把它吞成 null ⇒ 版本历史整块不渲染，而脚本毫不知情）。
         fetchLegRevisions: (id, legId) =>
           live('GET', '/entrust/assignments/' + id + '/legs/' + legId + '/revisions'),
+        // 合同派生与签署证据（§10.1 第 7 步 / BP-03 第 8 条 / D1-08）—— 走**真 HTTP**。
+        // ⚠️ 同一条纪律：新增取数函数必须登记。漏登记的后果不是报错而是**静默** ——
+        //    落到真实 `utils/request.js` ⇒ Node 里没有 `wx.request` ⇒ 页面 `.catch`
+        //    把它吞成 null ⇒ 合同块整块不渲染，而脚本毫不知情（把"没渲染"读成"还没派生"）。
+        fetchEntrustmentOfferReleases: (eid) =>
+          live('GET', '/entrust/entrustments/' + eid + '/offer-releases'),
+        fetchContractDerivation: (rid) =>
+          live('GET', '/entrust/offer-releases/' + rid + '/contract'),
+        fetchSignatureEvidence: (aid) =>
+          live('GET', '/entrust/contracts/' + aid + '/signature-evidence'),
+        // 两条写命令与其它写命令**同一条闸门**（只在 WRITE_ENABLED 的段里真发）：
+        // 派生会真的产出一份合同、记证据会真的写一行，在"读"的段里发生它们，
+        // 后面的断言就会拿到一个被自己污染过的世界。
+        deriveContract: (rid, body, key) =>
+          pageWrite('POST', '/entrust/offer-releases/' + rid + '/contract', body, key)
+            .then(rejectIfNotOk),
+        recordSignatureEvidence: (aid, body, key) =>
+          pageWrite('POST', '/entrust/contracts/' + aid + '/signature-evidence', body, key)
+            .then(rejectIfNotOk),
         // 两条写命令与其它写命令**同一条闸门**（只在 WRITE_ENABLED 的段里真发）：
         // 段是这张委托的**事实**，在"读"的段里建一段，后面的断言就会拿到一个被自己
         // 污染过的世界（段数、段序、模板核对的数据域全变）。

@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（84 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（86 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -743,6 +743,29 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "（回空壳会让「还没派生」与「派生了一份空合同」长得一样，而后者最该被发现）。"
         "⚠️ 有意**不**给货主本人放行：来源表里是 release:12@v3 / leg:4 这类**内部编号**，"
         "客户看合同走已有发布通路（冻结快照）。故用 assert_can_view_org（无货主旁路）",
+    ),
+    _r(
+        "POST",
+        "/contracts/{contract_artifact_id}/signature-evidence",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:create",
+        idempotent=True,
+        note="就合同的**某个版本**记一条签署证据（§10.1 第 7 步后半 / D1-08 的 linked evidence）。"
+        "⛔ `mode` **不是入参**：恒为 labeled_sample 由服务端写死 —— 让调用方能传 mode=live "
+        "就等于让界面自称「已完成电子签署」，与合同 §3.2 / D1-08 直接冲突。"
+        "证据形态只接受三个登记取值（未知形态 ⇒ 400）：未登记的形态进库后，"
+        "「这份证据到底存不存在实物」就再无答案。同一版同一形态只记一条 ⇒ 重放 409（带已存在的 id）",
+    ),
+    _r(
+        "GET",
+        "/contracts/{contract_artifact_id}/signature-evidence",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="该合同**全部版本**的签署证据清单（D1-08 inspection 面）。"
+        "一份都没记过 ⇒ 空列表 + has_items=false（**不是 404**）："
+        "「合同存在但还没记证据」是正常中间态，与「这个 id 没有对应物」语义不同。"
+        "⚠️ 同派生一样**不**给货主本人放行：证据行带内部编号与审计措辞，"
+        "客户看合同走已有发布通路（冻结快照）",
     ),
     # ── 运力确认与有效期（capacity_api.py / S3 / BP-03 第 3 条 / D1-06）───────
     _r(

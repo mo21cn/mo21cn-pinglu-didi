@@ -4199,6 +4199,184 @@ function decorateLegRevisions(payload) {
   }
 }
 
+// ── 合同派生与签署证据（§10.1 第 7 步 / BP-03 第 8 条 / D1-08）──────────────
+//
+// 两条命令 + 两条取数，**全部只有经理侧一条通道**：后端逐条走
+// `assert_can_write_entrustment` / `assert_can_view_org`，不设货主旁路 ——
+// 字段来源表里带 `release:12@v3` / `leg:4` 这类内部编号，那是审计信息。
+// 客户要看合同走**已有的发布通路**（把 `contract_review` 发布出去、客户读冻结
+// 快照），不为「客户看合同」新开一条通道，否则「客户能看到什么」会有两个判据。
+//
+// ⚠️ 派生**不带业务入参**：`note` 之外什么都不传。合同内容只能来自
+//    「客户接受的那一版」，让界面能填金额就等于允许手编一份合同。
+// ⚠️ 签署证据的 `mode` **不在这个模块里出现**：它恒为 `labeled_sample`、
+//    由服务端写死，响应里的 `mode_text` 原样透出 —— 前端若再存一份标签表，
+//    改一处另一处就静默显示旧说法（与航段 `mode_label` 同一条纪律）。
+
+/**
+ * 从该委托授权下的发布里挑出「客户已接受的对客报价」。
+ *
+ * 只看**已接受**的那一条：未响应 / 被拒绝都派生不出合同（服务端给 409），
+ * 前端多判一次不是为了省那次请求 —— 摆一个必然失败的按钮，用户会以为是自己
+ * 操作有误（与「有响应的发布不给撤回按钮」同一条理由）。
+ */
+function pickAcceptedQuoteRelease(items) {
+  const rows = (items || []).filter(function (it) {
+    const r = it || {}
+    const resp = r.response || null
+    return (
+      String(r.artifact_type || '') === 'customer_quote' &&
+      !!resp &&
+      String(resp.decision || '') === 'accept'
+    )
+  })
+  if (!rows.length) return null
+  // 多条时取最新的那条：一份已接受事实只派生一份，但历史发布可能有多条。
+  rows.sort(function (a, b) {
+    return Number((b || {}).release_id || 0) - Number((a || {}).release_id || 0)
+  })
+  return rows[0]
+}
+
+/** 派生一份合同核对稿（`POST /offer-releases/{rid}/contract`，幂等）。 */
+function deriveContract(releaseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/offer-releases/' + releaseId + '/contract',
+    method: 'POST',
+    data: body || {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 读派生关系 + 逐字段来源（`GET /offer-releases/{rid}/contract`）。
+ *
+ * ⚠️ **还没派生过时是 404**，不是空壳：调用方必须把 404 与「读取失败」分开处置
+ * （派生前那一步要显示入口，读失败那一步要说清原因）。
+ */
+function fetchContractDerivation(releaseId) {
+  return request({ url: BASE + '/offer-releases/' + releaseId + '/contract', method: 'GET' })
+}
+
+/**
+ * 记一条签署证据（`POST /contracts/{aid}/signature-evidence`，幂等）。
+ *
+ * `body` 只有 `evidence_kind` / `note` / `revision_no` —— **没有 `mode`**：
+ * 模式由服务端写死，允许界面传就等于允许界面自称已完成电子签署。
+ */
+function recordSignatureEvidence(contractArtifactId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/contracts/' + contractArtifactId + '/signature-evidence',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 该合同各版本的签署证据清单（`GET /contracts/{aid}/signature-evidence`）。 */
+function fetchSignatureEvidence(contractArtifactId) {
+  return request({
+    url: BASE + '/contracts/' + contractArtifactId + '/signature-evidence',
+    method: 'GET'
+  })
+}
+
+/**
+ * 派生结果投影：派生关系 + **逐字段来源表** + 如实列出的缺失项。
+ *
+ * 五条处置：
+ * 1. 报价与合同的**精确版本**各自成串（D1-08 的那句 inspection）——
+ *    只写「已派生」等于把「这份合同是从哪一版来的」留在库里没人回答；
+ * 2. 来源行**同时给原值与文案**：界面显示「已接受报价」、比对用
+ *    `accepted_release`；只给文案的话，两个取值其实不同这件事就看不出来了；
+ * 3. 缺失项**列出来**而不是编默认值 —— 「这份合同少写了什么」必须看得见，
+ *    编一个默认值就把「没写」说成「写了」；
+ * 4. 备注为空写「未写备注」：`note` 为 null 是「当时没写」，不是「说明未知」；
+ * 5. 生效日缺失写「未提供」，两种都不该显示成空白格。
+ */
+function decorateContractDerivation(payload) {
+  const d = payload || {}
+  const sources = (d.field_sources || []).map(function (s) {
+    const one = s || {}
+    const kind = one.source_kind == null ? '' : String(one.source_kind)
+    const kindText = one.source_kind_text == null ? '' : String(one.source_kind_text)
+    const ref = one.source_ref == null ? '' : String(one.source_ref)
+    return {
+      fieldPath: one.field_path == null ? '' : String(one.field_path),
+      valueText: one.value_text == null ? '' : String(one.value_text),
+      sourceKind: kind,
+      sourceKindText: kindText || kind,
+      sourceRef: ref,
+      sourceText: (kindText || kind) + (ref ? ' · ' + ref : ''),
+      // ⚠️ 模板的 `wx:key` **不能**用 `fieldPath`：同一个字段可以有**多行**来源
+      // （"运输范围"一条条款由三个航段构成 ⇒ `route` 三行）。用非唯一键做 `wx:key`
+      // 会让列表静默少渲染几行 —— 而"来源行数不对"正是 D1-08 要抓的那类问题。
+      rowKey: [one.field_path, kind, ref].join('|')
+    }
+  })
+  const absent = (d.absent_quote_fields || []).map(function (k) {
+    return String(k == null ? '' : k)
+  }).filter(function (k) {
+    return !!k
+  })
+  const note = d.note == null ? '' : String(d.note)
+  return {
+    derivationIdText: '#' + _sid(d.derivation_id),
+    releaseIdText: '#' + _sid(d.release_id),
+    quoteArtifactId: _sid(d.quote_artifact_id),
+    quoteRevisionNoText: '报价 v' + String(d.quote_revision_no == null ? '' : d.quote_revision_no),
+    contractArtifactId: _sid(d.contract_artifact_id),
+    contractRevisionNoText:
+      '第 ' + String(d.contract_revision_no == null ? '' : d.contract_revision_no) + ' 版',
+    templateText: String(d.template_code || '') + ' · ' + String(d.template_version || ''),
+    effectiveDateText: d.effective_date ? String(d.effective_date) : '未提供',
+    derivedAtText: d.derived_at == null ? '' : String(d.derived_at),
+    noteText: note || '未写备注',
+    absentText: absent.join('、'),
+    hasAbsent: absent.length > 0,
+    sourceCount: sources.length,
+    sources: sources
+  }
+}
+
+/**
+ * 签署证据清单投影：一版一行 + 常驻声明 + 形态选项。
+ *
+ * 三条处置：
+ * 1. 每行必须带**版本串**（「第 1 版」）—— 「有证据」与「证据签在哪个版本上」
+ *    是两个问题，只答前一半等于把「客户签的是哪一版」留在库里没人回答；
+ * 2. `disclaimer` 与 `kindOptions` **原样透出服务端**：前者是合同要求常驻的措辞，
+ *    后者是取值域本身 —— 前端自己存一份就等于允许界面给出服务端不收的形态；
+ * 3. 说明为空写「未写说明」，不留空白格。
+ */
+function decorateSignatureEvidence(payload) {
+  const d = payload || {}
+  const items = (d.items || []).map(function (it) {
+    const one = it || {}
+    return {
+      evidenceIdText: '#' + _sid(one.evidence_id),
+      revisionNoText: one.revision_no_text == null ? '' : String(one.revision_no_text),
+      kind: one.evidence_kind == null ? '' : String(one.evidence_kind),
+      kindText: one.evidence_kind_text == null ? '' : String(one.evidence_kind_text),
+      modeText: one.mode_text == null ? '' : String(one.mode_text),
+      noteText: one.note_text == null ? '' : String(one.note_text),
+      recordedAtText: one.recorded_at == null ? '' : String(one.recorded_at)
+    }
+  })
+  const kindOptions = (d.kind_options || []).map(function (o) {
+    const one = o || {}
+    return { key: String(one.value == null ? '' : one.value), label: String(one.label || '') }
+  })
+  return {
+    contractArtifactId: _sid(d.contract_artifact_id),
+    items: items,
+    hasItems: !!d.has_items,
+    disclaimer: d.disclaimer == null ? '' : String(d.disclaimer),
+    kindOptions: kindOptions,
+    hasKindOptions: kindOptions.length > 0
+  }
+}
+
 // ── 组装成果（人工定版；UI-06 / 计划 §5.2 S3）──────────────────────────────
 
 /**
@@ -4527,6 +4705,7 @@ module.exports = {
   createTask,
   createArtifact,
   decideCase,
+  deriveContract,
   decorateAssignment,
   decorateAssignmentPlan,
   decorateAttachment,
@@ -4539,6 +4718,7 @@ module.exports = {
   decorateCapacityCandidate,
   decorateCapacityConfirmation,
   decorateCapacityRecheck,
+  decorateContractDerivation,
   decorateDetail,
   decorateEntrustment,
   decorateEntrustments,
@@ -4549,6 +4729,7 @@ module.exports = {
   decorateOrgs,
   decorateRevisions,
   decorateSession,
+  decorateSignatureEvidence,
   decorateSlot,
   decorateWorkbench,
   entryDecision,
@@ -4564,6 +4745,7 @@ module.exports = {
   fetchCapacityConfirmations,
   fetchCase,
   fetchCaseOrgList,
+  fetchContractDerivation,
   fetchEntrustmentAttachments,
   fetchJob,
   fetchJobs,
@@ -4574,6 +4756,7 @@ module.exports = {
   fetchQueue,
   fetchRevisions,
   fetchSession,
+  fetchSignatureEvidence,
   fetchSessionContext,
   fetchSessions,
   fetchTaskCandidates,
@@ -4595,12 +4778,14 @@ module.exports = {
   // 归一规则（`org_id` 为空 / 数字与字符串同型）一旦在一侧漂移，表现是"按钮时而出现
   // 时而不出现"，两边单看都对。
   isPermittedOrg,
+  pickAcceptedQuoteRelease,
   pickEntrustment,
   pickOrg,
   probeEntry,
   probeOwnerEntry,
   recheckCapacityConfirmation,
   recordCapacityCandidate,
+  recordSignatureEvidence,
   removeCaseLink,
   reopenCase,
   revisionSourceLabel,
