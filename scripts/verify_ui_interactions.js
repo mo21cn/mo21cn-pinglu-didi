@@ -771,6 +771,24 @@ section('⑤ 静态防线')
       check('describeError · 结构体 detail 不再拼出 [object Object]',
         RQ.describeError({ httpStatus: 409, detail: { message: '这条候选已经确认过' } }).cause
           === '接口返回 409：这条候选已经确认过')
+      // 2026-09-17 补：`errorFromResponse` 把「取 detail + 兜底 + 构造错误」收成一个
+      // 函数，传输层的 `request()` 与校验脚本的写通道**共用同一段构造**。
+      // 为什么要专门钉它：抽出它的动因就是"两边各写一份、靠注释说一致"——
+      // 实测 e2e 的写通道把 detail 压成了字符串，而注释写着"形状一致"。
+      check('utils/request 导出 errorFromResponse（写通道与它共用同一段构造，不各写一份）',
+        typeof RQ.errorFromResponse === 'function',
+        `errorFromResponse=${typeof RQ.errorFromResponse}`)
+      {
+        const sEmpty = RQ.errorFromResponse(500, {})
+        check('[错误形状] errorFromResponse · 空 detail 走「请求失败」兜底（与 request() 同口径）',
+          sEmpty.message === '请求失败' && sEmpty.httpStatus === 500,
+          JSON.stringify([sEmpty.message, sEmpty.httpStatus]))
+        const sStruct = { message: '这条候选已经确认过', existing_confirmation_id: 3 }
+        const eStruct = RQ.errorFromResponse(409, { detail: sStruct })
+        check('[错误形状] errorFromResponse · 结构体原样保留、message 取那句人话',
+          eStruct.detail === sStruct && eStruct.message === sStruct.message,
+          JSON.stringify([typeof eStruct.detail, eStruct.message]))
+      }
     }
 
     // —— 真机 / 模拟器的提示必须分流 ——

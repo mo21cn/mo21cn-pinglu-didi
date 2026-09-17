@@ -21,6 +21,16 @@ const fs = require('fs')
 const path = require('path')
 
 const ROOT = path.resolve(__dirname, '..')
+
+//: 传输层的**真实**实现。校验脚本"造出来的错误形状"必须与页面真机上拿到的一致，
+//: 所以直接调它的 `errorFromResponse`，而不是在这里再写一遍 —— 两份实现会各自演化，
+//: 而"形状不对会把正确的页面行为判成缺陷"（本文件 `rejectIfNotOk` 上方已写明）。
+//: ⚠️ 2026-09-17 实测就是这个病：本脚本的写通道把 409 的结构体 `detail` 压成了
+//:    字符串，与真机**不同形**，而注释写着"形状与 utils/request.js 一致"。
+//: ⚠️ 该模块顶层会调 `resolveBaseUrl()`，但它内部对 `wx` 不存在做了 try/catch 兜底
+//:    （取不到 platform 按开发者工具处理）⇒ 在 Node 下 require 是安全的，
+//:    且算出的 `BASE_URL` 与原先硬编码的 `http://127.0.0.1:8000` 相同。
+const REQ_UTIL = require(path.join(ROOT, 'miniapp', 'utils', 'request.js'))
 const BASE = (process.argv.find((a) => a.indexOf('--base=') === 0) || '').split('=')[1] || 'http://127.0.0.1:8000'
 
 //: DEMO-1 **canonical** 样报价单（合同 §3.1；HO 0917-3 裁定一）。
@@ -126,10 +136,10 @@ async function pageWrite(method, p, body, key) {
 function rejectIfNotOk(res) {
   if (res && res.rejected) throw new Error(res.reason)
   if (res.status !== 200) {
-    const err = new Error('写请求被拒 ' + res.status)
-    err.httpStatus = res.status
-    err.detail = res.data && res.data.detail
-    throw err
+    // 与真机**同源**：走 `utils/request.js` 的 `errorFromResponse`（message 取人话、
+    // `detail` 原样保留结构）。原先这里自己拼了一个"只有 message 与 httpStatus、
+    // detail 可能被压平"的形状 —— 那正是本文件上方注释警告过的事。
+    throw REQ_UTIL.errorFromResponse(res.status, res.data)
   }
   return res.data
 }
@@ -181,11 +191,10 @@ async function pageUpload(filePath, opts, key) {
     data: res.data
   })
   if (res.status !== 200) {
-    const detail = String(((res.data || {}).detail) || '上传失败')
-    const err = new Error(detail)
-    err.httpStatus = res.status
-    err.detail = detail
-    throw err
+    // 同 `rejectIfNotOk`：错误形状取自真实传输层。这里原先写的是
+    // `String(((res.data||{}).detail) || '上传失败')` ⇒ 结构体在**校验脚本自己手里**
+    // 就被压平了，于是"真机上会出 [object Object]、e2e 里不会"这个差异永远测不出来。
+    throw REQ_UTIL.errorFromResponse(res.status, res.data)
   }
   return res.data
 }
@@ -1229,14 +1238,28 @@ function loadPage(file, ctx) {
     }
     if (s.indexOf('tabbar') !== -1) return { syncTabBar() {} }
     if (s.indexOf('request') !== -1) {
-      return {
+      // ⚠️ **保留真实实现里的纯函数**（`httpError` / `detailText` / `errorFromResponse`
+      //    / `describeError`），只把**取数** `request()` 换成回放桩。
+      //    这里原先回的是一个**只含 4 个导出**的假对象 ⇒ 真实 `httpError`
+      //    （「`err.detail` 原样保留结构」这条契约）**根本不在本脚本的执行路径上**：
+      //    把 `e.detail = detail` 改回 `String(detail)`，本脚本照样全绿。
+      //    2026-09-17 ㊺ 章设备走查实测到那一版 —— 409 的结构体 detail 在传输层被
+      //    压成 `'[object Object]'`，页面那两条分流在真机上是**死代码**，
+      //    而四个前端静态门禁与本脚本全程绿。
+      const realReq = U('request.js')
+      return Object.assign({}, realReq, {
         request: (opts) => {
           const r = route(opts.url, opts.data)
-          return r.err ? Promise.reject(new Error(r.err)) : Promise.resolve(r.ok)
+          // 失败也走**真实传输层的构造**：形状与真机由同一段代码产生。
+          // 回放表的失败没有真实状态码（它不是真 HTTP），统一按 400 —— 真机上失败
+          // 必带 `httpStatus`，缺了它页面会走错分支（`describeError` 的 httpStatus
+          // 分支就进不去）。
+          return r.err
+            ? Promise.reject(realReq.httpError(400, r.err))
+            : Promise.resolve(r.ok)
         },
         getToken: () => 'fake-token', setToken() {}, clearToken() {},
-        BASE_URL: 'http://127.0.0.1:8000',
-      }
+      })
     }
     return {}
   }
@@ -3616,6 +3639,74 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           path.join(ROOT, 'miniapp/pages/entrust/detail/detail.js'), s._final())
       }
     }
+  }
+
+  // ── 传输层契约（2026-09-17 补：这一层原先**不在本脚本的判定范围内**）───────────
+  // 背景：本脚本是唯一会在 CI 里真起后端、真发 HTTP 的门禁，但它的取数助手把
+  // `utils/request.js` **整个换成了桩** ⇒ 真实传输层的 `httpError` / `detailText`
+  // 从没被执行过。㊺ 章设备走查由此暴露：409 的**结构体** detail 被 `String()`
+  // 压成 `'[object Object]'`，页面那两条分流在真机上是死代码，而这里**全程绿**。
+  // ⇒ 现在桩保留真实导出（见 `requireStub`），并且在收尾处直接断言。
+  {
+    const R = REQ_UTIL
+    // ① 结构体 detail 不许被压平 —— `rule_checks` 是 409「规则不过」那一支的判据，
+    //    `existing_confirmation_id` 是「状态冲突」那一支的判据，两种分流**处置相反**
+    const struct = {
+      message: '候选运力 2 未通过：有效期已过',
+      rule_checks: [{ code: 'validity', passed: false }],
+      existing_confirmation_id: 7
+    }
+    const e1 = R.httpError(409, struct)
+    if (e1.detail !== struct || !Array.isArray(e1.detail.rule_checks)
+      || e1.detail.existing_confirmation_id !== 7) {
+      fail('传输层 · 结构体 detail 被压平（409 的两种分流在页面侧将不可分辨）',
+        'typeof=' + typeof e1.detail + ' 值=' + String(e1.detail))
+    } else ok()
+    // ② message 仍是一句人话，且**不得**是 '[object Object]'
+    if (e1.message !== struct.message) {
+      fail('传输层 · 结构体 detail 的 message 未取到那句人话', JSON.stringify(e1.message))
+    } else ok()
+    // ③ httpStatus 必须挂上（`describeError` 的 httpStatus 分支靠它）
+    if (e1.httpStatus !== 409) fail('传输层 · httpStatus 未挂上', String(e1.httpStatus))
+    else ok()
+    // ④ 纯字符串 detail 照旧原样透传（400/403 那类"一句话拒绝"）
+    const e2 = R.httpError(403, '没有权限')
+    if (e2.message !== '没有权限' || e2.detail !== '没有权限') {
+      fail('传输层 · 纯字符串 detail 未原样透传', JSON.stringify([e2.message, e2.detail]))
+    } else ok()
+    // ⑤ 结构体缺 message 时**不编话**、也**不吐** '[object Object]'
+    const txt = R.detailText({ rule_checks: [] })
+    if (txt !== '') {
+      fail('传输层 · 无 message 的结构体应返回空串（把兜底交给调用方）', JSON.stringify(txt))
+    } else ok()
+    // ⑥ `errorFromResponse`：写通道与本脚本共用的那个构造
+    const e4 = R.errorFromResponse(409, { detail: struct })
+    if (e4.detail !== struct || e4.message !== struct.message) {
+      fail('传输层 · errorFromResponse 未保留结构或未取人话',
+        JSON.stringify([typeof e4.detail, e4.message]))
+    } else ok()
+    // ⑦ 空 detail 走 '请求失败' 兜底（与 `request()` 的非 401 分支同口径）
+    const e5 = R.errorFromResponse(500, {})
+    if (e5.message !== '请求失败') fail('传输层 · 空 detail 未走兜底', JSON.stringify(e5.message))
+    else ok()
+    // ⑧ ⭐ 本脚本的**写通道**：用假 409 响应驱动 `rejectIfNotOk`，断言它产出的错误
+    //    带着**结构体** detail。这一条同时证明"写通道用的是真实实现"——
+    //    若有人把它改回自己拼一个形状（原先就是），这里会红。
+    const struct2 = { message: '候选运力 1 已经确认过', existing_confirmation_id: 1 }
+    try {
+      rejectIfNotOk({ status: 409, data: { detail: struct2 } })
+      fail('传输层 · 写通道对 409 没有抛错', 'rejectIfNotOk 应抛')
+    } catch (err) {
+      if (err.detail !== struct2 || err.httpStatus !== 409 || err.message !== struct2.message) {
+        fail('传输层 · 写通道的错误形状与真机不同源',
+          JSON.stringify([typeof err.detail, err.httpStatus, err.message]))
+      } else ok()
+    }
+    // ⑨ `describeError` 对结构体不得拼出 '[object Object]'
+    const d = R.describeError(e1)
+    if (String(d.cause).indexOf('[object Object]') !== -1) {
+      fail('传输层 · describeError 把结构体拼成了 [object Object]', d.cause)
+    } else ok()
   }
 
   auditTemplates()

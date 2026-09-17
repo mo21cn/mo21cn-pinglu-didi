@@ -80,6 +80,22 @@ function httpError(httpStatus, detail) {
 }
 
 /**
+ * 从 HTTP 响应体构造错误 —— **传输层与校验脚本共用同一口径**。
+ *
+ * 为什么要有它：`detail` 的兜底（空 ⇒ `'请求失败'`）原先只写在 `request()` 的
+ * `wx.request` 回调里，于是校验脚本想"造一个与真机同形的错误"就只能**再写一遍** ——
+ * 而两份实现会各自演化，这正是「注释里说形状一致、实际不一致」的来源
+ * （2026-09-17 实测：e2e 的写通道把 detail 压成了字符串，与真机不同形，而注释写着"一致"）。
+ * 抽出来之后，`scripts/verify_frontend_e2e.js` 的写通道与本函数**是同一段代码**：
+ * 形状一致由机器保证，不靠人记得。
+ */
+function errorFromResponse(httpStatus, data) {
+  const raw = data && data.detail
+  const detail = raw === undefined || raw === null || raw === '' ? '请求失败' : raw
+  return httpError(httpStatus, detail)
+}
+
+/**
  * 把错误翻译成「哪一步坏了 + 怎么修」。
  * 调用方（如首页身份进入链路）据此给出可执行的提示，
  * 而不是笼统的「登录失败 / 网络异常」——后者无法定位问题。
@@ -184,13 +200,11 @@ function request(opts) {
           if (!silent) wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
           reject(httpError(401, '登录已过期，请重新登录'))
         } else {
-          const rawDetail = res.data && res.data.detail
-          const detail =
-            rawDetail === undefined || rawDetail === null || rawDetail === ''
-              ? '请求失败'
-              : rawDetail
-          if (!silent) wx.showToast({ title: detailText(detail) || '请求失败', icon: 'none' })
-          reject(httpError(res.statusCode, detail))
+          // 兜底与错误构造都交给 `errorFromResponse`：与校验脚本共用同一段代码，
+          // 「e2e 里造出来的拒绝形状」与真机因此**不可能**各自演化。
+          const err = errorFromResponse(res.statusCode, res.data)
+          if (!silent) wx.showToast({ title: err.message || '请求失败', icon: 'none' })
+          reject(err)
         }
       },
       fail(err) {
@@ -223,5 +237,8 @@ module.exports = {
   // 因此是**可执行地**被验证的，而不是只写在注释里
   httpError,
   detailText,
+  // 同上，且 `scripts/verify_frontend_e2e.js` 的写通道也用它构造拒绝 ——
+  // 校验脚本里"造出来的错误形状"与真机是同一段代码，不靠注释承诺一致
+  errorFromResponse,
   BASE_URL
 }
