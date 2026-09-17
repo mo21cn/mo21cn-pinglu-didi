@@ -2828,7 +2828,32 @@ function decorateJob(row) {
   // 的返回），不是 `proposals`。写成 `proposals` 不会报错，只会让"提案 N 条"
   // **永远是 0** —— 界面上看起来像"模型没给出任何提案"，而事实是读错了键。
   // 这条是靠 e2e 的"作业成功 ⇒ 页面必须列出提案"断言抓到的。
-  const proposals = (env && env.artifact_proposals) || []
+  const proposals = ((env && env.artifact_proposals) || []).map(function (p) {
+    const one = p || {}
+    const payload = one.payload || {}
+    return {
+      artifactType: one.artifact_type || '',
+      typeLabel: one.artifact_label || one.artifact_type || '未命名提案',
+      note: one.note || '',
+      // ⚠️ `payload` 保留**原始值**：提交采纳时必须原样发回去。
+      // 用下面 `rows[].value`（已格式化成字符串）去提交会把数值/数组写成字符串，
+      // 而服务端拿它当字段值存 —— 那是一次静默的数据损坏。
+      payload: payload,
+      // 提案内容**逐字段列出**：合同 BP-02 要求"类型化提案（价格/单位/有效期/
+      // 含与不含/来源/明确未知）"。只显示"提案 1 条"等于把要给人过目的东西藏起来，
+      // 而"人工采纳"这件事的前提正是**人看过了内容**。
+      // 中文标签复用成果页那一张表（`ARTIFACT_FIELD_LABELS`），不另造一份。
+      rows: Object.keys(payload).map(function (k) {
+        const raw = payload[k]
+        const kind = _fieldKind(raw, '')
+        return {
+          key: k,
+          label: artifactFieldLabel(k),
+          value: kind === 'json' ? _structuredText(raw) : _scalarText(raw)
+        }
+      })
+    }
+  })
   return {
     jobId: _sid(data.job_id),
     sessionId: _sid(data.session_id),
@@ -2840,6 +2865,16 @@ function decorateJob(row) {
     mocked: !!data.mocked,
     finishedAt: data.finished_at || '',
     proposalCount: proposals.length,
+    proposals: proposals,
+    /**
+     * 能否采纳（**纯展示**，不判权）。
+     *
+     * 与 `canClaimAssignment` 同一条纪律：前端不假装知道当前身份有没有
+     * `entrust:quote:create`（那取决于组织成员资格与授权，只有服务端知道）。
+     * 写端 `adopt_job_proposal` 会独立复核权限与作业状态 ——
+     * **隐藏按钮不等于放行**，这里少显示一个按钮只是少一次必然失败的点击。
+     */
+    canAdopt: data.status === 'succeeded' && proposals.length > 0,
     envelope: env,
     // 迟到写入作废时后端会给 lease_lost —— 界面必须能说"跑过但没生效"
     leaseLost: !!data.lease_lost
