@@ -230,6 +230,17 @@ const WALK_ANCHORS = [
     value: '{{item.key}}', handler: 'onSubmitTask' },
   { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-task-cancel',
     value: '{{item.key}}', handler: 'onCancelTask' },
+  // 2026-09-17（S3 收口）：组装对客报价的三段式（展开 / 提交 / 取消）。
+  // 与上面「受理确认条」同一条理由 —— 本页已有 7 个 `.slot-btn` 与 1 个受理按钮，
+  // 走查工具没有 index 参数，没有专属锚点就只能点到第一个。
+  // ⚠️ `onToggleQuote` 只被"展开"用；"取消"给的是 `onCancelQuote`（语义不同：
+  //    取消会**清空**表单，展开/收起不会），所以两者必须各有一个锚点。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-quote-open',
+    value: '1', handler: 'onToggleQuote' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-quote-submit',
+    value: '1', handler: 'onSubmitQuote' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-quote-cancel',
+    value: '1', handler: 'onCancelQuote' },
   // 页内输入框（文本靠 setData 注值，见走查脚本的声明），与案件页的 `act-input`+`data-df` 同形
   { kind: 'static', file: 'pages/entrust/detail/detail.wxml', class: 'slot-input', attr: 'data-df' },
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-toggle-links',

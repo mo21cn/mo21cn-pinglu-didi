@@ -38,8 +38,10 @@ const {
   TASK_TYPE_LABELS,
   TASK_TYPE_ORDER,
   ORG_PERM_CLAIM,
+  ORG_PERM_QUOTE_CREATE,
   canClaimAssignment,
   claimAssignment,
+  createArtifact,
   createTask,
   decorateCustomerOffer,
   decorateDetail,
@@ -48,7 +50,9 @@ const {
   fetchAssignment,
   fetchMyOfferReleases,
   fetchMyOrgs,
+  fetchSessionContext,
   fetchWorkbench,
+  isPermittedOrg,
   newIdempotencyKey,
   permittedOrgIds,
   pickOfferForAssignment,
@@ -103,6 +107,33 @@ Page({
      * 前端在这里假装知道有没有权限，只会在无权限时给出一个必然 403 的按钮。
      */
     canCreateCase: false,
+    /**
+     * 「组装对客报价」入口（S3：合同 §10.1 第 6 步 `Release the offer` 的前置动作）。
+     *
+     * 为什么这一步必须存在：能被客户看到的成果类型只有 `customer_quote` /
+     * `contract_review`（`registry.CUSTOMER_VISIBLE_TYPES`），而主演示链路上
+     * AG-02 产出的是 `quote_parsed`（**船东侧报价**，服务端在信封里明令
+     * "供应商侧报价…不得互相替代"）⇒ 拿它去发布会被 400 拒（拒得对）。
+     * 计划 §4 UI-06 与 §5.2 的 S3 DoD 都要求"对客报价**可人工组装**"，
+     * 这一片补的就是这一步。
+     *
+     * 两个条件同时满足才显示（与 `canClaim` 同一套口径）：
+     *   1. 服务端能定位到**唯一一条**生效授权（`GET /assignments/{id}/session-context`
+     *      返回 `entrustment_id`）—— 多条授权时该端点**不猜**，返回 `null` 并说明原因，
+     *      此时这里也不显示（宁可不显示，也不替用户在两条授权之间选边）；
+     *   2. 我在**该委托所属组织**内有 `entrust:quote:create`。
+     *
+     * 隐藏按钮不等于放行：写端 `POST /entrustments/{eid}/artifacts` 仍独立校验。
+     */
+    canAssembleQuote: false,
+    /** 组装表单是否展开（页内，不用原生弹层 —— 理由同「受理委托」） */
+    quoteOpen: false,
+    /** 组装表单的草稿：金额/币种/包含项/有效期（`includes` 在页内按逗号分隔录入） */
+    quoteForm: { amount: '', currency: 'CNY', includes: '', validUntil: '' },
+    /** 组装表单的校验/失败提示（在**页内**说清，不用 toast） */
+    quoteHint: '',
+    /** 提交在飞（防重复点击；重复提交另有幂等键兜底） */
+    quoteSubmitting: false,
     /** 归属机制上线前的历史成果计数提示（0 时为空串） */
     unassignedHint: '',
     /** 已展开类型选择的槽位 key（空串＝都收起） */
@@ -251,6 +282,11 @@ Page({
     // 收到过发布（正常状态），而经理**永远**会拿到空列表（服务端只回"发给我的"）。
     // 让它失败时把整页打成错误态，会让经理看不了这张委托 —— 那是把"没有报价"
     // 说成"页面坏了"。
+    // 第五个是**授权定位**（`session-context`）：它回答"这单该用哪一条委托授权"，
+    // 是多条授权时服务端唯一不猜的答案。与上面两个投影同一命运、同一理由：
+    // 取不到只是不显示「组装对客报价」入口，不该把整页打成错误态。
+    // ⚠️ 不自己按 (org, owner) 去推授权 id：`artifacts.count_unassigned` 的注释写得很清楚
+    //    —— 同一 (org, owner) 可能有多条授权，挑一条就是猜测，数据边界会随之改变。
     return Promise.all([
       fetchAssignment(id),
       fetchWorkbench(id),
@@ -259,16 +295,21 @@ Page({
       }),
       fetchMyOfferReleases().catch(function () {
         return null
+      }),
+      fetchSessionContext(id).catch(function () {
+        return null
       })
     ])
       .then(function (res) {
-        self.permittedOrgIds = permittedOrgIds((res[2] && res[2].items) || [], ORG_PERM_CLAIM)
+        const orgItems = (res[2] && res[2].items) || []
+        self.permittedOrgIds = permittedOrgIds(orgItems, ORG_PERM_CLAIM)
+        self.permittedQuoteOrgs = permittedOrgIds(orgItems, ORG_PERM_QUOTE_CREATE)
         const detail = decorateDetail(res[0], self.permittedOrgIds)
         const board = decorateWorkbench(res[1])
         // 只挑**本单**的那条：`/my-offer-releases` 是"我收到的全部发布"，
         // 混着别的委托单。挑错会把 A 单的报价显示在 B 单上，而两者都"看起来正常"。
         const mine = pickOfferForAssignment((res[3] && res[3].items) || [], id)
-        self.applyState(viewState({ status: 200, total: 1 }), detail, board, mine)
+        self.applyState(viewState({ status: 200, total: 1 }), detail, board, mine, res[4])
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -280,7 +321,7 @@ Page({
       })
   },
 
-  applyState(state, detail, board, offer) {
+  applyState(state, detail, board, offer, ctx) {
     this.setData({
       view: state.state,
       viewTitle: state.title,
@@ -297,6 +338,18 @@ Page({
         detail && detail.orgId,
         this.permittedOrgIds
       ),
+      // 「组装对客报价」= 授权能被**唯一**定位 ∧ 我在该组织内有制作报价权限。
+      // `ctx.entrustment_id` 为 null ⇒ 服务端刻意不猜（未指定组织 / 无生效授权 /
+      // 多条匹配需显式指定），此时同样不显示入口 —— 理由在 `ctx.note` 里，
+      // 不要把它误报成"没权限"。
+      canAssembleQuote:
+        !!(ctx && ctx.entrustment_id) &&
+        isPermittedOrg(this.permittedQuoteOrgs, detail && detail.orgId),
+      entrustmentId: ctx && ctx.entrustment_id ? String(ctx.entrustment_id) : '',
+      quoteOpen: false,
+      quoteForm: { amount: '', currency: 'CNY', includes: '', validUntil: '' },
+      quoteHint: '',
+      quoteSubmitting: false,
       canCreateCase: !!(board && board.status === 'claimed'),
       unassignedHint: board ? board.unassignedHint : '',
       offer: offer ? decorateCustomerOffer(offer) : null,
@@ -511,6 +564,132 @@ Page({
         from: SELF
       })
     }
+  },
+
+  // ── 人工落点：组装对客报价（S3；合同 §10.1 第 6 步的前置动作）──────────
+  //
+  // 为什么这一步是本片的主角：能被客户看到的成果类型只有 `customer_quote` /
+  // `contract_review`（`registry.CUSTOMER_VISIBLE_TYPES`），而主演示链路上 AG-02
+  // 产出的是 `quote_parsed`（**船东侧报价**，服务端在信封里写着"供应商侧报价…
+  // 不得互相替代"）⇒ 拿它去发布会被 400 拒，**拒得对**。计划 §4 UI-06 与 §5.2
+  // 的 S3 DoD 都要求"对客报价**可人工组装**"，本组就是那一步。
+
+  /**
+   * 展开 / 收起组装表单。**页内**，不用原生弹层 —— 理由同「受理委托」：
+   * 弹层不在渲染树里，它的确认键在真机上点不到 ⇒ 这条关键输入永远拿不到设备证据。
+   */
+  onToggleQuote() {
+    if (this.data.quoteSubmitting) return
+    this.setData({ quoteOpen: !this.data.quoteOpen, quoteHint: '' })
+  },
+
+  /**
+   * 表单输入：按 `data-df` 决定写回哪个字段。
+   *
+   * 按**字段名**而不是"第几个输入框"定位：位置索引会在模板调序时静默错位
+   * （写回另一个字段，页面看起来还正常）。写法与案件页的 `act-input` 一致。
+   */
+  onQuoteInput(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const field = String(ds.df || '')
+    if (!field) return
+    this.setData({
+      ['quoteForm.' + field]: (e && e.detail && e.detail.value) || '',
+      quoteHint: ''
+    })
+  },
+
+  /** 收起并清空（取消就是取消，不留半份草稿）。 */
+  onCancelQuote() {
+    this.setData({
+      quoteOpen: false,
+      quoteForm: { amount: '', currency: 'CNY', includes: '', validUntil: '' },
+      quoteHint: ''
+    })
+  },
+
+  /**
+   * 提交组装：创建一份 `customer_quote` 成果（**人工直写**，来源 `manual`）。
+   *
+   * 校验在**页内**说清（同 `onSubmitTask` 的理由：toast 会消失，而"为什么没提交"
+   * 正是此刻要一直看得见的那句话）。必填字段与后端注册表逐字一致：
+   * `amount` / `currency` / `includes`。
+   *
+   * ⚠️ **不替用户补默认值**：金额空着就是空着。替它填一个数才是真正危险的 ——
+   * 那会变成一条看起来完整、却没人确认过的对客报价。
+   */
+  onSubmitQuote() {
+    const self = this
+    if (this.data.quoteSubmitting) return Promise.resolve()
+    const form = this.data.quoteForm || {}
+    const amountText = String(form.amount || '').trim()
+    const currency = String(form.currency || '').trim()
+    const includes = String(form.includes || '')
+      .split(/[,\uFF0C\u3001]/)
+      .map(function (s) {
+        return s.trim()
+      })
+      .filter(function (s) {
+        return !!s
+      })
+    const eid = String(this.data.entrustmentId || '')
+    if (!eid) {
+      this.setData({ quoteHint: '定位不到唯一一条生效委托授权，暂时无法组装' })
+      return Promise.resolve()
+    }
+    // 先判空再判数：`Number('')` 是 0，只判 `isFinite` 会让空金额静默变成 ¥0
+    const amount = amountText ? Number(amountText) : NaN
+    if (!amountText || !isFinite(amount)) {
+      this.setData({ quoteHint: '请填写「金额」，且必须是数字（对客报价的必填项）' })
+      return Promise.resolve()
+    }
+    if (!currency) {
+      this.setData({ quoteHint: '请填写「币种」' })
+      return Promise.resolve()
+    }
+    if (!includes.length) {
+      this.setData({ quoteHint: '请至少填写一项「费用包含」' })
+      return Promise.resolve()
+    }
+    const validUntil = String(form.validUntil || '').trim()
+    const payload = { amount: amount, currency: currency, includes: includes }
+    if (validUntil) payload.valid_until = validUntil
+    this.setData({ quoteSubmitting: true, quoteHint: '' })
+    wx.showLoading({ title: '组装中', mask: true })
+    return createArtifact(
+      eid,
+      {
+        artifact_type: 'customer_quote',
+        payload: payload,
+        // 带上这张委托单：成果才会归属到它，界面上才看得到（不带就是"历史未归属成果"）
+        assignment_id: Number(this.data.assignmentId),
+        note: '经理按已确认口径人工组装的对客报价'
+      },
+      newIdempotencyKey('quote-assemble')
+    )
+      .then(function () {
+        wx.hideLoading()
+        self.setData({
+          quoteSubmitting: false,
+          quoteOpen: false,
+          quoteForm: { amount: '', currency: 'CNY', includes: '', validUntil: '' }
+        })
+        wx.showToast({ title: '已组装', icon: 'success' })
+        // 重取整页：新成果要经**槽位投影**出现在「对客方案与合同」里，
+        // 而不是由前端自己往列表里塞一行 —— 否则界面上会有两份"当前状态"。
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          quoteSubmitting: false,
+          quoteHint: status
+            ? '组装未提交（服务端返回 ' + status + '），请按提示核对字段口径'
+            : '组装未提交：网络异常（表单已保留，可重试）'
+        })
+        return null
+      })
   },
 
   // ── 人工落点：客户响应（对客报价；S3 / BP-03 第 6/7 条）──────────────
