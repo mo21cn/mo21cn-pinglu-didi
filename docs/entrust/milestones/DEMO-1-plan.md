@@ -133,6 +133,7 @@
 | 接管后围栏迟到输出 | 已有 | `agentjobs.py:_abandon_lost_lease`；`tasks.py` 的 `lease_generation` / `expected_generation` |
 | 真实模型 vs CI 夹具分离 | 已有 | `llm.py:chat_json`（`LLM_MOCK`）+ `agents/ag01.py:mock_content`、`ag02.py` |
 | 跨导航保持消息与 job 状态 | **缺连接** | `miniapp/utils/routes.js:NAV_EDGES` 有治理，但会话尚无「消息态」可保 |
+| 附件选择（§10.1 第 2 步） | **已接**（2026-09-17） | 上传 → 提取 → 引用链已落地（`DEMO-1-interface-delta.md` §7.6 第 28–37 条）；**演示口径已裁定**：内置样本＝主路径、原生入口保留、OS 级自动化暂缓（同文件 §7.9 第 56 条） |
 
 ### 3.3 BP-03 对客方案、采购确认与合同
 
@@ -143,12 +144,13 @@
 | **选择 ≠ 资源确认** 的门禁 | **缺连接** | `supplier_compare.selected_candidate` 与 `procurement_confirm` 是两个类型，但**无「选择→确认」门禁连接** |
 | 资源确认的授权 / 证据 / 有效期 | **缺连接** | `registry.py:procurement_confirm`（`evidence_kinds`/`effective_from`）**无专用确认端点** |
 | 服务端客户白名单投影 | **缺连接** | `registry.py:project_for_customer` 存在但**无调用方**（孤儿函数）；`envelope.py:project_envelope_for_operator` 只覆盖 Agent 侧 |
-| **释放不可变报价版本** | **缺失** | 未找到；`artifacts_api.py` 只有 confirm / void |
-| 客户按精确版本接受/拒绝（含三类负例） | **缺失** | 无 `/customer` 端点 |
+| **释放不可变报价版本** | **缺失（表已落）** | `ent_offer_release`（精确 revision + 白名单快照 + 三态）已在迁移 `ent_commitment`；**命令/端点未实现**。口径 A/B **已裁定**（`S3-发布与客户响应数据设计.md`） |
+| 客户按精确版本接受/拒绝（含三类负例） | **缺失（表已落）** | `ent_offer_response`（`UNIQUE(release_id)`）已在；**无 `/customer` 端点、无客户侧入口** |
 | 从已接受事实生成合同草稿 | **缺失** | 未找到 |
 | 签名证据记录（来源/模式标注） | **缺失** | 只有 `registry.py` 的 `EVIDENCE_CONFIRMATION` 枚举 |
-| 历史版本保留 | 已有 | `artifacts.py` append-only + `artifacts_api.py:list_revisions` |
 | 客户查看/下载字段与附件裁剪 | **缺连接** | `project_for_customer` 游离，客户端点未接 |
+| 航段（三段式）结构化对象 | **表已落** | `ent_leg`（稳定 ID / 运输方式 / 起终点 / `seq`）已在；**命令与界面未实现** |
+| 历史版本保留 | 已有 | `artifacts.py` append-only + `artifacts_api.py:list_revisions` |
 
 ### 3.4 BP-04 履约、变更、结算与结案
 

@@ -422,13 +422,30 @@ python scripts/verify_miniapp_devtools.py --section 43
 * **前置**：三份种子（`seed_demo` → `seed_entrust_demo` → `seed_entrust_orgpicker`）。
   本章会**真写**一张委托并把它受理掉、上传一份附件、建一份成果并推进到 v2 生效
   ⇒ 排在 `DEFAULT_ORDER` **最末**（它前面的章节按条数 / 按状态断言，会被它搅动）。
-* ⚠️ **两条上传通路，分别记、互不替代**：
-  * 「从系统里选文件」＝ 原生文件选择器（`wx.chooseMessageFile`）⇒ 走查工具够不着
-    它的选择项 ⇒ 记 **`LIMITATION`**（不计入通过）；
-  * 「用内置示例报价单」＝ **页内入口**（复用同一条 `uploadQuote`）⇒ 本节实际取证的
-    通路。两者的差别是"这一步的人工动作不同"，不是"功能有没有"。
+* ⭐ **演示口径已裁定（HO 0917-3 待裁决清单第 1 行）**：**内置样本＝主演示路径**。
+  两条通路**都在、都保留**，且**复用同一条 `uploadQuote`**（另写一份上传逻辑会让
+  "示例通路能过、真实通路没过"这种分叉在演示当天才暴露）：
+  * 「用内置示例报价单」＝ **页内入口** ⇒ **主演示路径**，也是本节实际取证的通路；
+  * 「从系统里选文件」＝ 原生文件选择器（`wx.chooseMessageFile`）⇒ 入口保留、
+    功能可用，但 **OS 级自动化暂缓**（系统弹层不在小程序渲染树里，走查工具够不着
+    它的选择项）⇒ 该格记 `LIMITATION`、**不计入通过**，**也不再作为阻塞项**。
+  * 合同 §10.1 第 2 步原文是 `A1 uploads the sample quotation`（**样本**）⇒ 走内置样本
+    与合同正文一致；两条通路的差别是"这一步的人工动作不同"，**不是"功能有没有"**。
 * ⚠️ 跑之前定好**模型模式**：`LLM_MOCK=true` 跑出来的是 **fixture 证据**，**不是**
   live invocation 证据（合同 §3.2 Required truth distinctions）—— 报告里必须标明。
+  live 那条由**另一条脚本 + 另一条入口**产出（见下），本节不复用它、也不替代它。
+* ⭐ **live 证据走「真实会话／作业入口」**（HO 0917-3 待裁决清单第 2 行）：
+
+  ```bash
+  python scripts/demo1_d1_03_live_session.py     # cwd=backend，需后端已在 8000
+  ```
+
+  它经 HTTP API 走 `POST /assignments` → `submit` → `claim` → 上传 multipart →
+  `extract` → 建会话 → **提交作业** → **推进作业** → 采纳为成果，
+  产出 `docs/entrust/milestones/evidence/D1-03-live-session-<ts>.json`
+  （含 assignment / entrustment / session / **job** / attachment / **artifact + revision** 六个 id）。
+  ⚠️ 判据取**作业行的 `mocked`**（不是"我配了 live"），且
+  `unverified_sources` 非空即**记 FAIL 并非 0 退出** —— 不靠重跑到碰巧通过。
 
 ---
 
