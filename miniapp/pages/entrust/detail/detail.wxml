@@ -210,6 +210,84 @@
         <view class="slot-note">{{unassignedHint}}</view>
       </view>
 
+      <!-- 组装对客报价（S3；合同 §10.1 第 6 步 Release the offer 的前置动作）。
+           为什么是**页内表单**而不是弹层或跳页：与「受理委托」「记录任务」同一条判据
+           —— 原生弹层不在渲染树里，走查工具点不到它的确认键 ⇒ 关键路径拿不到设备证据。
+           入口只在「授权可唯一定位 ∧ 我在该组织内有制作报价权限」时出现（判据在 js）。
+
+           ⚠️ 这里是 WXML 文本节点，**不是 Markdown**：文案里不能出现成对星号，
+              否则会原样渲染出多余字符（静态闸见 scripts/verify_entrust_ui.js）。 -->
+      <view wx:if="{{canAssembleQuote}}" class="card slot-card">
+        <view class="row-between slot-head">
+          <text class="slot-title">组装对客报价</text>
+        </view>
+        <view class="slot-note">
+          对客报价是客户能看到的成果，必须由经理按已确认口径组装定版后再发布；船东侧的报价解析稿属于内部底稿，不能直接对客发布。
+        </view>
+        <view wx:if="{{quoteOpen}}" class="slot-form">
+          <view class="slot-note">金额（必填，数字）</view>
+          <input
+            class="slot-input"
+            data-df="amount"
+            value="{{quoteForm.amount}}"
+            placeholder="例如 36000"
+            placeholder-class="input-ph"
+            type="digit"
+            bindinput="onQuoteInput"
+          />
+          <view class="slot-note">币种（必填）</view>
+          <input
+            class="slot-input"
+            data-df="currency"
+            value="{{quoteForm.currency}}"
+            placeholder="CNY"
+            placeholder-class="input-ph"
+            bindinput="onQuoteInput"
+          />
+          <view class="slot-note">费用包含（必填，多项用逗号分隔）</view>
+          <input
+            class="slot-input"
+            data-df="includes"
+            value="{{quoteForm.includes}}"
+            placeholder="内河运费,装船,卸船"
+            placeholder-class="input-ph"
+            bindinput="onQuoteInput"
+          />
+          <view class="slot-note">有效期（选填）</view>
+          <input
+            class="slot-input"
+            data-df="validUntil"
+            value="{{quoteForm.validUntil}}"
+            placeholder="2026-12-31"
+            placeholder-class="input-ph"
+            bindinput="onQuoteInput"
+          />
+          <view wx:if="{{quoteHint}}" class="slot-note slot-warn">{{quoteHint}}</view>
+          <view class="slot-actions">
+            <view
+              class="slot-btn slot-btn-strong"
+              data-act-quote-submit="1"
+              bindtap="onSubmitQuote"
+              hover-class="hover-dim"
+            >提交组装</view>
+            <view
+              class="slot-btn"
+              data-act-quote-cancel="1"
+              bindtap="onCancelQuote"
+              hover-class="hover-dim"
+            >取消</view>
+          </view>
+        </view>
+        <view wx:else class="slot-actions">
+          <view
+            class="slot-btn"
+            data-act-quote-open="1"
+            bindtap="onToggleQuote"
+            hover-class="hover-dim"
+          >组装对客报价</view>
+        </view>
+      </view>
+
       <!-- 七槽位（顺序与 key 由 utils/entrust.js 的 WORKBENCH_SLOTS 决定） -->
       <view wx:for="{{slots}}" wx:key="key" class="card slot-card">
         <view class="row-between slot-head">

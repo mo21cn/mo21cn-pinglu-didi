@@ -297,6 +297,54 @@ def test_two_channels_get_different_projections(env):
     assert out.status_code == 404, "局外人读一条发布 ⇒ 404，不泄漏存在性"
 
 
+def test_entrustment_release_list_picks_projection_by_identity(env):
+    """**清单**端点也必须按身份选投影（与详情端点同一判据）。
+
+    ⚠️ 这里曾经是恒回经理投影的。它不算越权（货主本人读得到自己的发布），但算**投影泄漏**：
+    `project_release_for_manager` 带着 `data_origin.basis`（`job_id` 与 `job_mocked`）、
+    `source_gate` 的待核验明细与 `released_by`／`close_reason`。六机制里
+    「客户白名单投影**不得先返回前端再隐藏**」约束的正是服务端这一刻的取舍 ——
+    前端不显示，不等于没返回。
+    """
+    db = env.make_session()
+    manager, owner, outsider, _org, eid, aid = _seed(env, db)
+    art_id = _create_artifact(env, manager, eid=eid, aid=aid)["artifact_id"]
+    _publish(env, manager, eid=eid, artifact_id=art_id, revision_no=1)
+
+    url = f"/api/v1/entrust/entrustments/{eid}/offer-releases"
+
+    cust = env.client.get(url, headers=_headers(owner))
+    assert cust.status_code == 200, cust.text
+    cb = cust.json()
+    assert cb["total"] == 1, cb
+    item = cb["items"][0]
+    assert item["content"]["amount"] == 36000
+    for leaked in (
+        "released_by",
+        "closed_by",
+        "close_reason",
+        "source_gate",
+        "customer_snapshot",
+        "data_origin",
+        "artifact_id",
+    ):
+        assert leaked not in item, f"客户通道不得出现 {leaked}：{sorted(item)}"
+    assert item["data_origin_mode"] in ("live", "synthetic", "manual", "unknown")
+    assert item["can_respond"] is True
+
+    mgr = env.client.get(url, headers=_headers(manager))
+    assert mgr.status_code == 200, mgr.text
+    mb = mgr.json()["items"][0]
+    assert mb["released_by"] == manager["user_id"]
+    assert mb["artifact_id"] == art_id
+    assert "source_gate" in mb and "customer_snapshot" in mb, (
+        "经理通道要能回答'客户当初看到的是哪一份内容'与'凭什么能发'"
+    )
+
+    # 局外人：清单端点同样不泄漏存在性（404，而不是空列表）
+    assert env.client.get(url, headers=_headers(outsider)).status_code == 404
+
+
 def test_my_offer_releases_lists_only_my_own(env):
     db = env.make_session()
     manager, owner, outsider, _org, eid, aid = _seed(env, db)
