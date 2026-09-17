@@ -82,6 +82,12 @@ const entrustSessionDetail = {}         // sessionId → 会话详情（含消�
 const entrustJobsByAssignment = {}      // assignmentId → 作业清单（真载荷）
 const entrustEntrustmentAttachments = {} // entrustmentId → 附件清单（真载荷）
 const entrustSessionContext = {}        // assignmentId → 会话上下文（真载荷）
+// S3 对客发布：客户侧（发给我的那份）与经理侧（按授权）各一份**复读**载荷。
+// 为什么必须真发布一次而不是手搓一份快照：客户侧「对客报价」卡的整组字段
+// （冻结内容行 / 来源标注 / 授权附件 / 响应）**只有在真的存在一条发布时才有值**；
+// 手搓的话，模板字段核对与"客户看到的是冻结内容"就都退回成脚本的期望值。
+let entrustMyReleases = { items: [] }              // 客户视角：我（货主）收到的发布
+const entrustEntrustmentReleases = {}              // entrustmentId → 经理视角发布清单
 
 // ── 页面驱动的写通道 ──────────────────────────────────────────────────────
 // 写请求**只在 ⑮ 段的显式用户动作里放行**（点"保存新版本"、点"设为生效版本"）：
@@ -655,6 +661,90 @@ async function bootstrap() {
     }
   })()
 
+  // ── S3 载荷：**真的发布一次**，再复读成回放载荷 ────────────────────────────
+  //
+  // 为什么必须真发布（而不是手搓一份快照）：客户侧「对客报价」卡的整组字段
+  // （冻结内容行 / 来源标注 / 授权附件 / 响应）**只有在真的存在一条发布时才有值**。
+  // 手搓的话，「页面读到的字段必须由运行时数据产出」这条核对就退化成脚本
+  // 自己写期望值给自己 —— 而客户侧最要紧的那件事（看到的是**冻结内容**、不是
+  // 最新版）恰恰只能靠"发布一次、再复读"来证明。
+  //
+  // 与成果段、会话段同一条纪律：写完**复读**，页面看到的每一格都是后端事实。
+  await (async function loadOfferReleasePayload() {
+    const aid = entrustWriteProof.assignmentId
+    if (!aid) {
+      note('S3 发布 · 无委托锚点（成果段没挑到委托），跳过')
+      return
+    }
+    try {
+      // 授权 id 走**真接口**取，不在脚本里推 —— 与页面同一条口径。
+      const ctx = await api('GET', '/entrust/assignments/' + aid + '/session-context',
+        { token: tok.owner })
+      const eid = (ctx.data || {}).entrustment_id
+      if (!eid) {
+        note('S3 发布 · 授权上下文未给出唯一授权（' + String((ctx.data || {}).note || '')
+          + '），跳过')
+        return
+      }
+
+      // 挑该委托的 `customer_quote` —— 它是合同 §10.1 第 6 步"发布报价、客户接受
+      // 精确版本"的对象。种子里这份成果是 `source=manual`（人工直写），
+      // 来源门槛对这类**放行**；这里**不为门槛伪造前提**（agent 产出却没有声明行的
+      // 会被正确地拒发）。
+      const list = entrustAssignmentArtifacts[aid] || {}
+      const cand = ((list.items) || []).filter(function (x) {
+        return x.artifact_type === 'customer_quote'
+      })[0]
+      if (!cand) {
+        note('S3 发布 · 委托 #' + aid + ' 没有 customer_quote 成果，跳过')
+        return
+      }
+
+      // 幂等：本机重复跑时复用已有发布。每次都新建会让"旧版本被取代"越堆越多，
+      // 而客户侧只该看到本单**最新**那一条。
+      const before = await api('GET', '/entrust/entrustments/' + eid + '/offer-releases',
+        { token: tok.owner })
+      const live = (((before.data || {}).items) || []).filter(function (r) {
+        return String(r.artifact_id) === String(cand.artifact_id) && r.status === 'released'
+      })[0]
+      if (!live) {
+        const made = await api('POST', '/entrust/entrustments/' + eid + '/offer-releases', {
+          token: tok.owner,
+          body: {
+            artifact_id: cand.artifact_id,
+            revision_no: 1,
+            // 把报价单附件**显式列入**授权清单：客户侧「授权附件」与"清单外一律 404"
+            // 这两件事都要有一条真实的授权记录才谈得上。
+            authorized_attachment_ids: entrustWriteProof.quoteAttachmentId
+              ? [entrustWriteProof.quoteAttachmentId] : []
+          },
+          headers: { 'Idempotency-Key': rid() }
+        })
+        if (made.status !== 200) {
+          // 不静默：拒发的原因（门槛 / 权限 / 状态）必须打出来，否则下一步会以
+          // "客户侧没有载荷"的形式暴露，而报错位置离真因很远。
+          note('S3 发布 · 发布被拒（' + made.status + '）：'
+            + JSON.stringify(made.data).slice(0, 240))
+          return
+        }
+        console.log('S3 发布：成果 #%s（%s v%s）→ release #%s',
+          String(cand.artifact_id), String(cand.artifact_type),
+          String(made.data.revision_no), String(made.data.release_id))
+      }
+
+      // 复读：经理侧（按授权）与客户侧（**发给我的**）各一份。
+      const mgr = await api('GET', '/entrust/entrustments/' + eid + '/offer-releases',
+        { token: tok.owner })
+      if (mgr.status === 200) entrustEntrustmentReleases[String(eid)] = mgr.data
+      const mine = await api('GET', '/entrust/my-offer-releases', { token: tok.shipper })
+      if (mine.status === 200) entrustMyReleases = mine.data
+      else note('S3 发布 · 客户侧清单取不到（' + mine.status + '）：'
+        + JSON.stringify(mine.data).slice(0, 200))
+    } catch (e) {
+      note('S3 发布 · 取数失败，跳过：' + (e && e.message))
+    }
+  })()
+
   console.log('载荷就绪：货 %d · 船 %d · 泊位 %d · 预约 %d · 订单 %d · 支付单 %d · 合同 %d',
     (D.cargoList.items || []).length, (D.ships.items || []).length, (D.berths.items || []).length,
     (D.appts.items || []).length, (D.orders.items || []).length,
@@ -668,6 +758,8 @@ async function bootstrap() {
       String(entrustArtifact.artifact_type), String(entrustWriteProof.beforeCurrentNo),
       (entrustArtifactRevisions.items || []).length)
   }
+  console.log('S3 发布载荷：客户侧 %d 条 · 经理侧覆盖 %d 个授权',
+    (entrustMyReleases.items || []).length, Object.keys(entrustEntrustmentReleases).length)
   if (!(D.entrustMine.items || []).length) {
     note('委托支线无载荷 —— 请确认已铺 backend/scripts/seed_entrust_demo.py')
   }
@@ -756,6 +848,22 @@ function route(url, body) {
     return d ? { ok: d } : { err: '委托不存在：' + m[1] }
   }
   if (u === '/entrust/my-orgs') return { ok: D.entrustOrgs }
+  // S3 对客发布（两条通道各一个口，**不能互为替代**）：
+  //   · `/my-offer-releases`      —— 客户侧：服务端按登录身份筛"发给我的"，
+  //                                  前端再按 assignment_id 挑本单那一条；
+  //   · `/entrustments/{eid}/offer-releases` —— 经理侧：该授权下的全部发布。
+  // 页面问的是哪一个口，回哪一个口的**同一份真载荷** —— 混用会让"客户看不到
+  // 内部字段"这类断言在一个恰好形状相似的载荷上假绿。
+  if (u === '/entrust/my-offer-releases') {
+    if (!(entrustMyReleases.items || []).length) {
+      return { err: '未拉取到客户侧发布载荷（应已真发布一次）' }
+    }
+    return { ok: entrustMyReleases }
+  }
+  if ((m = u.match(/^\/entrust\/entrustments\/(\d+)\/offer-releases$/))) {
+    const rows = entrustEntrustmentReleases[m[1]]
+    return rows ? { ok: rows } : { err: '未拉取授权 ' + m[1] + ' 的发布清单' }
+  }
   // 单委托任务清单（登记案件 / 处置里选受影响项用）。**精确匹配**：它是
   // `GET /entrust/tasks?assignment_id=`，若落到别的分支，页面会把一份委托载荷
   // 当成任务列出来（形状不对，表现为"受影响项里全是委托标题"这种静默错值）。
@@ -972,6 +1080,20 @@ function loadPage(file, ctx) {
         },
         fetchEntrustmentAttachments: (eid) =>
           fetchVia('/entrust/entrustments/' + eid + '/attachments'),
+        // ── 对客发布（S3 纵向切片）────────────────────────────────────────
+        // ⚠️ 上面那段"新增一个取数函数就必须在此登记"说的就是这个坑，而本轮**确实又踩了**：
+        //    `fetchMyOfferReleases` 漏登记 ⇒ 落到真实 `utils/request.js` ⇒ Node 里没有
+        //    `wx.request` 直接抛错 ⇒ 被详情页的 `.catch` 吞成一个 `null` ⇒ 客户侧
+        //    「对客报价」卡整块不渲染，表现为模板核对报 `offer.* 未产出`。
+        //    **真因在脚本里、症状在页面上**，只有本地复现 CI 才看得见（已实测：
+        //    复现前 rc=1，登记后 rc=0）。
+        fetchMyOfferReleases: () => fetchVia('/entrust/my-offer-releases'),
+        fetchEntrustmentOfferReleases: (eid) =>
+          fetchVia('/entrust/entrustments/' + eid + '/offer-releases'),
+        // `fetchOfferRelease`（单条发布）**刻意不登记**：目前没有任何页面调用它，
+        // 而 route() 里两条通道的载荷形状**不同**（客户投影 / 经理投影），
+        // 按 release_id 二选一会变成一个"猜调用者身份"的分支 —— 那是假绿的温床。
+        // 将来有页面用它时，应当**连 route() 那条一起加**，并在那里显式挑投影。
         // 附件上传与提取（S2 第三片）。**不是**回放式桩：它们真的发 multipart 请求
         // 并真的触发提取 —— 这两步是本片唯一能证明"上传的报价单 Agent 读得到"的地方，
         // 桩成回放就等于把被测对象换成我自己写的假货。

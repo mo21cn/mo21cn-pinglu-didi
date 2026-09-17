@@ -2821,6 +2821,63 @@ check('[接线] 登记入口只在已受理时出现（受理前 raise_case 必 
   )
 })()
 
+// ---- ㊹ 界面文案里不得残留 Markdown 强调标记（`**x**`） ----
+// 为什么值得一条检查：wxml 的**文本节点**与 js 的**字符串**都不是 Markdown 渲染器。
+// 写在注释里是排版习惯（无害，本脚本会先把注释剥掉）；写进文案里就会原样显示成
+// 「**样本签署**」——多了四个没人要的字符。而它是**静默**的：
+// 结构 / 路由 / 类名 / 事件绑定这几道既有检查都不看文本内容，本地静态全绿、
+// 真机走查也不会去挑"文案里多了两个星号"这种毛病 ⇒ 只有人肉盯屏幕才发现。
+// 2026-09-17 一轮里连踩 3 处（客户已响应行、签署模式说明、发布确认条文案）⇒ 加这道闸。
+// 唯一豁免：会话屏的内置样报价单 —— 它是后端夹具文件的**逐字节副本**，
+// 星号属于夹具原文（上面已有逐字节比对守着），改它反而会让两侧不一致。
+;(() => {
+  const blank = (m) => m.replace(/[^\n]/g, ' ')
+  /** 剥掉注释（保持行数不变，便于报出原始行号） */
+  const strip = (src, kind) => {
+    let s = src.replace(/\/\*[\s\S]*?\*\//g, blank)
+    if (kind === 'js') s = s.replace(/^[ \t]*\/\/.*$/gm, '')
+    if (kind === 'wxml') s = s.replace(/<!--[\s\S]*?-->/g, blank)
+    return s
+  }
+  /** 把内置样报价单常量整段挖空（它是夹具副本，星号是原文） */
+  const blankFixture = (src) => {
+    const start = src.indexOf('const SAMPLE_QUOTE_TEXT')
+    if (start === -1) return src
+    const joinAt = src.indexOf('\n].join(', start)
+    if (joinAt === -1) return src
+    const lineEnd = src.indexOf('\n', joinAt + 1)
+    const end = lineEnd === -1 ? src.length : lineEnd
+    return src.slice(0, start) + blank(src.slice(start, end)) + src.slice(end)
+  }
+
+  const files = []
+  const walk = (dir) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, ent.name)
+      if (ent.isDirectory()) walk(abs)
+      else if (/\.(wxml|js|wxss)$/.test(ent.name)) files.push(abs)
+    }
+  }
+  walk(MINI)
+
+  const hits = []
+  for (const abs of files) {
+    const kind = abs.endsWith('.wxml') ? 'wxml' : abs.endsWith('.wxss') ? 'wxss' : 'js'
+    let src = strip(fs.readFileSync(abs, 'utf8'), kind)
+    if (kind === 'js') src = blankFixture(src)
+    src.split('\n').forEach((line, i) => {
+      if (line.indexOf('**') !== -1) {
+        hits.push(`${path.relative(REPO, abs)}:${i + 1}  ${line.trim().slice(0, 90)}`)
+      }
+    })
+  }
+  check(
+    '[文案] 界面文本里没有残留的 Markdown 星号（wxml 文本节点 / js 字符串；注释与夹具副本不计）',
+    hits.length === 0,
+    hits.length ? `共 ${hits.length} 处：\n      ` + hits.join('\n      ') : `扫描 ${files.length} 个文件`
+  )
+})()
+
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)
 if (errors.length) {
