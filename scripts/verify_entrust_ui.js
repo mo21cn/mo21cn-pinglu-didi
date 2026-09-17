@@ -1065,6 +1065,120 @@ check(
   )
 })()
 
+// ── 文本来源 + 引用来获取值域（HO 0917-3 裁定二第 3 条：页面必须显示来源） ──
+// 两张表都是**后端取值域的镜像**。镜像的风险不是说错话，而是"少一档"：
+// 少了 `manual_transcription`，界面就无法提示"重抽会覆盖人写的内容"。
+const backendTextSources = pyValueConsts(attPy, 'TEXT_SOURCE_')
+const frontTextSources = Object.keys(E.TEXT_SOURCE_LABELS || {}).sort()
+check(
+  '[附件] 文本来源标签覆盖后端 TEXT_SOURCE_* 全部取值',
+  backendTextSources.length > 0 && backendTextSources.join(',') === frontTextSources.join(','),
+  `后端 [${backendTextSources.join('/')}] vs 前端 [${frontTextSources.join('/')}]`
+)
+check(
+  '[附件] 文本来源顺序表与标签键集合相等',
+  (E.TEXT_SOURCE_ORDER || [])
+    .slice()
+    .sort()
+    .join(',') === frontTextSources.join(','),
+  `ORDER [${(E.TEXT_SOURCE_ORDER || []).join('/')}]`
+)
+check(
+  '[附件] 未知文本来源照实回显，不折成某个已知来源',
+  E.textSourceLabel('brand_new_source').indexOf('brand_new_source') !== -1,
+  E.textSourceLabel('brand_new_source')
+)
+;(function () {
+  // 重抽会不会覆盖"人写的"内容 —— 这条决定界面要不要先问一次
+  const manual = E.decorateAttachment({
+    attachment_id: 9,
+    filename: 'scan.png',
+    extract_status: 'done',
+    text_source: 'manual_transcription'
+  })
+  const machine = E.decorateAttachment({
+    attachment_id: 10,
+    filename: 'q.txt',
+    extract_status: 'done',
+    text_source: 'extractor'
+  })
+  check(
+    '[附件] 只有人工转录才需要在重抽前确认（机读提取可再生成，不必打扰用户）',
+    manual.overwritesManualText === true && machine.overwritesManualText === false,
+    `manual=${manual.overwritesManualText} / extractor=${machine.overwritesManualText}`
+  )
+  check(
+    '[附件] 文本来源在界面上是两个不同的词（写成一个就分不出谁写的）',
+    manual.textSourceLabel !== machine.textSourceLabel,
+    `${manual.textSourceLabel} / ${machine.textSourceLabel}`
+  )
+  check(
+    '[附件] 只有 needs_transcription / unsupported 才给人工转录入口（failed 是文件坏了，转也白转）',
+    E.decorateAttachment({ attachment_id: 11, extract_status: 'needs_transcription' }).canTranscribe ===
+      true &&
+      E.decorateAttachment({ attachment_id: 12, extract_status: 'unsupported' }).canTranscribe ===
+        true &&
+      E.decorateAttachment({ attachment_id: 13, extract_status: 'failed' }).canTranscribe === false,
+    'needs_transcription/unsupported/failed'
+  )
+})()
+
+// ── 来源 kind：与后端 `runner.KIND_*` 逐字对齐 ──────────────────────────
+// ⚠️ `attachment` 与 `attachment_text` **必须都在这张表里，且是不同的词**：
+// 前者=附件存在，后者=文本被读进来了。界面把两者画成一个样子，
+// 等于替 Agent 把"读了"说成"有"。
+const runnerPy = read(path.join(REPO, 'backend/app/modules/entrust/agents/runner.py'))
+const backendKinds = pyValueConsts(runnerPy, 'KIND_')
+const frontKinds = Object.keys(E.SOURCE_KIND_LABELS || {}).sort()
+check(
+  '[来源] kind 标签覆盖后端 KIND_* 全部取值',
+  backendKinds.length > 0 && backendKinds.join(',') === frontKinds.join(','),
+  `后端 [${backendKinds.join('/')}] vs 前端 [${frontKinds.join('/')}]`
+)
+check(
+  '[来源] 「附件」与「附件文本」在界面上必须是两个不同的词',
+  E.sourceKindLabel('attachment') !== E.sourceKindLabel('attachment_text'),
+  `${E.sourceKindLabel('attachment')} / ${E.sourceKindLabel('attachment_text')}`
+)
+check(
+  '[来源] 未知 kind 照实回显，不折成"附件"',
+  E.sourceKindLabel('brand_new_kind').indexOf('brand_new_kind') !== -1,
+  E.sourceKindLabel('brand_new_kind')
+)
+;(function () {
+  // 未核验来源必须**画出来**，否则"页面显示来源与未核验警告"这条等于没做
+  const job = E.decorateJob({
+    job_id: 1,
+    status: 'succeeded',
+    envelope: {
+      artifact_proposals: [{ artifact_type: 'quote_parsed', payload: {}, note: '' }],
+      source_refs: [
+        { kind: 'attachment_text', ref: '7' },
+        { kind: 'attachment', ref: '7' }
+      ],
+      unverified_sources: [{ kind: 'attachment', ref: '999', where: 'findings[0].source_refs' }]
+    }
+  })
+  check(
+    '[来源] 作业把源清单与未核验清单都装饰出来（含位置 where）',
+    job.sources.length === 2 &&
+      job.unverified.length === 1 &&
+      job.unverified[0].where === 'findings[0].source_refs' &&
+      job.unverified[0].text.indexOf('findings[0]') !== -1,
+    JSON.stringify({ sources: job.sources.length, unverified: job.unverified })
+  )
+  const clean = E.decorateJob({
+    job_id: 2,
+    status: 'succeeded',
+    envelope: { artifact_proposals: [], source_refs: [], unverified_sources: [] }
+  })
+  check(
+    '[来源] 没有未核验来源时不无端告警（否则所有人都会学会忽略它）',
+    clean.unverified.length === 0,
+    JSON.stringify(clean.unverified)
+  )
+})()
+
 /**
  * 字段标签必须覆盖注册表里出现的**每一个** required + optional 字段名。
  * 回退值是字段名本身（看得见但不该出现），少一个就意味着界面上会冒出英文键。

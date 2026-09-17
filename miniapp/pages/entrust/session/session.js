@@ -49,6 +49,7 @@ const {
   newIdempotencyKey,
   runJob,
   submitJob,
+  transcribeAttachment,
   uploadAttachment,
   viewState
 } = require('../../../utils/entrust')
@@ -90,6 +91,13 @@ Page({
     /** 上传报价单：进行中标记（上传 + 提取是一串动作，全程只能有一个在跑） */
     uploading: false,
     attachNotice: '',
+    /** 附件写动作（重抽 / 人工转录）的进行中标记 */
+    attachBusy: false,
+    /** 重抽：待确认覆盖的附件（人工转录会被覆盖，必须先问一次） */
+    reextractId: '',
+    /** 人工转录：正在录入的附件 + 草稿 */
+    transcribeId: '',
+    transcribeDraft: '',
     /** 引用附件跑作业时的进行中标记（与「发消息」区分开） */
     referencing: false,
     /** 采纳：待确认的作业与提案类型（页内确认条的两个键） */
@@ -605,6 +613,134 @@ Page({
                 : '上传失败：请确认后端已启动'
         })
       })
+  },
+
+  /**
+   * 重抽（重新提取）——**人工转录之后必须先问一次**（HO 0917-3 裁定四）。
+   *
+   * 为什么不能直接抽：转录内容**不可再生成**（扫描件重抽只会得到"需要转录"），
+   * 而后端在提取失败的分支还会删掉旧文本 ⇒ 一次失败的重抽足以让人的劳动
+   * 凭空消失，界面上却只看到"提取失败"。所以这里用**页内确认条**先问
+   * （不用 `wx.showModal`：原生弹层不在渲染树里，关键路径拿不到设备证据）。
+   *
+   * 文本来自**机读提取**时不必问 —— 那本来就能由文件再生成一次。
+   */
+  onReextractAsk(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const id = ds.attachment_id != null ? String(ds.attachment_id) : ''
+    if (!id || this.data.attachBusy) return
+    const one = this.pickAttachment(id)
+    if (!one) {
+      wx.showToast({ icon: 'none', title: '该附件已不在本页，请下拉刷新' })
+      return
+    }
+    if (one.overwritesManualText) {
+      this.setData({ reextractId: id, attachNotice: '' })
+      return
+    }
+    return this.runReextract(id, false)
+  },
+
+  onReextractCancel() {
+    this.setData({ reextractId: '' })
+  },
+
+  onReextractConfirm() {
+    const id = this.data.reextractId
+    if (!id) return
+    this.setData({ reextractId: '' })
+    return this.runReextract(id, true)
+  },
+
+  /** 真重抽。`acknowledge` 只在"确认覆盖人工转录"时为真。 */
+  runReextract(id, acknowledge) {
+    const self = this
+    this.setData({ attachBusy: true, attachNotice: '' })
+    // 返回整条链：调用方（含 e2e）await 它才等于"这件事做完了"
+    return extractAttachment(id, newIdempotencyKey('rex'), {
+      acknowledgeTranscriptionOverwrite: acknowledge
+    })
+      .then(function (out) {
+        self.setData({ attachBusy: false })
+        const status = String((out && out.extract_status) || '')
+        const prev = String((out && out.previous_text_source) || '')
+        const chars = (out && out.extracted_chars) || 0
+        self.setData({
+          attachNotice:
+            status === 'done'
+              ? '已重新提取 ' + chars + ' 字' + (prev ? '（覆盖了原先的' + (prev === 'manual_transcription' ? '人工转录' : '机读提取') + '文本）' : '')
+              : '重新提取未成功：' + extractStatusLabel(status) + '。' + ((out && out.detail) || '')
+        })
+        return self.loadRest(self.data.sessionId)
+      })
+      .catch(function (err) {
+        self.setData({ attachBusy: false })
+        const status = (err && err.httpStatus) || 0
+        // 409 是"有人工转录、需先确认"——这正是这条守卫存在的意义，
+        // 不能提示成一个笼统的"失败"，否则用户永远不知道要先确认。
+        if (status === 409) {
+          self.setData({ reextractId: id })
+          return
+        }
+        wx.showToast({
+          icon: 'none',
+          title: status ? '重抽失败（' + status + '）' : '重抽失败：请确认后端已启动'
+        })
+      })
+  },
+
+  /** 人工转录入口：图片/扫描件拿不到机读文本时的降级通道 */
+  onTranscribeOpen(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const id = ds.attachment_id != null ? String(ds.attachment_id) : ''
+    if (!id || this.data.attachBusy) return
+    this.setData({ transcribeId: id, transcribeDraft: '', attachNotice: '' })
+  },
+
+  onTranscribeInput(e) {
+    this.setData({ transcribeDraft: (e && e.detail && e.detail.value) || '' })
+  },
+
+  onTranscribeCancel() {
+    this.setData({ transcribeId: '', transcribeDraft: '' })
+  },
+
+  onTranscribeSubmit() {
+    const self = this
+    const id = this.data.transcribeId
+    const text = (this.data.transcribeDraft || '').trim()
+    if (!id || this.data.attachBusy) return
+    if (!text) {
+      wx.showToast({ icon: 'none', title: '请先输入转录内容（提交空内容会被拒）' })
+      return
+    }
+    this.setData({ attachBusy: true })
+    return transcribeAttachment(id, text, newIdempotencyKey('tr'))
+      .then(function (out) {
+        self.setData({ attachBusy: false, transcribeId: '', transcribeDraft: '' })
+        const chars = (out && out.char_count) || 0
+        self.setData({
+          attachNotice:
+            '已人工转录 ' + chars + ' 字并标记来源为「人工转录」—— Agent 已能读到，' +
+            '但重抽会先来问你一次（转录内容不可再生成）'
+        })
+        return self.loadRest(self.data.sessionId)
+      })
+      .catch(function (err) {
+        self.setData({ attachBusy: false })
+        const status = (err && err.httpStatus) || 0
+        wx.showToast({
+          icon: 'none',
+          title: status ? '转录失败（' + status + '）' : '转录失败：请确认后端已启动'
+        })
+      })
+  },
+
+  /** 按附件编号取本页那一行（找不到返回 undefined） */
+  pickAttachment(id) {
+    return (this.data.attachments || []).filter(function (a) {
+      return String(a.attachmentId) === String(id)
+    })[0]
   },
 
   /**

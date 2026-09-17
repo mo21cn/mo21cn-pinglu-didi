@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -122,6 +122,7 @@ def _result_payload(
     persisted_status: str,
     persisted_error: str | None,
     extracted_chars: int | None,
+    previous_text_source: str | None = None,
 ) -> dict[str, Any]:
     preview = None
     if outcome.text:
@@ -136,6 +137,9 @@ def _result_payload(
         "detail": outcome.detail,
         "notes": outcome.notes,
         "text_preview": preview,
+        # 覆盖前那份文本的来源（没有文本时为 None）。放在**响应**里而不是幂等载荷里：
+        # 幂等载荷只能由请求派生，掺进当前状态会让同键重放变成"同键异体"409。
+        "previous_text_source": previous_text_source,
     }
 
 
@@ -147,6 +151,7 @@ def _result_payload(
 )
 def extract_attachment(
     attachment_id: int,
+    acknowledge_transcription_overwrite: Annotated[bool, Query()] = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     idempotency_key: Annotated[str | None, Header()] = None,
@@ -155,13 +160,34 @@ def extract_attachment(
 
     **可重复调用**（"重抽"就是同一个动作）：重复提取覆盖同一份文本，
     不产生多份互相矛盾的结果。因此不需要 `?refresh=true` 之类的开关。
+
+    ⚠️ 但"覆盖"在**人工转录**上是有代价的：转录内容不可再生成，而失败分支
+    还会 `drop_text`。所以当该附件当前的文本来自人工转录时，本端点**默认拒绝**
+    （409），要求调用方先提示覆盖影响、再带
+    `acknowledge_transcription_overwrite=true` 显式确认（HO 0917-3 裁定四）。
     """
     key = guard_or_400(idempotency_key)
     user_id = int(user.id)
     attachment = load_visible_attachment(db, attachment_id=attachment_id, user_id=user_id)
     _assert_can_modify_attachment(db, attachment=attachment, user_id=user_id)
 
+    # 覆盖前的来源要能查得到：这是"保留已被作业使用的文本依据"的**最小可核对形态**
+    # —— 附件文本是 1:1 一行、不留历史（见本文件顶部与 PR 的剩余限制），
+    # 至少要让"这次覆盖掉的是人工转录还是机器提取"有据可查。
+    #
+    # ⚠️ 它只进**响应**，**绝不进幂等载荷**：幂等载荷一旦掺进"读自当前状态"的值，
+    # 同一个键的第二次合法调用就会因为载荷不同而被判成"同键异体"→ 409。
+    # 实测踩到过（`test_extract_is_idempotent_under_same_key` 当场红）。
+    # **幂等载荷只能由请求派生**（附件 id / 内容指纹 / 参数）。
+    previous = svc.get_text(db, attachment_id)
+    previous_source = str(previous["source"]) if previous is not None else None
+
     def business() -> dict[str, Any]:
+        if previous_source == svc.TEXT_SOURCE_MANUAL and not acknowledge_transcription_overwrite:
+            raise svc.AttachmentTranscriptionOverwriteError(
+                "该附件当前的文本来自人工转录，重新提取会覆盖它且不可恢复；"
+                "确认覆盖请带 acknowledge_transcription_overwrite=true"
+            )
         data = _read_attachment_bytes(attachment)
         outcome = extraction.extract(
             data,
@@ -204,6 +230,7 @@ def extract_attachment(
             persisted_status=str(updated["extract_status"]),
             persisted_error=updated["extract_error"],
             extracted_chars=updated["extracted_chars"],
+            previous_text_source=previous_source,
         )
 
     return run_write(
@@ -215,6 +242,7 @@ def extract_attachment(
             "attachment_id": attachment_id,
             "sha256": attachment["sha256"],
             "max_chars": _max_chars(),
+            "acknowledge_transcription_overwrite": acknowledge_transcription_overwrite,
         },
         business=business,
         map_domain_error=map_attachment_error,

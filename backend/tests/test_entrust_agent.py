@@ -279,7 +279,261 @@ def test_envelope_marks_fabricated_sources():
         },
         known_source_refs=frozenset({("assignment", "1")}),
     )
-    assert result.unverified_sources == [{"kind": "attachment", "ref": "999"}]
+    assert result.unverified_sources == [
+        {"kind": "attachment", "ref": "999", "where": "source_refs"}
+    ]
+
+
+# ── 来源核对的六类情形（HO 0917-3 裁定二：回归必须覆盖这些） ──────────────
+#
+# 背景：2026-09-17 的 live 运行暴露出**两个**缺口 ——
+#   ① 校验只看顶层 `source_refs`，`findings[].source_refs` 里的引用**完全没被核对**；
+#   ② 模型没有可原样复制的来源目录，于是照着文件名写了描述串。
+# 下面六条把"什么叫合法引用"钉死，其中第 6 条是本轮新覆盖的通道。
+
+
+def test_source_ref_verification_accepts_exact_pairs_everywhere():
+    """① 合法引用（顶层 + findings 内）⇒ 一条都不该被标记。"""
+    result = env_mod.validate_envelope(
+        {
+            "base_revision": 1,
+            "summary": "x",
+            "source_refs": [{"kind": "attachment_text", "ref": "7"}],
+            "findings": [
+                {
+                    "code": "carrier_unparsed",
+                    "message": "m",
+                    "source_refs": [{"kind": "attachment", "ref": "7"}],
+                }
+            ],
+        },
+        known_source_refs=frozenset({("attachment", "7"), ("attachment_text", "7")}),
+    )
+    assert result.unverified_sources == []
+
+
+def test_source_ref_rejects_descriptive_string():
+    """② 描述串（本次 live 的真实形态）⇒ 标记 —— 目录里只有纯 id。"""
+    result = env_mod.validate_envelope(
+        {
+            "base_revision": 1,
+            "summary": "x",
+            "source_refs": [
+                {
+                    "kind": "attachment",
+                    "ref": "#1 DEMO1-SYNTHETIC-sample-quotation.txt（text/plain）",
+                }
+            ],
+        },
+        known_source_refs=frozenset({("attachment", "1"), ("attachment_text", "1")}),
+    )
+    assert len(result.unverified_sources) == 1
+    assert result.unverified_sources[0]["ref"].startswith("#1 ")
+
+
+def test_source_ref_cannot_swap_kind():
+    """③ 错误 kind ⇒ 标记。`attachment` 只说"附件存在"，`attachment_text` 才表示
+    "文本被读进来了" —— 两者不是同一个事实，不能互相顶替。"""
+    result = env_mod.validate_envelope(
+        {
+            "base_revision": 1,
+            "summary": "x",
+            "source_refs": [{"kind": "attachment", "ref": "7"}],
+        },
+        # 附件存在，但**没有** attachment_text（即：没提取出文本）
+        known_source_refs=frozenset({("attachment", "7")}),
+    )
+    assert result.unverified_sources == []
+
+    swapped = env_mod.validate_envelope(
+        {
+            "base_revision": 1,
+            "summary": "x",
+            "source_refs": [{"kind": "attachment_text", "ref": "7"}],
+        },
+        known_source_refs=frozenset({("attachment", "7")}),
+    )
+    assert swapped.unverified_sources == [
+        {"kind": "attachment_text", "ref": "7", "where": "source_refs"}
+    ]
+
+
+def test_source_ref_rejects_out_of_scope_id():
+    """④ 越权 ID：另一条委托的附件编号不在本次目录里 ⇒ 标记。"""
+    result = env_mod.validate_envelope(
+        {
+            "base_revision": 1,
+            "summary": "x",
+            "source_refs": [{"kind": "attachment", "ref": "42"}],
+        },
+        known_source_refs=frozenset({("attachment", "7")}),
+    )
+    assert result.unverified_sources == [
+        {"kind": "attachment", "ref": "42", "where": "source_refs"}
+    ]
+
+
+def test_source_ref_rejects_unextracted_attachment_text():
+    """⑤ 未提取的附件**不可**被当作文本来源引用。
+
+    目录本身已经这么构造（`build_source_catalog` 只在 `extract_status='done'`
+    时才加 `attachment_text`），本用例钉住的是"引用它就会被标记"这一后果。
+    """
+    from app.modules.entrust.agents.runner import build_source_catalog
+
+    catalog = build_source_catalog(
+        {
+            "assignment": {"assignment_id": 1},
+            "attachments": [
+                {"attachment_id": 7, "filename": "q.txt", "extract_status": "not_requested"}
+            ],
+        },
+        {"attachment_id": 7},
+    )
+    assert ("attachment", "7") in catalog
+    assert ("attachment_text", "7") not in catalog
+
+    result = env_mod.validate_envelope(
+        {
+            "base_revision": 1,
+            "summary": "x",
+            "source_refs": [{"kind": "attachment_text", "ref": "7"}],
+        },
+        known_source_refs=catalog,
+    )
+    assert result.unverified_sources == [
+        {"kind": "attachment_text", "ref": "7", "where": "source_refs"}
+    ]
+
+
+def test_source_ref_verification_covers_nested_findings():
+    """⑥ **嵌套**错误引用必须被抓到 —— 这是本轮的缺口所在。
+
+    校验原先只遍历顶层 `source_refs`：模型在 `findings[].source_refs` 里编来源
+    完全不会被发现，而 findings 恰恰是它解释"我为什么这么判"的地方。
+    """
+    result = env_mod.validate_envelope(
+        {
+            "base_revision": 1,
+            "summary": "x",
+            "source_refs": [{"kind": "assignment", "ref": "1"}],
+            "findings": [
+                {
+                    "code": "validity_missing",
+                    "message": "m",
+                    "source_refs": [
+                        {"kind": "attachment", "ref": "999"},
+                        {"kind": "assignment", "ref": "1"},
+                    ],
+                },
+                {
+                    "code": "carrier_unparsed",
+                    "message": "m",
+                    "source_refs": [{"kind": "attachment_text", "ref": "abc"}],
+                },
+            ],
+        },
+        known_source_refs=frozenset({("assignment", "1")}),
+    )
+    assert result.unverified_sources == [
+        {"kind": "attachment", "ref": "999", "where": "findings[0].source_refs"},
+        {"kind": "attachment_text", "ref": "abc", "where": "findings[1].source_refs"},
+    ]
+
+
+def test_quote_prompt_lists_copyable_source_catalog():
+    """提示词必须给出**可原样复制**的来源目录，且与校验用的是同一份集合。
+
+    只写"只能引用存在的来源"没有可操作性：模型不知道 ref 长什么样，
+    于是写一个看起来合理的描述串（实测形态）。
+    """
+    from app.modules.entrust.agents.runner import SPECIALTY_MODULES, build_source_catalog
+
+    context = {
+        "assignment": {"assignment_id": 1, "revision": 2, "cargo_summary": "钢材"},
+        "attachments": [
+            {
+                "attachment_id": 7,
+                "filename": "q.txt",
+                "content_type": "text/plain",
+                "extract_status": "done",
+                "text_excerpt": "报价方：某某航运\n单价：45.00 元/吨",
+            }
+        ],
+    }
+    catalog = build_source_catalog(context, {"attachment_id": 7})
+    prompt = SPECIALTY_MODULES["agent_02"].build_user_prompt(context, {"attachment_id": 7}, catalog)
+    assert "【可引用的来源目录" in prompt
+    for kind, ref in sorted(catalog):
+        assert f"- kind={kind} ref={ref}" in prompt
+    # 文本来自附件提取 ⇒ 提示词必须点名 `attachment_text`，否则模型很可能只写 `attachment`
+    assert "kind=attachment_text ref=7" in prompt
+    assert "必须" in prompt and "attachment_text" in prompt
+
+
+def test_quote_parsing_separates_rate_unit_from_quantity():
+    """`rate` 的分母是**计价单位**，不是数量单位。
+
+    旧写法把 `元/吨` 的"吨"记成 `quantity_unit`：两者恰好同名时看不出问题，
+    换成"每柜 3000 元"就会凭空造出一个不存在的数量事实（HO 0917-3 裁定二）。
+    """
+    from app.modules.entrust.agents import ag02
+
+    parsed = ag02._parse_quote_text("报价方：某某航运\n单价：3000.00 元/柜\n有效期至：2026-12-31")
+    assert parsed["rate"] == "3000.00"
+    assert parsed["rate_unit"] == "柜"
+    # 只写了每柜价、没写数量 ⇒ 不得出现任何数量字段
+    assert "quantity" not in parsed
+    assert "quantity_unit" not in parsed
+
+    full = ag02._parse_quote_text(
+        "报价方：某某航运\n单价：45.00 元/吨\n数量：1200 吨\n币种：人民币\n"
+    )
+    assert full["rate_unit"] == "吨"
+    assert full["quantity"] == "1200.00"
+    assert full["quantity_unit"] == "吨"
+    assert full["currency"] == "CNY"
+
+
+def test_quote_parsed_contract_now_covers_currency_and_unit():
+    """`currency` / `rate_unit` / `includes` / `excludes` 必须在字段契约内。
+
+    它们此前不在契约里 ⇒ 真实模型给出的这四个字段被登记成**未知字段**，
+    而它们恰好是 BP-02 要展示的业务内容，不能长期靠"任意 JSON 字段"承载。
+    """
+    from app.modules.entrust import registry as reg
+
+    spec = reg.get_spec("quote_parsed")
+    for field in ("currency", "rate_unit", "includes", "excludes"):
+        assert field in spec.optional_fields, field
+    assert (
+        reg.validate_payload(
+            "quote_parsed",
+            {
+                "carrier": "某某航运",
+                "rate": "45.00",
+                "currency": "CNY",
+                "rate_unit": "吨",
+                "includes": ["装船", "卸船"],
+                "excludes": ["港建费"],
+            },
+        )
+        == []
+    )
+    assert (
+        reg.unknown_fields(
+            "quote_parsed",
+            {
+                "carrier": "x",
+                "rate": "1.00",
+                "currency": "CNY",
+                "rate_unit": "吨",
+                "includes": [],
+                "excludes": [],
+            },
+        )
+        == []
+    )
 
 
 def test_envelope_forces_human_review():

@@ -271,6 +271,9 @@ class AttachmentOut(BaseModel):
     extract_status: str
     extract_error: str | None
     extracted_chars: int | None
+    #: 当前文本的来源（`extractor` / `manual_transcription`；没有文本时为 None）。
+    #: 界面据此区分"机读提取 / 人工转录"，并在重抽前提示会不会覆盖掉人写的内容。
+    text_source: str | None = None
     source_event_at: str | None
     created_at: str
     updated_at: str
@@ -320,6 +323,10 @@ class ExtractionResultOut(BaseModel):
     detail: str
     notes: list[str]
     text_preview: str | None
+    #: 覆盖前那份文本的来源（`extractor` / `manual_transcription`；没有文本时为 None）。
+    #: 作用：重抽会**覆盖**同一行、不留历史 ⇒ 至少要让"这次覆盖掉的是人工转录还是
+    #: 机器提取"在响应与幂等记录里可查（HO 0917-3 裁定四）。
+    previous_text_source: str | None = None
 
 
 class AttachmentTextOut(BaseModel):

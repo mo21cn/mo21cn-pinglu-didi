@@ -928,6 +928,7 @@ const REVISION_SOURCE_LABELS = { manual: '人工', agent: 'Agent' }
 const ARTIFACT_FIELD_LABELS = {
   carrier: '承运方',
   rate: '报价单价',
+  rate_unit: '计价单位',
   cargo_name: '货名',
   quantity: '数量',
   quantity_unit: '数量单位',
@@ -2823,6 +2824,40 @@ function decorateMessage(row) {
  * ⚠️ `envelope` 是**提案**，不是成果（AC-09）：它只有被 `adopt` 之后才成为成果。
  * 界面把它显示成"解析结果"会让人以为已经落库 —— 所以卡上必须写"提案"。
  */
+/**
+ * 来源引用取值域 —— 与后端 `runner.KIND_*` 一一对应。
+ *
+ * ⚠️ `attachment` 与 `attachment_text` **不是同一件事**：
+ * 前者说"这个附件存在"，后者说"它的文本被读进来了"。
+ * 界面必须分开显示 —— 把两者画成一个样子，等于替 Agent 把"读了"说成"有"。
+ */
+const SOURCE_KIND_LABELS = {
+  assignment: '受理单',
+  task: '任务',
+  artifact: '成果',
+  attachment: '附件',
+  attachment_text: '附件文本',
+  entrustment: '委托授权',
+  operator_input: '操作者输入'
+}
+
+const SOURCE_KIND_ORDER = [
+  'assignment',
+  'task',
+  'artifact',
+  'attachment',
+  'attachment_text',
+  'entrustment',
+  'operator_input'
+]
+
+function sourceKindLabel(kind) {
+  const k = String(kind || '')
+  if (!k) return '来源未知'
+  // 未知取值照实回显，不折成某个已知标签（折了会让人以为来源类型只有这几种）
+  return SOURCE_KIND_LABELS[k] || '未知来源（' + k + '）'
+}
+
 function decorateJob(row) {
   const data = row || {}
   const env = data.envelope || null
@@ -2868,6 +2903,43 @@ function decorateJob(row) {
     finishedAt: data.finished_at || '',
     proposalCount: proposals.length,
     proposals: proposals,
+    /**
+     * **来源**（HO 0917-3 裁定二第 3 条：页面必须显示来源与未核验警告）。
+     *
+     * 这一条补的是一个明确的产品缺口：此前经理人只看得到一个"采纳"按钮，
+     * 看不见这份提案**引用了什么**、其中哪些**在服务端核不上**。
+     * "有人工采纳按钮"不能替代"人能看见需要核对什么"。
+     */
+    sources: ((env && env.source_refs) || []).map(function (r) {
+      const one = r || {}
+      return {
+        key: String(one.kind || '') + ':' + String(one.ref || ''),
+        kind: one.kind || '',
+        ref: one.ref || '',
+        kindLabel: sourceKindLabel(one.kind),
+        text: sourceKindLabel(one.kind) + ' #' + (one.ref || '?')
+      }
+    }),
+    /**
+     * 服务端**核对不上**的引用（`envelope.validate_envelope` 的产出，含嵌套
+     * `findings[].source_refs`）。非空 ⇒ 界面必须警示，且采纳不等于"已核实"。
+     */
+    unverified: ((env && env.unverified_sources) || []).map(function (u) {
+      const one = u || {}
+      return {
+        key:
+          String(one.kind || '') +
+          ':' +
+          String(one.ref || '') +
+          ':' +
+          String(one.where || 'source_refs'),
+        kind: one.kind || '',
+        ref: one.ref || '',
+        where: one.where || 'source_refs',
+        kindLabel: sourceKindLabel(one.kind),
+        text: sourceKindLabel(one.kind) + ' #' + (one.ref || '?') + '（' + (one.where || '') + '）'
+      }
+    }),
     /**
      * 能否采纳（**纯展示**，不判权）。
      *
@@ -3007,6 +3079,27 @@ function _sizeText(bytes) {
   return (n / 1024 / 1024).toFixed(1) + ' MB'
 }
 
+/**
+ * 附件文本来源取值域 —— 与后端 `attachments.TEXT_SOURCE_*` 一一对应。
+ *
+ * 为什么界面要关心"这段文本是谁写的"：**机读提取可以重抽，人工转录不能**。
+ * 转录内容不可再生成（扫描件重抽只会得到"需要转录"），而重抽失败时后端还会
+ * 删掉旧文本 ⇒ 一次失败的重抽足以让人的劳动凭空消失。界面因此在重抽前必须
+ * 先问一句。
+ */
+const TEXT_SOURCE_LABELS = {
+  extractor: '机读提取',
+  manual_transcription: '人工转录'
+}
+
+const TEXT_SOURCE_ORDER = ['extractor', 'manual_transcription']
+
+function textSourceLabel(source) {
+  const s = String(source || '')
+  if (!s) return '无文本'
+  return TEXT_SOURCE_LABELS[s] || '未知来源（' + s + '）'
+}
+
 function decorateAttachment(row) {
   const data = row || {}
   const status = String(data.extract_status || '')
@@ -3015,6 +3108,8 @@ function decorateAttachment(row) {
   // 未提取的附件对 Agent 而言只是"一个文件名"。`canReference` 就是这条区分
   // 在界面上的落点 —— 少了它，用户会以为"传上去了 Agent 就该读到"。
   const hasText = status === 'done'
+  const textSource = String(data.text_source || '')
+  const manual = textSource === 'manual_transcription'
   return {
     attachmentId: _sid(data.attachment_id),
     name: data.name || data.filename || '未命名附件',
@@ -3024,6 +3119,20 @@ function decorateAttachment(row) {
     extractLabel: extractStatusLabel(status),
     hasText: hasText,
     canReference: hasText,
+    /** 当前文本的来源（机读提取 / 人工转录）；没文本时为空 */
+    textSource: textSource,
+    textSourceLabel: textSourceLabel(textSource),
+    /**
+     * 重抽会不会**覆盖掉人写的内容**。界面据此先出确认条：
+     * 覆盖人工转录不可恢复（转录内容不可再生成，且失败的提取还会删文本）。
+     */
+    overwritesManualText: manual,
+    /**
+     * 能不能走人工转录。只在"有内容但拿不到机读文本"时才有意义：
+     * `needs_transcription`（扫描件/图片）与 `unsupported`（格式不支持）。
+     * `failed` 是文件坏了，先换文件，转也白转。
+     */
+    canTranscribe: status === 'needs_transcription' || status === 'unsupported',
     referenceHint: hasText
       ? 'Agent 会读到这份附件的文本'
       : status === 'needs_transcription'
@@ -3093,12 +3202,36 @@ function uploadAttachment(filePath, opts, idempotencyKey) {
  *
  * **可重复调用**（"重抽"就是同一个动作）：重复提取覆盖同一份文本，
  * 不产生多份互相矛盾的结果，所以不需要 `?refresh=true` 之类的开关。
+ *
+ * ⚠️ `opts.acknowledgeTranscriptionOverwrite` 是"我知道这会覆盖人工转录"的显式确认。
+ * 该附件当前的文本来自人工转录时，后端**默认拒绝**（409）—— 转录内容不可再生成，
+ * 而失败的提取还会删掉旧文本。确认由**页内确认条**收集，不由原生弹层（弹层不在
+ * 渲染树里，关键路径拿不到设备证据）。
  */
-function extractAttachment(attachmentId, idempotencyKey) {
+function extractAttachment(attachmentId, idempotencyKey, opts) {
+  const o = opts || {}
+  const suffix = o.acknowledgeTranscriptionOverwrite
+    ? '?acknowledge_transcription_overwrite=true'
+    : ''
   return request({
-    url: BASE + '/attachments/' + attachmentId + '/extract',
+    url: BASE + '/attachments/' + attachmentId + '/extract' + suffix,
     method: 'POST',
     data: {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 提交**人工转录**文本（图片/扫描件的降级通道）。
+ *
+ * 转录完成后文本来源是 `manual_transcription` —— 它会显示在附件行上，
+ * 并让后续"重抽"变成需要确认的动作。
+ */
+function transcribeAttachment(attachmentId, text, idempotencyKey) {
+  return request({
+    url: BASE + '/attachments/' + attachmentId + '/transcription',
+    method: 'POST',
+    data: { text: text },
     headers: { 'Idempotency-Key': idempotencyKey }
   })
 }
@@ -3193,6 +3326,8 @@ module.exports = {
   SESSION_STATUS_LABELS,
   SLOT_EMPTY_TEXT,
   SLOT_FIELD_LABELS,
+  SOURCE_KIND_LABELS,
+  SOURCE_KIND_ORDER,
   STATUS_HINT,
   STATUS_META,
   STATUS_ORDER,
@@ -3200,6 +3335,8 @@ module.exports = {
   TASK_STATUS_LABELS,
   TASK_TYPE_LABELS,
   TASK_TYPE_ORDER,
+  TEXT_SOURCE_LABELS,
+  TEXT_SOURCE_ORDER,
   VIEW,
   WORKBENCH_SLOTS,
   addCaseLink,
@@ -3296,10 +3433,13 @@ module.exports = {
   revisionSourceLabel,
   runJob,
   sessionStatusLabel,
+  sourceKindLabel,
   statusClass,
   statusLabel,
   submitAssignment,
   submitJob,
+  textSourceLabel,
+  transcribeAttachment,
   uploadAttachment,
   viewState
 }

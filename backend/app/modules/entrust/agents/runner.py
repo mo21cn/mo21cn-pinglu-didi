@@ -136,7 +136,11 @@ async def run_agent(
     if module is None:
         raise EnvelopeValidationError("unknown_specialty", f"未注册的专业 {scope.specialty!r}")
 
-    user_prompt = module.build_user_prompt(context, job_input)
+    # ⚠️ 来源目录在这里算一次，**同时**喂给提示词与之后的来源核对。
+    #    两处必须用同一个集合：提示词里给的是 A、校验认的是 B 的话，
+    #    模型照着提示词原样抄也会被判成"编造来源"——那比不给目录更坏。
+    source_catalog = build_source_catalog(context, job_input)
+    user_prompt = module.build_user_prompt(context, job_input, source_catalog)
     try:
         result = await chat_json(
             system=module.SYSTEM_PROMPT,

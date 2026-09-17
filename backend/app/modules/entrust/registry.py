@@ -149,7 +149,22 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
         code="quote_parsed",
         label="报价解析稿",
         required_fields=("carrier", "rate"),
-        optional_fields=("cargo_name", "quantity", "quantity_unit", "route", "valid_until"),
+        optional_fields=(
+            "cargo_name",
+            "quantity",
+            "quantity_unit",
+            "route",
+            "valid_until",
+            # 2026-09-17（HO 0917-3 裁定二）：下面四项此前不在契约里，于是真实模型
+            # 给出的 `currency` / `includes` / `excludes` 被登记成**未知字段** ——
+            # 而它们恰好是 BP-02 要展示的业务内容，不能长期靠"任意 JSON 字段"承载。
+            # 另：`rate` 只说"45.00"，**不说这一价是每吨还是每柜**，光有金额无法确定
+            # 费用 ⇒ 计价单位必须显式落在 `rate_unit` 上。
+            "currency",
+            "rate_unit",
+            "includes",
+            "excludes",
+        ),
         internal_fields=(),
         evidence_kinds=(EVIDENCE_DOCUMENT, EVIDENCE_EMAIL, EVIDENCE_PHOTO),
         field_types=(
@@ -160,6 +175,10 @@ _SPECS: tuple[ArtifactTypeSpec, ...] = (
             ("quantity_unit", FIELD_TEXT),
             ("route", FIELD_TEXT),
             ("valid_until", FIELD_TEXT),
+            ("currency", FIELD_TEXT),
+            ("rate_unit", FIELD_TEXT),
+            ("includes", FIELD_LIST),
+            ("excludes", FIELD_LIST),
         ),
     ),
     ArtifactTypeSpec(

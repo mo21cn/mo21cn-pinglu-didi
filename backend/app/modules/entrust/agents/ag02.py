@@ -52,15 +52,22 @@ SYSTEM_PROMPT = """你是内河货运的方案与采购助理。输出必须是 
 }
 
 字段契约（服务端会按注册表校验，缺必填会记入 missing_fields）：
-- quote_parsed：必填 carrier、rate；可选 cargo_name、quantity、quantity_unit、route、valid_until
+- quote_parsed：必填 carrier、rate；可选 cargo_name、quantity、quantity_unit、route、
+  valid_until、currency、rate_unit、includes、excludes
 - supplier_compare：必填 candidates（数组）
 - customer_quote：必填 amount、currency、includes
 
 硬性约束：
 1. 抽取不到的字段**留空或省略**，绝不猜测；金额用十进制字符串（如 "38.00"）。
-2. 只能引用输入中确实给出的来源（附件/任务/成果/受理单）；编造来源会被服务端标记。
-3. 所有产出都是提案，`requires_review` 必须为 true。
-4. 只允许 parse_quote / compare_suppliers / assemble_customer_quote 三种建议动作。
+2. **rate 必须与 rate_unit 成对**（`"元/吨"` 写 `rate_unit="吨"`，`"元/柜"` 写
+   `rate_unit="柜"`）。只给一个金额、不说这一价是每吨还是每柜，费用就无法确定，
+   下游也没法算总额。同样地：金额要带 `currency`；数量与计价单位是**两件事**，
+   别把 `rate_unit` 当成 `quantity_unit`。
+3. 只能引用输入里【可引用的来源目录】列出的来源，且 **kind 与 ref 都要原样复制**。
+   写成文件名、加 `#` 前缀、把 `attachment_text` 写成 `attachment`、或引用目录里
+   没有的编号，都会被服务端判为**编造来源**并标记给经理人核对。
+4. 所有产出都是提案，`requires_review` 必须为 true。
+5. 只允许 parse_quote / compare_suppliers / assemble_customer_quote 三种建议动作。
 """
 
 _CARRIER_RE = re.compile(
@@ -70,6 +77,13 @@ _CARRIER_RE = re.compile(
 _RATE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:元|块)\s*(?:/|每)?\s*(吨|柜|箱|方|立方米|m3|公里|km)?")
 _DATE_RE = re.compile(r"(?:有效期(?:至)?|截止|至)\s*[:：]?\s*(\d{4}-\d{2}-\d{2})")
 _ROUTE_RE = re.compile(r"([\u4e00-\u9fa5]{2,8})\s*(?:→|->|—|至|到)\s*([\u4e00-\u9fa5]{2,8})")
+#: **数量**（与单价的分母是两件事，别混）。`数量：1200 吨` → quantity + quantity_unit
+_QUANTITY_RE = re.compile(
+    r"(?:数量|货量|总量|托运量)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(吨|柜|箱|方|立方米|m3)"
+)
+#: 币种。**金额不带币种等于半个事实**（CNY 与 USD 差一个数量级）
+_CURRENCY_ALIASES = {"CNY": "CNY", "RMB": "CNY", "人民币": "CNY", "USD": "USD", "美元": "USD"}
+_CURRENCY_RE = re.compile(r"CNY|RMB|人民币|USD|美元")
 
 
 def _to_decimal_text(raw: str) -> str:
@@ -93,7 +107,21 @@ def _parse_quote_text(text: str) -> dict[str, Any]:
     if match:
         payload["rate"] = _to_decimal_text(match.group(1))
         if match.group(2):
+            # ⚠️ 这是**计价单位**（单价的分母），不是数量单位。旧写法把它记成
+            # `quantity_unit`，等于让"每吨 45 元"冒充"数量是吨"：两者恰好同名时
+            # 看不出问题，换成"每柜 3000 元"就会凭空造出一个不存在的数量事实
+            # （HO 0917-3 裁定二：rate=45.00 本身不足以确定费用）。
+            payload["rate_unit"] = match.group(2)
+
+    match = _QUANTITY_RE.search(text)
+    if match:
+        payload["quantity"] = _to_decimal_text(match.group(1))
+        if match.group(2):
             payload["quantity_unit"] = match.group(2)
+
+    match = _CURRENCY_RE.search(text)
+    if match:
+        payload["currency"] = _CURRENCY_ALIASES.get(match.group(0), match.group(0))
 
     match = _DATE_RE.search(text)
     if match:
@@ -310,8 +338,18 @@ def mock_content(context: dict[str, Any], job_input: dict[str, Any]) -> dict[str
     }
 
 
-def build_user_prompt(context: dict[str, Any], job_input: dict[str, Any]) -> str:
-    """把只读事实与操作者输入渲染成提示词（真实模式使用）。"""
+def build_user_prompt(
+    context: dict[str, Any],
+    job_input: dict[str, Any],
+    source_catalog: frozenset[tuple[str, str]] | None = None,
+) -> str:
+    """把只读事实与操作者输入渲染成提示词（真实模式使用）。
+
+    `source_catalog` 是本次作业**允许引用**的 `(kind, ref)` 集合（由
+    `runner.build_source_catalog` 从服务端已读出的数据库事实枚举）。必须传进来：
+    不给目录，模型只能"猜一个像样的 ref"，而它猜出来的东西在服务端核不上 ——
+    2026-09-17 的 live 实测就是这样（它照着文件名写了描述串）。
+    """
     assignment = context.get("assignment") or {}
     quote_text, text_source = _quote_source(context, job_input)
     source_label = {
@@ -351,7 +389,34 @@ def build_user_prompt(context: dict[str, Any], job_input: dict[str, Any]) -> str
             "",
             f"【对客报价金额】{job_input.get('amount')} {job_input.get('currency') or ''}",
         ]
+    lines += _render_source_catalog(source_catalog, text_source=text_source, job_input=job_input)
     return "\n".join(lines)
+
+
+def _render_source_catalog(
+    source_catalog: frozenset[tuple[str, str]] | None,
+    *,
+    text_source: str | None,
+    job_input: dict[str, Any],
+) -> list[str]:
+    """把来源目录渲染成**可原样复制**的清单（HO 0917-3 裁定二的第一条）。
+
+    "只能引用存在的来源"这句话本身没有可操作性 —— 模型不知道 ref 长什么样，
+    于是它写一个看起来合理的描述串（实测就是 `#1 文件名（text/plain）`）。
+    给它逐行列出来的 `kind=... ref=...`，它就能照抄。
+    """
+    if not source_catalog:
+        return ["", "【可引用的来源目录】", "（空）—— 因此 source_refs 请一律留空。"]
+    out = ["", "【可引用的来源目录（kind 与 ref 必须原样复制，不得改写）】"]
+    for kind, ref in sorted(source_catalog):
+        out.append(f"- kind={kind} ref={ref}")
+    if text_source == "attachment_text" and job_input.get("attachment_id") is not None:
+        out.append(
+            "本次报价文本来自附件提取 ⇒ 引用里**必须**出现 "
+            f"`kind=attachment_text ref={job_input['attachment_id']}` 这一行"
+            "（只有它才说明文本被读进来了；只写 `attachment` 只表示附件存在）。"
+        )
+    return out
 
 
 __all__ = [

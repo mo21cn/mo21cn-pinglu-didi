@@ -938,3 +938,85 @@ def test_end_to_end_job_reads_uploaded_pdf(env):
     parsed = next(p for p in envelope["artifact_proposals"] if p["artifact_type"] == "quote_parsed")
     # 数字来自 PDF 文本层（这次操作者**没有**粘贴任何文本）
     assert parsed["payload"]["rate"] == "38.00"
+
+
+# ───────────────────────────── 重抽不得静默丢掉人工转录（HO 0917-3 裁定四）
+
+
+def test_reextract_refuses_to_overwrite_manual_transcription(env):
+    """人工转录之后重抽 ⇒ **409 且什么都不变**。
+
+    为什么必须是拒绝而不是"静默覆盖 + 提示"：转录内容**不可再生成**
+    （扫描件重抽只会得到 needs_transcription），而失败分支还会 `drop_text`
+    —— 一次失败的重抽足以让一份已存在的人工转录凭空消失，界面上却只看到"提取失败"。
+    """
+    db = env.make_session()
+    manager, _, _, eid = _seed(env, db)
+    attachment_id = _upload(
+        env, manager, data=PNG_BYTES, filename="扫描件.png", ctype="image/png", entrustment_id=eid
+    ).json()["attachment_id"]
+
+    assert _extract(env, manager, attachment_id).json()["extract_status"] == (
+        att.EXTRACT_NEEDS_TRANSCRIPTION
+    )
+    transcribed = env.client.post(
+        f"/api/v1/entrust/attachments/{attachment_id}/transcription",
+        json={"text": QUOTE_TEXT},
+        headers=_headers(manager, uuid.uuid4().hex),
+    )
+    assert transcribed.status_code == 200, transcribed.text
+    before = _get_text(env, manager, attachment_id).json()
+    assert before["source"] == att.TEXT_SOURCE_MANUAL and before["has_text"] is True
+
+    refused = _extract(env, manager, attachment_id)
+    assert refused.status_code == 409, refused.text
+    assert "人工转录" in refused.json()["detail"]
+
+    # 关键：拒绝是**无副作用**的 —— 文本、来源、状态一个都没动
+    after = _get_text(env, manager, attachment_id).json()
+    assert after["text"] == before["text"]
+    assert after["source"] == att.TEXT_SOURCE_MANUAL
+    assert after["char_count"] == before["char_count"]
+    meta = env.client.get(
+        f"/api/v1/entrust/attachments/{attachment_id}", headers=_headers(manager)
+    ).json()
+    assert meta["extract_status"] == att.EXTRACT_DONE
+
+
+def test_reextract_overwrites_transcription_only_when_acknowledged(env):
+    """显式确认后才允许覆盖，并且**来源必须跟着改**（不能把人工内容标成机器抽取）。"""
+    db = env.make_session()
+    manager, _, _, eid = _seed(env, db)
+    # 用可提取的文本文件：确认后重抽能拿到机器文本，覆盖是"真覆盖"
+    attachment_id = _upload(
+        env,
+        manager,
+        data="承运人：机器抽取物流\n单价：99.00 元/吨\n".encode(),
+        filename="报价.txt",
+        ctype="text/plain",
+        entrustment_id=eid,
+    ).json()["attachment_id"]
+
+    transcribed = env.client.post(
+        f"/api/v1/entrust/attachments/{attachment_id}/transcription",
+        json={"text": QUOTE_TEXT},
+        headers=_headers(manager, uuid.uuid4().hex),
+    )
+    assert transcribed.status_code == 200, transcribed.text
+
+    # 未确认 ⇒ 拒绝
+    assert _extract(env, manager, attachment_id).status_code == 409
+
+    # 确认 ⇒ 放行；同一幂等键在拒绝之后仍可用（拒绝不吃掉键）
+    key = uuid.uuid4().hex
+    ok = env.client.post(
+        f"/api/v1/entrust/attachments/{attachment_id}/extract"
+        "?acknowledge_transcription_overwrite=true",
+        headers=_headers(manager, key),
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["extract_status"] == att.EXTRACT_DONE
+
+    after = _get_text(env, manager, attachment_id).json()
+    assert after["source"] == att.TEXT_SOURCE_EXTRACTOR, "覆盖后来源必须变成机器抽取"
+    assert "机器抽取物流" in after["text"], "内容确实来自重抽，而不是留着人工那份"

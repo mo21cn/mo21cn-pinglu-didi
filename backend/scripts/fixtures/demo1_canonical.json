@@ -1,0 +1,66 @@
+{
+  "fixture_id": "DEMO-1-CANONICAL",
+  "data_label": "合成场景 / 人工录入证据（Synthetic — 不是真实客户材料）",
+  "authority": "DEMO-1-contract-v1.0 §3.1 Canonical fixture；HO 0917-3 裁定一（F-Q1/F-Q2 以合同为准）",
+  "purpose": "演示与相应自动化**共用**的 canonical 场景配置：统一报价文件、委托输入、候选运力与变更内容。",
+  "does_not_replace": "旧种子 seed_entrust_demo.py 的 1200 吨主单与「收货港变更」样本。HO 0917-3 明令**不要全局替换**它们（会让既有测试基线漂移），它们继续作为**旧回归数据**存在。",
+  "assignment": {
+    "title": "DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港",
+    "cargo_summary": "钢材 · 南宁 → 贵港（合成场景，非真实客户材料）",
+    "quantity": "800.000",
+    "quantity_unit": "吨",
+    "legs": [
+      { "seq": 1, "mode": "road", "from": "厂区", "to": "南宁港" },
+      { "seq": 2, "mode": "water", "from": "南宁港", "to": "贵港港" },
+      { "seq": 3, "mode": "road", "from": "贵港港", "to": "卸货地" }
+    ],
+    "note": "三段（公路—内河—公路）。⚠️ 航段目前**没有独立的结构化载体**，只是任务描述 —— HO 0917-3 裁定三要求 S3 建立最小结构化航段对象（稳定 ID、所属委托、运输方式、起终点、顺序），本配置先把字段列在这里备查。"
+  },
+  "quotation_file": "backend/scripts/fixtures/DEMO1-canonical-sample-quotation.txt",
+  "change": {
+    "kind": "quantity",
+    "from_quantity": "800.000",
+    "to_quantity": "950.000",
+    "reason": "货主追加 150 吨（合成场景）",
+    "note": "主演示使用**数量变更**；收货港变更继续作为补充回归场景（旧种子里的那一宗）。"
+  },
+  "candidates": [
+    {
+      "candidate_id": "C-900",
+      "carrier": "桂平航 6688",
+      "capacity_tonnes": "900.000",
+      "capacity_basis": "该水运段**单船承运**，且当前方案**不拆批**",
+      "single_vessel": true,
+      "no_partial_load": true,
+      "rate": "45.00",
+      "rate_unit": "吨",
+      "currency": "CNY",
+      "valid_until": "2026-12-31",
+      "expected_after_change": "不适用 —— 变更后 950 吨 > 900 吨，且不拆批 ⇒ 单船装不下",
+      "why_the_basis_matters": "⚠️ 只写「900」是不够的：若允许拆批或多船承运，950 吨**未必**装不下，那条「候选在变更后不适用」的判据就不成立。所以容量口径必须写进数据，不能只写在文档里。"
+    },
+    {
+      "candidate_id": "C-1200",
+      "carrier": "横州集运 101",
+      "capacity_tonnes": "1200.000",
+      "capacity_basis": "该水运段单船承运，且当前方案不拆批",
+      "single_vessel": true,
+      "no_partial_load": true,
+      "rate": "47.50",
+      "rate_unit": "吨",
+      "currency": "CNY",
+      "valid_until": "2026-12-31",
+      "expected_after_change": "仍适用（1200 ≥ 950）⇒ 变更后业务**可以继续完成**",
+      "why_needed": "HO 0917-3 裁定一明确要求另备一个容量足够的候选：只准备「装不下的那个」会让变更之后无路可走，演示也就停在半途。"
+    }
+  ],
+  "deterministic_capacity_rule": {
+    "statement": "候选适用于某数量 ⇔ candidate.capacity_tonnes ≥ 该水运段的实际承运量；若候选声明 single_vessel 且 no_partial_load，则该承运量必须由**一条船**装下（不允许拆批）。",
+    "not_an_llm_judgement": "容量适用性是**确定性规则**，不得由模型意见决定（合同 BP-04 第 6 条）。本配置因此把 capacity_tonnes / single_vessel / no_partial_load 都写成数据字段。",
+    "owner": "S4（履约与变更）实现；本文件只提供事实载体，不实现判断逻辑。"
+  },
+  "acceptance_entry": {
+    "principal": "主验收仍**从 UI 新建委托开始**（演示第 1 步）；本配置里的预置状态只用于检查点演示。",
+    "reference": "HO 0917-3 裁定一末句"
+  }
+}

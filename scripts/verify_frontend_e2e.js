@@ -23,11 +23,13 @@ const path = require('path')
 const ROOT = path.resolve(__dirname, '..')
 const BASE = (process.argv.find((a) => a.indexOf('--base=') === 0) || '').split('=')[1] || 'http://127.0.0.1:8000'
 
-//: DEMO-1 合成样报价单（合同 §3.1 的 canonical fixture / 演示第 2 步的输入）。
+//: DEMO-1 **canonical** 样报价单（合同 §3.1；HO 0917-3 裁定一）。
 //: ⚠️ 演示与 CI **必须用同一个文件** —— 否则会出现"演示能过、CI 用的是另一份"
 //: 这种两边都对不上的分叉。清单见 `docs/entrust/milestones/DEMO-1-fixture-manifest.md`。
+//: 旧件 `DEMO1-SYNTHETIC-sample-quotation.txt`（1200 吨）**保留不动**，继续作为
+//: 旧回归数据（HO 0917-3：不要全局替换 1200 吨，避免既有测试基线漂移）。
 const FIXTURE_QUOTE = path.join(
-  ROOT, 'backend', 'scripts', 'fixtures', 'DEMO1-SYNTHETIC-sample-quotation.txt'
+  ROOT, 'backend', 'scripts', 'fixtures', 'DEMO1-canonical-sample-quotation.txt'
 )
 
 let N_OK = 0
@@ -974,8 +976,22 @@ function loadPage(file, ctx) {
         // 并真的触发提取 —— 这两步是本片唯一能证明"上传的报价单 Agent 读得到"的地方，
         // 桩成回放就等于把被测对象换成我自己写的假货。
         uploadAttachment: (filePath, opts, key) => pageUpload(filePath, opts, key),
-        extractAttachment: (id, key) =>
-          pageWrite('POST', '/entrust/attachments/' + id + '/extract', {}, key)
+        extractAttachment: (id, key, opts) =>
+          pageWrite(
+            'POST',
+            '/entrust/attachments/' +
+              id +
+              '/extract' +
+              (opts && opts.acknowledgeTranscriptionOverwrite
+                ? '?acknowledge_transcription_overwrite=true'
+                : ''),
+            {},
+            key
+          ).then(rejectIfNotOk),
+        // 人工转录（图片/扫描件的降级通道）。真网络、真落库 —— 桩成回放就等于
+        // 把"来源标记为人工转录"这件事换成我自己写的一个字符串。
+        transcribeAttachment: (id, text, key) =>
+          pageWrite('POST', '/entrust/attachments/' + id + '/transcription', { text: text }, key)
             .then(rejectIfNotOk),
         fetchRevisions: (id) => fetchVia('/entrust/artifacts/' + id + '/revisions'),
         // 写端点：**只放行显式用户动作**（见 WRITE_ENABLED）。走真网络，
@@ -2536,6 +2552,8 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
               // 回放快照换成写之后的真事实 —— 否则页面下一次 load() 会拿到旧清单。
               entrustEntrustmentAttachments[String(entrustWriteProof.entrustmentId)] =
                 attAfter.data
+              // 后面"重抽 / 人工转录"那一段要用它（它是页面自己传上去的那一份）
+              entrustWriteProof.pageUploadedAttachmentId = newAttId
             }
 
             // ③ 引用附件跑作业：**只带 attachment_id**。
@@ -2610,6 +2628,175 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
               if (kindsR.indexOf('operator_input') !== -1) {
                 fail(P2 + '本次没有操作者粘贴文本，来源里却出现 operator_input',
                   kindsR.join(','))
+              } else ok()
+            }
+
+            // ── 重抽 / 人工转录（HO 0917-3 裁定二第 3 条 + 裁定四）────────────
+            // ① 作业卡必须把**来源**画出来："有人工采纳按钮"不能替代
+            //    "人能看见需要核对什么"。
+            if (!pageJob) {
+              // 前面已经报过"缺该作业"，这里不重复报
+            } else if (!(pageJob.sources || []).length) {
+              fail(P2 + '作业卡没显示来源（经理看不见这份提案引用了什么）',
+                JSON.stringify(Object.keys(pageJob)))
+            } else ok()
+            // ② 来源里不同 kind 不能画成同一个词：`attachment`（附件存在）与
+            //    `attachment_text`（文本被读进来了）是两个事实。
+            if (pageJob && (pageJob.sources || []).length) {
+              const labelsShown = pageJob.sources.map(function (x) { return String(x.kindLabel) })
+              const kindsShown = pageJob.sources.map(function (x) { return String(x.kind) })
+              const dup =
+                new Set(labelsShown).size !== new Set(kindsShown).size
+              if (dup) {
+                fail(P2 + '不同的来源 kind 被画成了同一个标签', labelsShown.join(','))
+              } else ok()
+            }
+
+            // ③ 重抽 / 转录：这三步只能对着**页面自己上传的那一份**做
+            const ownAtt = entrustWriteProof.pageUploadedAttachmentId
+            if (!ownAtt) {
+              note(P2 + '没有页面自传的附件（上一步未成功），重抽与转录跳过')
+            } else {
+              // ③a 机读提取 ⇒ 重抽**不该问**（内容能由文件再生成，不该打扰用户）
+              const w1 = pageWrites.length
+              WRITE_ENABLED = true
+              try {
+                s.onReextractAsk({
+                  currentTarget: { dataset: { attachment_id: String(ownAtt) } }
+                })
+                await waitUntil(function () {
+                  return pageWrites.slice(w1).some(function (x) {
+                    return String(x.path).indexOf('/extract') !== -1
+                  })
+                }, 10000)
+              } finally {
+                WRITE_ENABLED = false
+              }
+              if (String(s._final().reextractId || '')) {
+                fail(P2 + '机读提取的附件重抽时也弹了确认（不该打扰用户）',
+                  String(s._final().reextractId))
+              } else ok()
+
+              // ③b 人工转录：提交后服务端来源必须变成 manual_transcription
+              const w2 = pageWrites.length
+              WRITE_ENABLED = true
+              try {
+                s.onTranscribeOpen({
+                  currentTarget: { dataset: { attachment_id: String(ownAtt) } }
+                })
+                await tick(40)
+                if (String(s._final().transcribeId) !== String(ownAtt)) {
+                  fail(P2 + '点了人工转录但没有进入录入态', String(s._final().transcribeId))
+                } else ok()
+                s.onTranscribeInput({ detail: { value: '承运人：人工转录物流\n单价：77.00 元/吨\n' } })
+                s.onTranscribeSubmit()
+                await waitUntil(function () {
+                  return pageWrites.slice(w2).some(function (x) {
+                    return String(x.path).indexOf('/transcription') !== -1
+                  })
+                }, 12000)
+              } finally {
+                WRITE_ENABLED = false
+              }
+              const attsNow = await api('GET',
+                '/entrust/entrustments/' + entrustWriteProof.entrustmentId + '/attachments',
+                { token: ownerToken })
+              const ownRow = ((((attsNow.data || {}).items) || [])).filter(function (a) {
+                return String(a.attachment_id) === String(ownAtt)
+              })[0]
+              if (!ownRow || ownRow.text_source !== 'manual_transcription') {
+                fail(P2 + '人工转录后来源没有被标记为 manual_transcription',
+                  ownRow ? String(ownRow.text_source) : '附件不见了')
+              } else ok()
+
+              // ⚠️ 把回放快照换成**转录之后**的真事实，再让页面重新取数一次 ——
+              // 这是真机上的同一动作（转录完页面会 loadRest）。不这么做，页面手里
+              // 还是"来源=机读提取"的旧清单，它会以为重抽不必问；那样的断言
+              // 测的是"桩的旧快照"，不是页面行为。
+              entrustEntrustmentAttachments[String(entrustWriteProof.entrustmentId)] =
+                attsNow.data
+              await s.loadRest(s._final().sessionId)
+              await tick(80)
+              const pageOwn = (s._final().attachments || []).filter(function (a) {
+                return String(a.attachmentId) === String(ownAtt)
+              })[0]
+              if (!pageOwn || pageOwn.textSource !== 'manual_transcription') {
+                fail(P2 + '页面没把文本来源显示成人工转录（用户看不到"这文本是人写的"）',
+                  pageOwn ? String(pageOwn.textSourceLabel) : '页面没有这份附件')
+              } else ok()
+
+              // ③c 这时**重抽必须先问**（转录内容不可再生成）
+              const w3 = pageWrites.length
+              WRITE_ENABLED = true
+              try {
+                s.onReextractAsk({
+                  currentTarget: { dataset: { attachment_id: String(ownAtt) } }
+                })
+                await tick(160)
+              } finally {
+                WRITE_ENABLED = false
+              }
+              // 判据是**真正的不变量**：未确认的路径**不能**毁掉人写的内容。
+              // 两种合法形态：① 页面知道来源是人写的 ⇒ 一问就停在确认态、不发请求；
+              // ② 页面信息过期（例如别人刚转录完）⇒ 请求发出去了但**服务端 409 拒掉**，
+              //    并且页面据此进入确认态。②不能算缺陷 —— 它正是服务端守卫的意义。
+              const reWrites = pageWrites.slice(w3)
+              const reRec = reWrites.filter(function (x) {
+                return String(x.path).indexOf('/extract') !== -1
+              })[0]
+              if (reRec && reRec.status === 200) {
+                fail(P2 + '人工转录后未确认的重抽**成功了**（人写的内容被静默覆盖）',
+                  reRec.status + ' → ' + String(reRec.path))
+              } else if (String(s._final().reextractId) !== String(ownAtt)) {
+                fail(P2 + '人工转录后重抽没有进入确认态',
+                  'reextractId=' + String(s._final().reextractId)
+                  + ' 写请求=' + reWrites.map(function (x) {
+                    return x.path + '(' + x.status + ')'
+                  }).join(' | '))
+              } else ok()
+              const stillManual = await api('GET',
+                '/entrust/entrustments/' + entrustWriteProof.entrustmentId + '/attachments',
+                { token: ownerToken })
+              const stillRow = ((((stillManual.data || {}).items) || [])).filter(function (a) {
+                return String(a.attachment_id) === String(ownAtt)
+              })[0]
+              if (!stillRow || stillRow.text_source !== 'manual_transcription') {
+                fail(P2 + '被拒的重抽竟然改动了文本来源（拒绝必须无副作用）',
+                  stillRow ? String(stillRow.text_source) : '附件不见了')
+              } else ok()
+
+              // ③d 确认 ⇒ 放行；服务端来源变回机读提取
+              const w4 = pageWrites.length
+              WRITE_ENABLED = true
+              try {
+                s.onReextractConfirm()
+                await waitUntil(function () {
+                  return pageWrites.slice(w4).some(function (x) {
+                    return String(x.path).indexOf('/extract') !== -1
+                  })
+                }, 12000)
+              } finally {
+                WRITE_ENABLED = false
+              }
+              const ackRec = pageWrites.slice(w4).filter(function (x) {
+                return String(x.path).indexOf('/extract') !== -1
+              })[0]
+              if (!ackRec || String(ackRec.path).indexOf('acknowledge_transcription_overwrite=true') === -1) {
+                fail(P2 + '确认重抽时没有带上显式确认参数（后端会拒绝）',
+                  ackRec ? String(ackRec.path) : '没有发出请求')
+              } else if (ackRec.status !== 200) {
+                fail(P2 + '确认重抽被拒', ackRec.status + ' → '
+                  + JSON.stringify(ackRec.data).slice(0, 140))
+              } else ok()
+              const attsAfter = await api('GET',
+                '/entrust/entrustments/' + entrustWriteProof.entrustmentId + '/attachments',
+                { token: ownerToken })
+              const afterRow = ((((attsAfter.data || {}).items) || [])).filter(function (a) {
+                return String(a.attachment_id) === String(ownAtt)
+              })[0]
+              if (!afterRow || afterRow.text_source !== 'extractor') {
+                fail(P2 + '确认重抽后来源没有变回机读提取',
+                  afterRow ? String(afterRow.text_source) : '附件不见了')
               } else ok()
             }
           }
