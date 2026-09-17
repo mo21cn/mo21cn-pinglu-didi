@@ -139,17 +139,17 @@
 
 | 项 | 状态 | 依据 |
 | --- | --- | --- |
-| 三段式方案 + 任务编排 | **缺连接** | 只有类型常量 `tasks.py:TASK_TYPE_QUOTE/PURCHASE/CONTRACT`，无编排 |
+| 三段式方案 + 任务编排 | **已成**（2026-09-17；**写侧界面未做**） | 三段式：`ent_leg` ＋ 读端点 `GET /assignments/{id}/plan` ＋ **航段命令**（建段 / **改段留版本** / 版本历史，`scope_matrix` 81 → 84）。任务编排：`ent_workflow_task.precondition_task_id`（一个任务至多一个固定前置，自依赖/循环由服务层拒绝）＋ 读模型与详情页**逐行显示前置**。⚠️ **写侧界面未做**（建段/改段没有页面入口）；设备侧走查 `NOT_RUN`。依据见 `DEMO-1-interface-delta.md` §7.21 / §7.22 |
 | 两家供应商报价对比 | 已有（类型） | `registry.py:supplier_compare`（`candidates`）+ `agents/ag02.py` |
 | **选择 ≠ 资源确认** 的门禁 | ✅ **后端已实现**（2026-09-17） | 门禁不是"两个端点"，是一条**规则闸门**：`capacity._assert_every_rule_reported` 要求四条规则**逐条**产出判定且无 fail，缺一条即中止。**候选登记与确认分属两条命令**，只登记候选**不产生任何确认痕迹**（有专门用例）。`procurement_confirm` 类型**第一次接上命令**（`capacity.confirm_capacity`） |
-| 资源确认的授权 / 证据 / 有效期 | ✅ **后端已实现**（2026-09-17）；**界面未做** | **6 条端点**（`scope_matrix` 74 → 80）；确认落 `ent_capacity_confirmation`（**冻结**判定读到的每一个值）+ `ent_capacity_rule_check`（逐规则判定）+ 一条成果。授权判据＝组织成员 + **唯一**生效授权 + 写权限；证据＝类别 + **引用**（为此给候选表补了 `evidence_ref`）。见 `S3-运力确认与有效期切片.md` |
+| 资源确认的授权 / 证据 / 有效期 | ✅ **后端与界面均已实现，且已有设备侧证据**（2026-09-17） | **6 条端点**（`scope_matrix` 74 → 80）；确认落 `ent_capacity_confirmation`（**冻结**判定读到的每一个值）+ `ent_capacity_rule_check`（逐规则判定）+ 一条成果。授权判据＝组织成员 + **唯一**生效授权 + 写权限；证据＝类别 + **引用**（为此给候选表补了 `evidence_ref`）。界面＝委托详情页运力块（登记 / 确认 / 只读复算）；㊺ 章设备走查 **`PASS=22 / FAIL=0 / NOT_RUN=0 / LIMITATION=0`**。⚠️「设备侧验过 ≠ 业务验收」。见 `S3-运力确认与有效期切片.md` |
 | 服务端客户白名单投影 | **缺连接** | `registry.py:project_for_customer` 存在但**无调用方**（孤儿函数）；`envelope.py:project_envelope_for_operator` 只覆盖 Agent 侧 |
 | **释放不可变报价版本** | ✅ **后端与界面均已实现**（表已在；命令与端点在 S3 纵向切片落地，界面在其收口切片上线） | `ent_offer_release` + `offers.release_offer` + `POST /entrustments/{eid}/offer-releases`；经理侧入口在成果页**版本行**上（页内确认条） |
 | 客户按精确版本接受/拒绝（含三类负例） | ✅ **后端与界面均已实现**（三类负例均已验：未发布/已撤回/已被取代 ⇒ 409；经理冒充 ⇒ 403；重复 ⇒ 唯一约束） | `offers.respond_to_offer` + `POST /offer-releases/{id}/responses`；客户侧入口在委托详情页「对客报价」卡（页内展开条） |
 | 从已接受事实生成合同草稿 | ✅ **后端已实现**（2026-09-17）；**界面未做** | `contracts.derive_contract` + `POST /offer-releases/{id}/contract`（前置＝客户**已接受**的发布且类型为 `customer_quote`）；并按 `S3-范围与依赖评估.md` §3 依赖 E 落了**逐字段来源表** `ent_contract_field_source`，闸门是"合同里每个字段都必须有来源行，缺一个就中止"。见 `S3-合同派生切片.md` |
 | 签名证据记录（来源/模式标注） | ✅ **已实现**（合同 BP-03 第 9 条 / §11.1） | `offers.SIGNATURE_MODE_LABELED_SAMPLE = "labeled_sample"` 随发布快照冻结；**数据来源标注**另表 `ent_artifact_origin`（`live`/`synthetic`/`manual`/`unknown`），判据取作业行的 `mocked` 事实、**不采信调用方自述**，`unknown` 不猜成 `live` |
 | 客户查看/下载字段与附件裁剪 | ✅ **后端与界面均已实现**（`project_for_customer` 不再游离） | 两条投影函数（`project_release_for_manager` / `project_release_for_customer`，服务端选投影，AC-26）+ **`GET /offer-releases/{id}/attachments/{aid}/download`**：判据只有发布时冻结的授权清单，**清单外一律 404**（不用 403 —— 403 会承认内部底稿存在） |
-| 航段（三段式）结构化对象 | **表已落；读端点与界面已成**（2026-09-17） | `ent_leg`（稳定 ID / 运输方式 / 起终点 / `seq`）已在；读模型 `plan.py` ＋ `GET /assignments/{id}/plan`（`scope_matrix` 80 → 81）＋ 委托详情页「运输计划」卡（与**必需任务前置**同屏）。⚠️ **建段命令仍未实现**（口径未裁定 ⇒ 演示走种子）；**设备侧走查 `NOT_RUN`**。见 `DEMO-1-interface-delta.md` §7.21 |
+| 航段（三段式）结构化对象 | **表已落；读端点、界面与写命令均已成**（2026-09-17） | `ent_leg`（稳定 ID / 运输方式 / 起终点 / `seq`）已在；读模型 `plan.py` ＋ `GET /assignments/{id}/plan`（`scope_matrix` 80 → 81）＋ 委托详情页「运输计划」卡（与**必需任务前置**同屏）；**航段命令**（建段 / **改段留版本** / 版本历史，`scope_matrix` 81 → **84**；口径＝HO 2026-09-17 三条裁定：谁能建段＝任意验收者/测试者 · 不强制公–水–公 · 改段保留版本）。⚠️ **写侧界面未做**；设备侧走查 `NOT_RUN`。见 `DEMO-1-interface-delta.md` §7.21 / §7.22 |
 | 历史版本保留 | 已有 | `artifacts.py` append-only + `artifacts_api.py:list_revisions` |
 
 ### 3.4 BP-04 履约、变更、结算与结案
@@ -365,7 +365,11 @@ inaccessible to B），任一句未取证则**整体不通过** —— 逐句的
 > **进度（2026-09-17 更新）**：第 4/5/6/8 项已落地（后端 + 界面），
 > 第 7 项**合同派生部分后端已落**（`S3-合同派生切片.md`；**界面未做**）——
 > 仍未做的只剩**签署证据的取证动作**（上传/记录并绑到合同版本）。
-> 第 1/2/3 项（三段式编排、比价接 UI、选择≠资源确认门禁）**仍未做** ——
+> 第 1/2/3 项**已推进**（逐条取证后更新）：**三段式编排**＝`ent_leg` 读/写命令
+> ＋ 任务固定前置（`precondition_task_id`）；**比价接 UI**＝#146 已上线两条候选并排比较；
+> **选择≠资源确认门禁**＝后端已实现且有专门用例。
+> 仍未做的：**签署证据的取证动作**、**合同派生与建段/改段的界面**、
+> 以及各步的**设备侧走查**（1/5/6/7/8）。
 > 即"客户侧 0 实现"这句已不成立，但**本里程碑整体仍未完成**。
 > 逐条依据见 `DEMO-1-interface-delta.md` §7.10/§7.11/§7.12 与
 > `docs/entrust/S3-发布与客户响应数据设计.md` §5/§6、`docs/entrust/S3-合同派生切片.md`。
