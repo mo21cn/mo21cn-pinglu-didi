@@ -848,6 +848,11 @@ def adopt_job_proposal(
         两者不在一个事务里。因此门槛把"模型产出却一条声明都没有"判为**不得发布**
         （`offers.source_gate` 的 `missing_declaration`）—— 那条缝由此变成一句可读的拒绝理由，
         而不是一次静默放行。
+
+        来源**标注**（`ent_artifact_origin`）在这里一并写下，依据是**作业行的 `mocked`**：
+        这个标志由服务端在发起调用时写入（`agentjobs` 的三态投影），调用方无从伪造。
+        合同 §11.1 要求 "labeled synthetic/manual/live sources" —— 标注必须来自事实，
+        让经理自己勾选"这次是 live"等于把标注变成一句口号。
         """
         created = art.create_artifact(
             db,
@@ -872,6 +877,22 @@ def adopt_job_proposal(
         )
         if written:
             db.commit()
+        # 三态：`True`＝桩/夹具，`False`＝真实调用，`None`＝没有尝试行 ⇒ **不猜**，标 unknown。
+        mocked = job.get("mocked")
+        if mocked is True:
+            mode = offers_svc.ORIGIN_SYNTHETIC
+        elif mocked is False:
+            mode = offers_svc.ORIGIN_LIVE
+        else:
+            mode = offers_svc.ORIGIN_UNKNOWN
+        offers_svc.record_origin(
+            db,
+            artifact_id=int(created["artifact_id"]),
+            revision_no=1,
+            mode=mode,
+            basis={"job_id": int(job_id), "job_mocked": mocked},
+            actor_user_id=int(user.id),
+        )
         return created
 
     return run_write(

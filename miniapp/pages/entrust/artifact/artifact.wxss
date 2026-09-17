@@ -250,6 +250,19 @@
   background: #EEF2FF;
 }
 
+/* 发布 / 撤回确认条里的输入框（授权附件 id、撤回理由）。
+   与详情页的 `.slot-input` 同一形态；**必须本页自带一份** —— 页面的 wxss 不共享，
+   漏了不会报错，只会让输入框变成没有边框的一行字（看起来像纯文本，用户不会去点它）。 */
+.slot-input {
+  margin: 12rpx 0 16rpx;
+  padding: 16rpx 20rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  color: #0F2540;
+  background: #FFFFFF;
+}
+
 /* ---- 本页 hover 反馈 ----
    `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */

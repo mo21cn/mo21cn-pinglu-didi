@@ -195,6 +195,89 @@
                 hover-class="hover-dim"
               >设为生效版本</view>
 
+              <!-- 发布这一版给客户（S3 纵向切片 / BP-03 第 5/8/10 条）。
+                   入口挂在**版本行**上，而不是成果级：发布按**精确版本**做，
+                   放在成果级会让人以为"发的是最新版"（后端根本没有那个分支）。
+                   已发布且仍待客户确认的版本**不再给按钮** —— 重复发布同一版
+                   只会把客户手上那份取代掉，没有任何收益。
+                   撤回只在"还没有客户响应"时出现：有响应的发布后端一律 409，
+                   摆一个必然失败的按钮等于把业务规则说成"随机失败"。 -->
+              <block wx:if="{{entrustmentId && !editing}}">
+                <view wx:if="{{item.releaseId}}" class="tl-time">
+                  发布 #{{item.releaseId}} · {{item.releaseStatusLabel}}{{item.releaseDecisionLabel ? ' · 客户已' + item.releaseDecisionLabel : ''}}
+                </view>
+                <view wx:if="{{item.releaseResponseNote}}" class="tl-note">
+                  客户说明：{{item.releaseResponseNote}}
+                </view>
+                <view
+                  wx:if="{{!item.published && releaseRevNo !== item.revisionNo}}"
+                  class="slot-btn"
+                  data-no="{{item.revisionNo}}"
+                  data-act-release="1"
+                  bindtap="onRelease"
+                  hover-class="hover-dim"
+                >发布这一版给客户</view>
+                <view
+                  wx:if="{{item.canWithdraw && withdrawReleaseId !== item.releaseId}}"
+                  class="slot-btn"
+                  data-id="{{item.releaseId}}"
+                  data-act-withdraw-open="1"
+                  bindtap="onWithdraw"
+                  hover-class="hover-dim"
+                >撤回这条发布</view>
+
+                <!-- 发布确认条：**页内**（原生弹层的确认键工具点不到）。 -->
+                <view wx:if="{{releaseRevNo === item.revisionNo}}" class="bar-note">
+                  {{releaseText}}
+                  <input
+                    class="slot-input"
+                    value="{{releaseAtts}}"
+                    bindinput="onReleaseAttsInput"
+                    placeholder="授权客户下载的附件 id（逗号分隔；留空＝不授权任何附件）"
+                  />
+                  <view wx:if="{{releaseHint}}" class="art-error">{{releaseHint}}</view>
+                  <view class="bar-actions">
+                    <view
+                      class="btn-ghost"
+                      data-act-release-cancel="1"
+                      bindtap="onReleaseCancel"
+                      hover-class="hover-dim"
+                    >取消</view>
+                    <view
+                      class="btn-primary"
+                      data-act-release-submit="1"
+                      bindtap="onReleaseSubmit"
+                      hover-class="hover-dim"
+                    >确认发布</view>
+                  </view>
+                </view>
+
+                <view wx:if="{{withdrawReleaseId === item.releaseId}}" class="bar-note">
+                  撤回发布 #{{item.releaseId}} —— 撤回后客户将不能再接受或拒绝这一版。
+                  <input
+                    class="slot-input"
+                    value="{{withdrawReason}}"
+                    bindinput="onWithdrawReasonInput"
+                    placeholder="撤回理由（必填，客户会看到这句）"
+                  />
+                  <view wx:if="{{withdrawHint}}" class="art-error">{{withdrawHint}}</view>
+                  <view class="bar-actions">
+                    <view
+                      class="btn-ghost"
+                      data-act-withdraw-cancel="1"
+                      bindtap="onWithdrawCancel"
+                      hover-class="hover-dim"
+                    >取消</view>
+                    <view
+                      class="btn-primary"
+                      data-act-withdraw-submit="1"
+                      bindtap="onWithdrawSubmit"
+                      hover-class="hover-dim"
+                    >确认撤回</view>
+                  </view>
+                </view>
+              </block>
+
               <view wx:if="{{confirmRevNo === item.revisionNo}}" class="bar-note">
                 {{confirmText}}
                 <view class="bar-actions">

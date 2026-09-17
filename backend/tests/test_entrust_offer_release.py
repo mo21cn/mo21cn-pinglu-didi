@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -558,3 +559,185 @@ def test_agent_revision_without_any_declaration_cannot_be_published(env):
     resp = _publish(env, manager, eid=eid, artifact_id=int(created["artifact_id"]), revision_no=1)
     assert resp.status_code == 400, resp.text
     assert "没有任何来源声明记录" in str(resp.json()["detail"])
+
+
+# ───────────────────────────────────────── 5. 客户下载：只认发布时冻结的清单
+
+
+def _upload(env, user, *, eid: int, name: str = "quote.txt"):
+    resp = env.client.post(
+        "/api/v1/entrust/attachments",
+        files={
+            "file": (
+                name,
+                b"\xe8\xaf\x95\xe4\xbb\xb7\xe5\x8d\x95\xe6\xad\xa3\xe6\x96\x87",
+                "text/plain",
+            )
+        },
+        data={"entrustment_id": str(eid)},
+        headers=_headers(user, uuid.uuid4().hex),
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_offer_attachment_download_is_limited_to_the_frozen_whitelist(env):
+    """BP-03 第 10 条：客户下载**只限**发布时明确授权的那几份。
+
+    这条用例真正要钉住的是一句话：**"客户能拿到什么"由发布那一刻决定，
+    不由事后可见性决定**。客户作为参与方，对整条授权下的附件本来都有可见性 ——
+    若下载口复用 `load_visible_attachment`，内部底稿会一起开出去，而这一格
+    在界面上完全看不出来（界面只显示清单里那几份）。
+
+    负例一律取 **404**（不是 403）：403 等于告诉调用方"这份文件确实存在，只是不给你"。
+    """
+    db = env.make_session()
+    manager, owner, outsider, _org, eid, aid = _seed(env, db)
+    created = _create_artifact(env, manager, eid=eid, aid=aid)
+    art_id = created["artifact_id"]
+
+    shared = _upload(env, manager, eid=eid, name="shared.txt")  # 授权给客户
+    internal = _upload(env, manager, eid=eid, name="internal-cost.txt")  # 内部底稿，**不**授权
+
+    resp = _publish(
+        env, manager, eid=eid, artifact_id=art_id, revision_no=1, atts=[shared["attachment_id"]]
+    )
+    assert resp.status_code == 200, resp.text
+    release_id = resp.json()["release_id"]
+    base = f"/api/v1/entrust/offer-releases/{release_id}/attachments"
+
+    # ① 客户下清单内的 ⇒ 200，且内容真的是那份文件
+    ok = env.client.get(f"{base}/{shared['attachment_id']}/download", headers=_headers(owner))
+    assert ok.status_code == 200, ok.text
+    assert ok.content, "下载内容不能为空"
+
+    # ② 客户下**同一条授权下的内部底稿** ⇒ 404（白名单外）
+    blocked = env.client.get(
+        f"{base}/{internal['attachment_id']}/download", headers=_headers(owner)
+    )
+    assert blocked.status_code == 404, (
+        f"白名单外的附件必须 404（实际 {blocked.status_code}）—— "
+        "复用附件支线的可见性判定会让内部底稿一起开出去"
+    )
+
+    # ③ 局外人 ⇒ 404（连"这条发布存在"都不该知道）
+    outside = env.client.get(
+        f"{base}/{shared['attachment_id']}/download", headers=_headers(outsider)
+    )
+    assert outside.status_code == 404, outside.text
+
+    # ④ 经理走**同一条通道**看到的也是"客户能拿到的那几份"（他另有通用出口下内部件）
+    mgr_ok = env.client.get(f"{base}/{shared['attachment_id']}/download", headers=_headers(manager))
+    assert mgr_ok.status_code == 200, mgr_ok.text
+    mgr_blocked = env.client.get(
+        f"{base}/{internal['attachment_id']}/download", headers=_headers(manager)
+    )
+    assert mgr_blocked.status_code == 404, (
+        "经理走本端点也只看客户视角：这条端点的判据是**发布快照里的清单**，不是调用者身份"
+    )
+    # 反面证据：经理从通用出口能拿到内部件 ⇒ 证明上面那个 404 是白名单拦的，
+    # 不是"文件不存在"（否则这条用例可能因为附件压根没存上而假绿）
+    direct = env.client.get(
+        f"/api/v1/entrust/attachments/{internal['attachment_id']}/download",
+        headers=_headers(manager),
+    )
+    assert direct.status_code == 200, (
+        "内部附件对经理必须仍可从通用出口下载 —— 否则本用例的 404 无法区分"
+        "「被白名单拦住」与「文件根本不存在」"
+    )
+
+
+# ───────────────────────────────────────── 6. 数据来源标注（BP-03 第 9 条）
+
+
+def test_publish_freezes_data_origin_and_signature_mode(env):
+    """发布快照必须**冻结**数据来源标注与签署模式，客户通道也能看到标注。
+
+    合同 §11.1 要求 "labeled synthetic/manual/live sources"；§10.1 第 7 步要求
+    "labeled sample signature evidence"。两者都是**标注**，落法只有一条：
+    标注进快照（与内容同一时刻定格），而不是靠调用方自述或事后重算。
+
+    人工创建的成果 `source=manual` ⇒ 标注自然是 `manual`（表格里那一列就是事实）。
+    """
+    db = env.make_session()
+    manager, owner, _out, _org, eid, aid = _seed(env, db)
+    created = _create_artifact(env, manager, eid=eid, aid=aid)
+    art_id = created["artifact_id"]
+
+    resp = _publish(env, manager, eid=eid, artifact_id=art_id, revision_no=1)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    snap = body["customer_snapshot"]
+    assert snap["data_origin"]["mode"] == "manual", (
+        f"人工产出的版本应标注 manual，实际 {snap.get('data_origin')}"
+    )
+    assert snap["signature_mode"] == "labeled_sample", "签署证据模式必须随发布冻结"
+
+    # 经理投影给**完整依据**（凭什么说它是 manual）
+    assert body["data_origin"]["mode"] == "manual"
+    assert body["data_origin"]["basis"], "经理侧必须能看到判定依据，不能只给一个词"
+
+    # 客户投影给**标注**但不给依据（依据里有内部编号）
+    mine = env.client.get("/api/v1/entrust/my-offer-releases", headers=_headers(owner))
+    assert mine.status_code == 200, mine.text
+    item = mine.json()["items"][0]
+    assert item["data_origin_mode"] == "manual"
+    assert item["signature_mode"] == "labeled_sample"
+    assert "basis" not in json.dumps(item.get("data_origin") or {})
+    assert "artifact_id" not in item, "客户投影不得回内部 artifact_id"
+
+    # 响应留痕后，签署标注仍在（它属于这条发布，不属于响应）
+    got = _respond(env, owner, release_id=body["release_id"], decision="accept")
+    assert got.status_code == 200, got.text
+    after = env.client.get(
+        f"/api/v1/entrust/offer-releases/{body['release_id']}", headers=_headers(owner)
+    ).json()
+    assert after["signature_mode"] == "labeled_sample"
+    assert after["response"]["decision"] == "accept"
+
+
+def test_unknown_origin_is_not_guessed_as_live(env):
+    """**未知保持未知**：没有标注行的 agent 产出必须标 `unknown`，不得猜成 live。
+
+    猜错的代价不对称：把"可复现的合成产出"包装成"真实模型产出"，会让审计把
+    两部分证据混为一谈（合同 §3.2 的 Required truth distinctions）。
+
+    ⚠️ 这条用例**不**顺带验"发布" —— 把版本的 `source` 改成 `agent` 之后，
+    来源门槛会**正确地**以"模型产出却无声明"拒发（`missing_declaration`）。
+    那是另一条规则，混在同一条用例里会让"哪条规则生效了"变得说不清。
+    """
+    db = env.make_session()
+    manager, _owner, _out, _org, eid, aid = _seed(env, db)
+    created = _create_artifact(env, manager, eid=eid, aid=aid)
+    art_id = created["artifact_id"]
+    # 造一个"agent 产出但没有标注行"的版本（模拟历史数据 / 采纳那一步没走完）
+    db.execute(
+        text(
+            "UPDATE ent_artifact_revision SET source = 'agent' "
+            "WHERE artifact_id = :a AND revision_no = 1"
+        ),
+        {"a": art_id},
+    )
+    db.commit()
+    origin = svc.resolve_origin(db, artifact_id=art_id, revision_no=1, revision_source="agent")
+    assert origin["mode"] == "unknown", f"不得猜测来源，实际 {origin['mode']}"
+    assert origin["basis"], "unknown 也必须写明为什么判不出来"
+
+    # 人工产出的另一份成果：标注行**优先于**按 `source` 的推导 ⇒ 快照按记录的事实定格
+    other = _create_artifact(env, manager, eid=eid, aid=aid, payload=dict(QUOTE_PAYLOAD))
+    other_id = other["artifact_id"]
+    svc.record_origin(
+        db,
+        artifact_id=other_id,
+        revision_no=1,
+        mode=svc.ORIGIN_SYNTHETIC,
+        basis={"job_id": 42, "job_mocked": True},
+        actor_user_id=1,
+    )
+    resp = _publish(env, manager, eid=eid, artifact_id=other_id, revision_no=1)
+    assert resp.status_code == 200, resp.text
+    snap = resp.json()["customer_snapshot"]
+    assert snap["data_origin"]["mode"] == "synthetic", (
+        "标注行必须优先于按 source 的推导（否则人工修改过的模型产出会被标成 manual）"
+    )
+    assert snap["data_origin"]["basis"]["job_mocked"] is True, "依据必须随快照冻结"

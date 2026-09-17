@@ -3356,6 +3356,367 @@ function adoptJobProposal(jobId, body, idempotencyKey) {
   })
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 对客发布与客户响应（S3 纵向切片 / BP-03 第 4–10 条；D1-07 / D1-11）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 这一片把「经理发布指定版本 → 货主查看冻结内容 → 接受／拒绝 → 经理看到响应」
+// 接到界面上。此前这三步只能用 API 走通，按 HO 的口径那**不算"按业务结果可演示"**。
+//
+// ── 四条必须写在界面上的语义（不靠后端默默保证）────────────────────────
+//
+// 1. **客户看到的是发布那一刻冻结的内容**，不是"这个成果的最新版"。
+//    所以客户侧**一律**渲染 `release.content`（服务端投影的结果），**绝不**去读成果本体 ——
+//    读成果会把"客户看到的"与"现在的最新版"混成一件事，而这两者在并发编辑下不同。
+// 2. **数据来源标注要显示**（BP-03 第 9 条）：真实模型 / 演示合成 / 人工录入 / **未标注**。
+//    `unknown` **照实显示成"来源未标注"**，不折成"人工录入"：折了就等于替审计做了判断，
+//    而"不知道"与"不是模型产的"是两句不同的话。
+// 3. **签署是样张模式**（`labeled_sample`，合同 §10.1 第 7 步）：界面上必须说明这次确认
+//    是在演示语境下取得的，不是一个已生效的法律签署 —— 不标注就会被下游当成真签署。
+// 4. **响应只有货主本人能做**。经理看到的是"客户响应了什么"，不是"我可以代他确认"
+//    —— 后端对经理返回 **403**（不是 404：他看得见，只是无权）。界面按同一条口径分工。
+
+/** 发布状态（后端 `offers.STATUS_*`）。 */
+const OFFER_STATUS_META = {
+  released: { label: '待客户确认', tone: 'warn' },
+  withdrawn: { label: '已撤回', tone: 'muted' },
+  superseded: { label: '已被新版本取代', tone: 'muted' }
+}
+
+/** 与后端取值域完全一致的顺序（断言用，勿随意增删） */
+const OFFER_STATUS_ORDER = ['released', 'withdrawn', 'superseded']
+
+function offerStatusLabel(status) {
+  const s = String(status || '')
+  if (!s) return '未知状态'
+  const meta = OFFER_STATUS_META[s]
+  // 未知取值照实回显，不折成某个已知标签
+  return meta ? meta.label : '未知状态（' + s + '）'
+}
+
+function offerStatusClass(status) {
+  const meta = OFFER_STATUS_META[String(status || '')]
+  return 'chip chip-' + (meta ? meta.tone : 'muted')
+}
+
+/**
+ * 数据来源标注（后端 `offers.ORIGIN_*`）。键必须覆盖后端全部取值。
+ *
+ * `unknown` 的文案是"**来源未标注**"而不是"未知"：后者听起来像系统坏了，
+ * 而事实是"这条记录没有标注行"—— 该做的是去补记录，不是报故障。
+ */
+const DATA_ORIGIN_LABELS = {
+  live: '真实模型调用',
+  synthetic: '演示用合成数据',
+  manual: '人工录入',
+  unknown: '来源未标注'
+}
+
+const DATA_ORIGIN_ORDER = ['live', 'synthetic', 'manual', 'unknown']
+
+function dataOriginLabel(mode) {
+  const m = String(mode || '')
+  if (!m) return DATA_ORIGIN_LABELS.unknown
+  return DATA_ORIGIN_LABELS[m] || '未标注（' + m + '）'
+}
+
+/** 客户响应的**两层含义**要分开说清：决定是什么 + 依据是哪一版。 */
+const OFFER_DECISION_LABELS = { accept: '接受', reject: '拒绝' }
+
+function offerDecisionLabel(decision) {
+  const d = String(decision || '')
+  if (!d) return ''
+  return OFFER_DECISION_LABELS[d] || '未知响应（' + d + '）'
+}
+
+/** 签署证据模式（后端 `offers.SIGNATURE_MODE_LABELED_SAMPLE`）。 */
+const SIGNATURE_MODE_LABELS = { labeled_sample: '样本签署（演示语境）' }
+
+function signatureModeLabel(mode) {
+  const m = String(mode || '')
+  if (!m) return '未标注签署模式'
+  return SIGNATURE_MODE_LABELS[m] || '未知签署模式（' + m + '）'
+}
+
+/**
+ * 签署模式的**一句解释**。
+ *
+ * 为什么必须常驻显示而不是只在首次提示：这一行决定了"这次确认算不算数"。
+ * 把它藏进提示气泡里，界面上就只剩下"已接受"三个字 —— 而看的人会以为
+ * 已经拿到了一份可执行的法律确认。
+ */
+function signatureModeHint(mode) {
+  return String(mode || '') === 'labeled_sample'
+    // ⚠️ 文案里**不得出现 Markdown 星号**：这里是 WXML 文本节点，`**x**` 会原样渲染成
+    //    「**样本签署**」四个多余字符 —— 这是展示缺陷，且不会有任何静态检查拦住它。
+    ? '本次客户确认按演示口径记录为「样本签署」，不作为已生效的法律签署'
+    : ''
+}
+
+/** 对客成果类型的中文名（客户侧不取注册表，故在此内置；与后端注册表取值域对应）。 */
+const OFFER_ARTIFACT_TYPE_LABELS = {
+  customer_quote: '对客报价',
+  quote_parsed: '报价解析稿',
+  capacity_confirmation: '运力确认',
+  contract_review: '合同核对稿'
+}
+
+function offerArtifactTypeLabel(code) {
+  const c = String(code || '')
+  if (!c) return '报价'
+  return OFFER_ARTIFACT_TYPE_LABELS[c] || c
+}
+
+// ── 取数 ────────────────────────────────────────────────────────────────────
+
+/** 客户侧：我（货主本人）收到的发布。归属由服务端从登录身份推导，不接受客户端指定。 */
+function fetchMyOfferReleases() {
+  return request({ url: BASE + '/my-offer-releases', method: 'GET' })
+}
+
+/** 经理侧：该委托授权下的发布记录（含客户快照、来源门槛与响应）。 */
+function fetchEntrustmentOfferReleases(entrustmentId) {
+  return request({
+    url: BASE + '/entrustments/' + entrustmentId + '/offer-releases',
+    method: 'GET'
+  })
+}
+
+/** 单条发布：服务端按调用者身份选投影（客户投影 / 经理投影）。 */
+function fetchOfferRelease(releaseId) {
+  return request({ url: BASE + '/offer-releases/' + releaseId, method: 'GET' })
+}
+
+// ── 写命令 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 发布**指定的那一个**版本。
+ *
+ * `body` 必须带 `artifact_id` 与 `revision_no` —— 后端**没有**"不传版本就发最新"
+ * 的分支。界面因此也只能从"某一行的版本"发起，而不是从"这份成果"发起。
+ */
+function releaseOffer(entrustmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/entrustments/' + entrustmentId + '/offer-releases',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 客户接受／拒绝该已发布版本。只有货主本人能调（经理会拿到 403）。 */
+function respondOffer(releaseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/offer-releases/' + releaseId + '/responses',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 显式撤回发布。理由必填；已被客户响应的发布撤不回来（后端 409）。 */
+function withdrawOffer(releaseId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/offer-releases/' + releaseId + '/withdraw',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+// ── 授权附件下载 ────────────────────────────────────────────────────────────
+
+/**
+ * 发布清单里某份附件的下载地址。
+ *
+ * 走的是 `/offer-releases/{id}/attachments/{aid}/download` —— **不是**通用附件下载口。
+ * 通用口的判据是"对这条授权有可见性"，客户作为参与方对整条授权下的附件都有可见性
+ * ⇒ 用通用口等于把内部底稿一起开给客户。这一条端点的判据**只有发布时冻结的那份清单**。
+ */
+function offerAttachmentDownloadUrl(releaseId, attachmentId) {
+  return (
+    BASE_URL +
+    BASE +
+    '/offer-releases/' +
+    releaseId +
+    '/attachments/' +
+    attachmentId +
+    '/download'
+  )
+}
+
+/**
+ * 下载发布清单里的附件并交给系统打开。
+ *
+ * 为什么不用 `wx.openDocument({filePath})` 直接打开本地文件：附件在服务端，
+ * 必须先 `wx.downloadFile` 取到临时文件。而 `downloadFile` **不自动带鉴权头**
+ * （与 `uploadFile` 同一类问题），漏了它会得到一个 401 的临时文件路径 ——
+ * 表现为"下载成功但打开是乱码/空白"。
+ *
+ * 返回 Promise，并对 404 给出**可读**的失败原因：这一格的 404 有确定含义
+ * （"这份附件不在客户可见清单里"），不是网络抖动。把它说成"下载失败，请重试"
+ * 会让用户一直重试一件永远不可能成功的事。
+ */
+function downloadOfferAttachment(releaseId, attachmentId) {
+  return new Promise(function (resolve, reject) {
+    const header = {}
+    const token = getToken()
+    if (token) header.Authorization = 'Bearer ' + token
+    wx.downloadFile({
+      url: offerAttachmentDownloadUrl(releaseId, attachmentId),
+      header: header,
+      success(res) {
+        if (res.statusCode !== 200) {
+          const err = new Error('下载失败')
+          err.httpStatus = res.statusCode
+          reject(err)
+          return
+        }
+        resolve({ filePath: res.tempFilePath, statusCode: res.statusCode })
+      },
+      fail(err) {
+        const e = new Error((err && err.errMsg) || '下载失败')
+        e.netError = true
+        reject(e)
+      }
+    })
+  })
+}
+
+// ── 投影 ────────────────────────────────────────────────────────────────────
+
+/** 把客户冻结内容摊成可渲染的行（**只读**，标签来自成果字段表）。 */
+function offerContentRows(content) {
+  const c = content || {}
+  return Object.keys(c).map(function (k) {
+    const raw = c[k]
+    const kind = _fieldKind(raw, '')
+    return {
+      name: k,
+      label: artifactFieldLabel(k),
+      value: kind === 'json' ? _structuredText(raw) : _scalarText(raw),
+      structured: kind === 'json'
+    }
+  })
+}
+
+/** 客户视角的一条发布（`GET /my-offer-releases` / 按身份取的那条）。 */
+function decorateCustomerOffer(row) {
+  const d = row || {}
+  const resp = d.response || null
+  const origin = String(d.data_origin_mode || '') || 'unknown'
+  return {
+    releaseId: _sid(d.release_id),
+    assignmentId: _sid(d.assignment_id),
+    revisionNo: d.revision_no === null || d.revision_no === undefined ? 0 : Number(d.revision_no),
+    status: d.status || '',
+    statusLabel: offerStatusLabel(d.status),
+    statusClass: offerStatusClass(d.status),
+    releasedAt: d.released_at || '',
+    typeCode: d.artifact_type || '',
+    typeLabel: offerArtifactTypeLabel(d.artifact_type),
+    contentRows: offerContentRows(d.content),
+    contentEmpty: Object.keys(d.content || {}).length === 0,
+    dataOriginMode: origin,
+    dataOriginLabel: dataOriginLabel(origin),
+    signatureMode: d.signature_mode || '',
+    signatureLabel: signatureModeLabel(d.signature_mode),
+    signatureHint: signatureModeHint(d.signature_mode),
+    attachments: (d.authorized_attachment_ids || []).map(function (id) {
+      return { attachmentId: _sid(id), label: '授权附件 #' + _sid(id) }
+    }),
+    canRespond: !!d.can_respond,
+    decided: !!resp,
+    decision: resp ? resp.decision || '' : '',
+    decisionLabel: resp ? offerDecisionLabel(resp.decision) : '',
+    responseNote: resp ? resp.note || '' : '',
+    respondedAt: resp ? resp.responded_at || '' : ''
+  }
+}
+
+/** 经理视角的一条发布：控制信息 + 客户快照 + 门槛 + 响应。 */
+function decorateManagerRelease(row) {
+  const d = row || {}
+  const resp = d.response || null
+  const gate = d.source_gate || {}
+  const origin = d.data_origin || {}
+  const pending = (gate.pending || []).length
+  const rejected = (gate.rejected || []).length
+  let gateHint = '来源已逐条核验'
+  if (rejected) gateHint = '有 ' + rejected + ' 条来源被判定不可用'
+  else if (pending) gateHint = '还有 ' + pending + ' 条来源待核验'
+  return {
+    releaseId: _sid(d.release_id),
+    assignmentId: _sid(d.assignment_id),
+    artifactId: _sid(d.artifact_id),
+    revisionNo: d.revision_no === null || d.revision_no === undefined ? 0 : Number(d.revision_no),
+    status: d.status || '',
+    statusLabel: offerStatusLabel(d.status),
+    statusClass: offerStatusClass(d.status),
+    releasedAt: d.released_at || '',
+    releasedBy: _sid(d.released_by),
+    customerUserId: _sid(d.customer_user_id),
+    closeReason: d.close_reason || '',
+    dataOriginMode: String(origin.mode || 'unknown'),
+    dataOriginLabel: dataOriginLabel(origin.mode),
+    // 依据**只给经理**（客户投影没有这个字段）——"凭什么说这是 live"要有据可查
+    dataOriginBasis: origin.basis ? JSON.stringify(origin.basis) : '',
+    attachments: (d.authorized_attachment_ids || []).map(function (id) {
+      return { attachmentId: _sid(id), label: '授权附件 #' + _sid(id) }
+    }),
+    gateOk: !!gate.ok,
+    gatePending: pending,
+    gateRejected: rejected,
+    gateHint: gateHint,
+    contentRows: offerContentRows((d.customer_snapshot || {}).payload || {}),
+    decided: !!resp,
+    decision: resp ? resp.decision || '' : '',
+    decisionLabel: resp ? offerDecisionLabel(resp.decision) : '',
+    responseNote: resp ? resp.note || '' : '',
+    respondedAt: resp ? resp.responded_at || '' : '',
+    // 有客户响应的发布**不能被撤回或取代**（后端会 409）⇒ 前端也不给这个按钮，
+    // 免得用户点一个必然失败的按钮还以为是自己操作有误。
+    canWithdraw: d.status === 'released' && !resp
+  }
+}
+
+/** 客户侧：从"我收到的发布"里挑出**本单**的那条（多单混在一个列表里）。 */
+function pickOfferForAssignment(items, assignmentId) {
+  const want = String(assignmentId === null || assignmentId === undefined ? '' : assignmentId)
+  if (!want) return null
+  const mine = (items || []).filter(function (it) {
+    return _sid(it && it.assignment_id) === want
+  })
+  if (!mine.length) return null
+  // 取 release_id 最大的那条（同单可能有历史发布，最新的在最前）
+  mine.sort(function (a, b) {
+    return Number(b.release_id || 0) - Number(a.release_id || 0)
+  })
+  return mine[0]
+}
+
+/** 经理侧：某份成果的全部发布记录（成果页要按版本显示"这一版发过没有"）。 */
+function offersForArtifact(items, artifactId) {
+  const want = _sid(artifactId)
+  return (items || [])
+    .filter(function (it) {
+      return _sid(it && it.artifact_id) === want
+    })
+    .sort(function (a, b) {
+      return Number(b.release_id || 0) - Number(a.release_id || 0)
+    })
+}
+
+/** 某份成果的某个版本是否已经发布过（成果页在版本行上给结论，不让用户猜）。 */
+function releasedRevisionOf(releases, revisionNo) {
+  const want = Number(revisionNo)
+  const hit = (releases || []).filter(function (r) {
+    return Number(r.revision_no) === want
+  })[0]
+  return hit || null
+}
+
 module.exports = {
   BASE,
   SAMPLE_QUOTE_FILENAME,
@@ -3518,5 +3879,33 @@ module.exports = {
   textSourceLabel,
   transcribeAttachment,
   uploadAttachment,
-  viewState
+  viewState,
+  DATA_ORIGIN_LABELS,
+  DATA_ORIGIN_ORDER,
+  OFFER_ARTIFACT_TYPE_LABELS,
+  OFFER_DECISION_LABELS,
+  OFFER_STATUS_META,
+  OFFER_STATUS_ORDER,
+  SIGNATURE_MODE_LABELS,
+  dataOriginLabel,
+  decorateCustomerOffer,
+  decorateManagerRelease,
+  downloadOfferAttachment,
+  fetchEntrustmentOfferReleases,
+  fetchMyOfferReleases,
+  fetchOfferRelease,
+  offerArtifactTypeLabel,
+  offerAttachmentDownloadUrl,
+  offerContentRows,
+  offerDecisionLabel,
+  offerStatusClass,
+  offerStatusLabel,
+  offersForArtifact,
+  pickOfferForAssignment,
+  releaseOffer,
+  releasedRevisionOf,
+  respondOffer,
+  signatureModeHint,
+  signatureModeLabel,
+  withdrawOffer
 }

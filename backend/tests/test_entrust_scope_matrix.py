@@ -100,8 +100,13 @@ def test_matrix_size_matches_baseline():
     ⚠️ 这批端点的**投影分叉**（经理 / 客户两条通道）由服务端决定，不靠前端藏字段；
     其中 `POST /offer-releases/{id}/responses` 是**唯一**一条"身份即权限"的写端点
     （货主本人；经理来调一律 403，不是 404 —— 他看得见，但无权替客户确认）。
+    71 → 72（**S3 客户下载接线**，BP-03 第 10 条）：新增
+    `GET /offer-releases/{id}/attachments/{aid}/download` —— 判据**只有**发布时冻结的
+    `authorized_attachment_ids`，清单外 404。有意不复用
+    `attachments_api.load_visible_attachment`：客户对整条授权下的附件都有可见性，
+    复用会把内部底稿一并开给他（"客户能拿到什么"由**发布那一刻**决定，不由事后可见性决定）。
     """
-    assert len(sm.SCOPE_MATRIX) == 71
+    assert len(sm.SCOPE_MATRIX) == 72
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

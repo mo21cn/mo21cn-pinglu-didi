@@ -1160,6 +1160,9 @@ class OfferReleaseOut(BaseModel):
     close_reason: str | None = None
     customer_snapshot: dict[str, Any] = Field(default_factory=dict)
     authorized_attachment_ids: list[int] = Field(default_factory=list)
+    #: 数据来源标注的**完整依据**（mode + basis + 作业行 id）。经理有权看内部数据，
+    #: 而"凭什么说这是 live"必须有据可查 —— 只给一个词就不是证据。
+    data_origin: dict[str, Any] | None = None
     source_gate: SourceGateOut | None = None
     response: OfferResponseOut | None = None
 
@@ -1175,6 +1178,9 @@ class OfferReleaseCustomerOut(BaseModel):
 
     刻意不含 `released_by` / `closed_by` / `artifact_id` 与来源台账 —— 客户不该看到
     内部是谁发布的、有哪些内部来源待核验。
+
+    来源标注**给客户**（BP-03 第 9 条要客户看到"这份内容来自哪类产出"），
+    但只给 `mode`，不给 `basis`（依据里有作业 id 这类内部编号）。
     """
 
     release_id: int
@@ -1185,6 +1191,10 @@ class OfferReleaseCustomerOut(BaseModel):
     content: dict[str, Any] = Field(default_factory=dict)
     artifact_type: str | None = None
     content_source: str | None = None
+    data_origin_mode: str | None = None
+    #: 签署证据模式（`labeled_sample`）：声明这是演示/样张语境下的确认，
+    #: 不是已生效的法律签署 —— 不标注就会被下游当成真签署。
+    signature_mode: str | None = None
     authorized_attachment_ids: list[int] = Field(default_factory=list)
     can_respond: bool
     response: OfferResponseOut | None = None

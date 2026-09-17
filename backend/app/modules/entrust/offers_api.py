@@ -24,12 +24,14 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.entrust import artifacts as art
+from app.modules.entrust import attachments as att_svc
 from app.modules.entrust import offers as svc
 from app.modules.entrust import schemas as sm
 from app.modules.entrust._http import guard_or_400, require_entrust_enabled, run_write
@@ -253,6 +255,78 @@ def get_offer_release(
     return sm.offer_release_out(
         svc.project_release_for_manager(db, release, response=response)
     ).model_dump(mode="json")
+
+
+# ── 客户：按发布清单下载附件（BP-03 第 10 条）──────────────────────────────
+
+
+@router.get(
+    "/offer-releases/{release_id}/attachments/{attachment_id}/download",
+    summary="按发布冻结的授权清单下载附件（清单之外一律 404，客户唯一出口）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def download_offer_attachment(
+    release_id: int,
+    attachment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """**这条端点的判据只有一个**：发布时冻结的 `authorized_attachment_ids`。
+
+    刻意**不**复用 `attachments_api.load_visible_attachment`：那个函数按"对委托授权
+    有可见性"放行 —— 而客户对该授权下的**所有**附件都有可见性（他本来就是参与方），
+    复用它等于把内部报价底稿、核验材料一起开给客户。合同要求的是**裁剪视图**：
+    "客户能看到哪些附件"由**发布那一刻的授权**决定，不由事后可见性决定。
+
+    经理也可以调用这条端点，看到的是**客户视角能看到的那几份**（便于核对
+    "客户到底拿得到什么"）。经理要下内部附件走 `/attachments/{id}/download`。
+    """
+    release = svc.get_release(db, release_id=release_id)
+    if release is None:
+        raise not_found("发布记录不存在")
+
+    # 可见性：客户本人，或该委托单的可见者（经理）。两者再一起过同一份白名单。
+    if int(user.id) != int(release["customer_user_id"]):
+        assignment = load_assignment(db, release["assignment_id"])
+        if assignment is None:
+            raise not_found("发布记录不存在")
+        try:
+            assert_can_view_assignment(db, user_id=int(user.id), assignment=assignment)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise
+            raise not_found("发布记录不存在") from exc
+
+    if int(attachment_id) not in set(release["authorized_attachment_ids"]):
+        # 404（不是 403）：白名单外的附件对**这条通道**而言就是"不存在"。
+        # 用 403 会告诉调用方"确实有这份文件、只是不给你" —— 那等于泄漏内部附件的存在性。
+        raise not_found("附件不存在")
+
+    attachment = att_svc.get_attachment(db, attachment_id)
+    if attachment is None:
+        raise not_found("附件不存在")
+    # 白名单是发布时写下的 id 列表；若附件后来被挪到别的委托（数据异常），
+    # 必须拒绝而不是照旧放行 —— 否则一处写错的清单会变成一条跨单泄漏。
+    same_entrustment = (
+        release["entrustment_id"] is not None
+        and attachment["entrustment_id"] is not None
+        and int(attachment["entrustment_id"]) == int(release["entrustment_id"])
+    )
+    same_assignment = attachment["assignment_id"] is not None and int(
+        attachment["assignment_id"]
+    ) == int(release["assignment_id"])
+    if not (same_entrustment or same_assignment):
+        raise not_found("附件不存在")
+
+    try:
+        path = att_svc.resolve_path(attachment)
+    except att_svc.AttachmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(
+        path=path,
+        media_type=str(attachment["content_type"]),
+        filename=str(attachment["filename"]),
+    )
 
 
 # ── 客户：响应 ──────────────────────────────────────────────────────────────
