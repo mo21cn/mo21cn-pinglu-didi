@@ -331,6 +331,14 @@
             </view>
 
             <block wx:if="{{canRecordCapacity && item.confirmable}}">
+              <!-- ⚠️ 判据是 `capConfirmKey === item.candidateId`：两侧都是**字符串**
+                   （`capConfirmKey` 来自 dataset 并经 `onOpenCapConfirm` 的 `String()` 归一；
+                   `decorateCapacityCandidate` 的 `candidateId` 同样 `String()`）。
+                   WXML 的 `===` 是严格比较 —— 一边字符串一边数字会**永远不相等**，
+                   表现是"点了「确认这一条」什么都不会出现"：范围框、备注框、提交键
+                   在渲染树里根本不存在，而静态门禁与 e2e 全绿（它们查得到锚点写在模板里，
+                   查不到运行时类型）。2026-09-17 设备走查 ㊺ 章实测到过这一版：
+                   内部状态键已置上、三个锚点命中数全为 0。与下方 `taskOpenKey` 同一条口径。 -->
               <view wx:if="{{capConfirmKey === item.candidateId}}" class="slot-form">
                 <view class="slot-note">
                   确认 {{item.carrier}} 的 {{item.capacityText}} 吨：通过后产出采购确认成果，且这条候选不能再被确认第二次。
@@ -624,7 +632,15 @@
                 hover-class="hover-dim"
               >复算这条确认</view>
             </view>
-            <view wx:if="{{capRecheckId === item.confirmationId && capRecheck}}" class="cap-verdict">
+            <!-- `data-act-cap-recheck-verdict` 是**复算结果真的渲染出来了**的锚点。
+                 没有它，设备走查只能证到"复算键可点" —— 而「判据不出现」恰恰是
+                 2026-09-17 实测到的那一版（`capRecheckId` 是字符串、`item.confirmationId`
+                 若是数字则 `===` 恒假）：请求发了、页面什么都没多出来。 -->
+            <view
+              wx:if="{{capRecheckId === item.confirmationId && capRecheck}}"
+              data-act-cap-recheck-verdict="{{item.confirmationId}}"
+              class="cap-verdict"
+            >
               <view class="cap-verdict-title">{{capRecheck.validLabel}}（复算基准日 {{capRecheck.asOfDate}}）</view>
               <view class="cap-verdict-sub">判定输入的变化：{{capRecheck.changedText}}</view>
               <view wx:if="{{capRecheck.failedText}}" class="cap-verdict-sub cap-warn">{{capRecheck.failedText}}</view>
