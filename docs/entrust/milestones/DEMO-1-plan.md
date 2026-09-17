@@ -149,7 +149,7 @@
 | 从已接受事实生成合同草稿 | ✅ **后端已实现**（2026-09-17）；**界面未做** | `contracts.derive_contract` + `POST /offer-releases/{id}/contract`（前置＝客户**已接受**的发布且类型为 `customer_quote`）；并按 `S3-范围与依赖评估.md` §3 依赖 E 落了**逐字段来源表** `ent_contract_field_source`，闸门是"合同里每个字段都必须有来源行，缺一个就中止"。见 `S3-合同派生切片.md` |
 | 签名证据记录（来源/模式标注） | ✅ **已实现**（合同 BP-03 第 9 条 / §11.1） | `offers.SIGNATURE_MODE_LABELED_SAMPLE = "labeled_sample"` 随发布快照冻结；**数据来源标注**另表 `ent_artifact_origin`（`live`/`synthetic`/`manual`/`unknown`），判据取作业行的 `mocked` 事实、**不采信调用方自述**，`unknown` 不猜成 `live` |
 | 客户查看/下载字段与附件裁剪 | ✅ **后端与界面均已实现**（`project_for_customer` 不再游离） | 两条投影函数（`project_release_for_manager` / `project_release_for_customer`，服务端选投影，AC-26）+ **`GET /offer-releases/{id}/attachments/{aid}/download`**：判据只有发布时冻结的授权清单，**清单外一律 404**（不用 403 —— 403 会承认内部底稿存在） |
-| 航段（三段式）结构化对象 | **表已落** | `ent_leg`（稳定 ID / 运输方式 / 起终点 / `seq`）已在；**命令与界面未实现** |
+| 航段（三段式）结构化对象 | **表已落；读端点与界面已成**（2026-09-17） | `ent_leg`（稳定 ID / 运输方式 / 起终点 / `seq`）已在；读模型 `plan.py` ＋ `GET /assignments/{id}/plan`（`scope_matrix` 80 → 81）＋ 委托详情页「运输计划」卡（与**必需任务前置**同屏）。⚠️ **建段命令仍未实现**（口径未裁定 ⇒ 演示走种子）；**设备侧走查 `NOT_RUN`**。见 `DEMO-1-interface-delta.md` §7.21 |
 | 历史版本保留 | 已有 | `artifacts.py` append-only + `artifacts_api.py:list_revisions` |
 
 ### 3.4 BP-04 履约、变更、结算与结案
