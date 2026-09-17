@@ -18,10 +18,16 @@
    "计划与前置"，多带一个字段就红（照抄 `workbench._load_tasks` 的先例：
    它带 `precondition_task_id`、**不带** `required_evidence`）。
 
-⚠️ 航段一律**直接 INSERT**：`ent_leg` **没有服务层建段函数**（建段命令本轮未做，
-需口径裁定 —— 谁能建 / 是否强制 公—水—公 / 改段是否留版本，见 `plan.py` 模块文档）。
-本用例与种子脚本 `seed_entrust_canonical.py` 用同一手法，这本身是本切片登记的缺口，
-不要在读到 `INSERT INTO ent_leg` 时以为漏了什么。
+⚠️ 本文件的航段仍**直接 INSERT**（不调建段命令）—— 但理由已经变了：
+建段命令**已经落地**（`legs.create_leg` / `POST …/legs`，见 `legs_api.py`；
+口径＝HO 2026-09-17 裁定）。之所以不改成"先调命令再读"：本文件验的是**读模型**，
+而直接 INSERT 更能说明"投影对**任何来源**的行都给同一份形状"——
+包括种子脚本 `seed_entrust_canonical.py` 铺的那些行。
+⇒ 读到 `INSERT INTO ent_leg` 时**不要**以为漏了命令；命令的行为由
+`test_entrust_legs_command.py` 单独验（含建段/改段/版本历史三类）。
+⚠️ 直接 INSERT **不写** `ent_leg_revision`（append-only 版本表）——
+这些行模拟的是"命令落地之前就存在的航段"，版本历史只对**经命令产生的**改动成立。
+读模型不碰版本表，所以这个差别对上面的断言无影响。
 """
 
 from __future__ import annotations
