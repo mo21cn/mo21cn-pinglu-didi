@@ -147,8 +147,7 @@ CREATE TABLE IF NOT EXISTS `ent_contract_field_source` (
   `value_text` TEXT NOT NULL
     COMMENT '该字段**实际写入合同**的值（文本形式）；与合同内容对不上就说明派生不可信',
   `source_kind` VARCHAR(32) NOT NULL
-    COMMENT '来源类别：accepted_release（已接受发布）/ customer_response / assignment / leg /'
-    ' organization / template',
+    COMMENT '来源类别：accepted_release（已接受发布）/ customer_response / assignment / leg / organization / template',
   `source_ref` VARCHAR(160) NOT NULL
     COMMENT '来源标识（内部编号，如 release:12@v3；**只在本表出现，不进合同正文**）',
   `created_at` DATETIME NOT NULL,
