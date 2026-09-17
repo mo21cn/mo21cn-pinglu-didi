@@ -1467,6 +1467,11 @@ class CapacityConfirmationOut(BaseModel):
     as_of_date: str
     #: 规则集版本 —— 规则会演进，旧确认要能说清它按哪一版判的
     rule_set_version: str
+    #: 这次确认**覆盖的范围**（业务判断，确认时由调用方给出）。
+    #: ⚠️ 它**不在确认行的列上** —— 事实来源是这次确认产出的**成果版本**
+    #: （`artifact_revision_id` 冻结在确认行上 ⇒ 取到的永远是"当时那一版"），
+    #: 见 `capacity._scope_from_payload`。`None` = 那一版载荷里没有这个字段。
+    agreed_scope: str | None = None
     #: 确认产出的采购确认成果与版本（可发布、可复核、可作变更影响目标）
     artifact_id: int
     artifact_revision_id: int

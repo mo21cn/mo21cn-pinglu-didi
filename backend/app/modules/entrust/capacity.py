@@ -541,6 +541,19 @@ _CONFIRMATION_COLS = (
     "artifact_revision_no, confirmed_by, confirmed_at, note, created_at, updated_at"
 )
 
+#: 确认行**不自带** `agreed_scope` —— 它是这次确认产出的**成果版本**里的字段。
+#: 按冻结在确认行上的 `artifact_revision_id` 取那一版的载荷 ⇒ 取到的永远是"当时那一版"，
+#: 不会随成果后来改版而变。
+#: ⚠️ **不去 `ent_capacity_confirmation` 加一列**：那样同一事实在库里有两份，
+#:   改一处就静默不一致 —— 与 `contracts._assert_every_field_has_source` 防的是同一类病。
+#: ⚠️ 这条子查询是**相关子查询**（每行执行一次）。确认行数在一张委托上是个位数
+#:   （一条候选只能确认一次，见 `uk_ent_capacity_confirmation_candidate`），
+#:   所以没有把它改写成 JOIN 的必要；真到了需要的时候再说。
+_CONFIRMATION_SCOPE_COL = (
+    "(SELECT r.payload_json FROM ent_artifact_revision r "
+    " WHERE r.id = ent_capacity_confirmation.artifact_revision_id) AS artifact_payload_json"
+)
+
 
 def _row_to_candidate(row: Any) -> dict[str, Any]:
     # 有效期只解析一次：写成 `_as_date(...).isoformat() if _as_date(...)` 时 mypy 收不窄
@@ -571,6 +584,29 @@ def _row_to_candidate(row: Any) -> dict[str, Any]:
     }
 
 
+def _scope_from_payload(raw: Any) -> str | None:
+    """从**成果版本的载荷**里取 `agreed_scope`。
+
+    为什么读模型要走这一条路（而不是在确认表上加一列）：`agreed_scope` 的**事实来源**
+    就是这次确认产出的成果版本。冻结在确认行上的 `artifact_revision_id` 让"当时那一版"
+    可达，于是这里取到的东西与"成果里写着什么"**永远一致** —— 不需要任何同步动作。
+
+    ⚠️ 载荷解析不了时**不静默返回 None**：载荷是本模块自己经
+    `registry.validate_payload` 写进去的，解析不了说明数据坏了。那种事必须响，
+    不能表现成"这次确认没写范围"（那是"未知保持未知"的反面：把**坏了**说成**没写**）。
+    """
+    if raw is None:
+        return None
+    payload = json.loads(str(raw))
+    if not isinstance(payload, dict):
+        raise ValueError("采购确认成果的载荷不是对象，取不到 agreed_scope")
+    value = payload.get("agreed_scope")
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    return text_value or None
+
+
 def _row_to_confirmation(row: Any) -> dict[str, Any]:
     expiry = _as_date(row["valid_until"])
     as_of = _as_date(row["as_of_date"])
@@ -599,6 +635,8 @@ def _row_to_confirmation(row: Any) -> dict[str, Any]:
         "demand_ref": str(row["demand_ref"]),
         "as_of_date": as_of.isoformat() if as_of else str(row["as_of_date"]),
         "rule_set_version": str(row["rule_set_version"]),
+        # 范围**不在确认行的列上** —— 按冻结的成果版本投影，见 `_scope_from_payload`
+        "agreed_scope": _scope_from_payload(row.get("artifact_payload_json")),
         "artifact_id": int(row["artifact_id"]),
         "artifact_revision_id": int(row["artifact_revision_id"]),
         "artifact_revision_no": int(row["artifact_revision_no"]),
@@ -644,7 +682,10 @@ def list_candidates(session: Session, *, assignment_id: int) -> list[dict[str, A
 def get_confirmation(session: Session, *, confirmation_id: int) -> dict[str, Any] | None:
     row = (
         session.execute(
-            text(f"SELECT {_CONFIRMATION_COLS} FROM ent_capacity_confirmation WHERE id = :cid"),
+            text(
+                f"SELECT {_CONFIRMATION_COLS}, {_CONFIRMATION_SCOPE_COL} "
+                "FROM ent_capacity_confirmation WHERE id = :cid"
+            ),
             {"cid": confirmation_id},
         )
         .mappings()
@@ -657,8 +698,8 @@ def get_confirmation_by_candidate(session: Session, *, candidate_id: int) -> dic
     row = (
         session.execute(
             text(
-                f"SELECT {_CONFIRMATION_COLS} FROM ent_capacity_confirmation "
-                "WHERE candidate_id = :cid"
+                f"SELECT {_CONFIRMATION_COLS}, {_CONFIRMATION_SCOPE_COL} "
+                "FROM ent_capacity_confirmation WHERE candidate_id = :cid"
             ),
             {"cid": candidate_id},
         )
@@ -672,8 +713,8 @@ def list_confirmations(session: Session, *, assignment_id: int) -> list[dict[str
     rows = (
         session.execute(
             text(
-                f"SELECT {_CONFIRMATION_COLS} FROM ent_capacity_confirmation "
-                "WHERE assignment_id = :aid ORDER BY id"
+                f"SELECT {_CONFIRMATION_COLS}, {_CONFIRMATION_SCOPE_COL} "
+                "FROM ent_capacity_confirmation WHERE assignment_id = :aid ORDER BY id"
             ),
             {"aid": assignment_id},
         )
@@ -1241,6 +1282,13 @@ def project_confirmation(session: Session, confirmation: dict[str, Any]) -> dict
         "demand_ref": str(confirmation["demand_ref"]),
         "as_of_date": str(confirmation["as_of_date"]),
         "rule_set_version": str(confirmation["rule_set_version"]),
+        # 范围（`agreed_scope`）与 `rule_set_version` 同族：都不是"候选行现在的值"，
+        # 而是**这次确认的判定输入**。它的事实来源是这次确认产出的**成果版本**，
+        # 已在 `_row_to_confirmation` 里解析过（`_scope_from_payload`）—— 这里只搬运。
+        # ⚠️ 本函数是**显式白名单**：`_row_to_confirmation` 里加了字段、忘了在这里登记，
+        #    POST / GET / 清单三条路径会**齐声**少掉那一项，而库里数据完全正确 ——
+        #    表现成"写进去了但读不出来"，最难查的一类（本切片踩过一次）。
+        "agreed_scope": confirmation["agreed_scope"],
         "artifact_id": int(confirmation["artifact_id"]),
         "artifact_revision_id": int(confirmation["artifact_revision_id"]),
         "artifact_revision_no": int(confirmation["artifact_revision_no"]),

@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import timedelta
 
@@ -266,6 +267,84 @@ def test_confirmation_appears_in_assignment_list(env):
     )
     assert cands.status_code == 200, cands.text
     assert cands.json()[0]["status"] == "confirmed"
+
+
+def test_confirmation_read_model_carries_agreed_scope_from_artifact(env):
+    """范围（`agreed_scope`）按**冻结的成果版本**投影，不是在确认表上加一列。
+
+    ⚠️ 本条钉的是**设计决定**，不只是"字段存在"：
+    ① 四种读法（确认响应 / 单条读端点 / 清单读端点 / 成果那一版的载荷）**逐字一致** ——
+       同一个事实只有一个来源；
+    ② 确认表上**没有** `agreed_scope` 这一列。加一列就等于同一事实在库里有两份，
+       改一处就静默不一致 —— 与 `contracts._assert_every_field_has_source`
+       防的是同一类病（那边防的是"字段没有来源"，这边防的是"一个事实两个落点"）；
+    ③ 读模型有的业务字段，**投影必须都有**：`project_confirmation` 是显式白名单，
+       POST 响应 / 单条 / 清单三个读端点全从它出去 —— 忘了登记会让三个端点**齐声**
+       少掉那一项，而库里数据完全正确（"写进去了却读不出来"）。第一次就是这么错的。
+    """
+    db = env.make_session()
+    manager, _o, _x, _org, _eid, aid = _seed(env, db)
+    candidate = _add_candidate(env, manager, aid=aid).json()
+    scope = "南宁→贵港 水运段 900 吨舱位（含过驳）"
+
+    created = _confirm(
+        env, manager, aid=aid, candidate_id=candidate["candidate_id"], agreed_scope=scope
+    ).json()
+
+    # ⓪ 先钉**事实来源**：成果那一版的载荷里到底有没有范围。
+    #    顺序有意如此 —— 失败时能一眼分出「没写进去」与「没读出来」，
+    #    而不是对着一个 None 猜是哪一侧的问题。
+    payload_raw = db.execute(
+        text("SELECT payload_json FROM ent_artifact_revision WHERE id = :r"),
+        {"r": created["artifact_revision_id"]},
+    ).scalar_one()
+    assert json.loads(payload_raw)["agreed_scope"] == scope, payload_raw
+
+    # ① 确认响应
+    assert created["agreed_scope"] == scope, sorted(created.keys())
+
+    # ② 单条读端点（与 ③ 共用同一个 `_row_to_confirmation`，但还是各核一次：
+    #    哪天有人给某一条换成自己的组装代码，这里就是唯一会响的地方）
+    one = _read_confirmation(env, manager, confirmation_id=created["confirmation_id"])
+    assert one.status_code == 200, one.text
+    assert one.json()["agreed_scope"] == scope
+
+    # ③ 清单读端点
+    listed = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/capacity-confirmations", headers=_headers(manager)
+    )
+    assert listed.status_code == 200, listed.text
+    assert [r["agreed_scope"] for r in listed.json()] == [scope]
+
+    # ④ 与成果**那一版**的载荷逐字一致（事实只有一个来源）
+    payload_raw = db.execute(
+        text("SELECT payload_json FROM ent_artifact_revision WHERE id = :r"),
+        {"r": created["artifact_revision_id"]},
+    ).scalar_one()
+    assert json.loads(payload_raw)["agreed_scope"] == scope
+
+    # ⑤ 确认表上没有这一列（设计决定本身）
+    from sqlalchemy import inspect as sa_inspect
+
+    cols = {c["name"] for c in sa_inspect(db.get_bind()).get_columns("ent_capacity_confirmation")}
+    assert "agreed_scope" not in cols, (
+        "范围不该被复制到确认行上 —— 它的来源是成果版本（见 capacity._scope_from_payload）"
+    )
+
+    # ⑥ 读模型与投影的**键对齐** —— 本切片真正的根因就在这道缝上。
+    #
+    #    `project_confirmation` 是一层**显式白名单**，三个读端点（POST 响应 /
+    #    单条 / 清单）全都从它出去。只给 `_row_to_confirmation` 加字段、忘了在投影里
+    #    登记 ⇒ **三个端点齐声少掉那一项**，而库里数据完全正确 —— 表现成
+    #    "写进去了却读不出来"，是这一片最难查的一类（第一次就是这么错的）。
+    #    所以这里不钉某个字段，钉的是"读模型有的业务字段，投影必须都有"。
+    #    要故意不投影某个字段，就得在本条里显式豁免 —— 让"少一项"是个决定，不是疏忽。
+    row_keys = set(cap.get_confirmation(db, confirmation_id=created["confirmation_id"]) or {})
+    proj_keys = set(cap.project_confirmation(db, created))
+    assert row_keys - proj_keys == set(), (
+        "这些字段读模型里有、投影里没有 ⇒ 三个读端点都会静默少掉它们："
+        f"{sorted(row_keys - proj_keys)}"
+    )
 
 
 # ───────────────────────── 2. 「选中 ≠ 确认」：只登记候选，什么确认痕迹都没有
