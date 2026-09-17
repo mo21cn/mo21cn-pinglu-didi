@@ -163,8 +163,16 @@ def mock_content(context: dict[str, Any], job_input: dict[str, Any]) -> dict[str
     }
 
 
-def build_user_prompt(context: dict[str, Any], job_input: dict[str, Any]) -> str:
-    """把只读事实渲染成提示词（真实模式使用；fixture 不依赖它）。"""
+def build_user_prompt(
+    context: dict[str, Any],
+    job_input: dict[str, Any],
+    source_catalog: frozenset[tuple[str, str]] | None = None,
+) -> str:
+    """把只读事实渲染成提示词（真实模式使用；fixture 不依赖它）。
+
+    `source_catalog` 见 `ag02.build_user_prompt` 的说明：不给可原样复制的目录，
+    模型只能猜 ref，而猜出来的在服务端核不上（会被标为编造来源）。
+    """
     assignment = context.get("assignment") or {}
     tasks = context.get("tasks") or []
     lines = [
@@ -197,6 +205,12 @@ def build_user_prompt(context: dict[str, Any], job_input: dict[str, Any]) -> str
             )
 
     lines += ["", "【附加说明】", str(job_input.get("note") or "（无）")]
+    lines += ["", "【可引用的来源目录（kind 与 ref 必须原样复制，不得改写）】"]
+    if source_catalog:
+        for kind, ref in sorted(source_catalog):
+            lines.append(f"- kind={kind} ref={ref}")
+    else:
+        lines.append("（空）—— 因此 source_refs 请一律留空。")
     return "\n".join(lines)
 
 

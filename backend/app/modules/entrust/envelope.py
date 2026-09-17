@@ -229,9 +229,21 @@ def validate_envelope(
             result.proposal_unknown_fields[proposal.artifact_type] = unknown
 
     if known_source_refs is not None:
-        for ref in envelope.source_refs:
+        # ⚠️ 核对对象是 **(kind, ref) 这一对**，而且**不止顶层**：
+        # `findings[].source_refs` 同样会带引用（2026-09-17 实测：live 输出的
+        # 描述性引用有两处落在 findings 内）。只遍历顶层 source_refs 会让
+        # "编造来源"在这条通道上**完全不被发现** —— 而 findings 恰恰是
+        # 模型解释"我为什么这么判"的地方，最容易被它自己编来源。
+        declared: list[tuple[str, SourceRef]] = [
+            ("source_refs", ref) for ref in envelope.source_refs
+        ]
+        for idx, finding in enumerate(envelope.findings):
+            declared += [(f"findings[{idx}].source_refs", ref) for ref in finding.source_refs]
+        for where, ref in declared:
             if (ref.kind, ref.ref) not in known_source_refs:
-                result.unverified_sources.append({"kind": ref.kind, "ref": ref.ref})
+                # `where` 带上位置：经理要能一眼看到**哪里**需要核对，
+                # 只给一个 kind/ref 列表等于让他自己去翻。
+                result.unverified_sources.append({"kind": ref.kind, "ref": ref.ref, "where": where})
 
     if not envelope.requires_review:
         # 模型不能自己决定"这个不用复核"：R1 全部产出都要人工过一遍
