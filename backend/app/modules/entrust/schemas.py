@@ -1573,3 +1573,119 @@ class AssignmentPlanOut(BaseModel):
 
 def assignment_plan_out(data: dict[str, Any]) -> AssignmentPlanOut:
     return AssignmentPlanOut.model_validate(data)
+
+
+# ── 航段命令（建段 / 改段 / 版本历史）──────────────────────────────────────────
+# HO 2026-09-17 裁定的三条口径见 `backend/migrations/ent_leg_revision.py` 的模块文档。
+# 字段面的取舍：`LegOut` 与 `PlanLegOut` **保持同一份前六个键**（航段读模型与写响应
+# 说的必须是同一件事），只多出「当前版本号」与「更新时间」两个写侧才有的键。
+
+
+class LegCreateIn(BaseModel):
+    """建段入参。
+
+    ⚠️ `mode` **不是枚举**：`road/water/rail` 是既有数据用到的取值，不是写入口的
+    取值域 —— 把它做成枚举就等于用一行代码固化"只能有一种方案"，而裁定明确说
+    **不强制 公–水–公**。长度上限与迁移的列宽一致（超长在这里就被拦成 422/400，
+    不会变成 DB 的 1406）。
+    """
+
+    #: 航段顺序，自 1 起、委托内唯一（读侧按它排序 = 方案顺序）
+    seq: int = Field(ge=1)
+    mode: str = Field(min_length=1, max_length=16)
+    from_name: str = Field(min_length=1, max_length=64)
+    to_name: str = Field(min_length=1, max_length=64)
+    #: 改动说明；可空（留版本是硬要求，写理由不是）
+    change_note: str | None = Field(default=None, max_length=255)
+
+
+class LegUpdateIn(BaseModel):
+    """改段入参 —— 全部可空，**至少要带一个**（服务层会以 400 拒绝空改动）。
+
+    ⚠️ 与 `LegCreateIn` 用两个模型而不是"一个模型 + 全可空"，是因为两者的
+    约束**相反**：建段必须给齐 seq/mode/起终点，改段只给要改的那些。
+    合成一个模型就只能把必填性放松，于是"建段少给一个字段"会从 422 退化成
+    服务层的一句 400 —— 校验点变远了，错的提示也变模糊了。
+    """
+
+    seq: int | None = Field(default=None, ge=1)
+    mode: str | None = Field(default=None, min_length=1, max_length=16)
+    from_name: str | None = Field(default=None, min_length=1, max_length=64)
+    to_name: str | None = Field(default=None, min_length=1, max_length=64)
+    change_note: str | None = Field(default=None, max_length=255)
+
+
+class LegOut(BaseModel):
+    """一段航段（写响应）。语义＝**这次操作完成之后**该段的当前状态。
+
+    `revision_no` 是"这一改是第几版"：建段恒为 `1`，第 N 次改段为 `N`
+    （建段算第 1 版）。完整历史走 `GET /assignments/{id}/legs/{leg_id}/revisions`。
+    """
+
+    leg_id: int
+    seq: int
+    mode: str
+    mode_label: str
+    from_name: str
+    to_name: str
+    revision_no: int
+    updated_at: str
+
+
+class LegRevisionOut(BaseModel):
+    """航段的一个**历史版本**（append-only 快照）。
+
+    ⚠️ 每一行是**当时**的取值快照，不是"指向当前行" —— 所以改完之后回看，
+    能读出"它当时是什么"，这正是"改段留版本"要回答的问题。
+    """
+
+    revision_id: int
+    leg_id: int
+    #: 该版本当时的顺序号（改过 `seq` 的段，历史里会看到不同的值）
+    seq: int
+    mode: str
+    mode_label: str
+    from_name: str
+    to_name: str
+    revision_no: int
+    #: `created`（建段）/ `updated`（改段）
+    change_kind: str
+    #: 改动说明；`None` = 当时没写（**不是**"说明未知"）
+    change_note: str | None = None
+    #: 发起人；`0` = 系统/种子（留痕用，不参与判权，故不叫 actor 的"权限"含义）
+    actor_user_id: int | None = None
+    changed_at: str
+
+
+def leg_out(data: dict[str, Any]) -> LegOut:
+    return LegOut.model_validate(data)
+
+
+def leg_revision_out(data: dict[str, Any]) -> LegRevisionOut:
+    """把 `ent_leg_revision` 行投影成对外模型。
+
+    两个改名是**有意**的（读侧不该看到 DB 的列名）：
+    `id → revision_id`（它是一条**版本**的 id，不是航段的 id）、
+    `created_at → changed_at`（它记的是"这一版是什么时候发生的"）。
+
+    ⚠️ `mode_label` 由**服务层**（`legs.list_leg_revisions`）算好放进行里，
+    本函数**不**自己去查标签表 —— 那样 schemas 就要 import `plan`，
+    而 `plan` 是业务模块，让校验层依赖业务层会把这个文件的定位弄糊
+    （它现在的定位是：**只做形状校验与改名**）。
+    """
+    return LegRevisionOut.model_validate(
+        {
+            "revision_id": int(data["id"]),
+            "leg_id": int(data["leg_id"]),
+            "seq": int(data["seq"]),
+            "mode": str(data["mode"]),
+            "mode_label": str(data["mode_label"]),
+            "from_name": str(data["from_name"]),
+            "to_name": str(data["to_name"]),
+            "revision_no": int(data["revision_no"]),
+            "change_kind": str(data["change_kind"]),
+            "change_note": data["change_note"],
+            "actor_user_id": data["actor_user_id"],
+            "changed_at": str(data["created_at"]),
+        }
+    )

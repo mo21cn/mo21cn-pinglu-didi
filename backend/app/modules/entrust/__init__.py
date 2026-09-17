@@ -26,6 +26,7 @@ from app.modules.entrust.capacity_api import router as capacity_api_router
 from app.modules.entrust.contracts_api import router as contracts_api_router
 from app.modules.entrust.exceptions_api import router as exceptions_api_router
 from app.modules.entrust.extraction_api import router as extraction_api_router
+from app.modules.entrust.legs_api import router as legs_api_router
 from app.modules.entrust.offers_api import router as offers_api_router
 from app.modules.entrust.plan_api import router as plan_api_router
 from app.modules.entrust.router import router
@@ -38,6 +39,7 @@ router.include_router(capacity_api_router)
 router.include_router(contracts_api_router)
 router.include_router(exceptions_api_router)
 router.include_router(extraction_api_router)
+router.include_router(legs_api_router)
 router.include_router(offers_api_router)
 router.include_router(plan_api_router)
 router.include_router(tasks_api_router)
