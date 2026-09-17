@@ -243,6 +243,114 @@
   line-height: 1.6;
 }
 
+/* ---- 运力确认与有效期（经理侧；BP-03 第 2、3 条）----
+   这一段是内部成本口径（承运人、供应商单价、需求量与缺口吨数），
+   整块只在看得到组织侧时渲染（判据在 detail.js 的 canViewCapacity）。 */
+.cap-row {
+  margin-top: 16rpx;
+  padding: 16rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 12rpx;
+  background: #FFFFFF;
+}
+
+.cap-carrier {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.cap-candidate {
+  font-size: 24rpx;
+  color: #6B7A8C;
+}
+
+.cap-confirmed {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #1D7A4D;
+}
+
+.cap-withdrawn {
+  font-size: 24rpx;
+  color: #8A93A0;
+}
+
+.cap-unknown {
+  font-size: 24rpx;
+  color: #B45309;
+}
+
+.cap-warn {
+  font-size: 25rpx;
+  color: #B45309;
+}
+
+.cap-picks {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 10rpx 0;
+}
+
+.cap-pick {
+  margin: 0 12rpx 12rpx 0;
+  padding: 8rpx 20rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  color: #0F2540;
+  background: #FFFFFF;
+}
+
+.cap-pick-on {
+  border-color: #0F2540;
+  background: #0F2540;
+  color: #FFFFFF;
+}
+
+.cap-verdict {
+  margin-top: 16rpx;
+  padding: 16rpx;
+  border: 1rpx solid #E8B4A0;
+  border-radius: 12rpx;
+  background: #FFF7F3;
+}
+
+.cap-verdict-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #B45309;
+}
+
+.cap-verdict-sub {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #6B7A8C;
+  line-height: 1.5;
+}
+
+.cap-rule {
+  margin-top: 10rpx;
+}
+
+.cap-rule-pass {
+  font-size: 24rpx;
+  color: #1D7A4D;
+}
+
+.cap-rule-fail {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #B45309;
+}
+
+.cap-rule-detail {
+  margin-left: 8rpx;
+  font-size: 23rpx;
+  color: #6B7A8C;
+  line-height: 1.5;
+}
+
 /* ---- 本页 hover 反馈 ----
    `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */

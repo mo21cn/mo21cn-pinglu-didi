@@ -33,21 +33,42 @@
 // 读出来是空），走查工具**点不到它的确认键** ⇒ 由弹层承担的关键路径永远拿不到设备证据
 // （⑧b / ㉕D 的 `LIMITATION` 就是这么来的）。判据：**弹层承担的关键路径 = 不可验证的路径**。
 // 静态防线见 `scripts/verify_ui_interactions.js` ⑪ 章（断言这两条路都不出现 `showModal`）。
+// 第 4 条（S3 收口 · 合同 §10.1 第 5 步 / BP-03 第 2、3 条 / D1-06）：
+// 本页新增**运力确认与有效期**这一块（经理侧）。它承载四件事：
+//   · 候选运力清单 —— 第 2 条要的"两家可比"（吨位 / 装载口径 / 单价口径 / 有效期 / 证据）；
+//   · 登记一条候选（**不是确认**：BP-03 第 3 条明确要求把"选中"与"确认"分开）；
+//   · 确认 —— 跑规则闸门，通过才产出采购确认成果；不通过时把**逐条**判定（含通过项）照实渲染；
+//   · 只读复算 —— "这条确认现在还成立吗"（D1-09 那句「900 吨候选在变更后不再适用」的可见形态）。
+// ⚠️ 六条端点**整组没有客户面**（后端 `capacity_api` 逐条走 `assert_can_view_org` /
+//    `assert_can_write_entrustment`，**不设货主旁路**）：候选行带承运人与供应商单价、
+//    确认行带需求量与缺口吨数、逐规则判定里还有比较过程。
+//    ⇒ 取数**之前**先按本地组织权限投影（`ORG_PERM_VIEW`）判一次，不该看的一次请求都不发；
+//    隐藏不等于放行，服务端仍按授权独立判定（与 `canClaim` / `canAssembleQuote` 同一口径）。
 const {
-  VIEW,
-  TASK_TYPE_LABELS,
-  TASK_TYPE_ORDER,
+  CAPACITY_EVIDENCE_LABELS,
+  CAPACITY_EVIDENCE_ORDER,
   ORG_PERM_CLAIM,
   ORG_PERM_QUOTE_CREATE,
+  ORG_PERM_VIEW,
+  TASK_TYPE_LABELS,
+  TASK_TYPE_ORDER,
+  VIEW,
   canClaimAssignment,
+  capacityRuleRows,
   claimAssignment,
+  confirmCapacity,
   createArtifact,
   createTask,
+  decorateCapacityCandidate,
+  decorateCapacityConfirmation,
+  decorateCapacityRecheck,
   decorateCustomerOffer,
   decorateDetail,
   decorateWorkbench,
   downloadOfferAttachment,
   fetchAssignment,
+  fetchCapacityCandidates,
+  fetchCapacityConfirmations,
   fetchMyOfferReleases,
   fetchMyOrgs,
   fetchSessionContext,
@@ -57,6 +78,8 @@ const {
   permittedOrgIds,
   pickOfferForAssignment,
   respondOffer,
+  recordCapacityCandidate,
+  recheckCapacityConfirmation,
   viewState
 } = require('../../../utils/entrust')
 
@@ -77,6 +100,41 @@ const SELF = 'pages/entrust/detail/detail'
 const TASK_TYPE_OPTIONS = TASK_TYPE_ORDER.map(function (t) {
   return { key: t, label: TASK_TYPE_LABELS[t] || t }
 })
+
+/**
+ * 证据类别选项（登记候选运力用）。
+ *
+ * 与 `TASK_TYPE_OPTIONS` 同一形态与理由：做成**页内选择条**而不是自由输入 ——
+ * 自由输入能填出必然被后端拒（`evidence_kind` 不在取值域）的值，而「类别填错了」
+ * 与「随便填了个类别」在库里的形状一样；BP-03 第 3 条要的是「类别 + 引用」两件齐全。
+ */
+const CAPACITY_EVIDENCE_OPTIONS = CAPACITY_EVIDENCE_ORDER.map(function (k) {
+  return { key: k, label: CAPACITY_EVIDENCE_LABELS[k] || k }
+})
+
+/**
+ * 登记表单的空白草稿。
+ *
+ * 做成**函数**而不是共享对象字面量：把同一个对象引用放进 `setData`/`data`，
+ * 一处取消就会把别处正在编辑的表单一起清空 —— 而那种错只在"同时开了两处"时出现。
+ * 键名与模板里 `data-df` 的 kebab 写法一一对应；到后端字段名的转换**只在
+ * `buildCapBody()` 一处**发生（散着写就会出现"某个字段改了名但没人发现"）。
+ */
+function emptyCapForm() {
+  return {
+    carrier: '',
+    vesselName: '',
+    capacityTonnes: '',
+    vesselCount: '1',
+    allowsPartialLoad: false,
+    rate: '',
+    rateUnit: '吨',
+    currency: 'CNY',
+    validUntil: '',
+    evidenceKind: '',
+    evidenceRef: ''
+  }
+}
 
 Page({
   data: {
@@ -193,7 +251,53 @@ Page({
     /** 响应请求在飞 */
     offerSubmitting: false,
     /** 附件下载的**页内**状态文案（下载是异步的，且失败要能一直看得见） */
-    downloadHint: ''
+    downloadHint: '',
+
+    // ── 运力确认与有效期（经理侧；第 4 条）──────────────────────────────
+    /**
+     * 该不该**发这次取数**：我在**这张委托所属组织**内有 `entrust:view`。
+     * 判据在 `applyState`（本地组织权限投影），`loadCapacity` 只读它。
+     * ⚠️ 用本地投影**不是为了省一次请求**：客户发出这个请求必然 403，
+     *    而 403 被 `.catch` 吞掉的表现与"这一单没有候选运力"一模一样 ——
+     *    那就是一次静默降级（本页注释反复在防的那类缺陷）。
+     */
+    canViewCapacity: false,
+    /**
+     * 该不该**显示入口**：授权能被唯一定位（`ctx.entrustment_id`）∧ 我在该组织内有
+     * `entrust:quote:create`。与 `canAssembleQuote` 同一判据、同一理由 ——
+     * 隐藏不等于放行，写端 `_write_scope` 仍独立判定（成员资格 → 恰好一条授权 → 写权限）。
+     */
+    canRecordCapacity: false,
+    /** 候选运力（已装饰：吨位/装载口径/单价/有效期/证据三态/状态标签） */
+    capCandidates: [],
+    /** 已作出的运力确认（**冻结副本** + 逐规则判定 + 成果引用） */
+    capConfirmations: [],
+    /** 登记表单展开（页内；理由同「受理委托」—— 原生弹层不在渲染树里、工具点不到确认键） */
+    capOpen: false,
+    /** 登记表单草稿（键名见 `emptyCapForm`） */
+    capForm: emptyCapForm(),
+    /** 登记表单的校验提示（页内常驻，不用会消失的 toast） */
+    capHint: '',
+    /** 登记提交在飞（防重复点击；重复提交另有幂等键兜底） */
+    capSubmitting: false,
+    /** 确认条展开在哪一条候选上（`''` ＝ 都收起；两侧都是字符串，见模板注释） */
+    capConfirmKey: '',
+    /** 「本次确认覆盖的范围」—— 后端必填（它是一条**采购范围判断**，数据里没有出处） */
+    capScope: '',
+    /** 确认备注（选填） */
+    capNote: '',
+    /** 确认提交在飞 */
+    capConfirming: false,
+    /** 最近一次被拒的**逐条**判定（含通过项）：标题写清它是哪一条候选的 */
+    capRuleTitle: '',
+    capRuleRows: [],
+    /** 复算结果显示在哪一条确认上（`''` ＝ 不显示） */
+    capRecheckId: '',
+    capRecheck: null,
+    /** 复算的失败提示（页内常驻） */
+    capRecheckHint: '',
+    /** 证据类别选项（页内选择条） */
+    capEvidenceOptions: CAPACITY_EVIDENCE_OPTIONS
   },
 
   onLoad(query) {
@@ -252,6 +356,13 @@ Page({
   load() {
     const self = this
     const id = this.data.assignmentId
+    // 组织权限投影**取数之前置空**（D-4 裁定 §2/§4 的代码形态）：空投影 ⇒ 不显示入口，
+    // 也不发运力那两次取数 ——「权限尚未加载或加载失败时不提前展示可执行按钮」。
+    // ⚠️ 三个投影一起清：只清一个的话，上一轮的结论会在这轮的第一帧里被继续使用，
+    //    而那正好是"权限与页面所说不一致"的窗口期。
+    this.permittedOrgIds = {}
+    this.permittedQuoteOrgs = {}
+    this.permittedViewOrgs = {}
     // 重取时把两处页内交互面**复位**：整页刷新之后，展开着的确认条 / 输入条都已经
     // 失去了它当初的判据（权限与委托状态都可能变了）⇒ 让它们回到"未展开"，
     // 而不是留一个点了必然失败的按钮。复位只放在这里一处，页面别处不再各收一次。
@@ -267,7 +378,20 @@ Page({
       offerForm: '',
       offerNote: '',
       offerHint: '',
-      downloadHint: ''
+      downloadHint: '',
+      capOpen: false,
+      capForm: emptyCapForm(),
+      capHint: '',
+      capSubmitting: false,
+      capConfirmKey: '',
+      capScope: '',
+      capNote: '',
+      capConfirming: false,
+      capRuleTitle: '',
+      capRuleRows: [],
+      capRecheckId: '',
+      capRecheck: null,
+      capRecheckHint: ''
     })
     // 前两个请求是**页面内容**：工作台是主内容，委托本体是它的头卡。任一失败都按失败
     // 处理 ——「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
@@ -304,12 +428,20 @@ Page({
         const orgItems = (res[2] && res[2].items) || []
         self.permittedOrgIds = permittedOrgIds(orgItems, ORG_PERM_CLAIM)
         self.permittedQuoteOrgs = permittedOrgIds(orgItems, ORG_PERM_QUOTE_CREATE)
+        // 运力块只读的那道判据（`entrust:view`）。与上面两个各管一段：
+        // 认领 / 组装报价 / 看运力成本口径，是**三种**不同的组织侧能力。
+        self.permittedViewOrgs = permittedOrgIds(orgItems, ORG_PERM_VIEW)
         const detail = decorateDetail(res[0], self.permittedOrgIds)
         const board = decorateWorkbench(res[1])
         // 只挑**本单**的那条：`/my-offer-releases` 是"我收到的全部发布"，
         // 混着别的委托单。挑错会把 A 单的报价显示在 B 单上，而两者都"看起来正常"。
         const mine = pickOfferForAssignment((res[3] && res[3].items) || [], id)
         self.applyState(viewState({ status: 200, total: 1 }), detail, board, mine, res[4])
+        // 运力那一块**第二轮**取：它的判据（本地组织权限投影）要等 `fetchMyOrgs` 回来才知道，
+        // 而"该不该发这次请求"必须在请求**之前**判（理由见 `data.canViewCapacity`）。
+        // 两轮都是同一次 `load()` 的一部分：失败由 `loadCapacity` 自己消化（不把整页打成错误态，
+        // 与权限投影、对客报价同一命运 —— 委托本体明明读到了，页面不该说失败）。
+        return self.loadCapacity()
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -356,7 +488,29 @@ Page({
       offerForm: '',
       offerNote: '',
       offerHint: '',
-      downloadHint: ''
+      downloadHint: '',
+      // ── 运力块的三个判据（见 data 上的逐条说明）──
+      // 读：我在该委托所属组织内有 `entrust:view`（决定**发不发**那两次取数）。
+      canViewCapacity: isPermittedOrg(this.permittedViewOrgs, detail && detail.orgId),
+      // 写：授权可唯一定位 ∧ 我在该组织内有 `entrust:quote:create`。
+      canRecordCapacity:
+        !!(ctx && ctx.entrustment_id) &&
+        isPermittedOrg(this.permittedQuoteOrgs, detail && detail.orgId),
+      // 候选与确认**不在这里清**：紧接着的 `loadCapacity()` 会重取。
+      // （在这一步清掉会让"取数未回来"的那一帧显示成"没有候选运力"，与真事实同形。）
+      capOpen: false,
+      capForm: emptyCapForm(),
+      capHint: '',
+      capSubmitting: false,
+      capConfirmKey: '',
+      capScope: '',
+      capNote: '',
+      capConfirming: false,
+      capRuleTitle: '',
+      capRuleRows: [],
+      capRecheckId: '',
+      capRecheck: null,
+      capRecheckHint: ''
     })
   },
 
@@ -812,6 +966,348 @@ Page({
           hint = '附件下载失败（服务端返回 ' + status + '）'
         }
         self.setData({ downloadHint: hint })
+        return null
+      })
+  },
+
+  // ── 运力确认与有效期（经理侧；BP-03 第 2、3 条 / D1-06 / 合同 §10.1 第 5 步）──
+  //
+  // 判据分三层，越往下越"以服务端为准"：
+  //   ① 该不该**发这次取数** —— 本地组织权限投影里有 `entrust:view`（`loadCapacity`）；
+  //   ② 该不该**显示入口** —— 授权能被唯一定位 ∧ 我在该组织内有 `entrust:quote:create`；
+  //   ③ 该不该**放行** —— 完全由服务端判定（403 / 409 + 逐条判定）。
+  // 前端一律不猜第 ③ 层：本页给出的每一个「不通过」都必须是后端说的原话。
+
+  /**
+   * 取运力数据（候选清单 + 已作出的确认）。
+   *
+   * ⚠️ 客户侧**一次请求都不发**（理由见 `data.canViewCapacity`）。取不到时也不把整页
+   * 打成错误态：这与权限投影、对客报价同一命运 —— 拿不到运力结论时用户仍有权读这张委托。
+   * 但**不静默**：有 `entrust:view` 却被拒是一次真失败，必须在页内说出来。
+   */
+  loadCapacity() {
+    const self = this
+    if (!this.data.canViewCapacity) {
+      this.setData({ capCandidates: [], capConfirmations: [] })
+      return Promise.resolve()
+    }
+    const id = this.data.assignmentId
+    return Promise.all([fetchCapacityCandidates(id), fetchCapacityConfirmations(id)])
+      .then(function (res) {
+        self.setData({
+          capCandidates: (res[0] || []).map(decorateCapacityCandidate),
+          capConfirmations: (res[1] || []).map(decorateCapacityConfirmation)
+        })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          capCandidates: [],
+          capConfirmations: [],
+          capHint: status
+            ? '运力数据未能读取（服务端返回 ' + status + '）—— 本地权限投影与授权结论不一致时也会这样'
+            : '运力数据未能读取：网络异常'
+        })
+      })
+  },
+
+  /** 展开 / 收起登记表单。**页内**，不用原生弹层（理由见文件头的「交互形态」）。 */
+  onToggleCap() {
+    if (this.data.capSubmitting) return
+    this.setData({ capOpen: !this.data.capOpen, capHint: '' })
+  },
+
+  /** 收起并清空（取消就是取消，不留半份草稿 —— 与「组装对客报价」同一取向）。 */
+  onCancelCap() {
+    this.setData({ capOpen: false, capForm: emptyCapForm(), capHint: '' })
+  },
+
+  /**
+   * 表单输入：按 `data-df` 决定写回哪个字段。
+   *
+   * 按**字段名**而不是"第几个输入框"定位：位置索引会在模板调序时静默错位
+   * （写回另一个字段，页面看起来还正常）。与 `onQuoteInput` / 案件页的 `act-input` 同形。
+   */
+  onCapInput(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const field = String(ds.df || '')
+    if (!field) return
+    // 表的值是 **setData 路径**，不是裸字段名：本块有两个输入框不在 `capForm` 里。
+    const map = {
+      'cap-carrier': 'capForm.carrier',
+      'cap-vessel': 'capForm.vesselName',
+      'cap-tonnes': 'capForm.capacityTonnes',
+      'cap-vessels': 'capForm.vesselCount',
+      'cap-rate': 'capForm.rate',
+      'cap-rate-unit': 'capForm.rateUnit',
+      'cap-currency': 'capForm.currency',
+      'cap-valid': 'capForm.validUntil',
+      'cap-evidence-ref': 'capForm.evidenceRef',
+      // 范围与备注属于**这一次确认**，不属于候选草稿：它们随确认条的开关生灭
+      // （`onOpenCapConfirm` / `onCancelCapConfirm` 会清掉），所以留在 `data` 根上。
+      // 混进 `capForm` 会让"取消再打开"把上一次的范围带过来，看起来像已经填好了。
+      //
+      // ⚠️ 少了这两条时：`bindinput` 照常触发、`ds.df` 也照常读到，只是 map 查不到 ⇒
+      //    **静默空转**，输入框一个字符都写不进去，而页面表现成"范围永远填不上、
+      //    确认永远提示必填"。e2e 的 ⑰ 段就是靠这条红的（`capScope` 恒为空 ⇒
+      //    `onSubmitCapConfirm` 在校验处就返回，四条逐条判定一条都没拿到）。
+      'cap-scope': 'capScope',
+      'cap-note': 'capNote'
+    }
+    const path = map[field]
+    if (!path) return
+    // 按**路径**写回（不整对象替换，避免输入法组字被打断）
+    this.setData({ [path]: (e && e.detail && e.detail.value) || '', capHint: '' })
+  },
+
+  /**
+   * 装载口径：**判容量时要用到**，所以必须显式选而不是默认。
+   * 夹具层面已经证明：只写"900 吨"没有判据价值 —— 允许拆批或多船承运时，
+   * 950 吨未必装不下。`data-act-partial` 给的是 `'0'` / `'1'`，这里转成布尔。
+   */
+  onCapPickPartial(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    this.setData({ 'capForm.allowsPartialLoad': String(ds.actCapPartial) === '1', capHint: '' })
+  },
+
+  /** 证据类别：选中 / 再点一次取消（不选就是"未登记"，**不替用户补默认值**）。 */
+  onCapPickKind(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const kind = String(ds.actCapKind || '')
+    if (!kind) return
+    this.setData({
+      'capForm.evidenceKind': this.data.capForm.evidenceKind === kind ? '' : kind,
+      capHint: ''
+    })
+  },
+
+  /**
+   * 表单 → 请求体。**转换只在这一处**（模板的 kebab 名 → 后端字段名）。
+   *
+   * 校验在**页内**说清（同 `onSubmitTask` / `onSubmitQuote` 的理由：toast 会消失，
+   * 而"为什么没提交"正是此刻要一直看得见的那句话）。前端这几条只挡"必然被后端拒"
+   * 的输入（少一次往返），**服务端才是判据**。空字段**不发键** —— 发 `""` 会让
+   * 服务端的报错与用户的操作对不上（与案件页登记表单同一条）。
+   */
+  buildCapBody() {
+    const f = this.data.capForm || {}
+    const carrier = String(f.carrier || '').trim()
+    if (!carrier) return { hint: '请填写「承运人」（必填）' }
+    const tonnesText = String(f.capacityTonnes || '').trim()
+    // 先判空再判数：`Number('')` 是 0，只判 `isFinite` 会让空吨位静默变成 0 吨
+    const tonnes = tonnesText ? Number(tonnesText) : NaN
+    if (!tonnesText || !isFinite(tonnes)) return { hint: '请填写「运力吨位」，且必须是数字（必填）' }
+    if (!(tonnes > 0)) return { hint: '「运力吨位」必须大于 0 —— 0 吨的候选无法通过容量判定' }
+    const vesselsText = String(f.vesselCount || '').trim()
+    const vessels = vesselsText ? Number(vesselsText) : 1
+    if (!isFinite(vessels) || !(vessels >= 1) || Math.floor(vessels) !== vessels) {
+      return { hint: '「船数」必须是不小于 1 的整数（留空按 1 条船）' }
+    }
+    const rateText = String(f.rate || '').trim()
+    const rateUnit = String(f.rateUnit || '').trim()
+    // 单价与计价单位**成对**：只有金额无法确定费用（后端同一条，注册表里也是成对的）
+    if (!!rateText !== !!rateUnit) return { hint: '「单价」与「计价单位」必须一起给或一起留空' }
+    if (rateText && (!isFinite(Number(rateText)) || !(Number(rateText) > 0))) {
+      return { hint: '「单价」必须是正数' }
+    }
+    const validUntil = String(f.validUntil || '').trim()
+    if (validUntil && !/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) {
+      return { hint: '「有效期至」要写成 2026-12-31 这样的日期' }
+    }
+    const body = { carrier: carrier, capacity_tonnes: tonnes, vessel_count: vessels }
+    body.allows_partial_load = !!f.allowsPartialLoad
+    const vesselName = String(f.vesselName || '').trim()
+    if (vesselName) body.vessel_name = vesselName
+    if (rateText) body.rate = Number(rateText)
+    if (rateUnit) body.rate_unit = rateUnit
+    const currency = String(f.currency || '').trim()
+    if (currency) body.currency = currency
+    if (validUntil) body.valid_until = validUntil
+    const kind = String(f.evidenceKind || '').trim()
+    const ref = String(f.evidenceRef || '').trim()
+    if (kind) body.evidence_kind = kind
+    if (ref) body.evidence_ref = ref
+    return { body: body }
+  },
+
+  /**
+   * 登记一条候选运力。
+   *
+   * ⚠️ 这一步**不确认**任何东西，注册表与合同 BP-03 第 3 条都把两者分开
+   * （`A chosen quotation alone does not create confirmed capacity.`）。
+   * 成功后走整页 `load()`：候选要经**投影**回到清单里，而不是前端自己往数组里塞一行。
+   */
+  onSubmitCap() {
+    const self = this
+    if (this.data.capSubmitting) return Promise.resolve()
+    const built = this.buildCapBody()
+    if (built.hint) {
+      this.setData({ capHint: built.hint })
+      return Promise.resolve()
+    }
+    this.setData({ capSubmitting: true, capHint: '' })
+    wx.showLoading({ title: '登记中', mask: true })
+    return recordCapacityCandidate(
+      this.data.assignmentId,
+      built.body,
+      newIdempotencyKey('cap-cand')
+    )
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ capSubmitting: false })
+        wx.showToast({ title: '已登记候选', icon: 'success' })
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          capSubmitting: false,
+          capHint: status
+            ? '候选未登记（服务端返回 ' + status + '），请按提示核对字段口径'
+            : '候选未登记：网络异常（表单已保留，可重试）'
+        })
+        return null
+      })
+  },
+
+  /**
+   * 展开某一条候选的**页内**确认条。再点同一条即收起（不留"必须点别处才能取消"的面板）。
+   *
+   * 为什么不是原生弹层：确认是本块唯一会**改变业务事实、且不可回退**的动作
+   * （后端 `UNIQUE(candidate_id)`，一条候选只能被确认一次），它必须可被真机验证。
+   * 弹层不在渲染树里、确认键点不到 ⇒ 只能记 `LIMITATION`（⑧b / ㉕D 的先例）。
+   */
+  onOpenCapConfirm(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    // ⚠️ 读的是 `data-act-cap-confirm-open` 对应的 **dataset 键** `actCapConfirmOpen`
+    //    （小驼峰），不是 `ds.id` —— `data-act-*` 被属性名转写过了。
+    //    写成 `ds.id` 会恒为 undefined ⇒ 按钮点了没反应，且不报错。
+    const id = String(ds.actCapConfirmOpen == null ? '' : ds.actCapConfirmOpen)
+    if (!id) return
+    const same = String(this.data.capConfirmKey) === id
+    this.setData({
+      capConfirmKey: same ? '' : id,
+      capScope: same ? '' : this.data.capScope,
+      capNote: same ? '' : this.data.capNote,
+      capHint: '',
+      capRuleRows: [],
+      capRuleTitle: ''
+    })
+  },
+
+  onCancelCapConfirm() {
+    this.setData({ capConfirmKey: '', capScope: '', capNote: '', capHint: '' })
+  },
+
+  /**
+   * 提交确认。
+   *
+   * 请求体**只带** `candidate_id` 与 `agreed_scope`（+ 可选 note）—— 一切事实
+   * （承运人、吨位、船数、是否拆批、单价、有效期、证据）都由后端**从候选行读**。
+   * 前端把事实一起发过去，会造出"确认的内容"与"候选运力"可以不一致的状态，
+   * 而那条不一致在界面上看不出来 ⇒「确认」就退化成一次自述。
+   *
+   * 失败分流（两种 409 的**处置完全不同**，混在一起就会把用户送进死循环）：
+   *   · 带 `rule_checks` ⇒ **规则不过**：事实没变，把**逐条**判定照实显示出来，
+   *     **不刷新**（刷新会把用户刚看到的那张判定表顶掉）；
+   *   · 带 `existing_confirmation_id` ⇒ 状态冲突（已被确认过）：**必须刷新** ——
+   *     页面上那个按钮已经没有意义了，不刷新用户会对着它反复点。
+   */
+  onSubmitCapConfirm(e) {
+    const self = this
+    if (this.data.capConfirming) return Promise.resolve()
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    // 同上：dataset 键是 `actCapConfirmSubmit`（不是 `id`）
+    const candidateId = Number(ds.actCapConfirmSubmit)
+    const scope = String(this.data.capScope || '').trim()
+    if (!candidateId) return Promise.resolve()
+    if (!scope) {
+      // `agreed_scope` 是**必填**：它是一条采购范围判断，数据里没有它的出处
+      this.setData({ capHint: '请填写「本次确认覆盖的范围」（必填）' })
+      return Promise.resolve()
+    }
+    const note = String(this.data.capNote || '').trim()
+    this.setData({ capConfirming: true, capHint: '', capRuleRows: [], capRuleTitle: '' })
+    wx.showLoading({ title: '确认中', mask: true })
+    return confirmCapacity(
+      this.data.assignmentId,
+      { candidate_id: candidateId, agreed_scope: scope, note: note || null },
+      newIdempotencyKey('cap-confirm')
+    )
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ capConfirming: false, capConfirmKey: '', capScope: '', capNote: '' })
+        wx.showToast({ title: '运力已确认', icon: 'success' })
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const status = (err && err.httpStatus) || 0
+        const det = (err && err.detail) || null
+        const isObj = !!(det && typeof det === 'object')
+        const rows = isObj ? capacityRuleRows(det) : []
+        const msg = isObj ? String(det.message || '') : String(det || '')
+        if (rows.length) {
+          // 规则不过：把**全部**判定照实摆出来（含通过的 —— 后端特意全给）
+          return Promise.resolve(
+            self.setData({
+              capConfirming: false,
+              capRuleTitle: msg || '这一条候选不满足确认条件',
+              capRuleRows: rows,
+              capHint: ''
+            })
+          )
+        }
+        if (isObj && det.existing_confirmation_id) {
+          self.setData({ capConfirming: false })
+          return self.load()
+        }
+        if (status === 403 || (isObj && det.existing_artifact_id)) {
+          self.setData({ capConfirming: false })
+          return self.load()
+        }
+        self.setData({
+          capConfirming: false,
+          capHint: status
+            ? '确认未提交（服务端返回 ' + status + '）' + (msg ? '：' + msg : '，请按提示处理')
+            : '确认未提交：网络异常（填写内容已保留，可重试）'
+        })
+        return null
+      })
+  },
+
+  /**
+   * 只读复算这条确认（不改任何行）。
+   *
+   * 它存在的全部意义是让「900 吨候选在变更后不再适用」这句话**可以被看到**：
+   * 同一套规则换一组当前事实之后不再通过了。所以页面上必须并排给出结论、
+   * 变化了的判定输入、以及**不通过那几条的原话** —— 只给一个"已失效"等于让人去猜。
+   */
+  onCapRecheck(e) {
+    const self = this
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    // 同上：dataset 键是 `actCapRecheck`
+    const id = ds.actCapRecheck
+    if (!id) return Promise.resolve()
+    this.setData({ capRecheckHint: '' })
+    return recheckCapacityConfirmation(id)
+      .then(function (res) {
+        self.setData({
+          capRecheckId: String(id),
+          capRecheck: decorateCapacityRecheck(res),
+          capRecheckHint: ''
+        })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          capRecheckId: String(id),
+          capRecheck: null,
+          capRecheckHint: status
+            ? '复算未能进行（服务端返回 ' + status + '）'
+            : '复算未能进行：网络异常'
+        })
         return null
       })
   },

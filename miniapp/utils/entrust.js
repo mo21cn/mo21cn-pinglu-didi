@@ -188,6 +188,22 @@ const ORG_PERM_CLAIM = 'entrust:assignment:claim'
  */
 const ORG_PERM_QUOTE_CREATE = 'entrust:quote:create'
 
+/**
+ * 「组织级读」权限码（= 后端 `access.PERM_VIEW`）。
+ *
+ * 运力候选 / 运力确认整组端点**只有组织侧一个通道**：`capacity_api` 里每一条都走
+ * `assert_can_view_org`（读）或 `assert_can_write_entrustment`（写），
+ * **没有**货主旁路 —— 候选行带承运人与供应商单价、确认行带 `agreed_amount`/`supplier`、
+ * 逐规则判定里还有需求量与缺口吨数。⇒ 详情页拿它去本地组织权限投影里查
+ * 「我能不能看这一块」，**只决定发不发这次取数**：客户侧一次请求都不发
+ * （否则每次开页都发一个必然 403 的请求，而 403 被 `.catch` 吞成"没有数据"
+ * 就成了一次静默降级 —— 那正是本页面反复写注释在防的那类缺陷）。
+ *
+ * ⚠️ 隐藏不等于放行：服务端仍按授权独立判定（同 `ORG_PERM_CLAIM` /
+ *    `ORG_PERM_QUOTE_CREATE` 的用法）。
+ */
+const ORG_PERM_VIEW = 'entrust:view'
+
 function statusLabel(status) {
   const meta = STATUS_META[status]
   return meta ? meta.label : '未知状态'
@@ -3534,6 +3550,357 @@ function withdrawOffer(releaseId, body, idempotencyKey) {
   })
 }
 
+// ── 运力确认与有效期（S3；BP-03 第 2/3 条 / D1-06 / 合同 §10.1 第 5 步）────
+//
+// ⚠️ 这一组端点**没有客户面**：后端 `capacity_api` 整组走 `assert_can_view_org` /
+// `assert_can_write_entrustment`，**不设货主旁路**。理由（后端模块文档逐条写着）：
+// 候选行带**承运人**与**供应商单价**、确认行带 `agreed_amount`/`supplier`、
+// 逐规则判定里还有需求量与缺口吨数。⇒ 本组取数**只该在经理侧**调用；
+// 客户了解商业承诺的渠道是发布那一刻的**白名单快照**，不是这里。
+
+/** 候选状态取值域（⇄ `capacity.CANDIDATE_STATUS_*`）。 */
+const CANDIDATE_STATUS_ORDER = ['candidate', 'confirmed', 'withdrawn']
+const CANDIDATE_STATUS_LABELS = {
+  candidate: '候选',
+  confirmed: '已确认运力',
+  withdrawn: '已作废'
+}
+
+/**
+ * 规则码 → 中文标签（⇄ `capacity.RULE_*`）。
+ *
+ * ⚠️ **本表不承担顺序**：后端 `ALL_RULE_CODES` 的顺序就是评估顺序与展示顺序，
+ * 且 409 响应体里每条判定都带 `seq` —— 按 `seq` 排，不按这里书写的先后排。
+ */
+const CAPACITY_RULE_LABELS = {
+  demand_known: '需求口径',
+  evidence: '证据',
+  validity: '有效期',
+  capacity: '容量'
+}
+
+/** 判定结果（⇄ `capacity.OUTCOME_*`）。 */
+const CAPACITY_OUTCOME_LABELS = { pass: '通过', fail: '不通过' }
+
+/**
+ * 证据类别取值域（⇄ `registry.ALL_EVIDENCE_KINDS`）。
+ *
+ * 与 `CAPACITY_RULE_LABELS` 同一取向：这张表**只做展示与选择**，
+ * 判定（`evidence` 规则）由后端跑，写端 `record_candidate` 还会按取值域拒掉表外的值。
+ * 页面把类别做成**页内选择条**而不是自由输入 —— 自由输入能填出必然 400 的值，
+ * 而"类别写错了"与"随便填了个类别"在库里的形状是一样的（BP-03 第 3 条
+ * 要的是「类别 + **引用**」，两者缺一都不算 identified evidence）。
+ */
+const CAPACITY_EVIDENCE_ORDER = [
+  'document',
+  'photo',
+  'email',
+  'receipt',
+  'contract',
+  'payment',
+  'confirmation'
+]
+const CAPACITY_EVIDENCE_LABELS = {
+  document: '单据',
+  photo: '照片',
+  email: '邮件',
+  receipt: '回单',
+  contract: '合同',
+  payment: '付款凭证',
+  confirmation: '确认函'
+}
+
+function capacityEvidenceLabel(kind) {
+  const k = String(kind == null ? '' : kind)
+  return CAPACITY_EVIDENCE_LABELS[k] || k
+}
+
+/** 候选状态标签；**未知取值照实回显**（缺一个就显示成"未知状态"是更坏的选择）。 */
+function candidateStatusLabel(status) {
+  const k = String(status == null ? '' : status)
+  return CANDIDATE_STATUS_LABELS[k] || k
+}
+
+/** 规则标签；未知码照实回显（后端新增规则时，界面至少看得见它存在）。 */
+function capacityRuleLabel(code) {
+  const k = String(code == null ? '' : code)
+  return CAPACITY_RULE_LABELS[k] || k
+}
+
+function capacityOutcomeLabel(outcome) {
+  const k = String(outcome == null ? '' : outcome)
+  return CAPACITY_OUTCOME_LABELS[k] || k
+}
+
+/**
+ * 候选行的展示装饰。
+ *
+ * ⚠️ 数值**已经是定长文本**（后端 `_row_to_candidate` 归一：吨位 3 位、单价 4 位），
+ * 本函数**原样显示**、不做 `Number()` 再格式化 —— 那会引入第二份"数值口径"，
+ * 且把 `45.0000` 美化成 `45` 会让界面与库里存的字符串不一致。
+ */
+function decorateCapacityCandidate(c) {
+  const row = c || {}
+  const vessels = Number(row.vessel_count || 0)
+  const partial = !!row.allows_partial_load
+  const status = String(row.status == null ? '' : row.status)
+  const evKind = row.evidence_kind ? capacityEvidenceLabel(row.evidence_kind) : ''
+  const evRef = row.evidence_ref ? String(row.evidence_ref) : ''
+  return {
+    candidateId: row.candidate_id == null ? '' : row.candidate_id,
+    carrier: String(row.carrier == null ? '' : row.carrier),
+    vesselName: row.vessel_name ? String(row.vessel_name) : '',
+    capacityText: String(row.capacity_tonnes == null ? '' : row.capacity_tonnes),
+    vesselCount: vessels,
+    /**
+     * 装载口径必须**看得见**：夹具层面已经证明，只写"900 吨"没有判据价值 ——
+     * 若允许拆批或多船承运，950 吨**未必**装不下。
+     */
+    loadBasis:
+      (vessels > 1 ? vessels + ' 船承运' : '单船承运') + '·' + (partial ? '允许拆批' : '不拆批'),
+    rateText:
+      row.rate == null ? '' : String(row.rate) + (row.rate_unit ? ' 元/' + row.rate_unit : ''),
+    currency: row.currency ? String(row.currency) : '',
+    validUntil: row.valid_until ? String(row.valid_until) : '',
+    /**
+     * 证据：BP-03 第 3 条要 `identified evidence` = **类别 + 引用**。
+     * 只有类别时界面必须显示"缺引用"，否则"有单据"与"有这一份单据"看起来一样。
+     */
+    evidenceKind: row.evidence_kind ? capacityEvidenceLabel(row.evidence_kind) : '',
+    evidenceRef: row.evidence_ref ? String(row.evidence_ref) : '',
+    evidenceMissingRef: !!row.evidence_kind && !row.evidence_ref,
+    /**
+     * 证据这一格必须**三态可分**：有类别且有引用 / 有类别缺引用 / 未登记。
+     * 折成两态（有 / 无）会让"有单据"与"有这一份单据"看起来一样 ——
+     * 而 BP-03 第 3 条要的正是「类别 + 引用」两件齐全，`evidence` 规则也这么判。
+     * 与 `loadBasis` 同一条取向：**判不了的那一格必须自己说话**。
+     */
+    evidenceText: row.evidence_kind
+      ? evKind + (row.evidence_ref ? ' · ' + evRef : '（缺引用）')
+      : '未登记',
+    evidenceCls: row.evidence_kind && row.evidence_ref ? 'field-value' : 'cap-warn',
+    status: status,
+    statusLabel: candidateStatusLabel(status),
+    statusClass: CANDIDATE_STATUS_ORDER.indexOf(status) >= 0 ? 'cap-' + status : 'cap-unknown',
+    /** 只有 `candidate` 可被确认：`confirmed` 已确认过（`UNIQUE(candidate_id)`），`withdrawn` 已作废。 */
+    confirmable: status === 'candidate'
+  }
+}
+
+/**
+ * 409 响应体里的逐规则判定 → 展示行（**含通过的**）。
+ *
+ * 后端刻意把**全部**判定都回（通过的也在内）：只回没过的会让人改完再撞下一条；
+ * 而通过的规则也带比较值，那是"这条规则确实跑过"的证据。
+ * ⇒ 前端**不得**过滤掉通过项 —— 那等于把后端特意给的信息又扔掉。
+ * 展示顺序 = **评估顺序**：按 `seq` 排（`seq` 缺失才退回本地下标）。
+ * 后端目前按序发出，但**排一次**才算把这条不变量写在代码里 —— 依赖"后端恰好有序"
+ * 是一种只在别人改动时才暴露的假设，而那时症状是"判定顺序看不懂"，不是报错。
+ */
+function capacityRuleRows(detail) {
+  const d = detail || {}
+  const list = Array.isArray(d.rule_checks) ? d.rule_checks : []
+  return list
+    .map(function (r, i) {
+      const row = r || {}
+      const outcome = String(row.outcome || '')
+      return {
+        seq: row.seq == null ? i + 1 : Number(row.seq),
+        ruleCode: String(row.rule_code || ''),
+        ruleLabel: capacityRuleLabel(row.rule_code),
+        outcome: outcome,
+        outcomeLabel: capacityOutcomeLabel(outcome),
+        passed: outcome === 'pass',
+        /** 通过 / 不通过**必须在界面上分得开**：只给一条灰字，读者会以为全是通过。 */
+        outcomeClass: outcome === 'pass' ? 'cap-rule-pass' : 'cap-rule-fail',
+        detail: String(row.detail || '')
+      }
+    })
+    .sort(function (a, b) {
+      return a.seq - b.seq
+    })
+}
+
+// ── 取数（均为既有端点，本片只接线；**经理侧**）────────────────────────────
+
+/**
+ * 确认行的展示装饰。
+ *
+ * ⚠️ 这里显示的 `capacityText` / `validUntil` / `evidence*` **全部来自确认行** ——
+ * 那是确认那一刻的**冻结副本**，不是候选行现在的值（候选行可以被改写，
+ * 而确认是一条已经作出的商业事实）。想看"现在还是不是这样"，
+ * 用 `recheckCapacityConfirmation()`；界面把两者并排显示，就是为了让
+ * 「改过之后不再成立」看得见（D1-09 那句话的可见形态）。
+ *
+ * ⚠️ `agreedScope` **不在**确认行的读模型上（服务端只把它写进采购确认成果的载荷）
+ * ⇒ 本函数**不伪造它**：给的是成果引用（`artifactId` / `artifactRevisionNo`），
+ * 由界面按**既有的成果引用导航**把用户带到那份成果上看范围与金额。
+ * （这是一处**已登记的口径缺口**，不是"这里忘了读"：要"确认清单里直接读到范围"，
+ * 得先给它在确认行上一个落点。）
+ */
+function decorateCapacityConfirmation(c) {
+  const row = c || {}
+  const ruleRows = capacityRuleRows(row)
+  const vessels = Number(row.vessel_count || 0)
+  const partial = !!row.allows_partial_load
+  let passed = 0
+  ruleRows.forEach(function (r) {
+    if (r.passed) passed += 1
+  })
+  return {
+    confirmationId: row.confirmation_id == null ? '' : row.confirmation_id,
+    candidateId: row.candidate_id == null ? '' : row.candidate_id,
+    artifactId: row.artifact_id == null ? '' : row.artifact_id,
+    artifactRevisionNo: row.artifact_revision_no == null ? '' : row.artifact_revision_no,
+    carrier: String(row.carrier == null ? '' : row.carrier),
+    vesselName: row.vessel_name ? String(row.vessel_name) : '',
+    capacityText: String(row.capacity_tonnes == null ? '' : row.capacity_tonnes),
+    loadBasis:
+      (vessels > 1 ? vessels + ' 船承运' : '单船承运') + '·' + (partial ? '允许拆批' : '不拆批'),
+    rateText:
+      row.rate == null ? '' : String(row.rate) + (row.rate_unit ? ' 元/' + row.rate_unit : ''),
+    currency: row.currency ? String(row.currency) : '',
+    validUntil: row.valid_until ? String(row.valid_until) : '',
+    evidenceKind: row.evidence_kind ? String(row.evidence_kind) : '',
+    evidenceRef: row.evidence_ref ? String(row.evidence_ref) : '',
+    demandText:
+      row.demand_tonnes == null
+        ? ''
+        : String(row.demand_tonnes) + (row.demand_unit ? ' ' + row.demand_unit : ''),
+    asOfDate: row.as_of_date ? String(row.as_of_date) : '',
+    ruleSetVersion: row.rule_set_version ? String(row.rule_set_version) : '',
+    note: row.note ? String(row.note) : '',
+    confirmedAt: row.confirmed_at ? String(row.confirmed_at) : '',
+    /**
+     * 采购确认成果的**引用行文案**（整句在这儿拼，模板只渲染）。
+     *
+     * ⚠️ 与槽位引用同一条纪律（静态闸见 `scripts/verify_entrust_ui.js`：
+     *    「引用行的文案只有一份」）：模板里拼「成果 #12 r1」会让"这条引用怎么写"
+     *    散到两个地方 —— 改一处、漏一处，界面上就是两种写法，而且**不报错**。
+     */
+    artifactRefText:
+      row.artifact_id == null
+        ? ''
+        : '采购确认成果 #' + row.artifact_id + ' r' + (row.artifact_revision_no == null ? '?' : row.artifact_revision_no),
+    ruleRows: ruleRows,
+    /**
+     * 判定条数：**少一条就是"这条规则没跑"**。
+     * 后端有 `_assert_every_rule_reported` 守这条（规则没跑全 ⇒ 程序性错误 ⇒ 500）；
+     * 界面再报一次条数，是因为"跑了且通过"与"这次没跑"在数据上原本完全一样。
+     */
+    ruleCount: ruleRows.length,
+    ruleSummary: ruleRows.length
+      ? '逐规则判定 ' + passed + '/' + ruleRows.length + ' 通过'
+      : '没有判定记录（不应发生，请报障）'
+  }
+}
+
+/**
+ * 只读复算结果的展示装饰（当前判定 ↔ 冻结判定并排）。
+ *
+ * ⚠️ `stillValid=false` **不等于**"这次确认被撤销了"：本端点**不写任何行**，
+ * 正式的重做属 S4 的变更流程。界面必须把这句话说出来，否则
+ * "900 吨候选在变更后不再适用"会被读成"确认失效了/被谁改掉了"。
+ */
+function decorateCapacityRecheck(r) {
+  const row = r || {}
+  const nowRows = capacityRuleRows({ rule_checks: row.rule_checks })
+  const frozenRows = capacityRuleRows({ rule_checks: row.frozen_rule_checks })
+  const changed = Array.isArray(row.changed_fields) ? row.changed_fields.map(String) : []
+  const failed = nowRows.filter(function (x) {
+    return !x.passed
+  })
+  return {
+    confirmationId: row.confirmation_id == null ? '' : row.confirmation_id,
+    stillValid: !!row.still_valid,
+    validLabel: row.still_valid ? '按当前事实仍然成立' : '按当前事实已不再成立',
+    asOfDate: row.as_of_date ? String(row.as_of_date) : '',
+    candidateMissing: !!row.candidate_missing,
+    changedFields: changed,
+    changedText: changed.length
+      ? changed.join('、')
+      : '判定读到的列没有变化（结论变化来自别处，请报障）',
+    nowRows: nowRows,
+    frozenRows: frozenRows,
+    /** 不通过的规则逐条说清（空串＝全部通过） */
+    failedText: failed
+      .map(function (x) {
+        return x.ruleLabel + '：' + x.detail
+      })
+      .join('；'),
+    note: row.still_valid
+      ? '本次复算只读、未改任何行'
+      : '本次复算只读、未改任何行；正式重做属变更流程，需要另一次确认'
+  }
+}
+
+/** 候选运力清单（第 2 条"两家可比"要看的运力 / 价格口径 / 数量单位 / 有效期 / 证据）。 */
+function fetchCapacityCandidates(assignmentId) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/capacity-candidates',
+    method: 'GET'
+  })
+}
+
+/** 该委托已作出的确认（响应体里**带逐规则判定** ⇒ 不必再逐条取详情）。 */
+function fetchCapacityConfirmations(assignmentId) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/capacity-confirmations',
+    method: 'GET'
+  })
+}
+
+/** 单条确认详情：**冻结的判定输入** + 逐规则判定（不存在 ⇒ 404，不回空壳）。 */
+function fetchCapacityConfirmation(confirmationId) {
+  return request({ url: BASE + '/capacity-confirmations/' + confirmationId, method: 'GET' })
+}
+
+/** 只读复算：这条确认**现在还成立吗**（用当前事实重跑同一套规则，不改任何行）。 */
+function recheckCapacityConfirmation(confirmationId) {
+  return request({
+    url: BASE + '/capacity-confirmations/' + confirmationId + '/recheck',
+    method: 'GET'
+  })
+}
+
+// ── 写命令 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 登记一条候选运力事实（**不是确认**）。
+ *
+ * 后端 `record_candidate` 只拒"结构上不可能有意义"的输入（承运人空、吨位非正数、
+ * 船数非正、单价与计价单位半边缺、证据类别不在取值域）；**"还没证据 / 还没有效期"
+ * 是允许的** —— 否则 `expired ... cannot be confirmed` 那条规则永远触发不了
+ * （过期数据根本进不来）。⇒ 界面**不替用户补默认值**，空就是空。
+ */
+function recordCapacityCandidate(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/capacity-candidates',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 确认运力：跑规则闸门 ⇒ 通过才产出 `procurement_confirm` 成果 + 确认记录。
+ *
+ * `body` **只带** `candidate_id` 与 `agreed_scope`（+ 可选 `note`）：
+ * 一切事实（承运人、吨位、船数、是否拆批、单价、有效期、证据）都由后端**从候选行读**。
+ * 让请求体带这些值，会造出"确认的内容"与"候选运力"可以不一致的状态，而那条不一致
+ * 在界面上看不出来 —— 于是"确认"退化成一次自述。
+ *
+ * 判定不通过 ⇒ **409**，响应体带**逐条**判定（含通过的），用 `capacityRuleRows` 渲染。
+ */
+function confirmCapacity(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/capacity-confirmations',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
 // ── 组装成果（人工定版；UI-06 / 计划 §5.2 S3）──────────────────────────────
 
 /**
@@ -3795,6 +4162,7 @@ module.exports = {
   MESSAGE_SOURCE_LABELS,
   ORG_PERM_CLAIM,
   ORG_PERM_QUOTE_CREATE,
+  ORG_PERM_VIEW,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
   REF_PROJECTORS,
@@ -3830,6 +4198,11 @@ module.exports = {
   artifactStatusLabel,
   buildPayload,
   canClaimAssignment,
+  candidateStatusLabel,
+  capacityEvidenceLabel,
+  capacityOutcomeLabel,
+  capacityRuleLabel,
+  capacityRuleRows,
   caseClosureOptions,
   caseCreateBody,
   caseDecideAvailable,
@@ -3844,6 +4217,7 @@ module.exports = {
   closeCase,
   coerceLike,
   confirmArtifact,
+  confirmCapacity,
   confirmCard,
   createAssignment,
   createCase,
@@ -3858,6 +4232,9 @@ module.exports = {
   decorateCaseLinkTargets,
   decorateCaseList,
   decorateCaseRow,
+  decorateCapacityCandidate,
+  decorateCapacityConfirmation,
+  decorateCapacityRecheck,
   decorateDetail,
   decorateEntrustment,
   decorateEntrustments,
@@ -3877,6 +4254,9 @@ module.exports = {
   fetchArtifactCandidates,
   fetchArtifactTypes,
   fetchAssignment,
+  fetchCapacityCandidates,
+  fetchCapacityConfirmation,
+  fetchCapacityConfirmations,
   fetchCase,
   fetchCaseOrgList,
   fetchEntrustmentAttachments,
@@ -3913,6 +4293,8 @@ module.exports = {
   pickOrg,
   probeEntry,
   probeOwnerEntry,
+  recheckCapacityConfirmation,
+  recordCapacityCandidate,
   removeCaseLink,
   reopenCase,
   revisionSourceLabel,
@@ -3927,6 +4309,12 @@ module.exports = {
   transcribeAttachment,
   uploadAttachment,
   viewState,
+  CANDIDATE_STATUS_LABELS,
+  CANDIDATE_STATUS_ORDER,
+  CAPACITY_EVIDENCE_LABELS,
+  CAPACITY_EVIDENCE_ORDER,
+  CAPACITY_OUTCOME_LABELS,
+  CAPACITY_RULE_LABELS,
   DATA_ORIGIN_LABELS,
   DATA_ORIGIN_ORDER,
   OFFER_ARTIFACT_TYPE_LABELS,
