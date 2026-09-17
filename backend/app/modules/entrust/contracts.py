@@ -65,6 +65,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.entrust import artifacts as art
 from app.modules.entrust import offers as offers_svc
+from app.modules.entrust import plan as plan_svc
 from app.modules.entrust import registry as reg
 from app.modules.entrust.authz import load_assignment
 
@@ -102,7 +103,8 @@ ALL_SOURCE_KINDS = frozenset(
 )
 
 #: 合同**必须**登记的字段路径前缀 —— 由注册表与本模块共同决定，测试对它做全覆盖断言。
-_MODE_LABELS = {"road": "公路", "water": "内河", "rail": "铁路"}
+#: ⚠️ 运输方式标签表**不再**在这里存一份：唯一实现是 `plan.MODE_LABELS`
+#: （全仓两处各存一份 ⇒ 改一处、另一处静默留下旧口径）。取标签统一走 `plan.mode_label`。
 
 #: 冻结快照里参与派生、且需要合同给出对应内容的报价字段。
 #: 用来回答"这份合同少写了什么"（缺失项**列出来**，不编造默认值）。
@@ -279,23 +281,8 @@ def _org_name(session: Session, org_id: int | None) -> str | None:
 
 
 def _list_legs(session: Session, assignment_id: int) -> list[dict[str, Any]]:
-    rows = session.execute(
-        text(
-            "SELECT id, seq, mode, from_name, to_name FROM ent_leg "
-            "WHERE assignment_id = :aid ORDER BY seq"
-        ),
-        {"aid": assignment_id},
-    ).mappings()
-    return [
-        {
-            "leg_id": int(r["id"]),
-            "seq": int(r["seq"]),
-            "mode": str(r["mode"]),
-            "from_name": str(r["from_name"]),
-            "to_name": str(r["to_name"]),
-        }
-        for r in rows
-    ]
+    """⚠️ 委托给 `plan.list_legs` —— 航段是**计划**这一域的事实，不在这里再写一份 SQL。"""
+    return plan_svc.list_legs(session, assignment_id)
 
 
 def _enumerate_field_paths(payload: dict[str, Any]) -> set[str]:
@@ -382,7 +369,7 @@ def _build(
     legs = _list_legs(session, assignment_id)
     if legs:
         route_text = "；".join(
-            f"{_MODE_LABELS.get(leg['mode'], leg['mode'])} {leg['from_name']}→{leg['to_name']}"
+            f"{plan_svc.mode_label(leg['mode'])} {leg['from_name']}→{leg['to_name']}"
             for leg in legs
         )
         idx = len(clauses)
