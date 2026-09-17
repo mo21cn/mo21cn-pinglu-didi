@@ -725,6 +725,21 @@ def test_publish_freezes_data_origin_and_signature_mode(env):
     assert body["data_origin"]["mode"] == "manual"
     assert body["data_origin"]["basis"], "经理侧必须能看到判定依据，不能只给一个词"
 
+    # ⭐ 成果类型在**顶层**（2026-09-18 补）：客户端要回答"这条发布是不是对客报价"
+    #    时，不该去 `customer_snapshot` 里挖（那是内容，不是元数据），也不该再查一次
+    #    成果清单。此前它只藏在快照里，而"不存在的顶层键"是**静默 0** ——
+    #    第 7 步的派生前置判据就是这么丢掉整章的（读错键名不会报错）。
+    #    本断言把"经理投影必须声明它"钉在 CI 上：将来谁把它拿掉，这里先红。
+    assert body["artifact_type"], "经理投影必须显式给出成果类型"
+    listed = env.client.get(
+        f"/api/v1/entrust/entrustments/{eid}/offer-releases", headers=_headers(manager)
+    )
+    assert listed.status_code == 200, listed.text
+    row = listed.json()["items"][0]
+    assert row["artifact_type"] == body["artifact_type"], (
+        "清单与详情必须给同一个类型（否则页面按清单挑、按详情显示会不一致）"
+    )
+
     # 客户投影给**标注**但不给依据（依据里有内部编号）
     mine = env.client.get("/api/v1/entrust/my-offer-releases", headers=_headers(owner))
     assert mine.status_code == 200, mine.text

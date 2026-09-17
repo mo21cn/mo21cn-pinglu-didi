@@ -1149,6 +1149,12 @@ class OfferReleaseOut(BaseModel):
     assignment_id: int
     entrustment_id: int | None = None
     artifact_id: int
+    #: 被发布的成果类型（`customer_quote` 等）。**顶层显式声明**，不让客户端去
+    #: `customer_snapshot` 里挖 —— 快照是"客户当初看到的内容"，不是元数据。
+    #: ⚠️ 它与客户视角的同名字段（`OfferReleaseCustomerOut.artifact_type`）语义相同：
+    #: "这条发布的是什么"。两处都声明，是为了让"派生前置要求接受的是对客报价"
+    #: 这条判据能在**有 schema 保证**的字段上成立。
+    artifact_type: str | None = None
     revision_id: int
     revision_no: int
     customer_user_id: int
