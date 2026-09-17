@@ -149,6 +149,15 @@ TITLE_MINE_DRAFT = "走查·我的委托·草稿（㊶ 章 API 建单，无承�
 TITLE_PROBE_PAGE = "走查·触底分页探针（㊷ 章 API 建单）"
 #: ㊷ 章分页探针：把该身份的单据数抬到**超过一页**，第 2 页才有观测对象。
 PROBE_PAGE_TARGET = 25
+
+#: ㊸ 主演示第 1–3 步（合同 §10.1）的输入。
+#: 口径来自 canonical 夹具（`backend/scripts/fixtures/demo1_canonical.json`：
+#: 钢材、南宁 → 贵港、800 吨）。⚠️ 这里的货名/货量是**演示者会在受理屏填什么**，
+#: 走查由真实点击把标题填进去，不靠 API 造单 —— 因为合同第 1 步要的就是
+#: "客户提交一张新委托"这个**界面动作**。
+A1_MAIN_TITLE = "走查·主演示第1-3步（钢材800吨）"
+CANON_CARGO = "钢材"
+CANON_QTY = "800"
 #: 页面 `assignments.js` 里 `PAGE_SIZE` 的探针侧副本。
 #: ⚠️ 两处不一致时本章会在「条目数」那一格红 —— 这是故意的：页长改了而探针没跟，
 #:    走查必须暴露出来，而不是继续按旧页长断言、把真实偏差留给用户发现。
@@ -7049,8 +7058,478 @@ def sec_42(w: Walker) -> None:
     )
 
 
+def sec_43(w: Walker) -> None:
+    """㊸ 主演示第 1–3 步（合同 §10.1 Witnessed business script）——设备侧运行取证。
+
+    合同 §10.1 前三步的原文：
+
+    1. Customer submits a new assignment; A1 claims it.
+    2. A1 uploads the sample quotation and invokes AG-02.
+    3. A1 corrects one field; open the same artifact from the workbench.
+
+    HO 0917-3 的执行顺序把它列为「第 1–3 步运行取证」，并明确**不得把 runner 单测或
+    Node e2e 称为设备侧完整链路** ⇒ 本章的价值就是「在真实模拟器上、用真实点击、
+    把这三步**连着**走一遍」。
+
+    为什么单独一章，而不是复用 ㉞ / ㊳ / ㊶ / ㊷
+    ------------------------------------------
+    既有各章各自只覆盖**一跳**（㉞ 客户提交、㊳ 受理、㊶㊷ 列表），且都止步于"状态变了"。
+    合同第 3 步要的是**跨页的同一性**："更正一个字段，然后**从工作台打开同一份**成果"
+    —— 这条只有把三步连起来走才成立：中间任何一环断裂（附件没提取 / 提案没产出 /
+    更正没生效），D1-04「更正出现在所有共享视图」的证据就不成立，而在单跳章节里
+    它照样会是绿的。
+
+    本节覆盖（措辞与手段一一对应）
+    ----------------------------
+    一、第 1 步：客户（`seed-shipper`）**真实点击**建单提交 → A1（`seed-owner`）
+        在工作台**真实点击**受理（服务端状态以 API 直证）。
+    二、第 2 步：A1 在会话屏走「内置示例报价单 → 上传 → 提取 → 引用 → 调 AG-02」，
+        等作业终态，断言产出了提案、且来源里含 `attachment_text`、无未核验来源。
+    三、第 3 步：采纳为成果 → 成果页**真实编辑一个字段并保存新版本** →
+        **设为生效版本**（页内确认条）→ **经工作台 → 委托卡 → 详情页 → 成果槽位**
+        打开同一份成果，断言是同一个 `artifact_id` 且显示的是更正后的内容。
+
+    ⚠️ 诚实边界（按档登记、**不计入通过**）
+    * 原生文件选择器（`wx.chooseMessageFile`）是 OS 级弹层、不在渲染树里，走查工具
+      够不着它的选择项 ⇒ 「从系统里选一个文件」这一格记 `LIMITATION`。本章另走
+      **内置示例**通路：它复用同一条 `uploadQuote`，覆盖的是**真实上传链路**，
+      但不是"从系统文件里挑一个"这一步 —— 两者不互相替代。
+    * 「更正一个字段」按合同改的是**成果**上的字段（成果页的编辑态）。会话屏的采纳
+      **刻意没有编辑态**（采纳＝确认模型产出；改内容属成果页），这条差异写进 note，
+      不假装修正发生在会话屏。
+    """
+    print("\n== ㊸ 主演示第 1–3 步（合同 §10.1，真实点击）==", flush=True)
+
+    err_base = w.c.errors()
+
+    def my_org_id(code: str, name: str) -> str:
+        """按组织名取 org_id（不写死 id：种子重铺会变）。"""
+        tok = (api_login(code) or {}).get("access_token") or ""
+        if not tok:
+            return ""
+        items = (api_get("/entrust/my-orgs", tok) or {}).get("items") or []
+        for r in items:
+            if str((r or {}).get("name") or "") == name:
+                return str((r or {}).get("org_id") or "")
+        return ""
+
+    def clear_intake_draft() -> bool:
+        """清当前身份的在途载荷。
+
+        该 Storage 键**跨轮次保留**：不清的话上一次走查留下的草稿会让本节的
+        "新建委托"变成"续接到旧草稿"，于是后面按标题找单会找不到那张**新的**。
+        键按 `user_id` 推导（与 intake.js 同一条口径），不是"扫所有前缀"。
+        """
+        key = w.c.evaluate(
+            "function(){var r=wx.getStorageSync('user_info');if(!r)return '';"
+            "var u=null;try{u=JSON.parse(r)}catch(e){return ''}"
+            "var id=(u&&u.user_id!=null)?String(u.user_id):'';"
+            "return id?('entrust_intake_draft_'+id):'';}"
+        )
+        if not key:
+            return False
+        w.c.remove_storage(str(key))
+        w.c.remove_storage(str(key))  # 双保险：抗一次无声失败
+        return True
+
+    def api_truth_status(aid: str, tok: str) -> dict:
+        return api_get(f"/entrust/assignments/{aid}", tok) or {}
+
+    # ==================== 一、第 1 步（前半）：客户提交 ====================
+    print("\n-- 一、第 1 步 · 客户（seed-shipper）真实点击提交一张新委托 --", flush=True)
+    if w.login_as(CODE_SHIPPER) != INDEX:
+        w.rep.rec("㊸ 前置 · seed-shipper 登录", False, f"未停在身份页（{w.c.current_path()}）")
+        return
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.rec("㊸ 前置 · 真点击身份卡进货主工作台", False, w.c.current_path())
+        return
+    time.sleep(1.2)
+    w.rep.rec(
+        "㊸ 前置 · 清掉按 `user_id` 推导的在途载荷（跨轮次残留会把'新建'变成'续接'）",
+        clear_intake_draft(),
+        "entrust_intake_draft_<user_id> 已清（清两次）",
+    )
+
+    n_center = w.c.count('[data-key="publish"]')
+    if n_center == 1:
+        w.c.tap('[data-key="publish"]')
+        via_cargo = "真实点击自定义 tabBar 凸起"
+    else:
+        w.c.nav("navigateTo", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
+        via_cargo = f"URL 直进（凸起锚点命中 {n_center} 个 —— 自定义 tabBar 是组件）"
+    ok_cargo = w.c.wait_path(PUBLISH_CARGO, 30)
+    time.sleep(1.3)
+    w.c.set_data({"form.cargo_name": CANON_CARGO, "form.weight_t": CANON_QTY})
+    time.sleep(0.6)
+    n_ent = w.c.count('[data-act-entrust="1"]')
+    t_ent = w.c.tap('[data-act-entrust="1"]') if n_ent == 1 else False
+    ok_intake = w.c.wait_path(INTAKE, 30)
+    time.sleep(1.5)
+    w.shot("43-1-受理屏")
+    w.rep.rec(
+        "㊸ 第1步 · 发布货源 → 受理屏（真实点击；货名/货量随草稿带过去）",
+        bool(ok_cargo and t_ent and ok_intake),
+        f"via={via_cargo} cargo_page={ok_cargo} 锚点命中 {n_ent} path={w.c.current_path()}",
+    )
+    if not ok_intake:
+        w.rep.not_run("㊸ 第1步 · 客户提交", "未进入受理屏，链路断在这里")
+        return
+
+    pg_intake = w.wait_data(lambda x: x.get("view") == "ready", tries=40, gap=0.5)
+    targets = pg_intake.get("targets") or []
+    org_names = [str((t or {}).get("orgName") or "") for t in targets]
+    tid = ""
+    for t in targets:
+        if str((t or {}).get("orgName") or "") == ORG_WORKBENCH:
+            tid = str((t or {}).get("orgId") or "")
+    w.rep.rec(
+        "㊸ 第1步 · 受理屏的目标清单里有「演示经营主体·工作台」"
+        "（客户 A 授权出去的组织 —— 不是「我所在的组织」，后者会给出能选但必然 403 的选项）",
+        bool(tid),
+        f"targets={org_names}",
+    )
+    if not tid:
+        w.rep.not_run("㊸ 第1步 · 客户提交", f"目标组织缺失：targets={org_names}")
+        return
+
+    w.c.set_data({"form.title": A1_MAIN_TITLE})
+    time.sleep(0.5)
+    n_org = w.c.count(f'[data-org-id="{tid}"]')
+    t_org = w.c.tap(f'[data-org-id="{tid}"]')
+    time.sleep(0.4)
+    t_submit = w.c.tap('[data-act-submit-intake="1"]')
+    ok_detail = w.c.wait_path(DETAIL, 45)
+    time.sleep(1.2)
+    w.shot("43-2-提交后落详情")
+    w.rep.rec(
+        "㊸ 第1步 · 真实点击「提交委托」⇒ 落到该委托的详情页（不是停在原页、也不是落首页）",
+        bool(t_submit and ok_detail),
+        f"org={tid}（锚点 {n_org}、tap={t_org}）、submit={t_submit}、path={w.c.current_path()}",
+    )
+
+    # ⚠️ `api_login` 返回的是**整个响应 dict**，不是 token 串 ——
+    #    直接把返回值当 token 传，会在 `"Bearer " + token` 处抛
+    #    `TypeError: can only concatenate str (not "dict") to str`，
+    #    而它崩在**章节中途**（前 6 项已 PASS），看起来像"第 7 项之后没跑"。
+    #    既有章节一律写 `(api_login(code) or {}).get("access_token") or ""`，照抄。
+    tok_owner = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    org_id = my_org_id(CODE_OWNER, ORG_WORKBENCH)
+    aid = find_submitted(org_id, A1_MAIN_TITLE, tok_owner) if org_id else ""
+    w.rep.rec(
+        "㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证）",
+        bool(aid),
+        f"aid={aid} org={org_id}（{ORG_WORKBENCH}）",
+    )
+    if not aid:
+        w.rep.not_run("㊸ 第1步 · A1 受理及其后全部断言", "未能按标题定位新建的委托")
+        return
+
+    # ==================== 一、第 1 步（后半）：A1 受理 ====================
+    print("\n-- 一、第 1 步 · A1（seed-owner）在工作台真实点击受理 --", flush=True)
+    if not w.open_workbench(CODE_OWNER, tag="㊸"):
+        w.rep.not_run("㊸ 第1步 · A1 受理", "未能进入经理工作台")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+
+    sel_claim = f'[data-act-claim="{aid}"]'
+    w.c.scroll_into(sel_claim)
+    n_claim = w.c.count(sel_claim)
+    w.shot("43-3-工作台-待受理")
+    w.rep.rec(
+        "㊸ 第1步 · A1 在工作台看到这张**新提交**的委托，受理入口可被唯一命中",
+        n_claim == 1,
+        f"{sel_claim} 命中 {n_claim}",
+    )
+    if n_claim != 1:
+        w.rep.not_run(
+            "㊸ 第1步 · A1 真实点击受理",
+            f"受理入口未出现（命中 {n_claim}）—— 队列可能未包含该单，或它已不是 submitted",
+        )
+        return
+    t_claim_open = w.c.tap(sel_claim)
+    time.sleep(0.5)
+    sel_submit = f'[data-act-claim-submit="{aid}"]'
+    n_confirm = w.c.count(sel_submit)
+    t_claim_submit = w.c.tap(sel_submit)
+    truth = {}
+    for _ in range(40):
+        truth = api_truth_status(aid, tok_owner)
+        if str(truth.get("status")) == "claimed":
+            break
+        time.sleep(0.5)
+    w.shot("43-4-受理成功")
+    w.rep.rec(
+        "㊸ 第1步 · 真实点击受理 ⇒ 服务端 `submitted → claimed` 且 `claimed_by` 已落"
+        "（**API 直证**，不只看界面）",
+        str(truth.get("status")) == "claimed" and bool(truth.get("claimed_by")),
+        f"展开={t_claim_open}（确认条 {n_confirm} 个）提交={t_claim_submit} "
+        f"status={truth.get('status')!r} claimed_by={truth.get('claimed_by')!r}",
+    )
+
+    # ==================== 二、第 2 步：上传样报价单 + 调 AG-02 ====================
+    print("\n-- 二、第 2 步 · 会话屏：上传样报价单 → 提取 → 引用 → AG-02 --", flush=True)
+    w.c.scroll_into(f'[data-act-session="{aid}"]')
+    t_sess = w.c.tap(f'[data-act-session="{aid}"]')
+    ok_sess = w.c.wait_path(SESSION, 30)
+    time.sleep(1.5)
+    pg_sess = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    w.shot("43-5-专属会话屏")
+    w.rep.rec(
+        "㊸ 第2步 · 工作台卡片的「会话」入口真实点击 ⇒ 进该委托的专属会话屏",
+        bool(t_sess and ok_sess),
+        f"path={w.c.current_path()} sessionId={pg_sess.get('sessionId')!r}",
+    )
+
+    # —— 原生文件选择器这一格：如实记「工具不可验证」——
+    n_pick = w.c.count('[data-act-pick-quote="1"]')
+    w.rep.limitation(
+        "㊸ 第2步 · 「上传报价单（从系统里选文件）」",
+        f"入口可被唯一命中（{n_pick} 个），但点击会打开 **OS 级原生文件选择器** —— "
+        "它是系统弹层、不在小程序渲染树里，走查工具够不着它的选择项"
+        "（技能 miniapp-device-walkthrough 的负例清单实测过）。**不计入通过**。"
+        "要拿到这一格的证据需要 OS 级输入通道（本项目 ⑧b/㊶ 用过），"
+        "或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。",
+    )
+
+    t_sample = w.c.tap('[data-act-sample-quote="1"]')
+    pg_att = w.wait_data(
+        lambda x: any(
+            str((a or {}).get("extractStatus")) == "done" for a in (x.get("attachments") or [])
+        ),
+        tries=80,
+        gap=0.5,
+    )
+    atts = pg_att.get("attachments") or []
+    done_atts = [a for a in atts if str((a or {}).get("extractStatus")) == "done"]
+    w.shot("43-6-附件已上传并提取")
+    w.rep.rec(
+        "㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**"
+        "（只有 done 的附件对 Agent 才是文本，否则它只是个文件名）",
+        bool(t_sample) and len(done_atts) >= 1,
+        f"attachments={len(atts)} done={len(done_atts)}",
+    )
+    notice = str(pg_att.get("attachNotice") or "")
+    w.rep.rec(
+        "㊸ 第2步 · 提取结果被**如实报出**（不是合成一句'上传成功'）",
+        "Agent 已能读到" in notice,
+        f"attachNotice={notice[:120]!r}",
+    )
+    if not done_atts:
+        w.rep.not_run("㊸ 第2步 · 引用附件调 AG-02", "附件未提取完成（没有可引用的文本）")
+        return
+
+    t_use = w.c.tap('[data-act-use-attachment="1"]')
+    pg_job = w.wait_data(
+        lambda x: (
+            bool(x.get("jobs"))
+            and str(((x.get("jobs") or [{}])[0] or {}).get("status")) in ("succeeded", "failed")
+        ),
+        tries=120,
+        gap=1.0,
+    )
+    jobs = pg_job.get("jobs") or []
+    j0 = jobs[0] if jobs else {}
+    w.shot("43-7-AG02-终态")
+    w.rep.rec(
+        "㊸ 第2步 · 真实点击「让 Agent 解析这份报价单」⇒ 作业跑到**终态**（不是只停在排队）",
+        bool(t_use) and str(j0.get("status")) == "succeeded",
+        f"status={j0.get('status')!r} jobId={j0.get('jobId')!r}",
+    )
+    w.rep.rec(
+        "㊸ 第2步 · 作业产出**提案**并在页面上列出条数（提案 ≠ 成果，才需要人工采纳）",
+        int(j0.get("proposalCount") or 0) >= 1,
+        f"proposalCount={j0.get('proposalCount')}",
+    )
+
+    jid = str(j0.get("jobId") or "")
+    jrow = (api_get(f"/entrust/agent/jobs/{jid}", tok_owner) or {}).get("job") or {} if jid else {}
+    env = jrow.get("envelope") if isinstance(jrow, dict) else None
+    env = env if isinstance(env, dict) else {}
+    kinds = [str((r or {}).get("kind")) for r in (env.get("source_refs") or [])]
+    unsrc = env.get("unverified_sources") or []
+    w.rep.rec(
+        "㊸ 第2步 · 作业来源里含 `attachment_text`（Agent 读的是**附件文本**，不是文件名）"
+        "—— API 直证",
+        "attachment_text" in kinds,
+        f"kinds={kinds} jobId={jid}",
+    )
+    w.rep.rec(
+        "㊸ 第2步 · 没有未核验来源（来源核对覆盖 `findings` 内的嵌套引用，见 PR #131）",
+        len(unsrc) == 0,
+        f"unverified_sources={str(unsrc[:3])[:160]}",
+    )
+
+    # ==================== 三、第 3 步：更正一个字段 + 跨视图同一份 ====================
+    print("\n-- 三、第 3 步 · 采纳 → 更正一个字段 → 从工作台打开同一份成果 --", flush=True)
+    if not j0.get("canAdopt"):
+        w.rep.not_run("㊸ 第3步 · 采纳为成果", "页面未给出采纳入口（作业未成功或提案为空）")
+        return
+    t_adopt = w.c.tap('[data-act-adopt="1"]')
+    time.sleep(0.4)
+    n_adopt_cf = w.c.count('[data-act-adopt-confirm="1"]')
+    t_adopt_cf = w.c.tap('[data-act-adopt-confirm="1"]')
+    pg_card = w.wait_data(lambda x: len(x.get("cards") or []) > 0, tries=60, gap=0.5)
+    cards = pg_card.get("cards") or []
+    aid_art = str((cards[0] or {}).get("artifactId") or "")
+    w.shot("43-8-采纳成成果")
+    w.rep.rec(
+        "㊸ 第3步 · 真实点击「采纳为成果」→ 页内确认条 → 确认 ⇒ 提案变成成果",
+        bool(t_adopt and t_adopt_cf) and bool(aid_art),
+        f"ask={t_adopt} confirm={t_adopt_cf}（确认条 {n_adopt_cf} 个）artifact_id={aid_art}",
+    )
+    if not aid_art:
+        w.rep.not_run("㊸ 第3步 · 更正与跨视图", "未取到新成果的 artifact_id")
+        return
+
+    w.c.scroll_into(f'[data-artifact_id="{aid_art}"]')
+    t_art = w.c.tap(f'[data-artifact_id="{aid_art}"]')
+    ok_art = w.c.wait_path(ARTIFACT, 30)
+    time.sleep(1.3)
+    pg_a = w.wait_data(lambda x: x.get("artifact") is not None, tries=40, gap=0.5)
+    w.shot("43-9-成果页")
+    w.rep.rec(
+        "㊸ 第3步 · 从**会话屏的成果卡**真实点击进入成果页（同一份）",
+        bool(t_art and ok_art) and str(pg_a.get("artifactId")) == aid_art,
+        f"path={w.c.current_path()} artifactId={pg_a.get('artifactId')!r}（期望 {aid_art}）",
+    )
+
+    art = pg_a.get("artifact") or {}
+    rev_before = len(pg_a.get("revisions") or [])
+    t_edit = w.c.tap('[data-act-edit="1"]')
+    time.sleep(0.8)
+    pg_form = w.wait_data(lambda x: bool(x.get("formFields")), tries=25, gap=0.4)
+    form_fields = pg_form.get("formFields") or []
+    # ⚠️ 取 `data-idx` 必须用**编辑态的 `formFields` 下标**，不能用查看态
+    #    `artifact.fields` 的下标：两者不保证一一对应（编辑态会排除它不显示的字段），
+    #    拿错下标会去改**另一个字段** —— 而页面照常保存成功，断言只会看到
+    #    "值没变成我要的那个"，看起来像"保存没生效"。
+    target_idx = None
+    for i, f in enumerate(form_fields):
+        if not (f or {}).get("unknown") and str((f or {}).get("kind") or "text") != "json":
+            target_idx = i
+            break
+    if target_idx is None:
+        w.rep.not_run(
+            "㊸ 第3步 · 更正一个字段",
+            f"编辑态没有可改的文本字段：formFields={len(form_fields)} 个",
+        )
+        return
+    old_val = str((form_fields[target_idx] or {}).get("text") or "")
+    new_val = (old_val + "（走查更正）") if old_val else "走查更正值"
+
+    n_input = w.c.count(f'[data-idx="{target_idx}"]')
+    t_input = w.c.input_text(f'[data-idx="{target_idx}"]', new_val)
+    time.sleep(0.5)
+    pg_b = w.wait_data(lambda x: x.get("dirty") is True, tries=20, gap=0.4)
+    w.shot("43-10-编辑态-已改一个字段")
+    w.rep.rec(
+        "㊸ 第3步 · 真实点击「编辑内容」→ **真实输入**改一个字段（页面识别到有未保存改动）",
+        bool(t_edit) and bool(t_input) and pg_b.get("dirty") is True,
+        f"字段#{target_idx} 锚点 {n_input} 个 input={t_input} "
+        f"{old_val!r} → {new_val!r} dirty={pg_b.get('dirty')!r}",
+    )
+
+    t_save = w.c.tap('[data-act-save="1"]')
+    pg_c = w.wait_data(lambda x: len(x.get("revisions") or []) > rev_before, tries=60, gap=0.5)
+    rev_after = len(pg_c.get("revisions") or [])
+    w.rep.rec(
+        "㊸ 第3步 · 保存 ⇒ **追加一个新版本**（append-only，不是就地改掉旧版本）",
+        bool(t_save) and rev_after > rev_before,
+        f"revisions {rev_before} → {rev_after} notice={str(pg_c.get('saveNotice'))[:70]!r}",
+    )
+
+    n_ask = w.c.count('[data-act-confirm-revision="1"]')
+    t_ask = w.c.tap('[data-act-confirm-revision="1"]')
+    time.sleep(0.4)
+    n_ok = w.c.count('[data-act-confirm-revision-submit="1"]')
+    w.shot("43-11-页内确认条")
+    w.rep.rec(
+        "㊸ 第3步 · 「设为生效版本」走**页内确认条**"
+        "（原生弹层的确认键走查工具点不到 ⇒ 这条路径本来拿不到设备证据）",
+        n_ask == 1 and bool(t_ask) and n_ok == 1,
+        f"入口 {n_ask} 个、确认条 {n_ok} 个",
+    )
+    t_ok = w.c.tap('[data-act-confirm-revision-submit="1"]')
+    pg_d = w.wait_data(
+        lambda x: "生效版本已切换" in str(x.get("saveNotice") or ""), tries=40, gap=0.5
+    )
+    # 「先证有，再证相等」：先确认**刚保存的那一版**的版本号取到了，再断言服务端的
+    # 生效版本就是它。少了前一半，`'' == ''` 也会通过 —— 本切片首跑正是如此：
+    # 字段名读错 ⇒ 两边都空 ⇒ 断言照样绿，只有 note 里那行
+    # `服务端 current_revision_no=''` 把真相写了出来（换个不看 note 的人就漏了）。
+    rev_nos = [int((r or {}).get("revisionNo") or 0) for r in (pg_c.get("revisions") or [])]
+    rev_new = str(max(rev_nos)) if rev_nos else ""
+    art_truth = api_get(f"/entrust/artifacts/{aid_art}", tok_owner) or {}
+    art_row = (
+        art_truth.get("artifact") if isinstance(art_truth.get("artifact"), dict) else art_truth
+    )
+    # ⚠️ 形状是嵌套的 `current_revision.revision_no`，不是顶层的 `current_revision_no`。
+    cur_no = str(((art_row or {}).get("current_revision") or {}).get("revision_no") or "")
+    w.rep.rec(
+        "㊸ 第3步 · 确认切换生效版本 ⇒ **服务端**的生效版本号 == 页面刚保存的那一版（API 直证）",
+        bool(t_ok and rev_new)
+        and cur_no == rev_new
+        and "生效版本已切换" in str(pg_d.get("saveNotice") or ""),
+        f"刚保存 v{rev_new} / 服务端 v{cur_no} / saveNotice={str(pg_d.get('saveNotice'))[:40]!r}",
+    )
+
+    # —— 从工作台打开同一份成果 ——
+    print("\n-- 三、第 3 步 · 从工作台 → 委托卡 → 详情页 → 成果槽位 打开同一份 --", flush=True)
+    if not w.open_workbench(CODE_OWNER, tag="㊸"):
+        w.rep.not_run("㊸ 第3步 · 从工作台打开同一份成果", "未能回到经理工作台")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    sel_card = f'[data-id="{aid}"]'
+    w.c.scroll_into(sel_card)
+    t_card = w.c.tap(sel_card)
+    ok_dt = w.c.wait_path(DETAIL, 30)
+    time.sleep(1.4)
+    pg_e = w.wait_data(lambda x: bool(x.get("slots")), tries=40, gap=0.5)
+    w.shot("43-12-详情页-成果槽位")
+    w.rep.rec(
+        "㊸ 第3步 · 工作台 → 委托卡 → 详情页（真实点击，经页面的 `go()` 决策）",
+        bool(t_card and ok_dt) and bool(pg_e.get("slots")),
+        f"path={w.c.current_path()} slots={len(pg_e.get('slots') or [])}",
+    )
+
+    sel_ref = f'[data-kind="artifact"][data-id="{aid_art}"]'
+    w.c.scroll_into(sel_ref)
+    n_ref = w.c.count(sel_ref)
+    t_ref = w.c.tap(sel_ref)
+    ok_ref = w.c.wait_path(ARTIFACT, 30)
+    time.sleep(1.3)
+    pg_f = w.wait_data(lambda x: x.get("artifact") is not None, tries=40, gap=0.5)
+    w.shot("43-13-从工作台打开同一份成果")
+    w.rep.rec(
+        "㊸ 第3步 · 槽位里的成果引用可点，且打开的是**被点的那一条**"
+        "（同一 `artifact_id`，不是'打开最新一份'）",
+        bool(t_ref and ok_ref) and str(pg_f.get("artifactId")) == aid_art,
+        f"引用锚点 {n_ref} 个、期望 aid={aid_art}、落页 artifactId={pg_f.get('artifactId')!r}",
+    )
+    shown = json.dumps(pg_f.get("artifact") or {}, ensure_ascii=False)
+    w.rep.rec(
+        "㊸ 第3步 · 工作台侧看到的是**更正后**的内容"
+        "（D1-04「更正出现在所有共享视图」—— 这是本步唯一真正的判据）",
+        new_val in shown,
+        f"期望页面字段值里含 {new_val!r}；实际{'命中' if new_val in shown else '未命中'}"
+        f"（字段 {len(art.get('fields') or [])} 个，生效版本证据见上一条）",
+    )
+
+    errs = w.new_errors(err_base)
+    if errs is None:
+        w.rep.review_required(
+            "㊸ 本章运行期 console 无未归因错误",
+            "采集**失败**（返回 None，不是空串）—— 不能把'采不到'当成'没有错误'",
+        )
+    elif errs.strip():
+        w.rep.review_required("㊸ 本章运行期 console 无未归因错误", errs[:400])
+    else:
+        w.rep.rec("㊸ 本章运行期 console 无未归因错误", True, "增量 0 条")
+
+
 SECTIONS = {
     "smoke": sec_smoke,
+    "43": sec_43,
     "0": sec_00,
     "1": sec_01,
     "2": sec_02,
@@ -7173,6 +7652,11 @@ DEFAULT_ORDER = [
     #    `seed-shipper-orgpicker` 名下），排在前面会让按条数 / 按页长断言的章节变脆。
     #    零改库、零改已存在的单据。**依赖**：页面须有 `onReachBottom`（本切片补的）。
     "42",
+    # ㊸ 主演示第 1–3 步（合同 §10.1）——HO 0917-3 执行顺序点名的"运行取证"。
+    # ⚠️ 放**全量序列最末**：它会真写一张委托并把这张单受理掉，还会上传附件、
+    #    建一份成果并把它推进到 v2 生效 —— 污染面比 ㉞/㊶/㊷ 更大，
+    #    排在前面会让后面按条数 / 按状态断言的章节一起变脆。
+    "43",
 ]
 
 

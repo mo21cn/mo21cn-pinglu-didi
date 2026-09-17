@@ -2087,24 +2087,28 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           if (!newRow) {
             note(P + '没有刚追加的版本行，确认走查跳过')
           } else {
-            lastWx._modals = []
+            // 2026-09-17：确认由原生弹层改成**页内确认条**（`wx.showModal` 的确认键
+            // 是原生控件、不在渲染树里，走查工具点不到 ⇒ 合同第 3 步"更正一个字段后
+            // 跨视图可见"拿不到设备证据）。判据**没有放松**：仍要求点名成果 ID 与
+            // 精确版本，只是改从**页面自己渲染出来的**确认文案读。
             self.onConfirm({ currentTarget: { dataset: { no: newRow.revisionNo } } })
             await tick(20)
-            const modal = (lastWx._modals || [])[0]
             const want = '成果 #' + artId + ' · v' + newRow.revisionNo
-            if (!modal) fail(P + '确认卡没有弹出')
-            else if (String(modal.content || '').indexOf(want) === -1) {
-              fail(P + '确认卡未点名成果 ID 与精确版本', String(modal.content))
+            const dC = self._final()
+            if (String(dC.confirmRevNo) !== String(newRow.revisionNo)) {
+              fail(P + '点「设为生效版本」没有进入页内确认态', String(dC.confirmRevNo))
+            } else if (String(dC.confirmText || '').indexOf(want) === -1) {
+              fail(P + '页内确认条未点名成果 ID 与精确版本', String(dC.confirmText))
             } else ok()
-            if (!modal) {
-              note(P + '确认走查跳过')
-            } else {
+            {
               const before2 = pageWrites.length
               writesDriven += 1
               WRITE_ENABLED = true
               let confThrown = null
               try {
-                await self.submitConfirm(newRow.revisionNo)
+                // 走页面真实的确认动作（它内部再调 submitConfirm），
+                // 而不是绕过页内确认条直接打后端。
+                await self.onConfirmSubmit()
                 await tick(60)
               } catch (e) { confThrown = e } finally { WRITE_ENABLED = false }
               const w2 = pageWrites[pageWrites.length - 1]

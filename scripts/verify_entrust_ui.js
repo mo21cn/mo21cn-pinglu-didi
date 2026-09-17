@@ -1600,6 +1600,26 @@ check(
   '[接线] 确认卡由 confirmCard 生成（不在页面里手写文案，否则"带精确版本"这条没人守）',
   /confirmCard\(/.test(artJs)
 )
+// 「设为生效版本」这一次确认**必须**在页内 —— 原生弹层的确认键点不到。
+// ⚠️ 断言只针对 `onConfirm` 那一段，**不是**"页面里没有 showModal"：本页别处仍有
+//    弹层（如"未保存编辑时确认离开"），那是另一条路径、另一个切片的事。写成全局
+//    `!/showModal/` 会立刻红，而红的原因与确认动作无关 —— 那种断言看似更严，
+//    实际只是把两件事混成一件，反而更难看懂。
+const artConfirmFn = (artJs.match(/onConfirm\(e\)\s*\{[\s\S]*?\n  \},/) || [''])[0]
+check(
+  '[接线] 「设为生效版本」走**页内确认条**（原生弹层的确认键工具点不到 ⇒' +
+    '合同第 3 步"更正后跨视图可见"拿不到设备证据）',
+  /onConfirmSubmit/.test(artJs) &&
+    // ⚠️ 只看**调用**形态：函数注释里提到 `wx.showModal` 是在交代改动历史，
+    //    不是还在用它。按纯文本匹配会把说明当成用法，于是断言永远红 ——
+    //    这种"断言说得比事实多"的写法，比不加断言更糟（它会把真正的问题淹掉）。
+    !/wx\.showModal\s*\(/.test(artConfirmFn) &&
+    /data-act-confirm-revision-submit/.test(artWxml) &&
+    /data-act-confirm-revision-cancel/.test(artWxml),
+  `确认函数 ${artConfirmFn.length} 字符、其中 showModal ` +
+    `${(artConfirmFn.match(/wx\.showModal\s*\(/g) || []).length} 处调用 / ` +
+    `本页其它 showModal ${(artJs.match(/wx\.showModal/g) || []).length} 处（不属本条口径）`
+)
 check(
   '[接线] 编辑与确认各自带幂等键（网络抖动重试不会留下两条一样的版本/动作）',
   (artJs.match(/newIdempotencyKey\(/g) || []).length >= 2
@@ -2767,6 +2787,39 @@ check('[接线] 委托详情页有登记案件入口，且带 assignment_id',
   /onCreateCase\(/.test(dtJs) && /case-create\/case-create\?assignment_id=/.test(dtJs))
 check('[接线] 登记入口只在已受理时出现（受理前 raise_case 必 409，不能摆一个必然失败的按钮）',
   /canCreateCase/.test(dtJs) && /status === 'claimed'/.test(dtJs))
+
+// ---- ㊸ 主演示第 1–3 步：内置示例报价单必须与后端 canonical 夹具同源 ----
+// 会话屏带了一份 canonical 样报价单的副本（"内置示例"入口要用）——因为
+// `wx.chooseMessageFile` 是 OS 级原生弹层，自动走查够不着它的选择项，
+// 附件入口必须另有一条页内通路（技能 miniapp-device-walkthrough 的界面要求）。
+//
+// 它是**生成**的不是手抄的，但生成也会过期：夹具改了、前端没重新生成，
+// 于是"演示用一份、CI 用另一份" —— 两边都对不上，而且没人会立刻发现。
+// 逐字节比对是唯一拦得住这种分叉的办法。
+;(() => {
+  const fx = path.join(REPO, 'backend/scripts/fixtures/DEMO1-canonical-sample-quotation.txt')
+  if (!fs.existsSync(fx)) {
+    errors.push('[夹具] 找不到后端 canonical 样报价单（前端副本没有可比对的参照物）')
+    return
+  }
+  const want = fs.readFileSync(fx, 'utf8')
+  const got = String(E.SAMPLE_QUOTE_TEXT || '')
+  check(
+    '[夹具] 前端内置示例报价单与后端 canonical 夹具**逐字节一致**' +
+      '（两侧各写一份、还不比对，就一定会漂移）',
+    got === want,
+    `前端 ${got.length} 字符 / 后端 ${want.length} 字符`
+  )
+  check(
+    '[夹具] 内置样本的文件名与磁盘上的夹具同名（上传后 name 字段才认得出是哪一份）',
+    E.SAMPLE_QUOTE_FILENAME === path.basename(fx),
+    `${E.SAMPLE_QUOTE_FILENAME} vs ${path.basename(fx)}`
+  )
+  check(
+    '[夹具] 内置样本自带 Data label（合同 §3.1 要求合成件在文件里就能被认出是合成的）',
+    got.indexOf('合成') !== -1 && got.indexOf('Data label') !== -1
+  )
+})()
 
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)

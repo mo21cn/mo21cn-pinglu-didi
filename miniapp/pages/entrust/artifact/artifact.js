@@ -50,6 +50,15 @@ Page({
     viewHint: '',
     artifactId: '',
     artifact: null,
+    /**
+     * 页内确认条当前展开的版本号（0＝都收起）。
+     *
+     * 「设为生效版本」是一次不可含糊的确认，但**不能用 `wx.showModal`**：
+     * 原生弹层的确认键不在渲染树里 ⇒ 走查工具点不到 ⇒ 这条关键路径拿不到
+     * 设备证据（技能 `miniapp-device-walkthrough` 的负面清单实测过）。
+     */
+    confirmRevNo: 0,
+    confirmText: '',
     revisions: [],
     /** 编辑态：字段值放 `formFields[].text`，模板不拼动态键名 */
     editing: false,
@@ -250,19 +259,33 @@ Page({
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
     const revisionNo = Number(ds.no)
     if (!revisionNo) return
-    const self = this
     const card = confirmCard(this.data.artifact || {}, revisionNo)
-    // 用弹层而不是页内卡片：这是一次**不可含糊的确认动作**，需要一个明确的
-    // 是/否出口；页内卡片容易被误当成又一屏内容。文案里的 `成果 #N · vK`
-    // 由 confirmCard() 生成（静态脚本断言它必须带 ID 与精确版本）。
-    wx.showModal({
-      title: card.title,
-      content: card.target + '\n\n' + card.body,
-      success: function (res) {
-        if (!res.confirm) return
-        self.submitConfirm(revisionNo)
-      }
+    // **页内二次确认**（2026-09-17 由 `wx.showModal` 改过来）。
+    //
+    // 原生弹层的确认键不在小程序渲染树里 ⇒ 走查工具点不到它（技能
+    // `miniapp-device-walkthrough` 的负面清单实测过），而合同主演示第 3 步
+    // 「更正一个字段 → 从工作台打开同一份成果」要先让更正的版本**生效**
+    // —— 用弹层的话这条路径永远拿不到设备证据。
+    // 受理 / 应用变更 / 记录任务三处已在更早的切片改过，这里是同一取向的第四处。
+    //
+    // 文案仍由 `confirmCard()` 生成（静态脚本断言它必须带成果 ID 与精确版本）。
+    this.setData({
+      confirmRevNo: revisionNo,
+      confirmText: card.title + '：' + card.target + '。' + card.body
     })
+  },
+
+  /** 取消页内确认：只收起，不改任何状态（确认动作本身没发生过） */
+  onConfirmCancel() {
+    this.setData({ confirmRevNo: 0, confirmText: '' })
+  },
+
+  /** 确认切换生效版本（前一动作已在页内问过，这里不再开任何弹层） */
+  onConfirmSubmit() {
+    const revisionNo = Number(this.data.confirmRevNo)
+    if (!revisionNo) return
+    this.setData({ confirmRevNo: 0, confirmText: '' })
+    return this.submitConfirm(revisionNo)
   },
 
   submitConfirm(revisionNo) {

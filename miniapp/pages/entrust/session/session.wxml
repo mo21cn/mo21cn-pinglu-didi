@@ -95,6 +95,7 @@
             <view
               wx:if="{{item.canReference}}"
               class="att-btn"
+              data-act-use-attachment="1"
               data-attachment_id="{{item.attachmentId}}"
               hover-class="hover-dim"
               bindtap="onUseAttachment"
@@ -144,8 +145,29 @@
         <text class="empty-line-text">还没有附件。上传一份样报价单，Agent 才能按文件内容解析，而不是靠手打</text>
       </view>
 
-      <view class="att-upload" hover-class="hover-dim" bindtap="onPickQuote">
+      <view
+        class="att-upload"
+        data-act-pick-quote="1"
+        hover-class="hover-dim"
+        bindtap="onPickQuote"
+      >
         <text class="att-upload-text">{{uploading ? '上传并提取中…' : '上传报价单（文件）'}}</text>
+      </view>
+
+      <!-- 内置示例报价单。
+           为什么必须有这条通路：原生文件选择器（`chooseMessageFile`）是 **OS 级弹层**，
+           不在小程序渲染树里 ⇒ 自动走查够不着它的选择项（技能 `miniapp-device-walkthrough`
+           的负面清单实测过），"演示第 2 步上传样报价单"就永远拿不到设备证据。
+           技能把这条写成**界面要求**：附件入口要另给一个"预置样本"的页内通路。
+           它同时也是给演示者的便利 —— 不必先把文件塞进模拟器才能演。
+           ⚠️ 样本内容与后端 canonical 夹具同源，逐格比对在 `verify_entrust_ui.js`。 -->
+      <view
+        class="att-sample"
+        data-act-sample-quote="1"
+        hover-class="hover-dim"
+        bindtap="onUseSampleQuote"
+      >
+        <text class="att-sample-text">{{uploading ? '上传并提取中…' : '用内置示例报价单（合成样件，不必选文件）'}}</text>
       </view>
     </view>
 
@@ -249,13 +271,14 @@
                   <text class="confirm-text">采纳「{{prop.typeLabel}}」为成果？这会新建一份成果（提案 ≠ 成果）。</text>
                   <view class="confirm-actions">
                     <view class="confirm-cancel" bindtap="onAdoptCancel">取消</view>
-                    <view class="confirm-ok" bindtap="onAdoptConfirm">确认采纳</view>
+                    <view class="confirm-ok" data-act-adopt-confirm="1" bindtap="onAdoptConfirm">确认采纳</view>
                   </view>
                 </view>
 
                 <view wx:elif="{{item.canAdopt}}" class="prop-actions">
                   <view
                     class="adopt-btn"
+                    data-act-adopt="1"
                     data-job_id="{{item.jobId}}"
                     data-artifact_type="{{prop.artifactType}}"
                     hover-class="hover-dim"
