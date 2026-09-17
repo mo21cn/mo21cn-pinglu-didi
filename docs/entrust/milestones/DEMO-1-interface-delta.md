@@ -482,6 +482,21 @@ mypy 109 files；ruff 146 files）、CI 的「前端端到端」job 本地复现
 （只归一会话内必然变化的三项：`pageId` / 探针耗时 / 输入框里的时间戳串）⇒
 那 22 条读数不是"某一次碰巧跑出来的"，改名与格式化对判定**无影响**。
 
+### 7.20 第二十切片（把两道"会漏的缝"收进本地门禁；2026-09-17）
+
+触发：本轮在 ㊺ 章设备走查与 #147 的 CI 失败里各暴露出一处**门禁盲区** —— 两者都不是产品缺陷，是"门禁自己看不见"。本条处置它们。
+
+| # | 项 | 性质与处置 |
+| --- | --- | --- |
+| 149 | **CI 的根脚本 lint 步原先不在本地门禁里**（13 项 → 16 项） | CI「后端 lint + test」job 的**第 8 步**对**仓库根** `scripts/*.py` 跑 `ruff check` ＋ `ruff format --check`（显式 `--config backend/pyproject.toml`），外加"根脚本必须已纳入 lint 或已登记豁免"的**登记完整性**。这三件事**原先一项都不在** `verify_local_gates.py` 里 ⇒ **13/13 全绿仍会 CI 红**（#147 实证：唯一失败项、29s）。现补为第 4 组 `rootscripts`。 |
+| 150 | **范围不抄第二份**：由 `verify_ci_parity.py --json` 从 `ci.yml` 读出 | 该脚本的 docstring 早就写着"输出可直接喂给本地预演脚本，让'本地跑什么'由 ci.yml 决定"，但**从来没人消费它**。本次把 `root_scripts.{cwd,linted,exempt,ruff_config}` 接进来：范围只有一个来源。取不到计划就**记 FAIL**（不静默跳过 —— 跳过等于把这一组变回不存在）；`cwd` 不是 `.` 也记 FAIL（`--config` 是相对路径，cwd 一变整条命令的含义就变了）。`--ci-parity-only` **不跑**该组：CI 自己已经在跑。 |
+| 151 | **两个半步各被独立证明会红**（mutation test） | 注入函数内大写变量 ⇒ 只有 `check` 红（⚠️ 第一次选错了位置：**模块级**大写变量不违反 N806，那次只证明了 format 半步）；注入 `vals=[1,2]` ⇒ 只有 `format --check` 红；造一个未登记的 `scripts/_zz_probe_unregistered.py` ⇒ 只有**登记完整性**红并指名它。三次都**字节级恢复**、复跑回全绿。⭐ 这也顺手证明了「`check` 通过 ≠ `format` 通过」是**真的**（注入一个时另一个纹丝不动）。 |
+| 152 | ⛔ **e2e 看不见传输层**：它的取数助手把 `utils/request.js` **整个换成了桩** | 桩里只有 4 个导出（`request` / `getToken` / `setToken` / `clearToken`），真实 `httpError` / `detailText` / `describeError` **根本不在执行路径上** ⇒ 把 `e.detail = detail` 改回 `String(detail)`，e2e 照样全绿。这正是 ㊺ 章那处缺陷（409 结构体被压平）能活到真机的原因。修法：**桩保留真实导出**（`Object.assign({}, real, {request: 桩})`），只把取数换成回放。 |
+| 153 | **写通道的错误形状与真机同源**：新增 `errorFromResponse` | 原先 `rejectIfNotOk` 自己拼 `new Error('写请求被拒 409')`、`pageUpload` 更是 `String(detail)` —— 与真机**不同形**，而两条函数上方的注释都写着"形状与 `utils/request.js` 一致"。注释承诺一致、实现却是第二份 ⇒ 把「取 detail + 兜底 + 构造错误」抽成 `request.js` 的 `errorFromResponse`，传输层的 `request()` 与校验脚本的写通道**调用同一段代码**：形状一致由机器保证，不靠人记得。 |
+| 154 | **e2e 新增 9 条「传输层契约」断言**（⑰ 段后、`auditTemplates()` 前） | ①结构体 detail 不被压平 ②message 仍是一句人话 ③`httpStatus` 挂上 ④纯字符串原样透传 ⑤无 `message` 的结构体返回空串、**不编话** ⑥`errorFromResponse` 保留结构 ⑦空 detail 走「请求失败」兜底 ⑧⭐**驱动本脚本自己的写通道**（假 409 响应 ⇒ `rejectIfNotOk` 产出的错误必须带结构体 detail —— 这条同时证明"写通道用的是真实实现"）⑨`describeError` 不拼出 `[object Object]`。断言数 442 → **451**；`verify_ui_interactions.js` ⑦ 节同步 +3 条（364）。 |
+| 155 | **反向验证（本条的核心主张）** | 把缺陷**重新制造出来**（`e.detail = detailText(detail)`）⇒ e2e 从"完全看不见"变成 **`OK 444 · FAIL 7`**，其中 3 条精确指名（`结构体 detail 被压平` / `errorFromResponse 未保留结构` / **`写通道的错误形状与真机不同源`**）；静态门禁 `OK 361 · FAIL 3`。恢复后**字节级相同**、e2e `OK 451 · FAIL 0`、静态门禁 `OK 364 · FAIL 0`。⚠️ 反向验证时 `run_e2e.sh`（`set -euo pipefail`，复刻 CI 配方）会被 `verify_login_flow.js` **先**拦下（它也在测传输层）⇒ 另建本机脚本只跑 e2e；⛔ **不去改 `run_e2e.sh`**（它是 CI 配方的复刻，不能为本地验证而偏离）。 |
+| 156 | ⚠️ **结论不变**：本条修的是**发现能力**，不改任何业务结论 | 两项都不改变 §10.1 第 5 步的档位、不改变 BP-03 第 3 条的口径、不新增任何"已验收"的声称。它们的价值是**下一次**同类缺陷会在推 PR 之前红，而不是在真机上被用户发现。本地复现：门禁 **16/16 PASS**（pytest 822＝808 通过/14 跳过/0 失败/0 错误、mypy 109、ruff 146）；CI 的 e2e 本地复现 `OK 451 · FAIL 0`、登录链路 `OK 23 · FAIL 0`。 |
+
 ### 7.17 第十八切片（`data-df` 输入通道守护：让"模板写了、handler 不认"这类静默空转在 CI 里红掉；2026-09-17）
 
 触发：§7.16 #123 ① 的实测缺陷（`cap-scope` / `cap-note` 不在 `onCapInput` 的映射表里
