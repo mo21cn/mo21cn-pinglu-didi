@@ -617,10 +617,10 @@ python scripts/run_walkthrough_devtools.py --section 48      # 货主身份建�
 python scripts/run_walkthrough_devtools.py --section 48,49   # 两章一起（㊾ 排在 ㊽ 之后，见下）
 ```
 
-| 章 | 覆盖 | 前置 |
-| --- | --- | --- |
-| **㊽** | 货主（`seed-shipper`）**经界面**在 canonical 委托上建一段（方式 `rail`，与 ㊼ 的 `air` 错开） | `seed_entrust_canonical.py` |
-| **㊾** | ① 未派生时页面有入口且它**不带业务入参**；② 经**界面**派生 ⇒ 页面与服务端**同一成果同一版本**；③ 逐字段来源表行数 = 服务端行数；④ 缺失项「未提供」可见；⑤ 经**界面**记一条证据 ⇒ 出现「第 1 版 · 样件扫描件 · 样件标注」且与服务端同源；⑥ 同形态二次页内说清"已经记过"；⑦ 常驻声明在页面上 + 零新增 console 报错 | `seed_entrust_canonical.py` **＋** `seed_entrust_contract_flow.py`（第 7 步夹具） |
+| 章 | 覆盖 | 前置 | 结论（2026-09-18） |
+| --- | --- | --- | --- |
+| **㊽** | 货主（`seed-shipper`）**经界面**在 canonical 委托上建一段（方式 `rail`，与 ㊼ 的 `air` 错开） | `seed_entrust_canonical.py` | `PASS=9 / FAIL=0` |
+| **㊾** | ① 未派生时页面有入口且它**不带业务入参**；② 经**界面**派生 ⇒ 页面与服务端**同一成果同一版本**；③ 逐字段来源表行数 = 服务端行数（实测 **23 = 23**）；④ 缺失项「未提供」可见；⑤ 经**界面**记一条证据 ⇒ 出现「第 1 版 · 样件扫描件 · 样件标注」且与服务端同源；⑥ 同形态二次页内说清"已经记过"；⑦ 常驻声明在页面上 + 零新增 console 报错 | `seed_entrust_canonical.py` **＋** `seed_entrust_contract_flow.py`（第 7 步夹具） | `PASS=13 / FAIL=0 / NOT_RUN=0 / LIMITATION=0` ⇒ **`RESULT: PASS`**（截图 `miniapp-device-artifacts/walk-20260918-060037/`） |
 
 * ⚠️ **㊾ 的前置分两个种子**：`seed_entrust_canonical`（委托本体）与
   `seed_entrust_contract_flow`（**客户已接受的对客报价发布**）。缺后者 ⇒ 本章整章 `NOT_RUN`
@@ -632,6 +632,13 @@ python scripts/run_walkthrough_devtools.py --section 48,49   # 两章一起（�
   重跑时若已派生，本章走「读回已有那份」的分支（不重复派生，也不报红）。
 * ⚠️ **㊾ 排在 ㊽ 之后是有理由的**：㊽ 加的那段会出现在**派生那一刻**的 `route_scope` 里 ——
   这是"派生用派生那一刻的航段"的真实形态，不是污染。两章顺序固定，不做顺序无关性断言。
+* ⭐ **同一个夹具在 CI 的 e2e 里要带 `--derive`**：`seed_entrust_contract_flow.py --derive`
+  会额外**真派生**一份合同并**真记**一条样件证据。原因是 e2e 的「模板字段核对」要求
+  wxml 读到的每个字段都在**页面数据域**里出现过，而合同卡那一块的键
+  （`contract.*` / `sig.*` / 来源行与证据行的 `item.*`）**只在** `contract` / `sig`
+  非空时才进数据域。⛔ **不要**为了让它闭嘴而把这些键写进 `detail.js` ——
+  那是造一个假落点，模板真写错字段名时就再也查不出来了。
+  （`ci.yml` 与本地 `.workbuddy/run_e2e.sh` 两处同改；详见 §7.25 #218/#219。）
 * ⚠️ **档位**：这两章答的是"真机上点得动 / 写进去读得回来"，**不是**业务验收。
   而第 7 步还包含**合同本身的签署**（谁能签、签了算不算数）—— 本切片只记录
   "存在一份**标注为样件**的证据"，守住的是 D1-08「证据与状态不得等同实时电子签」的边界。
