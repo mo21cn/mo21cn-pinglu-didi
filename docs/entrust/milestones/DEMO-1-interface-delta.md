@@ -317,4 +317,20 @@ S3 的 A、B / 发布前来源核验 / S3、S4 排期）。本节只登记与**�
 | 77 | ⚠️ **`withdrawReleaseId` 的字符串归一（本轮实测缺陷）** | 装饰器把 id 经 `_sid()` 归一成**字符串**，而撤回条的展开判据写成数字 ⇒ `0 !== '0'`，撤回条**永远展不开**（且不报错，看起来像"按钮没接线"）。修法：data 位与比较两侧统一字符串，并在注释里写明这条坑。 |
 | 78 | **走查锚点新增 12 条**（`verify_miniapp` 锚点 **75 → 87**） | 客户侧 `data-act-offer-accept/-reject/-submit/-cancel/-download/-origin`；经理侧 `data-act-release/-submit/-cancel` 与 `data-act-withdraw-open/-submit/-cancel`。`-origin` 登记为 **`static`**（纯展示、无 `bindtap`），其余为 `act`。`-download` 的值是**附件 id**（写成常量会让选择器退化成"第一个"，而"点第 2 份能不能下"正是本切片要证明的事）。 |
 
+### 7.12 第十三切片（S3 合同派生：从已接受事实派生 + 逐字段来源表；2026-09-17）
+
+触发：`S3-范围与依赖评估.md` §2 第 8 条与 **§3 依赖 E** —— *"第 8 条要求'从已接受事实派生'，
+需要一个**可核对的字段来源表**（哪些字段来自哪份已接受版本）"*。出口与判据见
+`docs/entrust/S3-合同派生切片.md`。本条只登记与**接口面**有关的部分。
+
+| # | 项 | 性质与处置 |
+| --- | --- | --- |
+| 79 | **新增 2 条端点**（`scope_matrix` **72 → 74**） | `POST /offer-releases/{release_id}/contract`（从**已接受的那条发布**派生合同核对稿；幂等）与 `GET /offer-releases/{release_id}/contract`（读派生关系 + **逐字段来源表**）。双向覆盖自检（openapi ↔ 矩阵）自动通过；条目数基线按惯例显式改并写明原因。 |
+| 80 | **权限取"产出成果"那一档**（`entrust:quote:create`），**不是** `quote:publish` | 派生 = 产出成果（与 `POST /entrustments/{eid}/artifacts`、`POST /agent/jobs/{id}/adopt` 同类）。拟稿与对客发布是可以分给两个人的两个动作，合用一个权限会抹掉这条区分。 |
+| 81 | ⚠️ **读取端点刻意不给货主本人放行**（`assert_can_view_org`，**无货主旁路**） | 字段来源表里是 `release:12@v3` / `leg:4` / `assignment:7` 这类**内部编号**。`assert_can_view_entrustment` / `assert_can_view_assignment` 都有"是货主本人就直接通过"的旁路 ⇒ 用它就会把内部审计信息送出去。客户要看合同走**已有的发布通路**（把 `contract_review` 发布出去、读冻结快照），不为它新开通道 —— 否则"客户能看到什么"会有两个判据（与 #69 白名单下载同一条纪律）。用例把这条决定钉死：谁换成 `assert_can_view_entrustment`，那条断言会红。 |
+| 82 | ⚠️ **一处刻意的不对称沿用**：未响应 / 已拒绝 ⇒ **409**；被接受的不是对客报价 ⇒ **400**；已派生过 ⇒ **409 且回 `existing_contract_artifact_id`** | 三者的语义不同（当前事实不允许 / 请求本身就错位 / 已经有一份），用一个码盖住会让客户端只能"再试一次"。409 里带上已有那份合同的 id：**"已经有一份了"是一句没用的拒绝**，客户端需要能直接去读它。 |
+| 83 | **请求体刻意不接任何业务入参** | `ContractDeriveIn` 只有一个可选 `note`。合同内容**不能**由调用方给：它必须全部来自已接受发布（金额/费用范围/有效期）与委托单（当事方）。若将来有人想加 `amount` / `parties` 之类的入参，那等于允许手工编造合同条款 —— 与 BP-03 第 8 条直接冲突。这条**写在 schema 的 docstring 里**，不靠口头约定。 |
+| 84 | 随本分支携带：**第十一片 #61 的"列表版"补齐**（PR #138） | `GET /entrustments/{id}/offer-releases` 原先**恒回经理投影**，而 `assert_can_view_entrustment` 对货主本人直接放行 ⇒ 客户能拿到 `data_origin.basis`（含 `job_id` / `job_mocked`）、`source_gate` 明细与 `released_by`。同一模块的详情端点**本来就做对了**（先判"是不是客户本人"）⇒ **同一份数据两个入口、判据不一致 = 其中一个泄漏**。修法：列表版照抄详情版的写法（不是各写一遍），并补一条**逐字段断言内部字段不出现**的用例。⚠️ 这是"两个入口不一致"型；#81 是"这条通道本不该有客户面"型 —— 同源不同型，都归 AC-26「不得先返回前端再隐藏」。 |
+| 85 | **界面未做 / 设备侧走查未跑**（如实登记） | 本切片目前**只能用 API 走通** ⇒ 不得声称 BP-03 第 8 条"按业务结果可演示"，也不得声称合同 §10.1 第 7 步 PASS。另：第 7 步后半 `record labeled sample signature evidence` **仍是"标注有了、取证动作没有"**（`SIGNATURE_MODE_LABELED_SAMPLE` 随快照冻结；而附件上传路径**不接收 `evidence_kind`**，本轮已 grep 核实）。 |
+
 

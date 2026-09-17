@@ -727,8 +727,12 @@ IDE / uvicorn 随发起 shell 结束被回收）。
   * 第 5 步 `Compare two quotations … evidence-backed procurement confirmation` —— **未开始**；
   * 第 6 步 `Release the offer; customer accepts its exact revision` —— **后端与界面均已落地**
     （见 §9.13）；**设备侧走查仍为 `NOT_RUN`**；
-  * 第 7 步 `Create the contract and record labeled sample signature evidence` —— **部分**：
-    签署证据的**模式标注**已随发布快照冻结（`labeled_sample`），**合同派生本身未做**；
+  * 第 7 步 `Create the contract and record labeled sample signature evidence` —— **部分（2026-09-17 更新）**：
+    **前半 `Create the contract` 后端已落**（`contracts.derive_contract` + 2 条端点 +
+    **逐字段来源表**，见 `S3-合同派生切片.md` 与 §9.14）；**界面未做、设备侧走查 `NOT_RUN`**。
+    后半 `record labeled sample signature evidence` **仍是"标注有了、取证动作没有"** ——
+    签署证据的**模式标注**已随发布快照冻结（`labeled_sample`），但附件上传路径
+    **不接收 `evidence_kind`**（本轮 grep 核实）⇒ 把一份签署证据绑到合同版本上的动作**未实现**；
   * 第 8–13 步（变更落地、复核接管、交接证据、结算确认、结案与重开、重进一致）—— **未开始**。
 
 ⚠️ **本文档不记 AC 通过**：CI 绿 / PR 可合并 / R1 可验收**三者不等价**（DR-0003：作者不自批）。
@@ -781,4 +785,59 @@ IDE / uvicorn 随发起 shell 结束被回收）。
 * 走查锚点已登记进 `verify_miniapp.js`（`data-act-offer-*` / `data-act-release*` /
   `data-act-withdraw-*`）—— **登记不等于取证**。
 * **未声称任何 AC 通过**，**未声称任何 D1 通过**；第 4/5 步与 S4（第 8–13 步）**未开始**。
+
+### 9.14 本轮执行记录（2026-09-17，HO 授权「授权合并；然后继续做 3-4-5」的**第 3 条**）
+
+> 触发：HO 本轮指令「下一步执行 1、三选一选 1，接近合同口径；2、授权合并；然后继续做 3-4-5」。
+> 第 1/2 条见上一轮与 PR #138；§9.14 记的是**第 3 条：合同派生**（§10.1 第 7 步前半）。
+> 逐条设计与判据见 `docs/entrust/S3-合同派生切片.md`。
+
+#### ① 开工前的**反向审计**（先问"是真缺后端，还是前端零调用"）
+
+按技能 `entrust-backend-slice` §11.1 的纪律先查了一遍，结论与上一轮**不同族**：
+
+| 问题 | 结论 |
+| --- | --- |
+| 后端有没有"从已接受事实派生"的能力？ | **没有**。`S3-范围与依赖评估.md` §2 第 8 条原文即判"**需新领域行为**"，§3 依赖 E 进一步点名"需要一个**可核对的字段来源表**" ⇒ 这是**真·后端缺口**，不是 R4 空转 |
+| 前端有没有零调用某个既有端点？ | 有（上一轮就是这一类），但**与本条无关** |
+
+#### ② 落地内容（可枚举）
+
+| 类型 | 内容 |
+| --- | --- |
+| 迁移 | `ent_contract:1` → `ent_contract_derivation`（`UNIQUE(release_id)`）；`ent_contract:2` → `ent_contract_field_source`。**只新增表**，既有表一字未改 |
+| 服务层 | `contracts.py`：`derive_contract`（**单事务写四张表**）+ 读与投影；**闸门** `_assert_every_field_has_source` |
+| 端点 | **2 条**（`scope_matrix` **72 → 74**）：`POST|GET /offer-releases/{release_id}/contract` |
+| 用例 | `test_entrust_contract_derivation.py`（**11 条**）+ `test_mysql_integration.py::test_contract_derivation_race_exactly_one_contract`（真 MySQL 并发） |
+
+#### ③ 本轮最该被记住的两件事
+
+1. ⭐ **"派生"与"编造"的分界是一条**代码里的**闸门**，不是文档里的一句话**：合同 payload 里
+   每个字段路径都必须在字段来源表里有行，**缺一个就中止**；反向也查（来源指向不存在的字段）。
+   用例专门证明这道闸门**真的会拦** —— "一道从不失败的检查等于没有检查"（同 §9.13 的文案闸）。
+2. ⚠️ **读取端点刻意不给货主本人放行**：字段来源表里是 `release:12@v3` / `leg:4` 这类**内部编号**。
+   `assert_can_view_entrustment` 有"货主本人直接通过"的旁路，用它就会把内部审计信息送出去 ——
+   所以用 `assert_can_view_org`（**无货主旁路**）。这与上一轮修的投影泄漏**同源不同型**：
+   那次是"两个入口判据不一致"，这次是"这条通道本就不该有客户面"。用例把这条决定钉死。
+
+#### ④ 门禁与实测（本轮）
+
+| 项 | 结果 |
+| --- | --- |
+| 13 项本机门禁 | **PASS 13 / FAIL 0** |
+| pytest（junitxml 判据） | **779 项 = 通过 766 + 跳过 13 + 失败 0 + 错误 0**（较上轮基线 **+12**，全部为本次新增；其中 1 条为真 MySQL 用例，本地无 MySQL ⇒ 计入跳过） |
+| mypy | `Success: no issues found in 105 source files`（+3：两个新模块 + 一个迁移） |
+| ruff（**CI 同 CWD `backend/`**） | `check rc=0` / `format --check rc=0`（139 files） |
+| 迁移冒烟 | 临时 SQLite 上两条迁移建成、唯一索引到位、**复跑执行 0 条** |
+| 并发**预跑**（文件版 SQLite 双线程） | **1 赢 1 输**（输家 `ContractStateError`，不是 500）；`derivations = 1 / contracts = 1 / field_sources = 14` —— 按技能纪律，**不把"从没跑过的测试"推上去** |
+
+#### ⑤ 如实标注（**不得据此声称已按业务结果演示**）
+
+* **界面未做** ⇒ 本条目前**只能用 API 走通**；按 HO 口径，那**不算"按业务结果可演示"**；
+* 第 7 步的**设备侧走查仍为 `NOT_RUN`** ⇒ **第 7 步不是 PASS**；
+* 一处**口径解释已入档**：`approved scope` 本切片读作"委托单已受理的作业范围"（航段 + 委托归属），
+  理由是"受理即批准范围"且 BP-03 第 3 条（采购确认）尚未实现。若 HO 认为它特指采购确认，
+  处置是**追加** `source_kind`（取值域本身是常量，**无迁移代价**）——
+  见 `S3-合同派生切片.md` §6，不要让后来者以为是漏读；
+* **未声称任何 AC 通过，未声称任何 D1 通过**。
 
