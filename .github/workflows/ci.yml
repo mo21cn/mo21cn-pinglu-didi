@@ -413,6 +413,18 @@ jobs:
 
           python scripts/seed_demo.py
           python scripts/seed_entrust_demo.py
+          # canonical 夹具（DEMO-1 §10.1 第 5 步）——**唯一**带航段（`ent_leg`）的种子。
+          # 为什么要在这里跑：委托详情页有一块「运输计划」（第 4 步），它的段行只在
+          # `plan.legs` 非空时才有 setData 产出，而模板核对的判据是"页面数据域里出现过
+          # 这个字段名"。库里的航段**只可能来自夹具** —— 服务层目前没有建段命令
+          # （切片 7.21 条目 162 如实登记了这个缺口）⇒ 少了这一步，`item.seqText` /
+          # `item.modeText` / `item.routeText` 会一行都渲染不出来，模板核对把它报成
+          # "模板读取但数据未产出"。那条判据本身没错，是**夹具没铺**。
+          # ⚠️ 不要为了让它闭嘴而把这三个键写进 detail.js —— 那等于造一个假落点，
+          #    模板真写错字段名时就再也查不出来了。
+          # 与下方 `seed_entrust_revalidation.py` 同一条纪律：**按需追加**，
+          # 不进复位基线（`reset_demo_env.py` 的 `SEED_ORDER` 保持不变）。
+          python scripts/seed_entrust_canonical.py
           cd ..
           node scripts/verify_login_flow.js
           node scripts/verify_frontend_e2e.js

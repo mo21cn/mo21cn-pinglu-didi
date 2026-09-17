@@ -1134,6 +1134,13 @@ function loadPage(file, ctx) {
           live('GET', '/entrust/assignments/' + id + '/capacity-confirmations'),
         recheckCapacityConfirmation: (cid) =>
           live('GET', '/entrust/capacity-confirmations/' + cid + '/recheck'),
+        // 运输计划（合同 §10.1 第 4 步 / BP-03 第 1 条）—— 同样走**真 HTTP**。
+        // ⚠️ 这里是"新增取数函数必须登记"那条纪律的第 N+1 次成立（漏登记的后果不是报错，
+        //    是**静默**：调用落到真实的 `utils/request.js` ⇒ Node 里没有 `wx.request`
+        //    ⇒ 页面 `.catch` 把它吞成 `null` ⇒ 计划块整块不渲染，而脚本毫不知情）。
+        // 为什么不用 `route()` 回放：本块要证的是"页面拿到的**就是这张委托的行**"，
+        // 回放表只会把我自己写进去的那几行再读回来 —— 那是自证。
+        fetchAssignmentPlan: (id) => live('GET', '/entrust/assignments/' + id + '/plan'),
         // 两条写命令：与其它写命令**同一条闸门**（只在 WRITE_ENABLED 的段里真发）——
         // 登记候选会改库（新候选会出现在清单里），在"读"的段里发生它，后面的断言
         // 就会拿到一个被自己污染过的世界。
@@ -3418,6 +3425,115 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           'status=' + shipperRead.status)
       } else ok()
 
+      // ── ①b 运输计划（合同 §10.1 第 4 步 / BP-03 第 1 条）：**取向与上面正相反** ──
+      // 运力整组不给货主放行（候选带承运人与供应商单价、判定里写着需求量与缺口），
+      // 而计划这一条**要给**：航段是客户自己交进来的起讫路线，任务标题与固定前置
+      // 里没有任何内部成本口径。⇒ 判据是"这条通道上有没有内部信息"，不是"是不是客户"。
+      // 两个方向各断言一次，且**取服务端的结论**（界面藏没藏不构成证据）。
+      const planMgr = await api('GET', '/entrust/assignments/' + aid + '/plan',
+        { token: ownerToken })
+      const planShipper = await api('GET', '/entrust/assignments/' + aid + '/plan',
+        { token: shipperToken })
+      if (planMgr.status !== 200 || planShipper.status !== 200) {
+        fail('⑰ 计划 · 经理或货主读不到运输计划（这条读通道本应两侧都通）',
+          'mgr=' + planMgr.status + ' · shipper=' + planShipper.status)
+      } else ok()
+
+      // ── ①c 运输计划块（合同 §10.1 第 4 步）：**必须锚在真有航段的那张委托上** ──
+      //
+      // 为什么不能就用上面的 `aid`：段行（`plan-leg`）只在 `plan.legs` 非空时才有
+      // setData 产出，而 `auditTemplates` 的判据是"这个字段名在页面数据域里出现过"
+      // （`utils/entrust.js` 是**投影层**，页面自己的 `jsKeyUniverse` 看不到它）。
+      // 夹具里若一张带航段的委托都没有，段行就一行都渲染不出来 ⇒ 模板核对会把
+      // `item.seqText` / `item.modeText` / `item.routeText` 报成"模板读取但数据未产出"。
+      // 那条判据本身**没错**，是夹具没铺（库里唯一带航段的是 canonical 夹具；
+      // 服务层目前没有建段命令，见切片 7.21 条目 162）。
+      // ⚠️ 反过来说：**不能**为了让它闭嘴而把这三个键写进 detail.js —— 那等于造一个
+      //    假落点，等模板真写错字段名的时候就再也查不出来了。
+      //
+      // 段数/任务数是**数据**的属性 ⇒ 断言比的是"页面 ⇄ 服务端同源"加"至少有一行"，
+      // 不写死"等于 3 段"（那等于把夹具的数值当契约）。两种身份各走一遍：
+      // 货主侧验的是 `assert_can_view_assignment` 的**旁路**在页面上真的走到了。
+      const planAid = await (async () => {
+        for (const c of D.entrustCases || []) {
+          const p = await api('GET', '/entrust/assignments/' + c[0] + '/plan',
+            { token: shipperToken })
+          if (p.status === 200 && (((p.data || {}).legs) || []).length > 0) return String(c[0])
+        }
+        return ''
+      })()
+      if (!planAid) {
+        fail('⑰ 计划 · 夹具里没有任何带航段的委托 ⇒「段行渲染」这一块静默失去覆盖',
+          'e2e 的种子序列里请跑 backend/scripts/seed_entrust_canonical.py '
+          + '（服务层没有建段命令，库里的航段只可能来自夹具）')
+      } else {
+        const srv = await api('GET', '/entrust/assignments/' + planAid + '/plan',
+          { token: shipperToken })
+        const legsSrv = ((srv.data || {}).legs) || []
+        const tasksSrv = ((srv.data || {}).task_prerequisites) || []
+        const noPreSrv = tasksSrv.filter((t) => t.precondition_task_id == null).length
+        let planBad = 0
+        for (const role of ['owner', 'shipper']) {
+          const sp = await walk('⑰ 计划 · ' + role + ' 侧详情', 'pages/entrust/detail/detail', null,
+            { role: role, arg: { assignment_id: planAid } }, ['onLoad'])
+          const P = '⑰ 计划 ' + role + ' #' + planAid + ' · '
+          if (!sp) {
+            fail(P + '详情页未装载，本块断言无意义（显式失败，不静默跳过）')
+            planBad++
+            continue
+          }
+          await waitUntil(() => !!sp._final().plan, 4000)
+          const dp = sp._final().plan
+          if (!dp) {
+            fail(P + '没取到运输计划（取数函数漏登记 requireStub 时正是这个症状）',
+              'planHint=' + JSON.stringify(sp._final().planHint))
+            planBad++
+            continue
+          }
+          const uiLegs = dp.legs || []
+          const uiTasks = dp.tasks || []
+          if (uiLegs.length !== legsSrv.length) {
+            fail(P + '页面段数与服务端不一致', uiLegs.length + ' vs ' + legsSrv.length)
+            planBad++
+          } else if (uiLegs.map((l) => l.seqText).join(',') !==
+            legsSrv.map((l) => String(l.seq)).join(',')) {
+            // 段是**按 seq 读**的，不是按写入顺序 —— 乱序插入也应当出有序的界面。
+            fail(P + '段序与 seq 不一致（段按 seq 读，不按写入顺序）',
+              uiLegs.map((l) => l.seqText).join(',') + ' vs ' +
+              legsSrv.map((l) => String(l.seq)).join(','))
+            planBad++
+          } else if (uiLegs.some((l) => !l.seqText || !l.modeText || !l.routeText)) {
+            // 三种文字都必须自己说话：段号是序号、方式是标签（未登记的方式退回原值）、
+            // 路线是「起 → 讫」。空一格就说明某条分支把"未知"渲染成了空白。
+            fail(P + '有段行的字段是空的（段号/方式/路线三样都必须自己说话）',
+              JSON.stringify(uiLegs.filter((l) => !l.seqText || !l.modeText || !l.routeText)[0]))
+            planBad++
+          } else if (uiTasks.length !== tasksSrv.length) {
+            fail(P + '页面任务数与服务端不一致', uiTasks.length + ' vs ' + tasksSrv.length)
+            planBad++
+          } else if (uiTasks.filter((t) => t.preText === '无固定前置').length !== noPreSrv) {
+            // ⭐「必需任务前置」要看的**判据本身**：两种说法必须分得开 ——
+            // "没有前置"（服务端 `precondition_task_id === null`）与
+            // "前置指向的标题解析不出来"（退回 `前置：任务 #<id>`）不是一回事。
+            fail(P + '「无固定前置」的行数与服务端不一致',
+              uiTasks.filter((t) => t.preText === '无固定前置').length + ' vs ' + noPreSrv)
+            planBad++
+          } else if (uiTasks.some((t) => !t.preText)) {
+            fail(P + '有任务行的前置文案是空的（判不了的那一格必须自己说话）')
+            planBad++
+          }
+          // 模板核对的落点：把**真有段行**的这一态并进该页的数据域。
+          collect('pages/entrust/detail/detail',
+            path.join(ROOT, 'miniapp/pages/entrust/detail/detail.js'), sp._final())
+        }
+        if (!planBad) {
+          note('⑰ 计划 · 锚定委托 #' + planAid + '（航段 ' + legsSrv.length + ' 段 / 任务 '
+            + tasksSrv.length + ' 条，其中无前置 ' + noPreSrv + ' 条）'
+            + '——经理与货主两种身份都逐项同源，段行渲染已被本段覆盖')
+          ok()
+        }
+      }
+
       // ── ② 经理侧详情页：运力块渲染出来 ──
       const s = await walk('⑰ 运力 · 经理侧详情', 'pages/entrust/detail/detail', null,
         { role: 'owner', arg: { assignment_id: aid } }, ['onLoad'])
@@ -3433,6 +3549,11 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
         if (!d0.canRecordCapacity) {
           fail('⑰ 运力 · 经理侧没有登记入口（授权未唯一定位，或缺 entrust:quote:create？）')
         } else ok()
+
+        // 运输计划这块**已经在上面的「①c 运输计划块」里逐项对账过**（含段行的三个字段
+        // 与段序、两种身份），这里不再重复一遍 —— 重复的断言不会多抓一个缺陷，
+        // 只会让"哪一处才是判据"变得含糊。本段下半部分验的是**运力**，
+        // 而运力的取向与计划**正相反**：整组不给货主放行。
         const before = (d0.capCandidates || []).length
 
         // ── ③ 经**页面**登记三条候选 ──
