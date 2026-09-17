@@ -40,9 +40,11 @@
 ⇒ 一轮最坏 ≈ `24 × 2 × 150s = 120 分钟`。实测一次 `--section 8,8b --pay`：
 **18 次探测烧掉 56 分钟**、页面栈全程为空，而日志只有一行行 `pageStack=[]`
 （**不打印耗时 ⇒ 完全看不出慢在哪**），于是被读成"卡死 / 网络抖动"。
-⇒ 现改为 `GATE_PROBE_S=45`（单次）+ `GATE_BUDGET_S=240`（总预算），
+⇒ 现改为 `GATE_PROBE_S=90`（单次）+ `GATE_BUDGET_S=900`（总预算），
 并打印真实耗时、单次调用耗时、进程数与**回执**：`ok=true` 且栈空 = 窗口没进小程序页；
 `ok=false` = 通道/授权问题 —— **两者处置不同，不能只看空列表**。
+⚠️ 2026-09-17 把单次超时从 45s 调**大**到 90s：冷启动**第一次**调用实测就要 ~61s，
+45s 会让每一次都超时 ⇒ 把"还没起来"读成"通道坏了"。
 
 **⑤ 闸门恒空时：先探测，再用 `--skip-ide`，别急着重启 IDE。**
 2026-09-15 实证（同一个 IDE）：运行器**新起**的实例上，闸门两次 240s 预算内恒为
@@ -55,6 +57,10 @@
 配套还加了两条：
 * `wait_ready` 命中「automation runtime 未注册」签名**连续 `AUTOMATION_DEAD_MAX` 次即早退**
   （不再空等满预算），并打印上面那套处置；
+  ⭐ **2026-09-17 补了墙钟下限 `AUTOMATION_DEAD_MIN_ELAPSED_S`**：冷启动期间那条签名
+  是**必然命中**，按次数收手会把"还在编译"误判成"通道坏了"。实测同一天两轮分别在
+  119s / 163s 早退，而 IDE 日志在同一分钟正写着 `[pageframe] finish load user code`
+  —— **早退恰好发生在项目刚加载完的那一刻**。⇒ 低于墙钟下限只记录不早退。
 * 起 IDE 的环境**不再传本机沙箱代理**（`ide_env()`）—— 那个代理指向每会话换端口的
   沙箱网关，服务的是命令行；实测由本项目起的 IDE 界面会反复闪「网络故障」。
   ⚠️ **但要诚实**：这**不是**已证实的根因（反证：同一次探测里 CLI 带着同一个代理也成功了），
@@ -314,8 +320,11 @@ def start_ide(env: Env, wait_s: int = 60, kill_all: bool = False):
 
 #: 就绪闸门：**单次探测**超时与**总预算**（秒）。
 #: ⚠️ 都别沿用客户端默认的 150s —— 见 `wait_ready` 的 docstring（实测 18 次探测烧掉 56 分钟）。
-GATE_PROBE_S = 45
-GATE_BUDGET_S = 240
+#: ⚠️ **单次超时不要收窄到 45s**（2026-09-17 改正）：冷启动**第一次**调用实测就要 ~61s，
+#: 45s 会让**每一次**都超时，于是"还没起来"被读成"通道坏了"。取 90s。
+GATE_PROBE_S = 90
+#: 总预算：冷 `CompileCache` 下本项目编译约需 **9 分钟**（技能坑 49），故取 15 分钟。
+GATE_BUDGET_S = 900
 
 #: IDE 侧「automation runtime 未注册」的签名（回执里出现任一条即命中）。
 #: 实测原文长这样（同一个 IDE 上连续 12+ 次都一样）：
@@ -331,6 +340,15 @@ AUTOMATION_DEAD_SIGNS = (
 #: 而失败的那两次是**连续 12～13 次**全命中。⇒ 4 不会误杀会自愈的冷启动，
 #: 又能把失败判定从 240s 压到约 40～60s。
 AUTOMATION_DEAD_MAX = 4
+#: ⭐ **早退的墙钟下限**（秒）—— 2026-09-17 加这一条，因为"连续 4 次"在**冷启动**期间
+#: 是个**必然命中**的计数：项目加载完成前每一次探测都会命中该签名。
+#: 实测（同一天两轮）：闸门分别在 **162.6s** 与 **119.4s** 早退，
+#: 而 IDE 自己的日志在同一分钟里正写着
+#:   `13:39:19.882 [pageframe] finish load user code` / `13:39:20.374 [devtools] webview page ready`
+#: —— **早退恰好发生在项目刚加载完的那一刻**。
+#: ⇒ 给早退加一个"先等够 6 分钟"的前置条件：低于它**只记录不早退**，
+#: 高于它才允许按连续计数收手。这样既不误杀冷启动，也保住了"真坏了就别等满预算"。
+AUTOMATION_DEAD_MIN_ELAPSED_S = 360
 
 
 def _brief(obj: object) -> str:
@@ -390,14 +408,23 @@ def wait_ready(
         #    已经注册好的实例**（`--skip-ide`），见 docstring 坑 ⑤ / DR-0009 §8.5⑨。
         if any(s in str(hit) for s in AUTOMATION_DEAD_SIGNS):
             dead += 1
-            if dead >= AUTOMATION_DEAD_MAX:
+            # ⭐ 早退只在**等够墙钟下限**之后才允许（见 `AUTOMATION_DEAD_MIN_ELAPSED_S`）：
+            #    冷启动期间该签名是必然命中，按次数收手会把"还在编译"误判成"通道坏了"。
+            if dead >= AUTOMATION_DEAD_MAX and t3 - t0 >= AUTOMATION_DEAD_MIN_ELAPSED_S:
                 log(
                     f"    ✗ 连续 {dead} 次命中「automation runtime 未注册」"
-                    f"（{_brief(hit)}）⇒ 早退，不再等满 {budget_s}s 预算。"
+                    f"（{_brief(hit)}），且已等够 {AUTOMATION_DEAD_MIN_ELAPSED_S}s"
+                    f" ⇒ 早退，不再等满 {budget_s}s 预算。"
                 )
                 log("      ⇒ 处置：① 只读探测**已在运行**的 IDE，能用就 `--skip-ide` 复用它；")
                 log("              ② 不能用再看 IDE 窗口是否有弹层/网络提示，然后清场重起。")
                 return False
+            if dead >= AUTOMATION_DEAD_MAX:
+                log(
+                    f"    ⏳ 连续 {dead} 次命中同一签名，但只过了 {t3 - t0:.0f}s "
+                    f"（< {AUTOMATION_DEAD_MIN_ELAPSED_S}s）⇒ **不早退**，"
+                    "按冷启动继续等（项目可能仍在编译）。"
+                )
         else:
             dead = 0
         time.sleep(3)
