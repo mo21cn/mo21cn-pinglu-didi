@@ -10,6 +10,7 @@
 `exceptions_api.py` 是异常与变更案件（ENT-030 / DR-0013），
 `offers_api.py` 是对客发布与客户响应（S3 / BP-03 第 4/5/6/7/10 条），
 `contracts_api.py` 是合同派生（S3 / BP-03 第 8 条），
+`capacity_api.py` 是运力确认与有效期（S3 / BP-03 第 3 条），
 它们挂到同一个 `router` 下，`main.py` 只注册一次 `/api/v1/entrust`。
 
 挂载顺序：`extraction_api` 必须排在 `attachments_api` **之后** ——
@@ -20,6 +21,7 @@
 from app.modules.entrust.agent_api import router as agent_api_router
 from app.modules.entrust.artifacts_api import router as artifacts_api_router
 from app.modules.entrust.attachments_api import router as attachments_api_router
+from app.modules.entrust.capacity_api import router as capacity_api_router
 from app.modules.entrust.contracts_api import router as contracts_api_router
 from app.modules.entrust.exceptions_api import router as exceptions_api_router
 from app.modules.entrust.extraction_api import router as extraction_api_router
@@ -30,6 +32,7 @@ from app.modules.entrust.tasks_api import router as tasks_api_router
 router.include_router(agent_api_router)
 router.include_router(artifacts_api_router)
 router.include_router(attachments_api_router)
+router.include_router(capacity_api_router)
 router.include_router(contracts_api_router)
 router.include_router(exceptions_api_router)
 router.include_router(extraction_api_router)

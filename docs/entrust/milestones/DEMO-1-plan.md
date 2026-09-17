@@ -141,8 +141,8 @@
 | --- | --- | --- |
 | 三段式方案 + 任务编排 | **缺连接** | 只有类型常量 `tasks.py:TASK_TYPE_QUOTE/PURCHASE/CONTRACT`，无编排 |
 | 两家供应商报价对比 | 已有（类型） | `registry.py:supplier_compare`（`candidates`）+ `agents/ag02.py` |
-| **选择 ≠ 资源确认** 的门禁 | **缺连接** | `supplier_compare.selected_candidate` 与 `procurement_confirm` 是两个类型，但**无「选择→确认」门禁连接** |
-| 资源确认的授权 / 证据 / 有效期 | **缺连接** | `registry.py:procurement_confirm`（`evidence_kinds`/`effective_from`）**无专用确认端点** |
+| **选择 ≠ 资源确认** 的门禁 | ✅ **后端已实现**（2026-09-17） | 门禁不是"两个端点"，是一条**规则闸门**：`capacity._assert_every_rule_reported` 要求四条规则**逐条**产出判定且无 fail，缺一条即中止。**候选登记与确认分属两条命令**，只登记候选**不产生任何确认痕迹**（有专门用例）。`procurement_confirm` 类型**第一次接上命令**（`capacity.confirm_capacity`） |
+| 资源确认的授权 / 证据 / 有效期 | ✅ **后端已实现**（2026-09-17）；**界面未做** | **6 条端点**（`scope_matrix` 74 → 80）；确认落 `ent_capacity_confirmation`（**冻结**判定读到的每一个值）+ `ent_capacity_rule_check`（逐规则判定）+ 一条成果。授权判据＝组织成员 + **唯一**生效授权 + 写权限；证据＝类别 + **引用**（为此给候选表补了 `evidence_ref`）。见 `S3-运力确认与有效期切片.md` |
 | 服务端客户白名单投影 | **缺连接** | `registry.py:project_for_customer` 存在但**无调用方**（孤儿函数）；`envelope.py:project_envelope_for_operator` 只覆盖 Agent 侧 |
 | **释放不可变报价版本** | ✅ **后端与界面均已实现**（表已在；命令与端点在 S3 纵向切片落地，界面在其收口切片上线） | `ent_offer_release` + `offers.release_offer` + `POST /entrustments/{eid}/offer-releases`；经理侧入口在成果页**版本行**上（页内确认条） |
 | 客户按精确版本接受/拒绝（含三类负例） | ✅ **后端与界面均已实现**（三类负例均已验：未发布/已撤回/已被取代 ⇒ 409；经理冒充 ⇒ 403；重复 ⇒ 唯一约束） | `offers.respond_to_offer` + `POST /offer-releases/{id}/responses`；客户侧入口在委托详情页「对客报价」卡（页内展开条） |
@@ -161,7 +161,7 @@
 | 业务时间 vs 记录时间分离 | **缺失** | 无 `occurred_at` / `recorded_at`，只有 `created_at` |
 | 800→950 变更结构化审批与应用 | 已有 | `exceptions.py:decide_case` / `apply_case`（`CHANGE_CARGO`） |
 | 影响映射与复核任务 | 已有 | `revalidation.py:IMPACT_MAP` / `apply_revalidation` |
-| 候选运力不适用的**确定性容量校验** | **缺失** | 容量校验只在 `backend/app/modules/port/service.py:confirm`（与本支线无关） |
+| 候选运力不适用的**确定性容量校验** | ✅ **已实现**（2026-09-17，落在 entrust 支线） | `capacity.evaluate` 逐规则判定；容量那条**不发明口径**，逐字取自 `demo1_canonical.json` 的 `deterministic_capacity_rule`（候选适用于某量 ⇔ `capacity_tonnes ≥` 该水运段实际承运量；声明单船且不拆批 ⇒ 必须**一条船**装下）。三种形态分开判（单船不拆批 / 多船 / 允许拆批）。⚠️ 与 `port/service.py:confirm` **无关** —— 那条属港口支线，本切片没动它 |
 | A2 接管任务 | 已有 | `tasks.py:takeover_task` |
 | 缺失卸货证据 → 阻塞条件 | **缺连接** | `tasks.py:wait_task` 只记 `wait_reason`；阻断集只认 `exceptions.py:is_blocking`（`impact_kind=execution-blocking`） |
 | 应收应付行 + 争议费用（Decimal/单位/币种/依据/状态） | **缺连接** | `registry.py:settlement_draft` 的 `receivable_lines`/`payable_lines`/`disputed` 均为自由 `FIELD_LIST` |

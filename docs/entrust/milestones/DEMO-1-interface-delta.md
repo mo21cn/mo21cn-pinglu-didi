@@ -333,4 +333,28 @@ S3 的 A、B / 发布前来源核验 / S3、S4 排期）。本节只登记与**�
 | 84 | 随本分支携带：**第十一片 #61 的"列表版"补齐**（PR #138） | `GET /entrustments/{id}/offer-releases` 原先**恒回经理投影**，而 `assert_can_view_entrustment` 对货主本人直接放行 ⇒ 客户能拿到 `data_origin.basis`（含 `job_id` / `job_mocked`）、`source_gate` 明细与 `released_by`。同一模块的详情端点**本来就做对了**（先判"是不是客户本人"）⇒ **同一份数据两个入口、判据不一致 = 其中一个泄漏**。修法：列表版照抄详情版的写法（不是各写一遍），并补一条**逐字段断言内部字段不出现**的用例。⚠️ 这是"两个入口不一致"型；#81 是"这条通道本不该有客户面"型 —— 同源不同型，都归 AC-26「不得先返回前端再隐藏」。 |
 | 85 | **界面未做 / 设备侧走查未跑**（如实登记） | 本切片目前**只能用 API 走通** ⇒ 不得声称 BP-03 第 8 条"按业务结果可演示"，也不得声称合同 §10.1 第 7 步 PASS。另：第 7 步后半 `record labeled sample signature evidence` **仍是"标注有了、取证动作没有"**（`SIGNATURE_MODE_LABELED_SAMPLE` 随快照冻结；而附件上传路径**不接收 `evidence_kind`**，本轮已 grep 核实）。 |
 
+### 7.13 第十四切片（S3 运力确认与有效期：候选事实 → 独立确认 → 逐规则判定；2026-09-17）
+
+触发：`S3-范围与依赖评估.md` §2 第 3 条与 **§3 依赖 C** —— *"D1-06 要求'选中 ≠ 确认运力'，
+且'过期/不适用不得确认'。这需要一个可判定的数据来源（确定性规则），否则只能用 LLM 意见 ——
+合同明令禁止"*。出口与判据见 `docs/entrust/S3-运力确认与有效期切片.md`。
+本条只登记与**接口面**有关的部分。
+
+| # | 项 | 性质与处置 |
+| --- | --- | --- |
+| 86 | **新增 6 条端点**（`scope_matrix` **74 → 80**） | 写侧：`POST /assignments/{aid}/capacity-candidates`（登记**候选事实**）、`POST /assignments/{aid}/capacity-confirmations`（确认，幂等）。读侧：两条 `GET` 列表、`GET /capacity-confirmations/{cid}`（含**逐规则判定**）、`GET /capacity-confirmations/{cid}/recheck`（用**当前事实**重跑同一套规则，**只读**）。双向覆盖自检（openapi ↔ 矩阵）自动通过；条目数基线按惯例显式改并写明原因。 |
+| 87 | **权限取"产出成果"那一档**（`entrust:quote:create`），**不新增权限常量** | 确认 = 产出成果（与 `POST /entrustments/{eid}/artifacts`、派生合同同类）。另：`registry.procurement_confirm` **本就有**类型契约（`supplier` / `agreed_scope` 必填，`evidence_kinds` 限 `receipt` / `payment` / `document`）⇒ 这一档不是新造，是**把既有契约第一次接上命令**。 |
+| 88 | ⚠️ **整组 6 条端点都不给货主本人放行**（`assert_can_view_org`，**无货主旁路**） | 比 §7.12 的 #81 更硬：不只是"读取端点不放行"，而是**这条通道本就不该有客户面**。理由：候选行带承运人与供应商单价、确认行带 `agreed_amount` / `supplier`、判定文案里写着**需求量与缺口吨数**。客户要看采购结论**没有通道** —— 客户看到的是**对客报价的冻结快照**。用例把这条钉死：谁换成 `assert_can_view_entrustment`，那条断言会红。 |
+| 89 | **写侧判据顺序固定**：组织成员（404）→ **唯一**生效授权（409）→ 写权限（403/409） | 顺序不是风格问题：成员资格排在授权解析**之前**，非成员探测只拿到 404，**不泄漏"这条委托存在"**。授权**多于一条不猜**（`find_active_entrustments` 是纯查找、不带身份过滤）—— 猜一条等于替 HO 决定权限口径。 |
+| 90 | ⚠️ **两处刻意的不对称**（写在迁移文档里，不靠口头约定） | ① 逐规则判定表 `ent_capacity_rule_check` **没有 `outcome` 列** —— **有行就是通过**；② 确认**失败时不写任何行**（判定表只承载通过的那些）。理由：若把失败判定也落库，"这条规则当时通过了没有"就得再读一列才知道，而 `recheck` 会变成两套语义（冻结的失败判定 vs 当下的失败判定）。代价是"当时为什么没过"只存在于那一次 409 的响应体里 —— 这是**有意的**：一次被拒的确认**不是**需要留档的商业事实。 |
+| 91 | **请求体只带三样**（`candidate_id` / `agreed_scope` / `note`） | 事实（承运人、吨位、船数、拆批、单价、有效期、证据类别与引用）**全部取自候选行**并**整体冻结**到确认记录上，调用方只能给"范围"这类业务判断。若将来有人想加 `capacity_tonnes` 之类的入参，那等于允许手工编造一条运力事实 —— 与 BP-03 第 3 条的 `identified evidence` 直接冲突。这条**写在 schema 的 docstring 里**。 |
+| 92 | **闸门 `_assert_every_rule_reported`**：规则集四条必须**逐条**产出判定且**无 fail**，缺一条即中止 | ⚠️ 该异常（`CapacityInvariantError`）**不继承** `CapacityError`、也**不接进** `_map_errors` ⇒ 必然是 **500**。理由：`CapacityRuleError`（409）是"业务不允许"，`CapacityInvariantError` 是"**我们写错了**"；把后者映射成 4xx 等于把缺陷伪装成一句业务拒绝。与 `contracts._assert_every_field_has_source` 同一条立场：**"某件东西没跑"必须与"跑了且通过"在数据上可区分**，否则这种缺口**没有任何下游症状**、必然静默。 |
+| 93 | **一列 `evidence_ref` 补在 `ent_capacity_candidate` 上**（本切片唯一的 ALTER） | BP-03 第 3 条的 `identified evidence` = 类别 + **引用**。只有 `evidence_kind` 时，"证据已指定"与"随便填了个类别"在库里**同形**。补列比另建表便宜；历史行允许 NULL（迁移的 `checks` 只断言列存在且可为空）。 |
+| 94 | ⚠️ **三条实测缺陷**（都是"本机全绿、CI 会红"那一类，逐条留档） | ① **迁移按模块名排序**：初版文件名 `ent_capacity.py` 排在 `ent_commitment.py` **之前** ⇒ 新库 `no such table: ent_capacity_candidate`，而**既有库因为表已在而全绿**；改名为 `ent_commitment_capacity.py`，并把这条隐含规则显式写进模块 docstring 与切片文档。② **`IntegrityError` 一律翻译成"已被确认过"**：并发预跑里两个线程**都**拿到该结论，而库中**零确认行**（真因是 `ent_artifact.entrustment_id` NOT NULL 违例）；修法是**先查确认行、查不到就原样 `raise`**，并补回归用例。③ **数值列跨后端类型差异**（MySQL 读回 `Decimal` / SQLite 读回 `str`）⇒ 在 `_row_to_*` 里归一到**定长文本**（吨位 3 位 / 单价 4 位），否则响应模型声明 `str` 时 MySQL 上直接校验失败。 |
+| 95 | **界面未做 / 设备侧走查未跑**（如实登记） | 本切片目前**只能用 API 走通** ⇒ 不得声称 BP-03 第 3 条"按业务结果可演示"，也不得声称合同 §10.1 **第 5 步** PASS（该步原文 *`Compare two quotations and record evidence-backed procurement confirmation`*）。§10.2 负例 *`unsuitable/expired resource confirmation`* 现在**只有自动化证据**。 |
+| 96 | **两条口径解释待 HO 认可**（改起来是一行判定 + 一条用例，**无迁移代价**） | ① **登记只拒"录错了"**（承运人空 / 吨位非正 / 船数 < 1 / 单价与计价单位半边缺 / 证据类别不在取值域 / 航段跨单），**不拒**"还没证据、还没有效期" —— 那些是**确认时**的判定；否则 *`expired or unsuitable resources cannot be confirmed`* 这条规则**永远触发不了**。② **允许拆批 ⇒ 判定通过 + 记下趟数**（`ROUND_CEILING`），而不是"不通过"：`allows_partial_load` 是**资源自己的属性**，读成"必须走变更"等于替业务做了决定。依据是 `demo1_canonical.json` 的 `deterministic_capacity_rule` 与 `DEMO-1-fixture-manifest.md`:25「若允许拆批或多船承运，950 吨未必装不下」。 |
+| 97 | **未擅自补 canonical 的 C-900 / C-1200 种子** | `demo1_canonical.json` 的候选是 900 吨**单船**；夹具第 25 行那句"不一定装不下"要用**多船或允许拆批**的候选才演得出来。补种子会**动既有基线**（CI 与本机共用那份夹具）⇒ 待 HO 定口径再动，不在本切片里夹带。 |
+| 98 | 随本分支携带：**第十二、第十三切片未合并**（PR #138 / #139 等授权） | `S3-quote-assemble`（#138）与 `S3-contract-derive`（#139）均仍 `OPEN`；本切片叠在 #139 之上 ⇒ **合并顺序不能反**（`required_linear_history=true` ⇒ 只能 squash 且逐个来）。 |
+| 99 | ⚠️ **本切片继承了 #139 的首轮 CI 红，已同步修复**（2026-09-17 补记） | #139 引入的 MySQL 语法错误（`ent_contract_field_source.source_kind` 的列注释折成两行相邻字面量 ⇒ `1064`）让**两个 MySQL job 双红**；本切片从 #139 旧 head 建出 ⇒ **同因**红。已把 #139 的三笔修正 **cherry-pick** 进本分支（`e03dff0` / `4a6355b` / `64ae978`）⇒ 两分支 CI 现均 **6/6 绿**。⭐ 副产物：`并发集成（MySQL 8.0）` job 本轮**第一次真正执行**（上一轮全是 setup 阶段的 `ERROR`）—— 本切片的 `test_capacity_confirmation_race_exactly_one_confirmation` 与 #139 的 `test_contract_derivation_race_exactly_one_contract` **首次获得实测证据**。合并顺序仍为 **#138 → #139 → #140**。 |
+
 

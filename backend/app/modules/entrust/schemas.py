@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -1318,3 +1318,204 @@ def contract_derivation_out(data: dict[str, Any]) -> ContractDerivationOut:
 
 def contract_derivation_created_out(data: dict[str, Any]) -> ContractDerivationCreatedOut:
     return ContractDerivationCreatedOut.model_validate(data)
+
+
+# ── 运力确认与有效期（capacity_api.py / S3 / BP-03 第 3 条 / D1-06）──────────
+#
+# ⚠️ 这一组**没有**客户视角的响应模型，而且是**成组的**：候选运力含承运人与供应商
+# 单价，采购确认含 `agreed_amount`/`currency`/`supplier` —— 注册表已把这三个字段
+# 标为 `internal_fields`。所以运力这一整条支线（登记、清单、确认、复算）
+# **一律不给货主本人放行**（`assert_can_view_org`，没有货主旁路）。
+# 客户要了解商业承诺，看到的是**对客报价的冻结快照**，不是这里的任何一条记录。
+
+
+class CapacityCandidateIn(BaseModel):
+    """登记一条候选运力（**不是确认**）。
+
+    请求体里给的是**关于这份资源的事实**：吨位、船数、是否拆批、单价、有效期、证据。
+    ⛔ 不要往这里加"是否已确认"这类字段 —— 确认是**另一个动作**，由
+    `POST /assignments/{id}/capacity-confirmations` 作出，且要有 actor 与逐规则判定。
+    把"已确认"做成登记时的一个入参，等于让"选中"一步到位变成"确认"，
+    而那正是 BP-03 第 3 条要分开的两件事。
+
+    数值用 `Decimal`：`capacity_tonnes` 参与容量判定，用 `float` 会在
+    "950 vs 900"这类边界上引入二进制误差，而这条判定的全部价值就是它算得准。
+    """
+
+    carrier: str = Field(min_length=1, max_length=64)
+    capacity_tonnes: Decimal
+    vessel_count: int = 1
+    allows_partial_load: bool = False
+    #: 对应航段（`ent_leg.id`）；给了就必须属于同一委托
+    leg_id: int | None = None
+    vessel_name: str | None = Field(default=None, max_length=64)
+    rate: Decimal | None = None
+    #: 与 `rate` **成对**：只有金额无法确定费用（与注册表里 `rate`/`rate_unit` 同一条理由）
+    rate_unit: str | None = Field(default=None, max_length=16)
+    currency: str | None = Field(default=None, max_length=8)
+    #: 报价有效期。**可以不给**（登记时还不知道），但确认时会因此判不通过 ——
+    #: "未知有效期"不等于"未过期"。
+    valid_until: date | None = None
+    #: 证据类别（取值域见 `registry.ALL_EVIDENCE_KINDS`）与**证据引用**。
+    #: 两者都可后补；确认时两者都必须齐（`identified evidence`）。
+    evidence_kind: str | None = Field(default=None, max_length=32)
+    evidence_ref: str | None = Field(default=None, max_length=255)
+
+
+class CapacityCandidateOut(BaseModel):
+    """一条候选运力。数值列是**定长文本**（3 位吨位 / 4 位单价），
+
+    用文本而不是 `Decimal` 输出，是为了让 SQLite 与 MySQL 两个后端给出**同一个字符串** ——
+    否则"同一份数据在两边看起来不同"，逐字段核对还要先解释格式差异。
+    """
+
+    candidate_id: int
+    assignment_id: int
+    leg_id: int | None = None
+    carrier: str
+    vessel_name: str | None = None
+    capacity_tonnes: str
+    vessel_count: int
+    allows_partial_load: bool
+    rate: str | None = None
+    rate_unit: str | None = None
+    currency: str | None = None
+    valid_until: str | None = None
+    evidence_kind: str | None = None
+    evidence_ref: str | None = None
+    #: `candidate` / `confirmed`（由确认命令写）/ `withdrawn`
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class CapacityConfirmIn(BaseModel):
+    """确认请求体。**只有三样东西**：确认哪一条候选、这一确认覆盖什么范围、一句备注。
+
+    ⛔ 不要往这里加 `supplier` / `capacity_tonnes` / `agreed_amount` 这类字段。
+    确认的一切**事实**都必须从候选行读（服务端按 `candidate_id` 取）。
+    让请求体带这些值会造出"确认的内容"与"候选运力"可以不一致的状态，
+    而那条不一致在界面上看不出来 —— 于是"确认"退化成一次自述，
+    容量判定也就成了对调用方输入的判定，不是对数据的判定。
+
+    为什么 `agreed_scope` 是**必填**（与 `ContractDeriveIn` 全可选形成对照）：
+    合同正文可以完全派生（金额、费用范围、当事方都有出处），所以派生请求体不需要
+    任何业务参数；但"这次确认覆盖什么范围"是一条**采购范围判断**，数据里没有它的出处，
+    只能由人给出。把它变成可选并补一个默认值，等于宣称「确认了」三个字本身
+    就构成可复核的商务事实。
+    """
+
+    candidate_id: int
+    agreed_scope: str = Field(min_length=1, max_length=500)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class CapacityRuleCheckOut(BaseModel):
+    """**一条规则的判定**。
+
+    同一个模型服务两种场景，这是**有意**的：
+
+    * 落库的行（读确认详情时）**只有通过**的判定 —— 所以 `outcome` 恒为 `pass`；
+      库里**没有** `outcome` 列：失败不落库（拒绝的证据是 409 响应体，不是一条历史行），
+      写一个恒为 `pass` 的列是造一个假字段。
+    * 409 响应体里的判定**可能**是 `fail` —— 在这里带 `outcome` 是为了让
+      "被拒绝"和"已确认"在客户端**形状一致**，一套渲染就够（否则失败要多写一套）。
+    """
+
+    rule_code: str
+    seq: int
+    #: `pass` / `fail`
+    outcome: str
+    #: 判定说明，含**实际比较的数**（如「900.000 × 1 = 900.000 吨 < 需求 950.000 吨，缺口 50.000 吨」）
+    detail: str
+    created_at: str | None = None
+
+
+class CapacityConfirmationOut(BaseModel):
+    """一条运力确认记录。
+
+    ⚠️ 本模型里的 `capacity_tonnes` / `valid_until` / `evidence_*` 等**全部来自确认行**
+    （确认那一刻的冻结副本），**不是**候选行现在的值 —— 候选行可以被改写，
+    而确认是一条已经作出的商业事实。想知道"现在还是不是这样"，
+    用 `GET /capacity-confirmations/{id}/recheck`（只读复算，它会把差异列出来）。
+
+    `rule_checks` = 这次确认**评估过**的规则（逐条带比较值）。它的存在使
+    "规则跑没跑"可被核对 —— 否则"跑了且通过"与"这次没跑"在数据上完全一样。
+    """
+
+    confirmation_id: int
+    assignment_id: int
+    entrustment_id: int | None = None
+    candidate_id: int
+    leg_id: int | None = None
+    carrier: str
+    vessel_name: str | None = None
+    capacity_tonnes: str
+    vessel_count: int
+    allows_partial_load: bool
+    rate: str | None = None
+    rate_unit: str | None = None
+    currency: str | None = None
+    valid_until: str | None = None
+    evidence_kind: str | None = None
+    evidence_ref: str | None = None
+    #: 判定输入的另一半：需求（确认时的快照）与它的出处
+    demand_tonnes: str | None = None
+    demand_unit: str | None = None
+    demand_ref: str
+    #: 判定基准日（有效期与它比较）。与 `confirmed_at` 分开：业务时间可复算
+    as_of_date: str
+    #: 规则集版本 —— 规则会演进，旧确认要能说清它按哪一版判的
+    rule_set_version: str
+    #: 确认产出的采购确认成果与版本（可发布、可复核、可作变更影响目标）
+    artifact_id: int
+    artifact_revision_id: int
+    artifact_revision_no: int
+    confirmed_by: int
+    confirmed_at: str
+    note: str | None = None
+    rule_checks: list[CapacityRuleCheckOut] = Field(default_factory=list)
+
+
+class CapacityConfirmationCreatedOut(CapacityConfirmationOut):
+    """确认成功时额外回规则条数（少一条就说明有规则没跑）。"""
+
+    rule_check_count: int = 0
+
+
+class CapacityRecheckOut(BaseModel):
+    """**只读复算**：这条确认现在还成立吗。
+
+    `rule_checks` 是**用当前事实**重跑同一套规则的结果；`frozen_rule_checks` 是确认
+    当时落库的判定。两者并排，才能回答"为什么不成立了" —— 只给一个
+    `still_valid=false` 等于让人自己去猜是哪一项变了。
+
+    ⚠️ 本端点**不写任何行**：正式的重做属 S4 的变更流程。这里只是让
+    "900 吨候选在变更后不再适用"这句话**可以被看到**，而不是只在模型意见里。
+    """
+
+    confirmation_id: int
+    still_valid: bool
+    as_of_date: str
+    #: 候选行不在了（不该发生；真发生时 `still_valid` 恒为 false —— 判据没了，结论就没了）
+    candidate_missing: bool = False
+    #: 当前值与确认冻结值**不一致**的判定输入（只列判定真正读到的那几列）
+    changed_fields: list[str] = Field(default_factory=list)
+    rule_checks: list[CapacityRuleCheckOut] = Field(default_factory=list)
+    frozen_rule_checks: list[CapacityRuleCheckOut] = Field(default_factory=list)
+
+
+def capacity_candidate_out(data: dict[str, Any]) -> CapacityCandidateOut:
+    return CapacityCandidateOut.model_validate(data)
+
+
+def capacity_confirmation_out(data: dict[str, Any]) -> CapacityConfirmationOut:
+    return CapacityConfirmationOut.model_validate(data)
+
+
+def capacity_confirmation_created_out(data: dict[str, Any]) -> CapacityConfirmationCreatedOut:
+    return CapacityConfirmationCreatedOut.model_validate(data)
+
+
+def capacity_recheck_out(data: dict[str, Any]) -> CapacityRecheckOut:
+    return CapacityRecheckOut.model_validate(data)
