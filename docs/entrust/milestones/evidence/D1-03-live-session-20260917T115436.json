@@ -1,0 +1,134 @@
+{
+  "evidence_label": "D1-03 live invocation evidence（**经真实会话／作业入口**）",
+  "contract_ref": "DEMO-1-contract-v1.0 §9 D1-03 / §3.1 Canonical fixture / §10.1 第 2 步",
+  "recorded_at": "2026-09-17T11:54:36.838468+08:00",
+  "verdict": "PASS",
+  "verdict_reason": {
+    "live（作业行 mocked=false）": true,
+    "来源可核对（unverified_sources 为空）": true,
+    "来源含 attachment_text（读的是附件文本）": true,
+    "产出类型化提案并采纳为成果": true
+  },
+  "ids": {
+    "assignment_id": 3,
+    "entrustment_id": 1,
+    "session_id": 1,
+    "job_id": 1,
+    "attachment_id": 1,
+    "artifact_id": 7,
+    "artifact_revision_no": 1
+  },
+  "invocation": {
+    "provider": "minimax",
+    "model": "MiniMax-M2.7",
+    "endpoint_host": "api.minimax.chat",
+    "mocked_from_job_row": false,
+    "run_seconds": 20.7,
+    "agent": "AG-02（agent_02 / 方案与采购）",
+    "attempts": [
+      {
+        "attempt_no": 1,
+        "status": "succeeded",
+        "latency_ms": 20515,
+        "mocked": false,
+        "error_kind": null
+      }
+    ]
+  },
+  "input": {
+    "fixture_path": "backend/scripts/fixtures/DEMO1-canonical-sample-quotation.txt",
+    "fixture_sha256": "a10bf30bbf11af74ed7768889f47dcfa91b17c62ea9f85588cfe1a253462a36b",
+    "fixture_data_label": "合成 / 人工录入（Synthetic — 不是真实客户材料）",
+    "source_channel": "attachment_text（附件提取文本）",
+    "upload_route": "POST /entrust/attachments（真实 multipart）→ POST /extract",
+    "extracted_chars": 1228,
+    "text_source": null
+  },
+  "result": {
+    "job_status": "succeeded",
+    "summary": "解析 DEMO-1 标准报价单：西江航运承运钢材 800 吨，南宁至贵港，含装卸单价 45.00 元/吨，有效期至 2026-12-31",
+    "proposal_types": [
+      "quote_parsed"
+    ],
+    "source_kinds": [
+      "attachment_text"
+    ],
+    "unverified_sources": [],
+    "proposal_missing_fields": [],
+    "requires_review": true,
+    "artifact": {
+      "artifact_id": 7,
+      "artifact_type": "quote_parsed",
+      "payload": {
+        "carrier": "西江航运有限公司",
+        "rate": "45.00",
+        "rate_unit": "吨",
+        "currency": "CNY",
+        "cargo_name": "钢材",
+        "quantity": "800",
+        "quantity_unit": "吨",
+        "route": "南宁 → 贵港",
+        "valid_until": "2026-12-31",
+        "includes": "船舶运输、装船、卸船；常规内河航段通行费用",
+        "excludes": "港口建设费、滞期费（滞留费）、超期堆存费；保险与货损赔付；因委托变更（数量调整、收货港调整等）产生的重新报价"
+      },
+      "revision_no": 1,
+      "revision_count": 1
+    }
+  },
+  "steps": [
+    {
+      "step": "第1步 客户建单",
+      "detail": "assignment_id=3 revision=1"
+    },
+    {
+      "step": "第1步 客户提交",
+      "detail": "status='submitted' org=演示经营主体·工作台(1)"
+    },
+    {
+      "step": "第1步 A1 受理",
+      "detail": "status='claimed' claimed_by=2"
+    },
+    {
+      "step": "第1步 取授权上下文",
+      "detail": "entrustment_id=1 note=''"
+    },
+    {
+      "step": "第2步 上传",
+      "detail": "attachment_id=1 filename=DEMO1-canonical-sample-quotation.txt bytes=2674 extract_status='not_requested'"
+    },
+    {
+      "step": "第2步 提取完成",
+      "detail": "extract_status='done' extracted_chars=1228 text_source=None"
+    },
+    {
+      "step": "第2步 开专属会话",
+      "detail": "session_id=1 specialty=agent_02"
+    },
+    {
+      "step": "第2步 提交作业",
+      "detail": "job_id=1 status='queued'（提交与执行分离）"
+    },
+    {
+      "step": "第2步 作业终态",
+      "detail": "status='succeeded' mocked=False proposals=['quote_parsed'] source_kinds=['attachment_text'] unverified=0 missing=[]"
+    },
+    {
+      "step": "第3步 采纳为成果",
+      "detail": "artifact_id=7 revision_no=1 payload={\"carrier\": \"西江航运有限公司\", \"rate\": \"45.00\", \"rate_unit\": \"吨\", \"currency\": \"CNY\", \"cargo_name\": \"钢材\", \"quantity\": \"800\", \"quantity_unit\": \"吨\", \"route\": \"南宁 → 贵港\", \""
+    }
+  ],
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Windows",
+    "app_env": "development",
+    "llm_mock_in_caller_process": false,
+    "note": "`llm_mock_in_caller_process` 只是**调用方进程**读到的配置，**不是判据**：本机 backend/.env.local 会把 `LLM_MOCK` 顶掉，而调用方与后端可以是两套 env（第一次实测就是这样：字段为 true、作业行 mocked=false）。**唯一的判据是作业行的 `mocked`**（见 `invocation.mocked_from_job_row`）——「我以为配了 live」不能当 live 证据。"
+  },
+  "not_evidence_of": [
+    "不是模型质量结论（H7a 的 calibration 仍记未达标；本脚本不产生准确率）",
+    "不是 R1 验收，不能替代任何一条 D1",
+    "不是 D1-05（离线/人工可完成）的证据 —— live 与 offline 互不替代",
+    "不是真实航线、真实运力或真实成交的证据（输入是标注为合成的夹具）"
+  ]
+}
