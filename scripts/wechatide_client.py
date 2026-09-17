@@ -77,6 +77,33 @@ _BOOTSTRAP = (
     "process.argv=[process.execPath,e,'--electron'].concat(a);require(e)"
 )
 
+#: **裸属性选择器**（`[data-x]`，只判"有这个属性"、不带值）。
+#: 微信开发者工具的自动化通道**不支持它**，而且是**静默回 0**：
+#: 2026-09-17 实测同一页同一语义三条通道 ——
+#:   类选择器 `.plan-leg` → **1**、带值属性 `[data-plan-leg="88"]` → **1**、
+#:   裸属性 `[data-plan-leg]` → **0**（元素明明在渲染树里）。
+#: 这与 `count` 文档里 `createSelectorQuery` 的"假 0"同类，但更坏：
+#:   · 写成 `count('[data-x]') >= 1` ⇒ **假红**（看起来像模板没渲染）；
+#:   · 写成 `count('[data-x]') == 0`（断言"不该有"）⇒ **假绿**，真出问题也照样绿。
+#: ⇒ 与其在每章走查里反复踩，不如在入口**响亮地拒绝**：能改写成带值属性或类名，
+#: 就说明本来也不需要"裸属性"这种筛法。
+_BARE_ATTR_SELECTOR_RE = re.compile(r"^\[\s*[A-Za-z_][\w-]*\s*\]$")
+
+
+def _reject_bare_attr(selector: str) -> None:
+    """裸属性选择器 ⇒ 直接抛（带改写指引），**不**让它静默回 0。
+
+    要看"这个属性存在与否"的证据（例如必须把这条工具链限制留在走查输出里），
+    显式用 `query_selector_all`（低层、无守卫）并写明是这样用的 —— 那条路是
+    "取值"，不是"判据"。
+    """
+    if _BARE_ATTR_SELECTOR_RE.match(str(selector).strip()):
+        raise ValueError(
+            f"裸属性选择器不支持：{selector!r}（本工具链静默回 0）"
+            ' ⇒ 改用带值属性 [data-x="值"] 或类名 .cls（见 wechatide_client.count 文档）'
+        )
+
+
 # 在页面上下文取「匹配元素个数」
 _COUNT_FN = (
     "function(sel){return new Promise(function(res){"
@@ -351,7 +378,11 @@ class Client:
 
         `createSelectorQuery` 保留为**兜底**：工具通道不可用时至少有个数
         （但它回 0 时不可信，勿用来下"元素不存在"的结论）。
+
+        ⛔ **裸属性选择器在这里会被拒绝**（`ValueError`）—— 见 `_reject_bare_attr`。
+        要用属性定位，写成 `[data-x="值"]`；只按"有这个属性"筛，改用类名。
         """
+        _reject_bare_attr(selector)
         els = self.query_selector_all(selector)
         if els is not None:
             return len(els)

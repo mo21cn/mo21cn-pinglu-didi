@@ -8699,14 +8699,17 @@ def sec_46(w: Walker) -> None:
     一、**写→读闭环，经 API 写、经界面读**：经写命令真建一段（并改一次留版本），
         再让**页面**去读 —— 页面看到的段数、方式标签、段序必须与**服务端事实**逐项同源。
         这一条把"命令落地了但界面看不到／界面读的是另一份"挡掉。
-    二、**两类行的渲染判据落在渲染树**：`count('[data-plan-leg]')` /
-        `[data-plan-task]` / `[data-plan-task-pre]`。⚠️ 刻意**不看**页面内部状态键 ——
+    二、**两类行的渲染判据落在渲染树**：`.plan-leg` / `.plan-task` / `.plan-task-pre`
+        三个类选择器（外加带值属性 `[data-plan-leg="值"]`）。⛔ **不用裸属性
+        `[data-x]`** —— 本工具链对它静默回 0（`wechatide_client.count` 已直接拒绝）。
+        ⚠️ 刻意**不看**页面内部状态键 ——
         状态键在"整块根本没渲染"时也可能被置上（㊺ 章实测过这种假绿）。
 
     ⚠️ 诚实边界（按档登记，**不计入通过**）
-    * ⛔ **写侧界面不存在**：本切片只做了后端命令（§7.22）。所以本章的**写操作全部经 API**，
-      界面侧**只验渲染** ⇒ 「人工落点经界面走通」**没有**被本章覆盖，
-      **不得**把"写链路通"写成"界面能建段"。
+    * **本章的写操作全部经 API**（与 ㊼ 章的**分工**，不是缺口）：㊻ 答"写命令落地后页面读得对"，
+      ㊼ 答"经界面写得进去"。⇒ 本章**不**声称"界面能建段"—— 那是 ㊼ 的证据，**章节之间不借证据**。
+      （订正：本节曾把这一格记成 `LIMITATION`／"写侧界面不存在"；写侧界面已于 §7.24 落地、
+      ㊼ 章已取证 ⇒ 那句话**过期**，留着它会把整个序列的 `RESULT` 误报成 `NOT_RUN`。）
     * **载体运行期造**（不新造种子）：`run_walkthrough_devtools.py` 的种子
       （`seed_demo` / `seed_entrust_demo` / `seed_entrust_orgpicker`）**不含**
       `seed_entrust_canonical.py`，而临时库里唯一可能带航段的就是它
@@ -8807,7 +8810,7 @@ def sec_46(w: Walker) -> None:
     leg_id = str((body1 or {}).get("leg_id") or "")
     w.rep.rec(
         "㊻ ① 写命令真建段（**经 API**）：建段 + 写下第 1 版历史。"
-        "⛔ 写侧界面不存在 ⇒ 这一格证明的是**写链路**，**不是**「界面能建段」",
+        "⚠️ 写侧界面由 ㊼ 章取证（两章分工）⇒ 这一格证明的是**写链路**，**不是**「界面能建段」",
         st1 == 200 and bool(leg_id) and int((body1 or {}).get("revision_no") or 0) >= 1,
         f"HTTP={st1} leg_id={leg_id!r} revision_no={(body1 or {}).get('revision_no')!r}",
     )
@@ -8849,20 +8852,23 @@ def sec_46(w: Walker) -> None:
     # 否则会把"还没取回来"读成"没有计划"。
     d = w.wait_data(lambda x: x.get("plan") is not None, tries=60, gap=0.5)
 
-    # ⚠️⚠️ 三条通道**同时**数行数：类选择器 / 裸属性 / 带值属性。
-    # 第一轮只用了裸属性 `[data-plan-leg]`，得 **0**；第二轮三条一起打，结果是：
+    # ⚠️⚠️ 判据只用**类选择器**与**带值属性**两条通道数行数。
+    # 第一轮只用了裸属性 `[data-plan-leg]`（当时 `count` 还没守卫），得 **0**；
+    # 三条一起打的结果是：
     #     段行 按类=1  裸属性=0  值属性=1     （服务端 1 段，hasLegs=True）
     #     任务行 按类=7 裸属性=0 值属性=—      （服务端 7 条，hasTasks=True）
-    # ⭐ 结论：**这个工具链的 `querySelectorAll` 不认「裸属性选择器」`[attr]`** ——
-    #    `[attr="值"]` 认、类选择器认，而**不带 `=值` 的 `[attr]` 静默回 0**
-    #    （不是报错、不是 -1 ⇒ 与"元素不存在"同形）。
-    #    ㊺ 章一直用**带值**选择器（`[data-act-cap-open="1"]`），所以这条一直没暴露。
-    # ⇒ 走查里**禁止**用裸属性选择器数个数：要么带值（推荐，顺带验了锚点值），
-    #    要么用类名。否则 `count('[data-xxx]')` 恒为 0 ——
-    #    而反向写法（断言"不该有"）会**恒真**，变成假绿。
+    # ⭐ 结论：**这个工具链不认「裸属性选择器」`[attr]`** —— `[attr="值"]` 认、
+    #    类选择器认，而**不带 `=值` 的 `[attr]` 静默回 0**（不是报错、不是 -1
+    #    ⇒ 与"元素不存在"同形）。㊺ 章一直用带值选择器，所以这条一直没暴露。
+    # ⇒ 已把这条限制**收进代码**：`wechatide_client.count()` 遇到裸属性选择器直接
+    #    抛 `ValueError`（写在注释里没人看，写在取值通道里才拦得住下一个人）。
+    #    要复核"裸属性确实回 0"这个**证据**，就得显式走低层的
+    #    `query_selector_all`（无守卫）—— 下面那一行就是这么用的：
+    #    它是**取证**，不参与任何判据（判据只看 `n_*_cls` / `n_*_val`）。
     n_leg_cls = w.c.count(".plan-leg")
-    n_leg_attr = w.c.count("[data-plan-leg]")
     n_leg_val = w.c.count(f'[data-plan-leg="{walk_seq}"]')
+    _bare = w.c.query_selector_all("[data-plan-leg]")
+    n_leg_attr = -1 if _bare is None else len(_bare)
     pl = d.get("plan") or {}
     w.rep.rec(
         "㊻ ③ 运输计划卡**真的渲染**：段行数 = 服务端段数（判据落渲染树，不看内部状态键）",
@@ -8885,9 +8891,12 @@ def sec_46(w: Walker) -> None:
         f"页面段={ui_mine[0] if ui_mine else None!r} 服务端方式标签={[x.get('mode_label') for x in mine]!r}",
     )
     n_task_cls = w.c.count(".plan-task")
-    n_task_attr = w.c.count("[data-plan-task]")
     n_pre_cls = w.c.count(".plan-task-pre")
-    n_pre_attr = w.c.count("[data-plan-task-pre]")
+    # 同上：裸属性的两个读数只为**取证**（`count` 已拒绝这种选择器，走低层通道）。
+    _bare_task = w.c.query_selector_all("[data-plan-task]")
+    _bare_pre = w.c.query_selector_all("[data-plan-task-pre]")
+    n_task_attr = -1 if _bare_task is None else len(_bare_task)
+    n_pre_attr = -1 if _bare_pre is None else len(_bare_pre)
     w.rep.rec(
         "㊻ ⑤ 必需任务与**前置**逐行渲染（每一条任务行都带一行前置说明："
         "「无固定前置」或有具体前置 —— 判不了的那一格也必须自己说话）",
@@ -8903,10 +8912,264 @@ def sec_46(w: Walker) -> None:
         not errs.strip(),
         (errs.strip()[:300] if errs.strip() else "无"),
     )
-    w.rep.limitation(
-        "㊻ ⑦ 「经**界面**建段/改段」",
-        "写侧界面**尚未实现**（§7.22 如实登记）⇒ 本章的写操作全部经 API。"
-        "这一格**不是**「界面能建段」的证据；等写侧界面上线后另起章节取证。",
+    # ⚠️ **订正（2026-09-18）**：这一格原来记 `LIMITATION`（"写侧界面尚未实现 ⇒ 本章的写操作
+    #   全部经 API"）。那句话**已经过期**：写侧界面已落地（§7.24），且有 ㊼ 章在真机上取证。
+    #   继续留着它不是"保守"，而是**报错的读数** —— 它会让整个序列的 `RESULT` 归并成
+    #   `NOT_RUN`（LIMITATION 的归并口径，见 runbook §8），而实际上两章全绿。
+    #   ⇒ 改成一条**章内可自证**的断言：写入口就在渲染树里（界面**是**存在的，这是事实，
+    #     不需要借 ㊼ 的结论）。⚠️ 「经界面真的写得进去」仍**不在本章** —— 那由 ㊼ 章取证，
+    #     章节之间**不借证据**（不把别人的 PASS 记到这一格上）。
+    n_leg_open_entry = w.c.count('[data-act-leg-open="1"]')
+    w.rep.rec(
+        "㊻ ⑦ 写入口（`data-act-leg-open`）**已在渲染树里** ⇒ 写侧界面存在"
+        "（本章的写操作仍**经 API**：经界面写由 ㊼ 章取证，两章分工、不互相借证据）",
+        n_leg_open_entry == 1,
+        f"写入口元素数={n_leg_open_entry}（界面不存在时这里会是 0 —— 那才是需要记限制的形状）",
+    )
+
+
+def sec_47(w: Walker) -> None:
+    """㊼ 航段命令的**写侧界面**（合同 §10.1 第 4 步）——设备侧运行取证。
+
+    与 ㊻ 的分工（两章合起来才是"第 4 步可演示"）
+    --------------------------------------------
+    * ㊻ 验**读**：写命令经 API 落地之后，**页面**读回来的是同一份事实
+      （并在那里把"写侧界面不存在"如实记为 `LIMITATION`）。
+    * ㊼ 验**写**：建段与改段**全部经界面**（点按钮 → 填表 → 提交），
+      再回到渲染树与服务端事实对账。
+
+    ⛔ **㊻ 的 `LIMITATION` 由本章解除** —— 但"解除"的证据只能是**本章的结果**：
+    §7.22 之后又落了写侧界面（`data-act-leg-open` / `-edit` / `-hist` / `-mode` /
+    `-submit` / `-cancel`），本章就是它在真机上的取证。
+
+    本节覆盖（四条，各对应一个会静默失效的环节）
+    ----------------------------------------------
+    一、**写入口在渲染树里**（`[data-act-leg-open="1"]`）+ 段行数 = 服务端段数。
+    二、**经界面建段**：点开表单 → 输入（`input_text` 真触发 `bindinput`）→ 提交，
+        页面段行数、段序、方式标签与**服务端事实**逐项同源；未登记的方式
+        （`air`）原样显示（不兜底成「公路」）。
+    三、**经界面改段**：表单**回填服务端原值**（不是显示文案）；「一个字段都没改」
+        时**本地就拦下**（不发注定 400 的请求）；真改之后段行变成服务端的标签，
+        且**服务端历史里两版都在**（改段留版本，不是覆盖）。
+    四、**版本历史渲染出来**：`.plan-rev` 行数 ≥ 2，且**第 1 版仍是当时的方式** ——
+        判据必须读第 1 版的内容：历史被当前值覆盖时，行数**照样**是 2。
+
+    ⚠️ 诚实边界
+    * **身份取 `seed-owner`**（经理）：这是详情页工作台能直接装载的身份。
+      「货主本人也能建段」这条判据的证据在 **e2e**（`shipperToken` 经页面真写），
+      **不在本章** —— 不把 e2e 的结论借来给设备侧记功。
+    * **载体运行期造**：种子（`seed_demo` / `seed_entrust_demo` / `seed_entrust_orgpicker`）
+      不含带航段的夹具，本章的段**由本章自己经界面建出来**（不新造种子）。
+    * `seq` 取"服务端现有最大序号 + 1" ⇒ 共享库上重跑仍成立（不会撞号）。
+    * 本章**会写库**（1 段航段 + 2 条版本历史）。临时库跑完即弃。
+    * 本章**自足**：只依赖 `seed_entrust_demo.py` 铺的组织与委托
+      `演示委托·工作台样本`，刻意不依赖其它章节（含 ㊻）⇒ 可单跑：`--section 47`。
+    """
+    print("\n-- ㊼ 航段命令写侧界面（第 4 步 · 真机建段/改段/版本历史）--", flush=True)
+
+    err_base = w.c.errors()
+
+    code_mgr = "seed-owner"
+    org_name = "演示经营主体·工作台"
+    title_main = "演示委托·工作台样本"
+
+    # ── 前置：全部经 API 取（不写死 id —— 种子重铺会变）────────────────────
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊼ 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == org_name:
+            org_id = str((r or {}).get("org_id") or "")
+    if not org_id:
+        w.rep.not_run("㊼ 全部断言", f"seed-owner 的组织里没有「{org_name}」")
+        return
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
+    hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    if not hit:
+        w.rep.not_run("㊼ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
+        return
+    aid = str((hit[0] or {}).get("assignment_id") or "")
+
+    plan0 = api_get(f"/entrust/assignments/{aid}/plan", tok) or {}
+    legs0 = plan0.get("legs") or []
+    seq_next = max([int((x or {}).get("seq") or 0) for x in legs0] + [0]) + 1
+    #: 故意用一个**未登记**的方式：页面必须**原样**显示它（投影侧不该把未知兜底成"公路"）。
+    mode_raw = "air"
+    frm = f"㊼起点{seq_next}"
+    to1 = f"㊼终点{seq_next}"
+    to2 = f"㊼改后终点{seq_next}"
+
+    if not w.open_workbench(code_mgr, tag="㊼"):
+        w.rep.not_run("㊼ 全部断言", "未能以 seed-owner 进入经理工作台")
+        return
+    # 组织显式钉住（`pickOrg` 的 `saved` 分支跨 IDE 重启保留）
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    d = w.wait_data(lambda x: x.get("plan") is not None, tries=60, gap=0.5)
+
+    # ── ① 写入口与段行都在渲染树里 ────────────────────────────────────────
+    n_open = w.c.count('[data-act-leg-open="1"]')
+    n_leg0 = w.c.count(".plan-leg")
+    w.rep.rec(
+        "㊼ ① 写入口（「加一段」）与段行都在渲染树里（判据落渲染树，不看内部状态键）",
+        n_open == 1 and n_leg0 == len(legs0),
+        f"加一段={n_open} 段行={n_leg0} 服务端段数={len(legs0)} plan={(d.get('plan') or {}).get('assignmentId')!r}",
+    )
+
+    # ── ② 点开建段表单：渲染出来 + 顺序号预填「最大序号 + 1」──────────────
+    w.c.scroll_into('[data-act-leg-open="1"]')
+    if not w.c.tap('[data-act-leg-open="1"]'):
+        w.rep.rec("㊼ ② 点「加一段」失败（按钮在渲染树里但点不动）", False, "")
+    d = w.wait_data(lambda x: x.get("legOpen") is True, tries=20, gap=0.3)
+    n_seq_input = w.c.count('input[data-df="leg-seq"]')
+    form_seq = str(((d.get("legForm") or {}).get("seq")) or "")
+    w.rep.rec(
+        "㊼ ② 建段表单渲染出来，且顺序号预填「**最大序号 + 1**」"
+        "（契约只要求 seq 唯一、不要求连续 —— 用「段数 + 1」在有空洞时会撞号）",
+        n_seq_input == 1 and form_seq == str(seq_next),
+        f"输入框={n_seq_input} 预填={form_seq!r} 期望={seq_next} 服务端序号={[x.get('seq') for x in legs0]}",
+    )
+
+    # ── ③ 经**界面**输入 + 提交（建段）────────────────────────────────────
+    # ⚠️ `seq` **不键入**：它已经预填好了（上面刚验过）——而 `input_text` 是**键入**，
+    #    往已有值后面追加，硬打一遍会得到 "99" ⇒ 撞号 409，看起来像产品缺陷。
+    typed = (
+        w.c.input_text('input[data-df="leg-mode"]', mode_raw)
+        and w.c.input_text('input[data-df="leg-from"]', frm)
+        and w.c.input_text('input[data-df="leg-to"]', to1)
+        and w.c.input_text('input[data-df="leg-note"]', "㊼ 章真机建段")
+    )
+    w.rep.rec(
+        "㊼ ③ 输入真的接上了（`input_text` 触发 `bindinput` ⇒ handler 按 `data-df` 认领到字段）",
+        typed,
+        "四个输入框都键入成功" if typed else "有输入框没接上（`data-df` 漏映射时正是这个症状）",
+    )
+    w.c.scroll_into('[data-act-leg-submit="1"]')
+    w.c.tap('[data-act-leg-submit="1"]')
+    # 提交成功后页面走整页 `load()` ⇒ 段数从服务端回来才算数
+    d = w.wait_data(
+        lambda x: len((x.get("plan") or {}).get("legs") or []) == len(legs0) + 1,
+        tries=40,
+        gap=0.5,
+    )
+    ui_legs = (d.get("plan") or {}).get("legs") or []
+    srv_legs = (api_get(f"/entrust/assignments/{aid}/plan", tok) or {}).get("legs") or []
+    n_leg1 = w.c.count(".plan-leg")
+    n_anchor = w.c.count(f'[data-plan-leg="{seq_next}"]')
+    row_wxml = w.c.outer_wxml(f'[data-plan-leg="{seq_next}"]')
+    w.rep.rec(
+        "㊼ ④ 经**界面**建段：页面段行数 = 服务端段数，新段那一行在渲染树里，"
+        "且**未登记的方式原样显示**（`air` ⇒ `air`，不兜底成「公路」）",
+        len(ui_legs) == len(srv_legs)
+        and n_leg1 == len(srv_legs)
+        and n_anchor == 1
+        and mode_raw in row_wxml
+        and frm in row_wxml
+        and to1 in row_wxml,
+        f"页面段={len(ui_legs)} 服务端段={len(srv_legs)} 类行={n_leg1} 值锚点={n_anchor} 行文本={row_wxml[:160]!r}",
+    )
+    added = [x for x in ui_legs if str((x or {}).get("seqText")) == str(seq_next)]
+    leg_id = str(((added[0] if added else {}) or {}).get("legId") or "")
+    if not leg_id:
+        w.rep.not_run("㊼ ⑤ ～ ⑧", "建段后页面里找不到那一段的 legId（后面的断言没有锚点）")
+        w.shot("㊼-建段未回读")
+        errs = w.new_errors(err_base)
+        w.rep.rec(
+            "㊼ ⑧ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
+        )
+        return
+
+    # ── ⑤ 点「改这一段」：表单**回填服务端原值** ──────────────────────────
+    w.c.scroll_into(f'[data-act-leg-edit="{leg_id}"]')
+    w.c.tap(f'[data-act-leg-edit="{leg_id}"]')
+    d = w.wait_data(lambda x: str(x.get("legEditingId") or "") == str(leg_id), tries=20, gap=0.3)
+    f = d.get("legForm") or {}
+    w.rep.rec(
+        "㊼ ⑤ 改段表单**回填服务端原值**（方式＝`air` 而不是显示文案）"
+        "——回填标签会在库里造出「公路」这个取值，而它与 `road` 在界面上长得一模一样",
+        str(f.get("mode")) == mode_raw and str(f.get("from")) == frm and str(f.get("to")) == to1,
+        f"回填 seq={f.get('seq')!r} mode={f.get('mode')!r} from={f.get('from')!r} to={f.get('to')!r}",
+    )
+
+    # ── ⑥ 空改动的**本地闸门**：一个字段都没改 ⇒ 页内说清，且**不发请求** ──
+    legs_before_noop = len((w.c.page_data().get("plan") or {}).get("legs") or [])
+    w.c.tap('[data-act-leg-submit="1"]')
+    d = w.wait_data(lambda x: "完全相同" in str(x.get("legHint") or ""), tries=8, gap=0.4)
+    hint = str(d.get("legHint") or "")
+    legs_after_noop = len((d.get("plan") or {}).get("legs") or [])
+    w.rep.rec(
+        "㊼ ⑥ 「一个字段都没改」在**本地**就被拦下：页内提示说清原因，"
+        "且**没有**把注定 400 的请求发出去（段数未变、页面未刷新）",
+        "完全相同" in hint and legs_after_noop == legs_before_noop,
+        f"legHint={hint!r} 段数 {legs_before_noop} → {legs_after_noop}",
+    )
+
+    # ── ⑦ 真改一段：点快捷项「内河」+ 换终点 ⇒ 段行变、历史留两版 ─────────
+    w.c.scroll_into('[data-act-leg-mode="water"]')
+    w.c.tap('[data-act-leg-mode="water"]')
+    d = w.wait_data(
+        lambda x: str((x.get("legForm") or {}).get("mode")) == "water", tries=10, gap=0.3
+    )
+    w.rep.rec(
+        "㊼ ⑦ 快捷项把方式改成已登记取值（`water` === 选中项的 key：两侧都是字符串）",
+        str((d.get("legForm") or {}).get("mode")) == "water",
+        f"legForm.mode={((d.get('legForm') or {}).get('mode'))!r}",
+    )
+    # ⚠️ 终点是**有值**的：`input_text` 会往后面追加 ⇒ 先用 `set_data` 清空。
+    #    清空这一步**不验输入通道**，所以随后仍然**用输入通道**打新值 ——
+    #    "输入真的接上了"这条判据不受影响（上面 ③ 已经在空框上验过一次）。
+    w.c.set_data({"legForm.to": ""})
+    w.c.input_text('input[data-df="leg-to"]', to2)
+    w.c.scroll_into('[data-act-leg-submit="1"]')
+    w.c.tap('[data-act-leg-submit="1"]')
+    # 提交成功后 `load()` 会把表单收起 ⇒ 以它为"写完成 + 整页刷新"的信号
+    d = w.wait_data(
+        lambda x: (
+            x.get("legOpen") is False
+            and str(((x.get("plan") or {}).get("legs") or [{}])[0].get("modeText") or "") != ""
+        ),
+        tries=40,
+        gap=0.5,
+    )
+    row2 = w.c.outer_wxml(f'[data-plan-leg="{seq_next}"]')
+    hist = api_get(f"/entrust/assignments/{aid}/legs/{leg_id}/revisions", tok) or []
+    kinds = [str((r or {}).get("change_kind") or "") for r in hist]
+    w.rep.rec(
+        "㊼ ⑧ 经**界面**改段：段行的方式标签变成服务端的「内河」、终点也换了；"
+        "服务端历史里**两版都在**（改段留版本，不是覆盖）",
+        "内河" in row2
+        and to2 in row2
+        and len(hist) >= 2
+        and kinds[0] == "created"
+        and kinds[-1] == "updated",
+        f"行文本={row2[:160]!r} 历史={len(hist)}版 kinds={kinds}",
+    )
+
+    # ── ⑨ 版本历史**渲染出来**，且第 1 版仍是**当时**的取值 ────────────────
+    w.c.scroll_into(f'[data-act-leg-hist="{leg_id}"]')
+    w.c.tap(f'[data-act-leg-hist="{leg_id}"]')
+    d = w.wait_data(lambda x: x.get("legHistory") is not None, tries=30, gap=0.4)
+    n_rev = w.c.count(".plan-rev")
+    first_rev = w.c.outer_wxml(".plan-rev")
+    hist_ui = (d.get("legHistory") or {}).get("items") or []
+    w.rep.rec(
+        "㊼ ⑨ 版本历史在渲染树里（`.plan-rev` 行数 ≥ 2）且**第 1 版保留当时的方式 `air`**"
+        "——历史被当前值覆盖时行数**照样**是 2，所以判据必须读第 1 版的内容",
+        n_rev >= 2 and mode_raw in first_rev and len(hist_ui) == len(hist),
+        f"版本行={n_rev} 页面版数={len(hist_ui)} 服务端={len(hist)} 第1版文本={first_rev[:160]!r}",
+    )
+
+    w.shot("㊼-航段命令写侧")
+    errs = w.new_errors(err_base)
+    w.rep.rec(
+        "㊼ ⑩ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
     )
 
 
@@ -8916,6 +9179,7 @@ SECTIONS = {
     "44": sec_44,
     "45": sec_45,
     "46": sec_46,
+    "47": sec_47,
     "0": sec_00,
     "1": sec_01,
     "2": sec_02,
@@ -9062,10 +9326,18 @@ DEFAULT_ORDER = [
     # ㊻ 运输计划（合同 §10.1 第 4 步）——设备侧运行取证。
     # ⚠️ **自足**：只依赖 `seed_entrust_demo.py` 的组织与委托 `演示委托·工作台样本`，
     #    刻意不依赖其它章节 ⇒ 可单跑：`--section 46`。
-    # ⚠️ **写侧界面不存在**（§7.22）：本章的写操作**经 API**、界面侧只验渲染；
-    #    「经界面建段」记 `LIMITATION`，**不计入通过**。
+    # ⚠️ 本章的写操作**经 API**（与 ㊼ 章的分工）；界面侧只验渲染。
+    #    曾把这句写成"写侧界面不存在 ⇒ LIMITATION"，写侧界面已于 §7.24 落地 ⇒ 已订正。
     # ⚠️ 副作用：会真建 1 段航段 + 1 条版本历史（`seq=88`，种子不占用）。临时库跑完即弃。
     "46",
+    # ㊼ 航段命令的**写侧界面**（合同 §10.1 第 4 步）——设备侧运行取证。
+    # ⚠️ **解除 ㊻ 的 `LIMITATION`**：㊻ 的写操作全部经 API（当时写侧界面不存在），
+    #    本章把"建段 / 改段 / 版本历史"全部**经界面**走一遍。
+    # ⚠️ **自足**：只依赖 `seed_entrust_demo.py` 的组织与 `演示委托·工作台样本`，
+    #    段由本章自己经界面建出来（种子不含航段夹具）⇒ 可单跑：`--section 47`。
+    # ⚠️ 副作用：会真建 1 段 + 改 1 次（2 条版本历史）；`seq` 取"现有最大序号 + 1"
+    #    ⇒ 共享库上重跑仍成立（不撞号），但会留下痕迹。
+    "47",
 ]
 
 
