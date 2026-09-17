@@ -721,6 +721,29 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "⚠️ 有意**不**复用 attachments_api.load_visible_attachment：客户对整条授权下的附件"
         "都有可见性，复用等于把内部底稿一起开给他。经理走本端点看到的是**客户视角**那几份",
     ),
+    # ── 合同派生（contracts_api.py / S3 / BP-03 第 8 条 / D1-08）──────────────
+    _r(
+        "POST",
+        "/offer-releases/{release_id}/contract",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:quote:create",
+        idempotent=True,
+        note="从**已接受的那条发布**派生合同核对稿（BP-03 第 8 条：合同从已接受事实派生）。"
+        "权限取「产出成果」那一档（quote:create），**不是** quote:publish —— "
+        "拟稿与对客发布是可以分给两个人的两个动作，合用一个权限会抹掉这条区分。"
+        "三类前置：未响应 / 已拒绝 ⇒ 409，被接受的不是对客报价 ⇒ 400，"
+        "已派生过 ⇒ 409 并回已存在的那份合同 id（判据是 UNIQUE(release_id)，不是先查后写）",
+    ),
+    _r(
+        "GET",
+        "/offer-releases/{release_id}/contract",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="派生关系 + **逐字段来源表**（D1-08 的 inspection 面）；未派生过 ⇒ 404"
+        "（回空壳会让「还没派生」与「派生了一份空合同」长得一样，而后者最该被发现）。"
+        "⚠️ 有意**不**给货主本人放行：来源表里是 release:12@v3 / leg:4 这类**内部编号**，"
+        "客户看合同走已有发布通路（冻结快照）。故用 assert_can_view_org（无货主旁路）",
+    ),
 )
 
 
