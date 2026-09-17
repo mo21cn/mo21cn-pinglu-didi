@@ -4,6 +4,7 @@
 
     .venv/Scripts/python.exe scripts/verify_local_gates.py
     .venv/Scripts/python.exe scripts/verify_local_gates.py --only pytest
+    .venv/Scripts/python.exe scripts/verify_local_gates.py --only rootscripts
     python scripts/verify_local_gates.py --ci-parity-only      # CI 的 parity 步骤用
 
 `--ci-parity-only` 是**用途标识**，不是又一种过滤：CI 的「门禁范围一致性」步骤
@@ -30,6 +31,21 @@ CI 那步浑然不觉），而它恰恰是"防止两边分叉"的那个脚本，
 本脚本**不替代** CI：它把 CI 里那几组检查在本地按同一口径跑一遍，方便提交前自检。
 参数、范围与 `backend/pyproject.toml`、`.github/workflows/ci.yml` 保持一致；
 两者若出现分叉，以 `scripts/verify_ci_parity.py` 的登记一致性检查为准。
+
+⚠️ **2026-09-17 补的第 4 组 `rootscripts`（原先这里只有 3 组 13 项）**
+--------------------------------------------------------------------
+CI 的「后端 lint + test」job **第 8 步**单独对**仓库根** `scripts/*.py` 跑
+`ruff check` ＋ `ruff format --check`（**显式**带 `--config backend/pyproject.toml`），
+外加"每个根脚本必须已纳入 lint 或已登记豁免"的**登记完整性**检查。
+**这一步原先不在本脚本里** ⇒ 13/13 全绿仍会 CI 红（#147 实证：唯一失败项、29s；
+且不带 `--config` 时本机默认规则只报 6 条、带上后同一份代码现出 9 条）。
+
+⇒ 该组的三项：`ruff check` / `ruff format --check` / 登记完整性。
+范围**不在这里抄一份** —— 由 `verify_ci_parity.py --json` 从 `ci.yml` **读出来**
+（它 docstring 里就写着"输出可直接喂给本地预演脚本，让'本地跑什么'由 ci.yml 决定"）。
+读不到计划就**记 FAIL**（不静默跳过：跳过等于把这一组变回不存在）。
+
+`--ci-parity-only` **不跑**该组：CI 自己已经在跑那一步，本地再跑一遍是重复。
 """
 
 from __future__ import annotations
@@ -104,9 +120,38 @@ def _junit_verdict(path: Path) -> tuple[bool, str]:
     return ok, f"{tests} 项（通过 {passed} / 跳过 {skipped} / 失败 {failures} / 错误 {errors}）"
 
 
+def _root_scripts_plan(py: str) -> tuple[dict | None, str]:
+    """取「仓库根 `scripts/*.py` 的 lint 计划」——**范围来自 ci.yml，不在这里抄一份**。
+
+    为什么要绕这一层：范围凡是"人记住的"就一定会分叉。本仓已两次踩到「本地绿、
+    CI 红」，两次根因都是范围不一致 —— `verify_ci_parity.py` 正是为此把 ci.yml 的
+    范围读成机器可读的 `--json`（它 docstring 就写着"输出可直接喂给本地预演脚本"）。
+
+    ⚠️ 该脚本的 `rc` **不作判据**：它的 `--json` 分支在"范围不一致"时照样打印计划、
+    只是返回 1（那是 `parity` 组的事）。这里只关心"计划取到没有"。
+    返回 `(plan, "")` 或 `(None, 原因)`；**取不到就由调用方记 FAIL**，不静默跳过。
+    """
+    rc, out = _run([py, str(ROOT / "scripts" / "verify_ci_parity.py"), "--json"], ROOT)
+    payload = [line for line in out.splitlines() if line.strip().startswith("{")]
+    if not payload:
+        return None, f"rc={rc} 未取到执行计划；{_tail(out, 2)}"
+    try:
+        plan = json.loads(payload[-1])
+    except ValueError as exc:
+        return None, f"执行计划不是合法 JSON：{exc}"
+    rs = plan.get("root_scripts") if isinstance(plan, dict) else None
+    if not isinstance(rs, dict) or not rs.get("linted"):
+        return None, f"计划里缺 root_scripts.linted：{str(plan)[:160]}"
+    return rs, ""
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="本地门禁（pytest 判据取 junitxml）")
-    ap.add_argument("--only", default="", help="只跑某一组：backend / pytest / frontend / parity")
+    ap.add_argument(
+        "--only",
+        default="",
+        help="只跑某一组：backend / pytest / frontend / rootscripts / parity",
+    )
     ap.add_argument(
         "--ci-parity-only",
         action="store_true",
@@ -173,6 +218,50 @@ def main(argv: list[str] | None = None) -> int:
     if want("parity"):
         rc, out = _run([py, str(ROOT / "scripts" / "verify_ci_parity.py")], ROOT)
         rows.append(("范围一致性 verify_ci_parity", rc == 0, f"rc={rc} {_tail(out, 2)}"))
+
+    if want("rootscripts"):
+        # ── 仓库根 scripts/*.py 的独立 lint（＝ CI「后端 lint + test」job 第 8 步）──
+        # ⚠️ 本脚本原先 13 项里**没有这一步** ⇒ 13/13 全绿仍会 CI 红：2026-09-17 #147
+        #    实证「唯一失败项、29s」，且不带 `--config` 时同一份代码本机只报 6 条、
+        #    带上后现出 9 条。范围**取自 ci.yml**（见 `_root_scripts_plan`）。
+        plan, err = _root_scripts_plan(py)
+        if plan is None:
+            rows.append(("根脚本 lint 计划（取自 ci.yml）", False, err))
+        else:
+            if plan.get("cwd") != ".":
+                rows.append(
+                    (
+                        "根脚本 lint 的 cwd",
+                        False,
+                        f"ci.yml 该 step 的 working-directory = {plan.get('cwd')!r}，"
+                        "与本脚本假设的「.」不同 ⇒ 请同步本脚本（`--config` 是相对路径）",
+                    )
+                )
+            linted = list(plan["linted"])
+            cfg = str(plan["ruff_config"])
+            for label, sub in (
+                ("check", ["check"]),
+                ("format --check", ["format", "--check"]),
+            ):
+                # `check` 与 `format --check` 是**两个独立的半步**：只跑 check 时
+                # format 的 `1 file would be reformatted` 完全看不到，而它同样阻塞。
+                rc, out = _run([str(ruff), *sub, "--config", cfg, *linted], ROOT)
+                rows.append((f"根脚本 ruff {label}", rc == 0, f"rc={rc} {_tail(out, 2)}"))
+            # 登记完整性：仓库根每个 `.py` 必须「已纳入 lint」或「已登记豁免」，二选一。
+            # 这是 CI 那一步的第三件事；漏了它，"新增根脚本却忘了登记"就没有人拦。
+            present = sorted(p.name for p in (ROOT / "scripts").glob("*.py"))
+            registered = {os.path.basename(x) for x in [*linted, *plan["exempt"]]}
+            missing = [name for name in present if name not in registered]
+            rows.append(
+                (
+                    "根脚本登记完整性",
+                    not missing,
+                    f"未登记：{missing}（必须「已纳入 lint」或「已登记豁免」二选一）"
+                    if missing
+                    else f"scripts/*.py {len(present)} 个：linted {len(linted)} / "
+                    f"exempt {len(plan['exempt'])}",
+                )
+            )
 
     print(f"\n================ 本地门禁（用途：{purpose}）================")
     for label, ok, note in rows:
