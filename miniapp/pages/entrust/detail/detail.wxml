@@ -380,6 +380,43 @@
 
           <view wx:if="{{!capCandidates.length}}" class="slot-note">还没有登记候选运力</view>
 
+          <!-- ② 两家可比：同一组维度**并排**。纵向卡片要上下滚动 + 靠记忆对齐，
+               而"它们在哪一点上不同"恰恰是"要不要选它"的依据 —— 卡片头那句
+               「两家可比」在只有纵向列表时是**没有载体的承诺**。
+               ⚠️ 只标「有差异」，不标哪一条更好：哪条更合适取决于货量、时效、能否拆批，
+                  那是方案判断，投影不替用户判（见 utils/entrust.js 的 buildCapacityComparison）。
+               ⚠️ 少于两家不渲染（一条候选没有"并排"可言），判据是 capCompareRows 的长度。 -->
+          <view wx:if="{{capCompareRows.length}}" class="cap-compare">
+            <view class="slot-note">
+              同一组维度并排看 {{capCompareCols.length}} 家：标出「有差异」的维度，就是它们真正不同的地方。
+            </view>
+            <scroll-view scroll-x class="cap-compare-scroll">
+              <view class="cap-compare-grid">
+                <view class="cap-compare-row cap-compare-headrow">
+                  <view class="cap-compare-label">维度</view>
+                  <view
+                    wx:for="{{capCompareCols}}"
+                    wx:for-item="cc"
+                    wx:key="candidateId"
+                    class="cap-compare-cell cap-compare-head"
+                  >{{cc.head}}</view>
+                </view>
+                <view wx:for="{{capCompareRows}}" wx:key="key" class="cap-compare-row">
+                  <view class="cap-compare-label">
+                    <text>{{item.label}}</text>
+                    <text wx:if="{{item.diff}}" class="cap-compare-diff">有差异</text>
+                  </view>
+                  <view
+                    wx:for="{{item.cells}}"
+                    wx:for-item="cell"
+                    wx:key="i"
+                    class="cap-compare-cell"
+                  >{{cell.text}}</view>
+                </view>
+              </view>
+            </scroll-view>
+          </view>
+
           <!-- 被拒时的**逐条**判定：通过的项也在（后端特意全给；只给没过的那几条，
                会让人改完再撞下一条）。顺序取后端给的 seq。 -->
           <view wx:if="{{capRuleRows.length}}" class="cap-verdict">
@@ -567,6 +604,8 @@
               <text class="{{rr.outcomeClass}}">{{rr.seq}} {{rr.ruleLabel}} · {{rr.outcomeLabel}}</text>
               <view class="cap-rule-detail">{{rr.detail}}</view>
             </view>
+            <view wx:if="{{item.scopeText}}" class="slot-note">本次确认覆盖的范围：{{item.scopeText}}</view>
+            <view wx:else class="cap-warn">本次确认的范围未记录（确认时必填 —— 缺失说明那一版成果载荷异常）</view>
             <view wx:if="{{item.note}}" class="slot-note">{{item.note}}</view>
             <view class="slot-refs">
               <view

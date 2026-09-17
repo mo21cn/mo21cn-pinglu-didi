@@ -351,6 +351,68 @@
   line-height: 1.5;
 }
 
+/* ---- 「两家可比」并排表 ----
+   列 = 候选，行 = 维度。**列宽固定 + 横向可滚**：三家以上时宁可横滑，
+   也不把字压成看不清 —— 这张表的用途就是"一眼比出来"，挤成一团就等于没做。 */
+.cap-compare {
+  margin-top: 16rpx;
+}
+
+.cap-compare-scroll {
+  margin-top: 8rpx;
+  /* 横向滚动靠 white-space: nowrap + 子元素 inline-block（小程序 scroll-view 的规矩） */
+  white-space: nowrap;
+}
+
+.cap-compare-grid {
+  display: inline-block;
+  min-width: 100%;
+}
+
+.cap-compare-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1rpx solid #DCE3EE;
+}
+
+.cap-compare-headrow {
+  border-bottom-color: #0F2540;
+}
+
+.cap-compare-label {
+  flex: 0 0 150rpx;
+  padding: 10rpx 8rpx;
+  font-size: 24rpx;
+  color: #6B7A8C;
+}
+
+.cap-compare-cell {
+  flex: 0 0 240rpx;
+  padding: 10rpx 8rpx;
+  font-size: 26rpx;
+  color: #0F2540;
+  /* 父级 nowrap 是为了横滑，单元格里的长文案仍要能换行 */
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.cap-compare-head {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #6B7A8C;
+}
+
+/* 差异标记 = 「这两家在这一维上不一样」。**不评价哪边好** —— 只指出分歧点，
+   好不好是方案判断（见 utils/entrust.js 的 buildCapacityComparison）。 */
+.cap-compare-diff {
+  margin-left: 8rpx;
+  padding: 0 8rpx;
+  border-radius: 6rpx;
+  font-size: 20rpx;
+  color: #FFFFFF;
+  background: #B45309;
+}
+
 /* ---- 本页 hover 反馈 ----
    `hover-dim` 是页面级类（app.wxss 未定义），用到就自带一份；
    漏声明只会表现为"点了没反馈"，不会报错（verify_entrust_ui.js 有专门检查）。 */

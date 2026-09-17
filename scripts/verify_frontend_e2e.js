@@ -3507,8 +3507,10 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
         } else ok()
 
         // ── ⑥ 确认「甲」（全过）：通过 ⇒ 产出确认记录 + 采购确认成果 ──
+        // 范围文案只写一次：下面三条断言（页面投影 / 服务端读模型 / 成果载荷）都用它。
+        const SCOPE_TEXT = 'e2e 全程 800 吨'
         s.onOpenCapConfirm({ currentTarget: { dataset: { actCapConfirmOpen: idOf(C_OK) } } })
-        s.onCapInput(ev('cap-scope', 'e2e 全程 800 吨'))
+        s.onCapInput(ev('cap-scope', SCOPE_TEXT))
         WRITE_ENABLED = true
         try {
           await s.onSubmitCapConfirm({
@@ -3530,6 +3532,11 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           } else ok()
           if (!conf.artifactId) fail('⑰ 运力 · 确认记录没有成果引用')
           else ok()
+          // 范围（`agreed_scope`）**不在确认行的列上** —— 它按冻结的成果版本投影。
+          // 页面这一侧必须能显示出来（后端给了、前端却不渲染，等于白给）。
+          if (String(conf.scopeText) !== SCOPE_TEXT) {
+            fail('⑰ 运力 · 页面投影没带上这次确认的范围', String(conf.scopeText))
+          } else ok()
           // 以**服务端事实**判定，而不是从页面的 setData 反推（同 ⑮ 段的取向）
           const be = await api('GET', '/entrust/capacity-confirmations/' + conf.confirmationId,
             { token: ownerToken })
@@ -3541,6 +3548,44 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           } else if (String((be.data || {}).candidate_id) !== idOf(C_OK)) {
             fail('⑰ 运力 · 服务端确认挂的不是那条候选',
               String((be.data || {}).candidate_id) + ' vs ' + idOf(C_OK))
+          } else if (String((be.data || {}).agreed_scope) !== SCOPE_TEXT) {
+            fail('⑰ 运力 · 服务端读模型没带这次确认的范围',
+              String((be.data || {}).agreed_scope))
+          } else ok()
+          // 接着验**并排比较**（「两家可比」的载体）：列数=候选数、行=固定五个维度、
+          // 每行列数=列数、`diff` 与取值自洽。
+          // ⚠️ 只钉**不变量**，不钉"哪一维该有差异"—— 那等于把夹具的具体数值焊进断言，
+          //    以后改夹具就红，而红的理由与产品无关（"判据要能说清它为什么红"）。
+          const dc = (s._final().capCompareCols || []).length
+          const cmp = s._final().capCompareRows || []
+          const candCount = (s._final().capCandidates || []).length
+          if (dc !== candCount || dc < 2) {
+            fail('⑰ 运力 · 并排比较的列数不等于候选数（≥2 条才该渲染）',
+              dc + ' 列 vs ' + candCount + ' 条候选')
+          } else ok()
+          const CMP_KEYS = 'capacity,loadBasis,rate,validUntil,evidence'
+          if (cmp.map((r) => r.key).join(',') !== CMP_KEYS) {
+            fail('⑰ 运力 · 并排比较的维度不是固定五项（顺序也要稳定：同一份数据两次打开要长得一样）',
+              cmp.map((r) => r.key).join(','))
+          } else ok()
+          const badShape = cmp.filter((r) => (r.cells || []).length !== dc
+            || Object.keys(r).sort().join(',') !== 'cells,diff,key,label')
+          if (badShape.length) {
+            fail('⑰ 运力 · 并排比较的行结构不对（每行列数应=列数；行上不得多出"推荐"之类的字段）',
+              JSON.stringify(badShape[0]))
+          } else ok()
+          // `diff` 与取值**自洽**：判断只用它自己的输出，不把维度定义重抄一遍。
+          const badDiff = cmp.filter((r) => {
+            const texts = (r.cells || []).map((c) => String(c.text))
+            return (new Set(texts).size > 1) !== !!r.diff
+          })
+          if (badDiff.length) {
+            fail('⑰ 运力 · 差异标记与取值不一致（标了差异却全一样 / 不一样却没标）',
+              JSON.stringify(badDiff[0]))
+          } else ok()
+          // 判据不能空转：三条候选在吨位/有效期上确实不同 ⇒ 至少要有一行标了差异
+          if (!cmp.some((r) => r.diff)) {
+            fail('⑰ 运力 · 三条候选一个差异维度都没标出来（判据空转）')
           } else ok()
           // 候选状态被确认命令改写成 confirmed ⇒ 同一界面不该还留着可点的确认按钮
           const after = (s._final().capCandidates || []).filter((x) => x.carrier === C_OK)[0] || {}
