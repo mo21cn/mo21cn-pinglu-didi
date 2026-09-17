@@ -35,6 +35,7 @@ const {
   fetchSession,
   fetchSessionContext,
   fetchSessions,
+  adoptJobProposal,
   appendMessage,
   createSession,
   jobFailureText,
@@ -78,6 +79,11 @@ Page({
     attachmentText: '',
     draft: '',
     sending: false,
+    /** 采纳：待确认的作业与提案类型（页内确认条的两个键） */
+    adoptingJobId: '',
+    adoptingType: '',
+    adopting: false,
+    adoptNotice: '',
     /** fixture 模式提示（后端 mocked=true 时置真） */
     mockedNote: ''
   },
@@ -407,6 +413,79 @@ Page({
   /** 作业失败原因（失败必须**明确**，不能只写"失败"） */
   jobFailure(job) {
     return jobFailureText(job)
+  },
+
+  /**
+   * 采纳一份提案为成果（BP-02 的核心：**提案 → 人工采纳 → 同一份成果**）。
+   *
+   * 为什么分两步（先问、再确认）：采纳会**创建成果**，是本页唯一的写业务动作。
+   * 而确认用**页内确认条**而不是 `wx.showModal`：原生弹层不在渲染树里
+   * （选择器命中 0，工具点不到它的确认键）⇒ 关键路径永远拿不到设备证据。
+   * 这与本项目「受理」入口已经是同一条处置。
+   */
+  onAdoptAsk(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const jobId = ds.job_id != null ? String(ds.job_id) : ''
+    const want = ds.artifact_type ? String(ds.artifact_type) : ''
+    if (!jobId || !want) return
+    this.setData({ adoptingJobId: jobId, adoptingType: want, adoptNotice: '' })
+  },
+
+  onAdoptCancel() {
+    this.setData({ adoptingJobId: '', adoptingType: '' })
+  },
+
+  onAdoptConfirm() {
+    const self = this
+    const jobId = this.data.adoptingJobId
+    const want = this.data.adoptingType
+    if (!jobId || !want || this.data.adopting) return
+    const job = (this.data.jobs || []).filter(function (j) {
+      return String(j.jobId) === jobId
+    })[0]
+    const prop = ((job && job.proposals) || []).filter(function (p) {
+      return p.artifactType === want
+    })[0]
+    if (!prop) {
+      // 找不到对应提案 ⇒ 页面状态与按钮不同步。如实报错，不要盲发一个空载荷
+      // （那会在服务端产生一份内容为空的成果）。
+      wx.showToast({ icon: 'none', title: '该提案已不在本页，请下拉刷新' })
+      return
+    }
+    this.setData({ adopting: true })
+    adoptJobProposal(
+      jobId,
+      // `payload` 原样提交：本页没有编辑态，就不伪造"已人工修改过的内容"。
+      // 真正的字段级修正发生在成果页（那里有编辑与确认链路）。
+      { artifact_type: want, payload: prop.payload, note: '人工确认后采纳' },
+      newIdempotencyKey('adopt')
+    )
+      .then(function (row) {
+        const aid = row && row.artifact_id != null ? String(row.artifact_id) : ''
+        self.setData({ adopting: false, adoptingJobId: '', adoptingType: '' })
+        // 重新走一遍取数：成果卡才会把**刚采纳的这一份**列出来
+        // （`refresh()` 只刷消息与作业，不刷成果卡）。
+        return self.load().then(function () {
+          self.setData({
+            adoptNotice: aid
+              ? '已采纳为成果 #' + aid + '（与工作台、成果页是同一份）'
+              : '已采纳为成果'
+          })
+        })
+      })
+      .catch(function (err) {
+        self.setData({ adopting: false })
+        const status = (err && err.httpStatus) || 0
+        wx.showToast({
+          icon: 'none',
+          title:
+            status === 400
+              ? '该提案类型与该作业不匹配'
+              : status === 409
+                ? '作业尚未成功，暂不能采纳'
+                : '采纳失败' + (status ? '（' + status + '）' : '')
+        })
+      })
   },
 
   onOpenArtifact(e) {

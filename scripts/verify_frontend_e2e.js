@@ -882,7 +882,11 @@ function loadPage(file, ctx) {
           pageWrite('POST', '/entrust/sessions/' + sid + '/jobs', body, key).then(rejectIfNotOk),
         // 推进作业：**不带**幂等键（契约如此，见 pageWrite 里的说明）
         runJob: (jid) =>
-          pageWrite('POST', '/entrust/agent/jobs/' + jid + '/run', {}, null).then(rejectIfNotOk)
+          pageWrite('POST', '/entrust/agent/jobs/' + jid + '/run', {}, null).then(rejectIfNotOk),
+        // 采纳提案为成果（BP-02：提案 ≠ 成果，必须人工采纳，AC-09）
+        adoptJobProposal: (jid, body, key) =>
+          pageWrite('POST', '/entrust/agent/jobs/' + jid + '/adopt', body, key)
+            .then(rejectIfNotOk)
       })
     }
     if (s.indexOf('auth') !== -1) {
@@ -2089,29 +2093,49 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           })
           if (badJob) fail(P2 + '作业缺状态标签/chip 类', JSON.stringify(badJob).slice(0, 160))
           else ok()
-          // 后端 succeeded ⇒ 页面必须显示"有几条提案"，且 fixture 模式必须**可见**
-          // （`LLM_MOCK=true` 下把桩当模型质量证据是最要命的一种误读）。
+          // 后端 succeeded ⇒ 页面必须显示"有几条提案"，且**模式标注**必须与后端事实一致。
           const beOkJobs = beJobs.filter(function (j) { return j.status === 'succeeded' })
+          // ⚠️ `pageJob` 在 if/else **之外**声明：下面的"采纳"段也要用它。
+          //    写在 else 块里会变成 `one is not defined` —— 实测崩过一次，而崩点在
+          //    最后一段、前面的断言全绿，极易被读成"新增那段只是没跑"。
+          let pageJob = null
           if (!beOkJobs.length) {
             fail(P2 + '夹具里没有成功的作业（S2 首片的"结果"一侧没验到）',
               beJobs.map(function (j) { return String(j.status) }).join(','))
           } else {
-            const one = (d.jobs || []).find(function (j) {
+            pageJob = (d.jobs || []).find(function (j) {
               return String(j.jobId) === String(beOkJobs[0].job_id)
             })
-            if (!one || one.proposalCount < 1) {
-              fail(P2 + '作业成功但页面没列出提案', one ? String(one.proposalCount) : '缺该作业')
+            if (!pageJob || pageJob.proposalCount < 1) {
+              fail(P2 + '作业成功但页面没列出提案',
+                pageJob ? String(pageJob.proposalCount) : '缺该作业')
             } else {
               ok()
-              // ⚠️ fixture 模式标注**当前验不到**，如实记 note —— 不假装验过。
-              // 原因：`agentjobs._row_to_job` 没把 `mocked` 放进**作业投影**
-              // （它只存在于 `ent_agent_job_attempt.mocked`），而会话页读的是
-              // **作业列表** ⇒ `decorateJob().mocked` 恒 false，界面上那句
-              // "本页含 fixture 结果（LLM_MOCK）"永远不会出现。
-              // 要修得让作业投影带上 mocked（属独立切片，见接口增量 §7.4）。
-              if (!one.mocked) {
-                note(P2 + 'fixture 模式标注未生效：后端作业投影没有 mocked 字段，'
-                  + '而界面必须能标明"这是桩输出"')
+              // 夹具必须把**真输入**交给作业：不带 `input.quote_text` 时作业不会
+              // 失败，而是**成功地**返回"未提供待解析的报价文本"
+              // （`findings[0].code = NO_QUOTE_INPUT`）⇒ 提案为空 ⇒ 断言看到的
+              // 是一个**合理解释**而不是一次错误。这种假绿比红麻烦，故显式拦住。
+              const codes = (((beOkJobs[0].envelope || {}).findings) || []).map(
+                function (f) { return String(f.code) })
+              if (codes.indexOf('NO_QUOTE_INPUT') !== -1) {
+                fail(P2 + '作业"成功"但没拿到报价文本（NO_QUOTE_INPUT）—— 空成功',
+                  codes.join(','))
+              } else ok()
+              // 模式标注：判据是**页面与后端一致**，不是"必须是桩"。
+              // ⚠️ 本机 `backend/.env.local`（不入库）里存着真 Key ⇒ 本地跑会**真打模型**
+              //    （`mocked=false`），而 CI 里 `LLM_MOCK=true` ⇒ `mocked=true`。
+              //    把断言写成"必须 mocked=true"会让**同一份代码本地红、CI 绿** ——
+              //    那是环境差异，不是产品缺陷。合同要的是**区分**两种事实，
+              //    所以这里判"两者一致"，并额外要求该字段真实存在（不是 undefined）。
+              const noteShown = String(d.mockedNote || '').indexOf('LLM_MOCK') !== -1
+              if (typeof beOkJobs[0].mocked !== 'boolean') {
+                fail(P2 + '作业投影没有 mocked（界面无从判断模式）',
+                  String(beOkJobs[0].mocked))
+              } else if (beOkJobs[0].mocked === true && !noteShown) {
+                fail(P2 + '这是桩输出但页面没有模式提示条', String(d.mockedNote))
+              } else if (beOkJobs[0].mocked === false && noteShown) {
+                fail(P2 + '真实模型调用被标成桩输出（反向误标同样有害）',
+                  String(d.mockedNote))
               } else ok()
             }
           }
@@ -2121,6 +2145,95 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
           if ((d.attachments || []).length !== beAtt.length) {
             fail(P2 + '附件条数与后端不符', (d.attachments || []).length + ' vs ' + beAtt.length)
           } else ok()
+
+          // 首次装载必须**只读**：会话已存在时页面不该再建会话、发消息或跑作业。
+          if (pageWrites.length !== w0) {
+            fail(P2 + '首次装载发了写请求（会话已存在时不该写）', pageWrites.length + ' vs ' + w0)
+          } else ok()
+
+          // ── 采纳：提案 → 成果（BP-02 出口证据 / 合同 §10.1 第 3 步）────────
+          // 判据是**同一份成果**：采纳之后成果卡里必须多出后端返回的那一份，
+          // 而工作台读的是同一个端点（`/assignments/{aid}/artifacts`）⇒ 三处同 ID。
+          const prop = pageJob ? (pageJob.proposals || [])[0] : null
+          if (!prop) {
+            fail(P2 + '作业只有提案计数、没有提案对象（人工采纳的前提是看得见内容）',
+              JSON.stringify(pageJob ? Object.keys(pageJob) : null))
+          } else {
+            const beTypes = ((((beOkJobs[0] || {}).envelope || {}).artifact_proposals) || [])
+              .map(function (x) { return String(x.artifact_type) })
+            if (beTypes.indexOf(String(prop.artifactType)) === -1) {
+              fail(P2 + '页面列出的提案类型不在后端信封里', String(prop.artifactType)
+                + ' vs ' + beTypes.join(','))
+            } else ok()
+            if (!(prop.rows || []).length) {
+              fail(P2 + '提案没有逐字段内容（只显示"提案 1 条"等于把该看的东西藏起来）',
+                String(prop.artifactType))
+            } else ok()
+
+            const nBefore = (d.cards || []).length
+            // 采纳**之前**先把后端的成果编号记下来：判定"新产生的是哪一份"要用
+            // 前后差集，而不是从 `pageWrites` 末条反推（那条依赖写记录的顺序与条数，
+            // 一旦多/少一条就会取到**别的**成果的 id，而断言会以"编号不对"的形式
+            // 报出来 —— 看起来像页面的错，其实是判定基准取错了）。
+            const idsBefore = await api('GET',
+              '/entrust/assignments/' + aid + '/artifacts?page=1&size=50', { token: ownerToken })
+            const setBefore = new Set((((idsBefore.data || {}).items) || [])
+              .map(function (x) { return String(x.artifact_id) }))
+            WRITE_ENABLED = true
+            try {
+              s.onAdoptAsk({ currentTarget: { dataset: {
+                job_id: String(pageJob.jobId), artifact_type: prop.artifactType } } })
+              await tick(30)
+              if (String(s._final().adoptingJobId) !== String(pageJob.jobId)) {
+                fail(P2 + '点了采纳但没有进入确认态（确认条是唯一改变业务状态的入口）',
+                  String(s._final().adoptingJobId))
+              } else ok()
+              s.onAdoptConfirm()
+              await tick(200)
+            } finally {
+              WRITE_ENABLED = false
+            }
+            // 只允许**这一笔**写：采纳 = 创建成果，是本页唯一的写业务动作。
+            // 失败信息里带上各笔写的路径 —— 否则"多了一笔"无法定位是谁写的。
+            if (pageWrites.length !== w0 + 1) {
+              fail(P2 + '采纳应恰好产生 1 笔写请求',
+                pageWrites.length + ' vs ' + (w0 + 1) + '；写路径='
+                + pageWrites.map(function (x) { return x.method + ' ' + x.path }).join(' | '))
+            } else ok()
+            const last = pageWrites[pageWrites.length - 1] || {}
+            const adoptedId = last.data && last.data.artifact_id != null
+              ? String(last.data.artifact_id) : ''
+            if (!adoptedId || String(last.path || '').indexOf('/adopt') === -1) {
+              fail(P2 + '末笔写请求不是采纳（或未返回 artifact_id）',
+                String(last.method) + ' ' + String(last.path) + ' → '
+                + JSON.stringify(last.data).slice(0, 120))
+            } else ok()
+            if (setBefore.has(adoptedId)) {
+              fail(P2 + '采纳返回的成果在采纳前就已存在（那这一笔没造出新东西）', adoptedId)
+            } else ok()
+
+            // 回放快照换成**写之后**的真事实（否则页面 load() 读到的是写之前的库，
+            // "成果卡多了一份"就会假失败）。
+            const list2 = await api('GET',
+              '/entrust/assignments/' + aid + '/artifacts?page=1&size=50', { token: ownerToken })
+            if (list2.status === 200) entrustAssignmentArtifacts[aid] = list2.data
+            await s.load()
+            await tick(140)
+            const d3 = s._final()
+            const ids3 = (d3.cards || []).map(function (c) { return String(c.artifactId) })
+            if (ids3.length !== nBefore + 1) {
+              fail(P2 + '采纳后成果卡没有多出那一份', nBefore + ' → ' + ids3.length
+                + '（view=' + String(d3.view) + '）')
+            } else ok()
+            if (ids3.indexOf(adoptedId) === -1) {
+              fail(P2 + '采纳产生的成果不在会话成果卡里（chat 与工作台就不是同一份了）',
+                'adopted=' + adoptedId + ' cards=' + ids3.join(','))
+            } else ok()
+            if (String(d3.adoptNotice || '').indexOf(adoptedId) === -1) {
+              fail(P2 + '采纳后没有点名成果编号（用户无法确认就是这一份）',
+                String(d3.adoptNotice))
+            } else ok()
+          }
 
           // 「离开后重新进入仍可恢复」：**新装载一次**（新实例、无页面内缓存），
           // 断言它拿回同样的会话、消息与作业。这是本片的核心承诺，
@@ -2137,10 +2250,9 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
                 + ' jobs=' + (d2.jobs || []).length)
             } else ok()
           }
-          // 两次装载都是**只读**：会话已存在时页面不该再建会话、发消息或跑作业。
-          if (pageWrites.length !== w0) {
-            fail(P2 + '取数阶段发了写请求（会话已存在时不该写）',
-              pageWrites.length + ' vs ' + w0)
+          // 重进是**只读**的：不得再有新的写请求（采纳那一笔之后不应增加）
+          if (pageWrites.length !== w0 + 1) {
+            fail(P2 + '重进触发了额外的写请求', pageWrites.length + ' vs ' + (w0 + 1))
           } else ok()
         }
       }

@@ -233,6 +233,9 @@ def get_job(session: Session, job_id: int) -> dict[str, Any]:
         raise AgentJobNotFoundError(f"作业 {job_id} 不存在")
     job = _row_to_job(row)
     job["attempts"] = list_attempts(session, job_id)
+    # 就地补 `mocked`（三态）：详情与列表必须同一口径，否则页面在两条路径上
+    # 会给出互相矛盾的"模式"结论。
+    _attach_attempt_modes(session, [job])
     return job
 
 
@@ -290,7 +293,55 @@ def list_jobs(
         .mappings()
         .all()
     )
-    return total, [_row_to_job(r) for r in rows]
+    items = [_row_to_job(r) for r in rows]
+    return total, _attach_attempt_modes(session, items)
+
+
+def _attach_attempt_modes(session: Session, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """给作业行补上「**最近一次尝试**是不是规则模板（fixture）输出」。
+
+    ## 为什么作业投影需要它
+
+    界面必须能标明"这是桩输出、不是真实模型结果" —— 合同 §3.2 把
+    「deterministic model fixture」与「live model invocation」列为**必须区分**的
+    两种事实，BP-02 的 persisted outputs 里也点名了 `model-mode evidence`。
+    而 `mocked` 只存在于**尝试**行上，作业投影此前完全没有它 ⇒ 页面即使拿到作业
+    也**无从判断**，只能显示成真实结果。这是"数据没下发"而不是"界面没做"。
+
+    ## 为什么取最近一次尝试
+
+    一个作业可能有多行尝试（失败重排、租约丢失）。决定这份 `envelope_json`
+    是谁产出的**只有最后一次** —— 取首次或取任一都会在重试场景下说错。
+
+    ## 未知保持未知（不补 False）
+
+    还没有任何尝试行时（如 `queued`）**保持 `None`**：
+    "没跑过"与"跑过但不是桩"是两句不同的话，用 `False` 表示前者就是编造事实。
+    """
+    jobs = list(jobs)
+    ids = [int(j["job_id"]) for j in jobs if j.get("job_id") is not None]
+    if not ids:
+        return jobs
+    placeholders = ", ".join(f":j{i}" for i in range(len(ids)))
+    params: dict[str, Any] = {f"j{i}": jid for i, jid in enumerate(ids)}
+    rows = (
+        session.execute(
+            text(
+                "SELECT a.job_id AS job_id, a.mocked AS mocked "
+                "FROM ent_agent_job_attempt a "
+                f"WHERE a.job_id IN ({placeholders}) AND a.attempt_no = ("
+                "SELECT MAX(b.attempt_no) FROM ent_agent_job_attempt b "
+                "WHERE b.job_id = a.job_id)"
+            ),
+            params,
+        )
+        .mappings()
+        .all()
+    )
+    mode = {int(r["job_id"]): bool(r["mocked"]) for r in rows}
+    for j in jobs:
+        j["mocked"] = mode.get(int(j["job_id"]))
+    return jobs
 
 
 # ── 提交与状态转移 ──────────────────────────────────────────────────────────
