@@ -38,7 +38,7 @@ const {
   isArtifactDirty,
   newIdempotencyKey,
   releaseOffer,
-  releasedRevisionOf,
+  releasedRevisionFor,
   viewState,
   withdrawOffer
 } = require('../../../utils/entrust')
@@ -201,8 +201,14 @@ Page({
     const list = releases || []
     // 把"这一版发过没有"算在**版本行**上：发布是按**精确版本**做的，
     // 不给出版本级的结论，用户就只能猜"我发的到底是哪一版"。
+    //
+    // ⚠️ 必须用 `releasedRevisionFor(release, **本成果**, 版本号)` ——
+    //    `list` 是**整条授权**的发布（可能含别的成果），而版本号只在成果**内部**唯一。
+    //    只比版本号 ⇒ 别的成果发过 v1 就把本成果的 v1 也标成已发布 ⇒
+    //    **不给发布入口**、用户发不出去，而页面上看不出为什么（静默）。
+    //    2026-09-18 设备走查抓到（见 `utils/entrust.js` 的 `releasedRevisionFor`）。
     const rows = (revisions || []).map(function (r) {
-      const rel = releasedRevisionOf(list, r.revisionNo)
+      const rel = releasedRevisionFor(list, artifact && artifact.artifactId, r.revisionNo)
       return Object.assign({}, r, {
         releaseId: rel ? rel.releaseId : '',
         releaseStatusLabel: rel ? rel.statusLabel : '',
