@@ -41,13 +41,18 @@ const {
   canClaimAssignment,
   claimAssignment,
   createTask,
+  decorateCustomerOffer,
   decorateDetail,
   decorateWorkbench,
+  downloadOfferAttachment,
   fetchAssignment,
+  fetchMyOfferReleases,
   fetchMyOrgs,
   fetchWorkbench,
   newIdempotencyKey,
   permittedOrgIds,
+  pickOfferForAssignment,
+  respondOffer,
   viewState
 } = require('../../../utils/entrust')
 
@@ -129,7 +134,35 @@ Page({
     claimOpen: false,
     /** 受理请求在飞（防同一页重复点击；跨用户并发仍由服务端 409 兜住） */
     claiming: false,
-    taskTypes: TASK_TYPE_OPTIONS
+    taskTypes: TASK_TYPE_OPTIONS,
+
+    // ── 对客报价（客户侧；S3 纵向切片 / BP-03 第 6/7/9/10 条）──────────────
+    /**
+     * 本单的**对客报价**（客户视角）。`null` ＝ 这一单没有发给我的发布。
+     *
+     * 说明为什么它不会在经理的屏幕上出现：数据来自 `GET /my-offer-releases`，
+     * 服务端只回 `customer_user_id == 登录用户` 的那些 ⇒ 经理拿到的永远是空列表。
+     * 前端**不**靠角色判断来隐藏这张卡 —— 那是"先拿到再隐藏"，而合同要求
+     * 客户数据必须由**服务端投影**决定谁能看到。
+     */
+    offer: null,
+    /**
+     * 响应表单展开成哪一种（`''` ＝ 未展开）。
+     *
+     * 用页内展开条而**不是** `wx.showModal`：接受／拒绝是本屏唯一会**改变业务事实**
+     * 且**不可回退**的动作（后端 `UNIQUE(release_id)`，响应过一次就永远不能再响应），
+     * 它必须能被真机验证。原生弹层的确认键不在渲染树里，工具点不到 ⇒ 只能记
+     * `LIMITATION`。本页的受理确认条与任务输入条已按同一条理由改造过两次。
+     */
+    offerForm: '',
+    /** 客户填的响应说明（拒绝时尤其需要一句话，否则经理只看到一个"拒绝"） */
+    offerNote: '',
+    /** 响应表单内的校验/失败提示（页内常驻，不用会消失的 toast） */
+    offerHint: '',
+    /** 响应请求在飞 */
+    offerSubmitting: false,
+    /** 附件下载的**页内**状态文案（下载是异步的，且失败要能一直看得见） */
+    downloadHint: ''
   },
 
   onLoad(query) {
@@ -199,7 +232,11 @@ Page({
       claiming: false,
       pickKey: '',
       taskOpenKey: '',
-      taskHint: ''
+      taskHint: '',
+      offerForm: '',
+      offerNote: '',
+      offerHint: '',
+      downloadHint: ''
     })
     // 前两个请求是**页面内容**：工作台是主内容，委托本体是它的头卡。任一失败都按失败
     // 处理 ——「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
@@ -209,10 +246,18 @@ Page({
     // 「仍可查看其有权读取的内容」—— 拿不到权限结论时用户仍有权读这张委托，
     // 把整页打成错误态是**过度反应**，而且会说错话（委托明明读到了，页面却说失败）。
     // 保守方向也在这里：拿不到 ⇒ 不显示，而不是猜"有权限"。
+    //
+    // 第四个是对客报价（S3）。它与权限投影同一命运、同一理由：客户可能这单根本没有
+    // 收到过发布（正常状态），而经理**永远**会拿到空列表（服务端只回"发给我的"）。
+    // 让它失败时把整页打成错误态，会让经理看不了这张委托 —— 那是把"没有报价"
+    // 说成"页面坏了"。
     return Promise.all([
       fetchAssignment(id),
       fetchWorkbench(id),
       fetchMyOrgs().catch(function () {
+        return null
+      }),
+      fetchMyOfferReleases().catch(function () {
         return null
       })
     ])
@@ -220,7 +265,10 @@ Page({
         self.permittedOrgIds = permittedOrgIds((res[2] && res[2].items) || [], ORG_PERM_CLAIM)
         const detail = decorateDetail(res[0], self.permittedOrgIds)
         const board = decorateWorkbench(res[1])
-        self.applyState(viewState({ status: 200, total: 1 }), detail, board)
+        // 只挑**本单**的那条：`/my-offer-releases` 是"我收到的全部发布"，
+        // 混着别的委托单。挑错会把 A 单的报价显示在 B 单上，而两者都"看起来正常"。
+        const mine = pickOfferForAssignment((res[3] && res[3].items) || [], id)
+        self.applyState(viewState({ status: 200, total: 1 }), detail, board, mine)
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -232,7 +280,7 @@ Page({
       })
   },
 
-  applyState(state, detail, board) {
+  applyState(state, detail, board, offer) {
     this.setData({
       view: state.state,
       viewTitle: state.title,
@@ -250,7 +298,12 @@ Page({
         this.permittedOrgIds
       ),
       canCreateCase: !!(board && board.status === 'claimed'),
-      unassignedHint: board ? board.unassignedHint : ''
+      unassignedHint: board ? board.unassignedHint : '',
+      offer: offer ? decorateCustomerOffer(offer) : null,
+      offerForm: '',
+      offerNote: '',
+      offerHint: '',
+      downloadHint: ''
     })
   },
 
@@ -458,6 +511,130 @@ Page({
         from: SELF
       })
     }
+  },
+
+  // ── 人工落点：客户响应（对客报价；S3 / BP-03 第 6/7 条）──────────────
+  //
+  // 这一组是本屏**唯一**「身份即权限」的落点：只有该委托的货主本人能响应。
+  // 经理看得到这张卡（他有权看这条委托的发布），但服务端对他的响应请求返回 **403**
+  // —— 界面因此**不给他**按钮，而不是给一个必然失败的按钮。
+
+  /** 展开响应表单（`accept` / `reject`）；再点同一次即收起。 */
+  onOfferRespond(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const want = String(ds.decision || '')
+    if (!want) return
+    this.setData({
+      offerForm: this.data.offerForm === want ? '' : want,
+      offerNote: '',
+      offerHint: ''
+    })
+  },
+
+  /** 说明按**路径**写回（不整对象替换，避免输入法组字被打断） */
+  onOfferNoteInput(e) {
+    this.setData({ offerNote: (e && e.detail && e.detail.value) || '', offerHint: '' })
+  },
+
+  /** 收起响应表单（取消）。已输入的内容**不保留** —— 取消就是取消。 */
+  onOfferCancel() {
+    this.setData({ offerForm: '', offerNote: '', offerHint: '' })
+  },
+
+  /**
+   * 提交响应。**这一步没有回头路**：后端 `UNIQUE(release_id)`，同一次发布只能被响应一次，
+   * 而"接受"是客户对**那一版内容**的确认 —— 所以确认动作必须发生在用户明确选中的那一版上
+   * （`offerForm` 由按钮的 `data-decision` 决定，不靠"再读一次状态"）。
+   */
+  onOfferSubmit() {
+    const offer = this.data.offer
+    const decision = String(this.data.offerForm || '')
+    if (!offer || !decision) return Promise.resolve()
+    const note = String(this.data.offerNote || '').trim()
+    if (decision === 'reject' && !note) {
+      // 拒绝必须给一句话：经理那边只看到"已拒绝"是没法决定下一步的
+      this.setData({ offerHint: '拒绝时请写明原因（经理据此决定是改价还是撤回）' })
+      return Promise.resolve()
+    }
+    return this.submitOfferResponse(decision, note)
+  },
+
+  submitOfferResponse(decision, note) {
+    const self = this
+    if (this.data.offerSubmitting) return Promise.resolve()
+    this.setData({ offerSubmitting: true, offerHint: '' })
+    wx.showLoading({ title: '提交中', mask: true })
+    return respondOffer(
+      this.data.offer.releaseId,
+      { decision: decision, note: note || null },
+      newIdempotencyKey('offer-resp')
+    )
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ offerSubmitting: false, offerForm: '', offerNote: '' })
+        wx.showToast({ title: decision === 'accept' ? '已接受' : '已拒绝', icon: 'success' })
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const status = (err && err.httpStatus) || 0
+        if (status === 409) {
+          // 已被响应过 / 已撤回 / 已被取代：页面上那个按钮已经没有意义了。
+          // **必须刷新**，否则用户会对着一个不可能成功的按钮反复点。
+          self.setData({ offerSubmitting: false })
+          return self.load()
+        }
+        self.setData({
+          offerSubmitting: false,
+          offerHint: status
+            ? '响应未提交（服务端返回 ' + status + '），请按提示处理'
+            : '响应未提交：网络异常（说明已保留，可重试）'
+        })
+        return null
+      })
+  },
+
+  /**
+   * 下载发布清单里的一份授权附件。
+   *
+   * 判据全在服务端（清单外的附件返回 404）—— 前端在这里**不做**任何"这份能不能下"的判断，
+   * 因为前端看到的清单和发布时冻结的清单可能已经被后来的操作改变，自己判会给出
+   * 一个"看着能点、点了 404"的按钮。
+   */
+  onDownloadOfferAttachment(e) {
+    const self = this
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const attId = ds.id
+    if (!attId || !this.data.offer) return Promise.resolve()
+    this.setData({ downloadHint: '正在下载附件 #' + attId + '…' })
+    return downloadOfferAttachment(this.data.offer.releaseId, attId)
+      .then(function (res) {
+        self.setData({ downloadHint: '附件 #' + attId + ' 已下载，正在打开…' })
+        wx.openDocument({
+          filePath: res.filePath,
+          showMenu: true,
+          fail() {
+            // 打开失败**不影响**"下载成功"这个事实：开发者工具对部分文件类型不提供预览。
+            // 两件事分开说，否则会被读成"下载坏了"。
+            self.setData({
+              downloadHint: '附件 #' + attId + ' 已下载到临时文件，但当前环境不支持直接打开'
+            })
+          }
+        })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        let hint = '附件下载失败：网络异常'
+        if (status === 404) {
+          // ⚠️ 这一格的 404 有确定含义（不在发布冻结的授权清单里），不是网络抖动。
+          // 说成"失败，请重试"会让人一直重试一件永远不会成功的事。
+          hint = '附件 #' + attId + ' 不在本次发布的授权清单内（服务端 404）'
+        } else if (status) {
+          hint = '附件下载失败（服务端返回 ' + status + '）'
+        }
+        self.setData({ downloadHint: hint })
+        return null
+      })
   },
 
   onRetry() {

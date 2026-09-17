@@ -55,6 +55,106 @@
         </view>
       </view>
 
+      <!-- 对客报价（客户侧 / S3 纵向切片 / BP-03 第 5–10 条）。
+           三件必须说清的事：
+           ① **内容来自发布那一刻冻结的投影**（`offer.contentRows`），不是"这份成果的最新版"。
+              客户是照着当时看到的内容做决定的，读最新版会把两次不同的东西显示成同一份。
+           ② **数据来源标注要显示**（第 9 条）：`unknown` 照实显示"来源未标注"，
+              不折成"人工录入" —— 折了就等于替审计做了判断。
+           ③ **签署是样张模式**（合同 §10.1 第 7 步）：不写这一句，"已接受"会被读成
+              一份已生效的法律签署。
+           响应表单走**页内展开条**而不用 `wx.showModal`：接受是唯一会改变业务事实、
+           且后端用 `UNIQUE(release_id)` 钉死"只能响应一次"的动作，必须可被真机验证。 -->
+      <view wx:if="{{offer}}" class="card slot-card">
+        <view class="row-between slot-head">
+          <text class="slot-title">{{offer.typeLabel}} · v{{offer.revisionNo}}</text>
+          <text class="{{offer.statusClass}}">{{offer.statusLabel}}</text>
+        </view>
+        <view class="slot-note">发布于 {{offer.releasedAt}}（客户看到的内容已在此刻冻结）</view>
+
+        <view wx:for="{{offer.contentRows}}" wx:key="name" class="field-row row-between">
+          <text class="field-label">{{item.label}}</text>
+          <text class="field-value">{{item.value}}</text>
+        </view>
+        <view wx:if="{{offer.contentEmpty}}" class="slot-note slot-warn">
+          这份发布没有可显示的内容（不应发生，请报障）
+        </view>
+
+        <view class="slot-note" data-act-offer-origin="1">数据来源标注：{{offer.dataOriginLabel}}</view>
+        <view wx:if="{{offer.signatureHint}}" class="slot-note slot-warn">
+          {{offer.signatureLabel}} · {{offer.signatureHint}}
+        </view>
+
+        <!-- 授权附件：**只有发布清单里的**能下载，判据在服务端（清单外 404） -->
+        <view wx:if="{{offer.attachments.length}}" class="slot-actions">
+          <view
+            wx:for="{{offer.attachments}}"
+            wx:for-item="att"
+            wx:key="attachmentId"
+            class="slot-btn"
+            data-act-offer-download="{{att.attachmentId}}"
+            data-id="{{att.attachmentId}}"
+            bindtap="onDownloadOfferAttachment"
+            hover-class="hover-dim"
+          >下载 {{att.label}}</view>
+        </view>
+        <view wx:if="{{downloadHint}}" class="slot-note">{{downloadHint}}</view>
+
+        <!-- 已响应：显示**当时的决定与说明**（不是"可以改"的表单） -->
+        <view wx:if="{{offer.decided}}" class="slot-note">
+          客户已于 {{offer.respondedAt}} 「{{offer.decisionLabel}}」该版本{{offer.responseNote ? '：' + offer.responseNote : ''}}
+        </view>
+        <block wx:elif="{{offer.canRespond}}">
+          <view class="slot-actions">
+            <view
+              wx:if="{{offerForm !== 'accept'}}"
+              class="slot-btn slot-btn-strong"
+              data-act-offer-accept="1"
+              data-decision="accept"
+              bindtap="onOfferRespond"
+              hover-class="hover-dim"
+            >接受这一版</view>
+            <view
+              wx:if="{{offerForm !== 'reject'}}"
+              class="slot-btn"
+              data-act-offer-reject="1"
+              data-decision="reject"
+              bindtap="onOfferRespond"
+              hover-class="hover-dim"
+            >拒绝</view>
+          </view>
+          <view wx:if="{{offerForm}}" class="slot-form">
+            <view class="slot-note">
+              {{offerForm === 'accept' ? '确认接受' : '拒绝'}} v{{offer.revisionNo}} —— 提交后不可修改
+            </view>
+            <input
+              class="slot-input"
+              value="{{offerNote}}"
+              bindinput="onOfferNoteInput"
+              placeholder="{{offerForm === 'reject' ? '请写明拒绝原因（必填）' : '可选：给经理留一句话'}}"
+            />
+            <view wx:if="{{offerHint}}" class="slot-note slot-warn">{{offerHint}}</view>
+            <view class="slot-actions">
+              <view
+                class="slot-btn slot-btn-strong"
+                data-act-offer-submit="1"
+                bindtap="onOfferSubmit"
+                hover-class="hover-dim"
+              >确认提交</view>
+              <view
+                class="slot-btn"
+                data-act-offer-cancel="1"
+                bindtap="onOfferCancel"
+                hover-class="hover-dim"
+              >取消</view>
+            </view>
+          </view>
+        </block>
+        <view wx:else class="slot-note">
+          这份发布当前不能再响应（已撤回，或已被同一成果的新版本取代）
+        </view>
+      </view>
+
       <!-- 待受理：给真实可执行的受理入口（无权限时服务端会如实拒绝）。
            确认条做成**页内 DOM** 而不是 `wx.showModal`：原生弹层不在渲染树里、
            工具点不到它的确认键 ⇒ 受理这条**唯一会改变业务状态、且不可回退**的路径

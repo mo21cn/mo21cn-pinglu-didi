@@ -345,6 +345,45 @@ const WALK_ANCHORS = [
     attr: 'data-act-confirm-revision-submit', value: '1', handler: 'onConfirmSubmit' },
   { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-ghost',
     attr: 'data-act-confirm-revision-cancel', value: '1', handler: 'onConfirmCancel' },
+  // ㊹ S3 纵向切片：对客发布（经理侧，成果页）与客户响应（客户侧，委托详情页）。
+  // 这两条链各有一个**唯一会改变业务事实**的动作，都必须可被真机点到：
+  //   · 客户「接受/拒绝」—— 后端用 `UNIQUE(release_id)` 钉死"只能响应一次"，没有第二
+  //     次机会；走 `wx.showModal` 就等于把唯一的落点放进渲染树外，工具够不着。
+  //   · 经理「发布 / 撤回」—— 发布冻结的是**精确版本**的内容快照，撤回理由必填。
+  // 三处细节值得留在表里：
+  //   ① 客户侧的「接受」「拒绝」**共用同一个** `onOfferRespond`（靠 `data-decision` 分派），
+  //      与既有 `onToggleClaim` 同一形态。所以属性名必须两两不同，否则
+  //      `[data-act-offer-accept]` 与 `[data-act-offer-reject]` 在选择器上不可区分。
+  //   ② `data-act-offer-origin` 是**纯展示**锚点（来源标注那一行）—— 它没有 `bindtap`，
+  //      登记成 `static` 而不是 `act`：`act` 会去查事件绑定，查不到就报错，
+  //      而它本来就不该有点击行为。
+  //   ③ `data-act-offer-download` 的值是**附件 id**（每份授权附件一个按钮）：写成常量会让
+  //      选择器退化成"第一个附件"，而"点第 2 份能不能下"正是白名单切片要证明的事。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', class: 'slot-btn',
+    attr: 'data-act-offer-accept', value: '1', handler: 'onOfferRespond' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', class: 'slot-btn',
+    attr: 'data-act-offer-reject', value: '1', handler: 'onOfferRespond' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', class: 'slot-btn',
+    attr: 'data-act-offer-submit', value: '1', handler: 'onOfferSubmit' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', class: 'slot-btn',
+    attr: 'data-act-offer-cancel', value: '1', handler: 'onOfferCancel' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', class: 'slot-btn',
+    attr: 'data-act-offer-download', value: '{{att.attachmentId}}',
+    handler: 'onDownloadOfferAttachment' },
+  { kind: 'static', file: 'pages/entrust/detail/detail.wxml', class: 'slot-note',
+    attr: 'data-act-offer-origin' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'slot-btn',
+    attr: 'data-act-release', value: '1', handler: 'onRelease' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'slot-btn',
+    attr: 'data-act-withdraw-open', value: '1', handler: 'onWithdraw' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-primary',
+    attr: 'data-act-release-submit', value: '1', handler: 'onReleaseSubmit' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-ghost',
+    attr: 'data-act-release-cancel', value: '1', handler: 'onReleaseCancel' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-primary',
+    attr: 'data-act-withdraw-submit', value: '1', handler: 'onWithdrawSubmit' },
+  { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-ghost',
+    attr: 'data-act-withdraw-cancel', value: '1', handler: 'onWithdrawCancel' },
 ]
 
 // 把 wxml 切成「标签」块：先剥掉注释（注释里的撇号会被当成引号，导致整个标签块
