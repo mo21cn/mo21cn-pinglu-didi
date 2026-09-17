@@ -425,6 +425,20 @@ jobs:
           # 与下方 `seed_entrust_revalidation.py` 同一条纪律：**按需追加**，
           # 不进复位基线（`reset_demo_env.py` 的 `SEED_ORDER` 保持不变）。
           python scripts/seed_entrust_canonical.py
+          # 第 7 步夹具（DEMO-1 §10.1 第 7 步）——已接受的对客报价发布，**外加**
+          # 真派生一份合同、真记一条样件证据（`--derive`）。
+          # 为什么 e2e 用 `--derive` 而走查（㊾ 章）**不用**：走查要证明的是
+          # 「**经界面点一下能派生出合同**」，派生动作必须留给界面；而 e2e 要的是
+          # 「页面在真载荷下把该显示的显示出来」—— 它的模板核对要求 wxml 里读到的
+          # 每个字段都在**页面数据域**里出现过，而合同卡那一块的键
+          # （`contract.*` / `sig.*` / 来源行与证据行的 `item.*`）**只在**
+          # `contract` / `sig` 非空时才进数据域（它们由 `utils/entrust.js` 的投影层产出，
+          # 页面自己的 `.js` 里没有这些字面量）⇒ 夹具没有"已派生的合同"，核对就会报
+          # 「模板读取但数据与静态配置均未产出」。
+          # ⚠️ 与上面 canonical 那段同一个处置：**让夹具真的有数据**，
+          #    不要为了让它闭嘴而把 `contractRevisionNoText` 这类键写进 detail.js ——
+          #    那等于造一个假落点，模板真写错字段名时就再也查不出来了。
+          python scripts/seed_entrust_contract_flow.py --derive
           cd ..
           node scripts/verify_login_flow.js
           node scripts/verify_frontend_e2e.js

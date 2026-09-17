@@ -18,6 +18,22 @@
 
 ⚠️ 也不**记签署证据**（同理）。
 
+`--derive`：给 **e2e** 用的第二形态（默认关闭）
+--------------------------------------------
+e2e（`scripts/verify_frontend_e2e.js`）在页面加载**之后**做「模板字段核对」：
+它要求 wxml 里读到的每个字段都在**页面数据域 ∪ 页面自己的 .js** 里出现过。
+合同卡那一块的键（`contract.*` / `sig.*` / 来源行与证据行的 `item.*`）**只来自投影层**
+（`utils/entrust.js`）且**只在 `contract` / `sig` 非空时才进数据域** ⇒ 夹具里没有
+"已派生的合同"，核对就会报「模板读取但数据与静态配置均未产出」。
+
+⚠️ **正解是让夹具真的有数据，不是给页面 `.js` 补键**（补键＝造一个假落点，
+模板真写错字段名时就再也查不出来）。这与 ci.yml 里 canonical 种子那段注释同型：
+航段行当年也是靠"把带航段的夹具加进 e2e 配方"才达标，不是靠改页面。
+
+⇒ `--derive` 就是那份"真的派生出来 + 真的记一条证据"的夹具形态：
+* **走查（㊾ 章）不带这个开关** —— 派生动作留给界面去做，那才是第 7 步的判据；
+* **e2e 带** —— 它要的是"页面在真载荷下把该显示的显示出来"。
+
 为什么挂在 canonical 那张委托上
 --------------------------------
 `derive_contract` 的一条条款 `route_scope` 由**航段**构成；canonical 是唯一
@@ -35,6 +51,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from typing import Any
@@ -68,6 +85,10 @@ QUOTE_PAYLOAD: dict[str, Any] = {
 }
 
 QUOTE_NOTE = "DEMO-1 第 7 步夹具：对客报价样件"
+
+DERIVE_NOTE = "DEMO-1 第 7 步夹具（--derive）：合同核对稿"
+
+EVIDENCE_NOTE = "DEMO-1 第 7 步夹具（--derive）：客户签回的样件扫描件"
 
 
 def _require_assignment(db: Session) -> tuple[int, int, int]:
@@ -195,7 +216,51 @@ def _ensure_accepted_release(
     return int(rel["release_id"])
 
 
-def main() -> int:
+def _ensure_derivation(db: Session, *, release_id: int, by: int) -> dict[str, Any]:
+    """确保这条已接受发布**已派生**出合同；已派生则复用。
+
+    复用而不是"再来一份"：`ent_contract_derivation` 有 `UNIQUE(release_id)`，
+    重复派生会以 409 失败，而那个 409 看起来像夹具坏了。
+    """
+    existing = ctr.get_derivation_by_release(db, release_id=release_id)
+    if existing is not None:
+        return existing
+    return ctr.derive_contract(db, release_id=release_id, actor_user_id=by, note=DERIVE_NOTE)
+
+
+def _ensure_signature_evidence(
+    db: Session, *, contract_artifact_id: int, by: int
+) -> dict[str, Any]:
+    """确保该合同的**当前版本**上有一条「样件扫描件」证据；已记过则复用。
+
+    幂等按**业务唯一约束**判（同一版同一形态只一条）：重跑时服务层会抛
+    `SignatureEvidenceStateError`（HTTP 层是 409）—— 那是"已经记过了"，
+    不是失败 ⇒ 读回那条即可，不要把它当异常抛出去（否则 `set -e` 下 e2e 配方会红）。
+    """
+    try:
+        return ctr.record_signature_evidence(
+            db,
+            contract_artifact_id=contract_artifact_id,
+            evidence_kind=ctr.KIND_SAMPLE_SCAN,
+            actor_user_id=by,
+            note=EVIDENCE_NOTE,
+        )
+    except ctr.SignatureEvidenceStateError:
+        for row in ctr.list_signature_evidence(db, contract_artifact_id=contract_artifact_id):
+            if str(row["evidence_kind"]) == ctr.KIND_SAMPLE_SCAN:
+                return row
+        raise
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="DEMO-1 §10.1 第 7 步的前置夹具")
+    ap.add_argument(
+        "--derive",
+        action="store_true",
+        help="额外**真派生**一份合同并**真记**一条样件证据（e2e 配方用；走查不带）",
+    )
+    args = ap.parse_args(argv)
+
     db = SessionLocal()
     try:
         aid, owner_id, org_id = _require_assignment(db)
@@ -205,7 +270,16 @@ def main() -> int:
         release_id = _ensure_accepted_release(
             db, aid=aid, artifact_id=artifact_id, by=manager_id, owner=owner_id
         )
+        if args.derive:
+            _ensure_derivation(db, release_id=release_id, by=manager_id)
         derivation = ctr.get_derivation_by_release(db, release_id=release_id)
+        evidence = None
+        if args.derive and derivation is not None:
+            evidence = _ensure_signature_evidence(
+                db,
+                contract_artifact_id=int(derivation["contract_artifact_id"]),
+                by=manager_id,
+            )
         legs = (
             db.execute(
                 text("SELECT COUNT(*) AS n FROM ent_leg WHERE assignment_id = :a"), {"a": aid}
@@ -227,6 +301,12 @@ def main() -> int:
             print(
                 f"  派生状态      : 已派生 合同成果 #{derivation['contract_artifact_id']}"
                 f"（第 {derivation['contract_revision_no']} 版）"
+            )
+        if evidence is not None:
+            print(
+                f"  签署证据      : #{evidence['evidence_id']} "
+                f"{evidence['contract_revision_no']} 版 · {evidence['evidence_kind']} · "
+                f"{evidence['mode']}（e2e 用；走查侧不应由夹具代做）"
             )
         print("OK seed_entrust_contract_flow")
         return 0
