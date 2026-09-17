@@ -60,6 +60,7 @@ const {
   confirmCapacity,
   createArtifact,
   createTask,
+  decorateAssignmentPlan,
   decorateCapacityCandidate,
   decorateCapacityConfirmation,
   decorateCapacityRecheck,
@@ -68,6 +69,7 @@ const {
   decorateWorkbench,
   downloadOfferAttachment,
   fetchAssignment,
+  fetchAssignmentPlan,
   fetchCapacityCandidates,
   fetchCapacityConfirmations,
   fetchMyOfferReleases,
@@ -305,7 +307,22 @@ Page({
     /** 复算的失败提示（页内常驻） */
     capRecheckHint: '',
     /** 证据类别选项（页内选择条） */
-    capEvidenceOptions: CAPACITY_EVIDENCE_OPTIONS
+    capEvidenceOptions: CAPACITY_EVIDENCE_OPTIONS,
+
+    // ── 运输计划与必需任务前置（合同 §10.1 第 4 步）─────────────────────
+    /**
+     * 三段计划（航段逐段成行）+ 必需任务与其固定前置。**两侧都显示** ——
+     * 后端这条读通道（`assert_can_view_assignment`）给货主本人放行，
+     * 理由见 `decorateAssignmentPlan`（航段是客户自己交进来的路线，
+     * 内部成本口径在运力那组）。所以这里**没有** `canViewCapacity` 那样的取数闸门。
+     */
+    plan: null,
+    /**
+     * 取不到时的**页内常驻**提示。⚠️ 取不到**不清成空计划、也不假装是空计划**：
+     * "本单没有结构化计划"与"计划读取失败"必须长得不一样 —— 前者要落方案，
+     * 后者要查为什么读不到，一律显示"暂无计划"会把后者说成前者。
+     */
+    planHint: ''
   },
 
   onLoad(query) {
@@ -399,7 +416,9 @@ Page({
       capRuleRows: [],
       capRecheckId: '',
       capRecheck: null,
-      capRecheckHint: ''
+      capRecheckHint: '',
+      plan: null,
+      planHint: ''
     })
     // 前两个请求是**页面内容**：工作台是主内容，委托本体是它的头卡。任一失败都按失败
     // 处理 ——「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
@@ -449,7 +468,11 @@ Page({
         // 而"该不该发这次请求"必须在请求**之前**判（理由见 `data.canViewCapacity`）。
         // 两轮都是同一次 `load()` 的一部分：失败由 `loadCapacity` 自己消化（不把整页打成错误态，
         // 与权限投影、对客报价同一命运 —— 委托本体明明读到了，页面不该说失败）。
-        return self.loadCapacity()
+        //
+        // 运输计划（§10.1 第 4 步）也在这一轮取。它**不依赖权限投影**（设计上两侧都可见，
+        // 见 `data.plan`），放在这里只是"同一次 `load()` 的第二次取数"这个位置。
+        // 两块**互不依赖** ⇒ 并行，失败各消化各的：一块读不到不该把另一块也清掉。
+        return Promise.all([self.loadCapacity(), self.loadPlan()])
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -1025,6 +1048,36 @@ Page({
           capHint: status
             ? '运力数据未能读取（服务端返回 ' + status + '）—— 本地权限投影与授权结论不一致时也会这样'
             : '运力数据未能读取：网络异常'
+        })
+      })
+  },
+
+  /**
+   * 取运输计划（三段航段 + 必需任务前置）。
+   *
+   * ⚠️ **没有取数闸门**（与 `loadCapacity` 的空投影早退不同）：后端这条通道
+   * `assert_can_view_assignment` 给货主本人也放行 —— 航段是客户自己交进来的起讫路线。
+   * 本页能加载出来，就说明调用方看得见这张委托（`fetchAssignment` 已经用同一判据过了一次）。
+   *
+   * 失败时**把结论与失败本身分开**：`plan` 置 null、`planHint` 写明原因。
+   * 不把 `plan` 置成一个空计划对象 —— 那会让"本单没有结构化计划"与"计划读取失败"
+   * 在界面上长得一样，而前者是**要落方案**、后者**要查为什么读不到**。
+   */
+  loadPlan() {
+    const self = this
+    const id = this.data.assignmentId
+    if (!id) return Promise.resolve()
+    return fetchAssignmentPlan(id)
+      .then(function (payload) {
+        self.setData({ plan: decorateAssignmentPlan(payload), planHint: '' })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          plan: null,
+          planHint: status
+            ? '运输计划未能读取（服务端返回 ' + status + '）'
+            : '运输计划未能读取：网络异常'
         })
       })
   },

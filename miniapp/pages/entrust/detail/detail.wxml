@@ -55,6 +55,58 @@
         </view>
       </view>
 
+      <!-- 运输计划（三段航段）与必需任务前置（BP-03 第 1 条 / 合同 §10.1 第 4 步：
+           `Show the road–water–road plan and required task prerequisites.`）
+           为什么落在这一页、为什么**两侧都显示**：航段是**客户自己交进来的**起讫路线，
+           后端那条读通道（`assert_can_view_assignment`）给货主本人放行；
+           承运人 / 供应商单价 / 缺口那些内部成本口径在**运力那一组**，那组一条都不放行。
+           ⚠️ 模板**不拼**"三段""公路—内河—公路"这类结论：段数是**行**的属性，
+              按行渲染；在服务端或投影里拼成一句话，就多一个会与数据脱节的落点。
+           ⚠️ 两种空态**分别说话**（见 `decorateAssignmentPlan` 第 4 条）：
+              "没有计划"要落方案、"没有任务"要派单，处置完全不同。
+           取不到时（`planHint`）**不显示成空计划** —— 那会把"读不到"说成"没有"。 -->
+      <view wx:if="{{plan}}" class="card slot-card">
+        <view class="row-between slot-head">
+          <text class="slot-title">运输计划</text>
+          <text class="slot-note">{{plan.legs.length}} 段</text>
+        </view>
+
+        <view wx:if="{{plan.hasLegs}}">
+          <view
+            wx:for="{{plan.legs}}"
+            wx:key="legId"
+            class="plan-leg"
+            data-plan-leg="{{item.seqText}}"
+          >
+            <text class="plan-leg-seq">{{item.seqText}}</text>
+            <text class="plan-leg-mode">{{item.modeText}}</text>
+            <text class="plan-leg-route">{{item.routeText}}</text>
+          </view>
+        </view>
+        <view wx:else class="slot-note">本单还没有结构化运输计划</view>
+
+        <view class="plan-task-head">必需任务与前置</view>
+        <block wx:if="{{plan.hasTasks}}">
+          <view
+            wx:for="{{plan.tasks}}"
+            wx:key="taskIdText"
+            class="plan-task"
+            data-plan-task="{{item.taskIdText}}"
+          >
+            <view class="row-between">
+              <text class="plan-task-title">{{item.titleText}}</text>
+              <text class="slot-note">{{item.statusText}}</text>
+            </view>
+            <text class="plan-task-pre" data-plan-task-pre="{{item.preText}}">{{item.preText}}</text>
+          </view>
+        </block>
+        <view wx:else class="slot-note">本单还没有派发任务</view>
+      </view>
+
+      <view wx:if="{{planHint}}" class="card slot-card">
+        <view class="slot-note slot-warn">{{planHint}}</view>
+      </view>
+
       <!-- 对客报价（客户侧 / S3 纵向切片 / BP-03 第 5–10 条）。
            三件必须说清的事：
            ① **内容来自发布那一刻冻结的投影**（`offer.contentRows`），不是"这份成果的最新版"。

@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（80 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（84 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -805,6 +805,66 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "并把当前值与冻结值的差异列出来（changed_fields）。**不写任何行** —— "
         "正式重做属 S4 变更流程；这里只是让 D1-09 的「900 吨候选变更后不再适用」"
         "可被看到，而不是只存在于模型意见里",
+    ),
+    # ── 运输计划与必需任务前置（plan_api.py）─────────────────────────────
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/plan",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="三段计划（ent_leg）+ 必需任务与固定前置（ent_workflow_task）；"
+        "可见性复用委托详情那条判据（authz.assert_can_view_assignment），非参与方 404。"
+        "⚠️ 与紧邻上面的运力那一组**取向相反**：这组**给货主本人放行** —— "
+        "航段是客户自己交进来的起讫路线、任务标题与前置不含内部成本口径；"
+        "而承运人/供应商单价/需求量与缺口在运力那组，那组一律不给货主放行。"
+        "判据是「这条通道上有没有内部信息」，不是「是不是客户」。"
+        "读路径不带写权限：§10.1 第 4 步原文是 Show ...",
+    ),
+    # ── 航段命令：建段 / 改段（留版本）/ 版本历史（legs_api.py）──────────────
+    # HO 2026-09-17 裁定三条：谁能建段＝**任意验收者/测试者**、**不强制 公–水–公**、
+    # **改段保留版本**。三条一起落地成下面这三条登记 —— 口径的正文在
+    # migrations/ent_leg_revision.py 的模块文档，这里只登记接口面。
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/legs",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        idempotent=True,
+        note="**建一段航段**，同时写下第 1 版历史（ent_leg_revision，append-only）。"
+        "判据与上面的计划读通道**完全同一份**（authz.assert_can_view_assignment）："
+        "货主本人或所属组织成员 ⇒ 「任意验收者/测试者都能建段」。"
+        "⛔ 这不是「任何登录用户」：非参与方一律 404（不泄漏存在性）。"
+        "⚠️ 这是本支线**唯一**一条「写动作不要求写入类权限常量」的命令 —— "
+        "依据是 HO 口径，且航段是客户自己交进来的方案事实（与会改内部成本口径的"
+        "报价/确认不同类）。**不是遗漏**：看到它别顺手补一个 PERM_* 上去。"
+        "⚠️ 不校验 mode 取值组合与段数（裁定：不强制 公–水–公）；只做结构完整性 —— "
+        "mode 非空、起终点非空、seq ≥1 且委托内唯一（唯一键在 DB 上，撞号 409）。",
+    ),
+    _r(
+        "PATCH",
+        "/assignments/{assignment_id}/legs/{leg_id}",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        idempotent=True,
+        note="**改一段航段**；旧版本**不覆盖**，每次改追加一版历史（裁定第三条）。"
+        "两处 400 是有意的：一个字段都没传、或传了但与当前值完全相同 —— "
+        "两者都不该在历史里留一版（版本历史是给人读「改过什么」的，"
+        "空改动会把它变成噪音）。改 seq 撞到别的段 ⇒ 409（由 DB 唯一键判，不先查后写）。"
+        "路径上的 assignment_id **必须**就是该航段的所属委托，否则 404（作用域自洽）。",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/legs/{leg_id}/revisions",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="某一段的**全部历史版本**（按 revision_no 升序 = 改动先后）。"
+        "每行是**当时的快照**，不是「指向当前行」—— 否则 ent_leg 一改历史也跟着变，"
+        "版本就白留了。⚠️ 读历史前先确认该航段属于这张委托单："
+        "否则「历史」会变成绕过可见性判定的后门。",
     ),
 )
 
