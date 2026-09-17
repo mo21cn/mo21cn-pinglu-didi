@@ -95,6 +95,7 @@ const entrustEntrustmentReleases = {}              // entrustmentId → 经理�
 // 但写动作必须真的发到后端，否则页面拿不到真响应，断言又退化成自证。
 let WRITE_ENABLED = false
 let ownerToken = ''                     // seed-owner（演示组织经理）：⑮ 段的真写与写后复读
+let shipperToken = ''                   // seed-shipper（货主本人）：⑰ 段要断言"货主读不到运力成本口径"
 const pageWrites = []                   // 真实发出的写请求，供"该不该写"的断言使用
 let lastWx = null                       // 最近一次页面装载用的 wx 桩（读取弹层文案）
 
@@ -131,6 +132,19 @@ function rejectIfNotOk(res) {
     throw err
   }
   return res.data
+}
+
+/**
+ * 页面的取数走**真 HTTP**（经理身份）而不是 `route()` 回放。
+ *
+ * 只给"写完立刻要读回来"的那几条用（⑰ 段运力清单与复算）—— 回放的是 bootstrap
+ * 那一刻的快照，恰好把被测的那一步换成写之前的库。与 `api()` 的区别是它把
+ * 非 200 转成**带 `httpStatus` 的拒绝**，形状与 `utils/request.js` 一致，
+ * 页面据此走"服务端已给出原因"那条分支（形状不对会把正确的页面行为判成缺陷）。
+ */
+async function live(method, p) {
+  const res = await api(method, p, { token: ownerToken })
+  return rejectIfNotOk(res)
 }
 
 /**
@@ -270,6 +284,10 @@ async function bootstrap() {
   // 与"有没有挑中成果"无关 —— 挂在挑中分支里会让不挑成果的那次运行拿不到 token，
   // 表现为相关的段整段 401，看起来像"接口坏了"。
   ownerToken = tok.owner
+  // 货主 token 同样交到模块级：⑰ 段要拿它去问运力端点，**期待被拒**。
+  // 那一条断言问的是服务端不变量（`assert_can_view_org` 没有货主旁路），
+  // 而"界面把整块隐藏"只是不该看 —— 两者都要有，且**服务端那条才是真的**。
+  shipperToken = tok.shipper
 
   const get = async (p, role, params) => {
     const res = await api('GET', p + qs(params), { token: tok[role] })
@@ -1094,6 +1112,28 @@ function loadPage(file, ctx) {
         // 而 route() 里两条通道的载荷形状**不同**（客户投影 / 经理投影），
         // 按 release_id 二选一会变成一个"猜调用者身份"的分支 —— 那是假绿的温床。
         // 将来有页面用它时，应当**连 route() 那条一起加**，并在那里显式挑投影。
+        // ── 运力确认与有效期（第 4 条 / 合同 §10.1 第 5 步）──────────────────
+        // ⚠️ 上面那条纪律在这里**第 N 次**成立：新增一个取数函数就必须在此登记。
+        // 取数（两条清单）走**真 HTTP**而不是 `route()` 回放 —— 本片要证的就是
+        // "写完立刻读得回来"（登记后清单里出现、确认后冻结副本与逐条判定可读），
+        // 而回放的是 bootstrap 那一刻的快照，恰好把被测的那一步换成写之前的库。
+        // `fetchCapacityConfirmation`（单条）**刻意不登记**：页面不用它
+        // （确认清单里已带逐规则判定，为每条再发一次请求只会让界面选择少拿那一块）。
+        fetchCapacityCandidates: (id) =>
+          live('GET', '/entrust/assignments/' + id + '/capacity-candidates'),
+        fetchCapacityConfirmations: (id) =>
+          live('GET', '/entrust/assignments/' + id + '/capacity-confirmations'),
+        recheckCapacityConfirmation: (cid) =>
+          live('GET', '/entrust/capacity-confirmations/' + cid + '/recheck'),
+        // 两条写命令：与其它写命令**同一条闸门**（只在 WRITE_ENABLED 的段里真发）——
+        // 登记候选会改库（新候选会出现在清单里），在"读"的段里发生它，后面的断言
+        // 就会拿到一个被自己污染过的世界。
+        recordCapacityCandidate: (id, body, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/capacity-candidates', body, key)
+            .then(rejectIfNotOk),
+        confirmCapacity: (id, body, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/capacity-confirmations', body, key)
+            .then(rejectIfNotOk),
         // 附件上传与提取（S2 第三片）。**不是**回放式桩：它们真的发 multipart 请求
         // 并真的触发提取 —— 这两步是本片唯一能证明"上传的报价单 Agent 读得到"的地方，
         // 桩成回放就等于把被测对象换成我自己写的假货。
@@ -3274,6 +3314,262 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
         else ok()
       }
       collect('pages/entrust/case/case', path.join(ROOT, 'miniapp/pages/entrust/case/case.js'), s._final())
+    }
+  }
+
+  // ══════════ ⑰ 运力确认与有效期（第 4 条 / 合同 §10.1 第 5 步 / BP-03 第 2、3 条）══════════
+  //
+  // 放在**最后**：这一段真的会写库（登记候选 → 确认 → 产出一份 `procurement_confirm`
+  // 成果）。放中段的话，后面任何拿"真载荷快照"当基线的断言都可能读到一个被它改过的
+  // 世界，而那种失败长得像别的段坏了。
+  //
+  // 与其它段的两处**有意不同**：
+  //   ① 本段的取数走真 HTTP（见 `live()`），不走 `route()` 回放；
+  //   ② 写一律经**页面**发出（`onSubmitCap` / `onSubmitCapConfirm`），不是脚本直发 API
+  //      —— 要验的是"页面把这几个字段送对了"，自己发就只验了自己。
+  //
+  // 不猜需求吨位：种子那单的货量不在本脚本手里，所以用**极大 / 极小**两侧把结论锁死
+  // （999999 吨必过容量、0.1 吨必不过），这样"哪条规则不通过"就是确定的。
+  {
+    let aid = ''
+    for (const c of D.entrustCases || []) {
+      // 只挑**组织侧可达**的那张：委托没有服务经营主体时，运力端点整组 404
+      // （后端 `_load_org_scope`：没有组织就没有"组织侧"这个视角）。
+      const probe = await api('GET', '/entrust/assignments/' + c[0] + '/capacity-candidates', {
+        token: ownerToken
+      })
+      if (probe.status === 200) {
+        aid = String(c[0])
+        break
+      }
+    }
+    if (!aid) {
+      fail('⑰ 运力 · 没有组织侧可达的委托（seed_entrust_demo.py 未生效？）',
+        '我的委托 ' + (D.entrustCases || []).length + ' 张')
+    } else {
+      // 回放表里的 `session-context` 只按**⑮ 段挑中的那张委托**存了一份
+      // （`entrustSessionContext[entrustWriteProof.assignmentId]`），而本段挑的是
+      // **组织侧可达的第一张** —— 两者不一定是同一张。
+      //
+      // 缺键时 `fetchSessionContext` 会 reject，被详情页的 `.catch` 吞成一个 `null`，
+      // 于是 `ctx.entrustment_id` 取不到 ⇒ `canRecordCapacity` 变假 ⇒ 登记入口在
+      // **页面上**消失（后端其实允许，本段第 ③ 步就直接把三条候选写进去了）。
+      // 那是最难认的一种红：它长得像"该组织缺 entrust:quote:create"。
+      //
+      // 补的仍是**真载荷**（与 bootstrap 同一条真接口、同一个经理身份），只是换了个键。
+      // 授权定位是写权限的前置（后端 `_write_scope`：`(货主, 组织)` 必须**恰好一条**
+      // 生效授权，多于一条 409），所以取不到就没有可确认的地基 —— 显式失败，不静默跳过。
+      if (!entrustSessionContext[Number(aid)]) {
+        const ctxLive = await api('GET',
+          '/entrust/assignments/' + aid + '/session-context', { token: ownerToken })
+        if (ctxLive.status !== 200) {
+          fail('⑰ 运力 · 补不到本单的会话上下文（授权定位是写权限的前置）',
+            'aid=' + aid + ' · status=' + ctxLive.status)
+        } else {
+          entrustSessionContext[Number(aid)] = ctxLive.data
+        }
+      }
+      const stamp = rid()
+      const BIG = '999999'
+      const C_OK = 'E2E 甲承运 ' + stamp
+      const C_EXP = 'E2E 乙承运(过期) ' + stamp
+      const C_SML = 'E2E 丙承运(运力不足) ' + stamp
+      const SET = [
+        { carrier: C_OK, tonnes: BIG, rate: '45', valid: '2027-12-31', kind: 'email',
+          ref: 'e2e/quote-' + stamp + '.eml', label: '甲（各条都过）' },
+        { carrier: C_EXP, tonnes: BIG, rate: '43', valid: '2020-01-31', kind: 'email',
+          ref: 'e2e/quote-expired-' + stamp + '.eml', label: '乙（只差有效期）' },
+        { carrier: C_SML, tonnes: '0.1', rate: '41', valid: '2027-12-31', kind: 'document',
+          ref: 'e2e/quote-small-' + stamp + '.pdf', label: '丙（只差容量）' }
+      ]
+      const WRITTEN = {}
+      SET.forEach(function (r) { WRITTEN[r.carrier] = r })
+      const ev = (df, value) => ({ currentTarget: { dataset: { df: df } }, detail: { value: value } })
+      const codes = (rows) => (rows || []).map((r) => r.ruleCode).join(',')
+
+      // ── ① 货主身份**读不到**候选运力（服务端不变量；界面的隐藏只是"不该看"）──
+      const shipperRead = await api(
+        'GET', '/entrust/assignments/' + aid + '/capacity-candidates', { token: shipperToken })
+      if (shipperRead.status !== 404) {
+        fail('⑰ 运力 · 货主身份读到了候选运力（整组端点本应没有货主旁路）',
+          'status=' + shipperRead.status)
+      } else ok()
+
+      // ── ② 经理侧详情页：运力块渲染出来 ──
+      const s = await walk('⑰ 运力 · 经理侧详情', 'pages/entrust/detail/detail', null,
+        { role: 'owner', arg: { assignment_id: aid } }, ['onLoad'])
+      if (!s) {
+        fail('⑰ 运力 · 详情页未装载，本段其余断言无意义（已显式失败，不静默跳过）')
+      } else {
+        await waitUntil(() => s._final().canViewCapacity === true, 4000)
+        const d0 = s._final()
+        if (!d0.canViewCapacity) {
+          fail('⑰ 运力 · 经理侧没渲染运力块（该组织缺 entrust:view？）',
+            'view=' + d0.view + ' · orgId=' + (d0.detail && d0.detail.orgId))
+        } else ok()
+        if (!d0.canRecordCapacity) {
+          fail('⑰ 运力 · 经理侧没有登记入口（授权未唯一定位，或缺 entrust:quote:create？）')
+        } else ok()
+        const before = (d0.capCandidates || []).length
+
+        // ── ③ 经**页面**登记三条候选 ──
+        WRITE_ENABLED = true
+        try {
+          for (const r of SET) {
+            s.onToggleCap()
+            s.onCapInput(ev('cap-carrier', r.carrier))
+            s.onCapInput(ev('cap-tonnes', r.tonnes))
+            s.onCapInput(ev('cap-vessels', '1'))
+            s.onCapPickPartial({ currentTarget: { dataset: { actCapPartial: '0' } } })
+            s.onCapInput(ev('cap-rate', r.rate))
+            s.onCapInput(ev('cap-rate-unit', '吨'))
+            s.onCapInput(ev('cap-currency', 'CNY'))
+            s.onCapInput(ev('cap-valid', r.valid))
+            s.onCapPickKind({ currentTarget: { dataset: { actCapKind: r.kind } } })
+            s.onCapInput(ev('cap-evidence-ref', r.ref))
+            await s.onSubmitCap()
+            await waitUntil(() => (s._final().capCandidates || []).length > before, 6000)
+          }
+        } finally {
+          WRITE_ENABLED = false
+        }
+        const d1 = s._final()
+        const mine = (d1.capCandidates || []).filter((x) => !!WRITTEN[x.carrier])
+        if ((d1.capCandidates || []).length !== before + 3 || mine.length !== 3) {
+          fail('⑰ 运力 · 登记三条候选后清单条数不对',
+            (d1.capCandidates || []).length + ' vs ' + (before + 3) + ' · 命中 ' + mine.length)
+        } else ok()
+        // 逐字段对账：吨位是后端**归一过的定长文本**（3 位小数）、装载口径必须写出来、
+        // 证据必须是「类别 + 引用」两件齐全（BP-03 第 3 条）
+        const wantTonnes = { }
+        wantTonnes[C_OK] = '999999.000'
+        wantTonnes[C_EXP] = '999999.000'
+        wantTonnes[C_SML] = '0.100'
+        const wrong = mine.filter(function (x) {
+          return x.capacityText !== wantTonnes[x.carrier] ||
+            x.loadBasis !== '单船承运·不拆批' ||
+            x.status !== 'candidate' || x.statusLabel !== '候选' ||
+            x.confirmable !== true || x.evidenceMissingRef === true
+        })
+        if (wrong.length) {
+          fail('⑰ 运力 · 候选字段与送出的口径不符',
+            JSON.stringify(wrong.map((x) => [x.carrier, x.capacityText, x.loadBasis, x.evidenceText])))
+        } else ok()
+        const idOf = (c) =>
+          String(((mine.filter((x) => x.carrier === c)[0] || {}).candidateId) || '')
+
+        // ── ④ 确认「过期」那条：必须 409，且**四条判定全在**（含通过项）──
+        s.onOpenCapConfirm({ currentTarget: { dataset: { actCapConfirmOpen: idOf(C_EXP) } } })
+        s.onCapInput(ev('cap-scope', 'e2e 全程 800 吨'))
+        WRITE_ENABLED = true
+        try {
+          await s.onSubmitCapConfirm({
+            currentTarget: { dataset: { actCapConfirmSubmit: idOf(C_EXP) } }
+          })
+        } finally {
+          WRITE_ENABLED = false
+        }
+        const dExp = s._final()
+        if (codes(dExp.capRuleRows) !== 'demand_known,evidence,validity,capacity') {
+          fail('⑰ 运力 · 过期候选的逐条判定不是"四条全跑"', codes(dExp.capRuleRows))
+        } else ok()
+        const failedExp = (dExp.capRuleRows || []).filter((r) => !r.passed).map((r) => r.ruleCode)
+        if (failedExp.join(',') !== 'validity') {
+          fail('⑰ 运力 · 过期候选应**只**在有效期上不通过（根因要分得出来）', failedExp.join(','))
+        } else ok()
+        const passedExp = (dExp.capRuleRows || []).filter((r) => r.passed).length
+        if (passedExp !== 3) {
+          fail('⑰ 运力 · 被拒时通过项被丢掉了（后端特意全给，前端不得过滤）', String(passedExp))
+        } else ok()
+        // **不刷新**：状态没变，刷新会把刚显示出来的判定表顶掉（确认条被收起）
+        if (String(dExp.capConfirmKey) !== idOf(C_EXP)) {
+          fail('⑰ 运力 · 规则未过却刷新了页面（确认条被收起）', JSON.stringify(dExp.capConfirmKey))
+        } else ok()
+        if ((dExp.capCandidates || []).length !== before + 3) {
+          fail('⑰ 运力 · 规则未过却重取了候选清单', String((dExp.capCandidates || []).length))
+        } else ok()
+
+        // ── ⑤ 确认「运力不足」那条：只在容量上不通过（与"有效期"分得开）──
+        s.onOpenCapConfirm({ currentTarget: { dataset: { actCapConfirmOpen: idOf(C_SML) } } })
+        s.onCapInput(ev('cap-scope', 'e2e 全程 800 吨'))
+        WRITE_ENABLED = true
+        try {
+          await s.onSubmitCapConfirm({
+            currentTarget: { dataset: { actCapConfirmSubmit: idOf(C_SML) } }
+          })
+        } finally {
+          WRITE_ENABLED = false
+        }
+        const failedSml = (s._final().capRuleRows || [])
+          .filter((r) => !r.passed).map((r) => r.ruleCode)
+        if (failedSml.join(',') !== 'capacity') {
+          fail('⑰ 运力 · 运力不足的候选应只在容量上不通过', failedSml.join(','))
+        } else ok()
+
+        // ── ⑥ 确认「甲」（全过）：通过 ⇒ 产出确认记录 + 采购确认成果 ──
+        s.onOpenCapConfirm({ currentTarget: { dataset: { actCapConfirmOpen: idOf(C_OK) } } })
+        s.onCapInput(ev('cap-scope', 'e2e 全程 800 吨'))
+        WRITE_ENABLED = true
+        try {
+          await s.onSubmitCapConfirm({
+            currentTarget: { dataset: { actCapConfirmSubmit: idOf(C_OK) } }
+          })
+        } finally {
+          WRITE_ENABLED = false
+        }
+        await waitUntil(() => (s._final().capConfirmations || []).length > 0, 6000)
+        const conf = (s._final().capConfirmations || [])[0]
+        if (!conf) {
+          fail('⑰ 运力 · 确认成功后清单里没有确认记录')
+        } else {
+          if (conf.ruleCount !== 4) {
+            fail('⑰ 运力 · 确认记录的判定条数不是 4（少一条＝有规则没跑）', String(conf.ruleCount))
+          } else ok()
+          if (String(conf.ruleSummary).indexOf('4/4') === -1) {
+            fail('⑰ 运力 · 确认记录的判定摘要不对', String(conf.ruleSummary))
+          } else ok()
+          if (!conf.artifactId) fail('⑰ 运力 · 确认记录没有成果引用')
+          else ok()
+          // 以**服务端事实**判定，而不是从页面的 setData 反推（同 ⑮ 段的取向）
+          const be = await api('GET', '/entrust/capacity-confirmations/' + conf.confirmationId,
+            { token: ownerToken })
+          if (be.status !== 200) {
+            fail('⑰ 运力 · 服务端读不到刚作出的确认', 'status=' + be.status)
+          } else if (((be.data || {}).rule_checks || []).length !== 4) {
+            fail('⑰ 运力 · 服务端确认的 rule_checks 不是 4 条',
+              String(((be.data || {}).rule_checks || []).length))
+          } else if (String((be.data || {}).candidate_id) !== idOf(C_OK)) {
+            fail('⑰ 运力 · 服务端确认挂的不是那条候选',
+              String((be.data || {}).candidate_id) + ' vs ' + idOf(C_OK))
+          } else ok()
+          // 候选状态被确认命令改写成 confirmed ⇒ 同一界面不该还留着可点的确认按钮
+          const after = (s._final().capCandidates || []).filter((x) => x.carrier === C_OK)[0] || {}
+          if (String(after.status) !== 'confirmed' || after.confirmable !== false) {
+            fail('⑰ 运力 · 已确认的候选仍是「可确认」（再点会 409）',
+              String(after.status) + '/' + String(after.confirmable))
+          } else ok()
+          // ⑦ 只读复算：事实没变 ⇒ 仍然成立（且**不改任何行**）
+          await s.onCapRecheck({
+            currentTarget: { dataset: { actCapRecheck: conf.confirmationId } }
+          })
+          const dr = s._final()
+          if (!dr.capRecheck) {
+            fail('⑰ 运力 · 复算没有结果', String(dr.capRecheckHint || ''))
+          } else if (dr.capRecheck.stillValid !== true) {
+            fail('⑰ 运力 · 事实未变，复算却说不再成立',
+              JSON.stringify(dr.capRecheck.changedFields))
+          } else ok()
+        }
+
+        // 本段是**最后**一段：`walk()` 内部的 `collect` 发生在写之前（那时清单还是空的），
+        // 而模板里那几个字段（capacityText / evidenceText / ruleRows / artifactRefText…）
+        // 由 **utils/entrust.js** 的投影产出 —— 页面自己的 `jsKeyUniverse` 看不到它们。
+        // ⇒ 必须在这里用**写完之后**的 data 再 collect 一次，否则 `auditTemplates`
+        //   会把"投影层产出的字段"报成"模板读取但数据未产出"（那是本脚本的判据，
+        //   不是页面缺陷）。与 ⑬/⑯ 段驱动之后手动 collect 是同一条做法。
+        collect('pages/entrust/detail/detail',
+          path.join(ROOT, 'miniapp/pages/entrust/detail/detail.js'), s._final())
+      }
     }
   }
 

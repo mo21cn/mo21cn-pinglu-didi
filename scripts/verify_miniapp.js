@@ -241,6 +241,33 @@ const WALK_ANCHORS = [
     value: '1', handler: 'onSubmitQuote' },
   { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-quote-cancel',
     value: '1', handler: 'onCancelQuote' },
+  // 2026-09-17（第 4 条 · 运力确认与有效期）：详情页新增的经理侧三方块
+  // （候选运力清单 / 登记候选 / 确认与复算）。与上面两组同一条理由 ——
+  // 本页已有 7 个 `.slot-btn`（记录任务）+ 受理 + 组装报价，而走查工具**没有 index 参数**
+  // ⇒ 没有专属锚点就只能点到第一个，断言建立在巧合上。
+  // 先登记（第 ㊺ 章的设备走查还没写）：锚点登记表是"改模板时弄丢了会红"的那道闸，
+  // 等章节写完再登记，中间那段时间是**无保护**的。
+  // ⚠️ `data-act-cap-partial` **故意不写 `value`**：它两处取值本来就是 `'0'` / `'1'`
+  //    （选择器靠值区分，要的不是"每行同值"那条保护）；而这里的校验是**所有命中**
+  //    都必须等于声明的值 —— 写死一个会让另一处当场红。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-open',
+    value: '1', handler: 'onToggleCap' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-submit',
+    value: '1', handler: 'onSubmitCap' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-cancel',
+    value: '1', handler: 'onCancelCap' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-partial',
+    handler: 'onCapPickPartial' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-kind',
+    value: '{{option.key}}', handler: 'onCapPickKind' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-confirm-open',
+    value: '{{item.candidateId}}', handler: 'onOpenCapConfirm' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-confirm-submit',
+    value: '{{item.candidateId}}', handler: 'onSubmitCapConfirm' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-confirm-cancel',
+    value: '{{item.candidateId}}', handler: 'onCancelCapConfirm' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-recheck',
+    value: '{{item.confirmationId}}', handler: 'onCapRecheck' },
   // 页内输入框（文本靠 setData 注值，见走查脚本的声明），与案件页的 `act-input`+`data-df` 同形
   { kind: 'static', file: 'pages/entrust/detail/detail.wxml', class: 'slot-input', attr: 'data-df' },
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-toggle-links',

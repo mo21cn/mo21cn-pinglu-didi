@@ -288,6 +288,314 @@
         </view>
       </view>
 
+      <!-- ── 运力确认与有效期（经理侧 / BP-03 第 2、3 条 / D1-06 / 合同 §10.1 第 5 步）──
+           这一段是"这份资源能不能用"的全部判据，也是**内部成本口径**：候选行带承运人
+           与供应商单价，确认行带需求量与缺口吨数，逐规则判定里还有比较过程。
+           所以整块只在看得到组织侧时渲染 —— 判据在 detail.js（本地组织权限投影里有
+           entrust:view，且**取数之前**先判：客户侧一次请求都不发，否则每次开页都是
+           一个必然 403，而 403 被吞掉就成了一次静默降级）。
+           确认条与登记表单都是**页内 DOM**：原生弹层不在渲染树里、走查工具点不到它的
+           确认键 ⇒ 这两条关键路径就永远拿不到设备证据（㉓/㉕D 的 LIMITATION 都这么来的）。
+           ⚠️ 这里是 WXML 文本节点，**不是 Markdown**：文案里不能出现成对星号。 -->
+      <block wx:if="{{canViewCapacity}}">
+        <!-- ① 候选运力：两家可比（吨位 / 装载口径 / 单价口径 / 有效期 / 证据） -->
+        <view class="card slot-card">
+          <view class="row-between slot-head">
+            <text class="slot-title">候选运力</text>
+            <text class="slot-note">{{capCandidates.length}} 家</text>
+          </view>
+          <view class="slot-note">
+            登记候选运力只说明这份资源存在、口径是什么；确认运力是另一次独立动作，要逐条过规则才算数。
+          </view>
+
+          <view wx:for="{{capCandidates}}" wx:key="candidateId" class="cap-row">
+            <view class="row-between">
+              <text class="cap-carrier">{{item.carrier}}{{item.vesselName ? ' · ' + item.vesselName : ''}}</text>
+              <text class="{{item.statusClass}}">{{item.statusLabel}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">运力</text>
+              <text class="field-value">{{item.capacityText}} 吨 · {{item.loadBasis}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">单价</text>
+              <text class="field-value">{{item.rateText}}{{item.currency ? ' · ' + item.currency : ''}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">有效期至</text>
+              <text class="field-value">{{item.validUntil}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">证据</text>
+              <text class="{{item.evidenceCls}}">{{item.evidenceText}}</text>
+            </view>
+
+            <block wx:if="{{canRecordCapacity && item.confirmable}}">
+              <view wx:if="{{capConfirmKey === item.candidateId}}" class="slot-form">
+                <view class="slot-note">
+                  确认 {{item.carrier}} 的 {{item.capacityText}} 吨：通过后产出采购确认成果，且这条候选不能再被确认第二次。
+                </view>
+                <input
+                  class="slot-input"
+                  data-df="cap-scope"
+                  value="{{capScope}}"
+                  placeholder="本次确认覆盖的范围（必填）"
+                  placeholder-class="input-ph"
+                  bindinput="onCapInput"
+                />
+                <input
+                  class="slot-input"
+                  data-df="cap-note"
+                  value="{{capNote}}"
+                  placeholder="备注（选填）"
+                  placeholder-class="input-ph"
+                  bindinput="onCapInput"
+                />
+                <view wx:if="{{capHint}}" class="slot-note slot-warn">{{capHint}}</view>
+                <view class="slot-actions">
+                  <view
+                    class="slot-btn slot-btn-strong"
+                    data-act-cap-confirm-submit="{{item.candidateId}}"
+                    bindtap="onSubmitCapConfirm"
+                    hover-class="hover-dim"
+                  >确认运力</view>
+                  <view
+                    class="slot-btn"
+                    data-act-cap-confirm-cancel="{{item.candidateId}}"
+                    bindtap="onCancelCapConfirm"
+                    hover-class="hover-dim"
+                  >取消</view>
+                </view>
+              </view>
+              <view wx:else class="slot-actions">
+                <view
+                  class="slot-btn"
+                  data-act-cap-confirm-open="{{item.candidateId}}"
+                  bindtap="onOpenCapConfirm"
+                  hover-class="hover-dim"
+                >确认这一条</view>
+              </view>
+            </block>
+          </view>
+
+          <view wx:if="{{!capCandidates.length}}" class="slot-note">还没有登记候选运力</view>
+
+          <!-- 被拒时的**逐条**判定：通过的项也在（后端特意全给；只给没过的那几条，
+               会让人改完再撞下一条）。顺序取后端给的 seq。 -->
+          <view wx:if="{{capRuleRows.length}}" class="cap-verdict">
+            <view class="cap-verdict-title">运力不能确认：{{capRuleTitle}}</view>
+            <view class="cap-verdict-sub">
+              下面是这一条候选的逐条判定（通过的也在内 —— 只回没过的那几条，会让人改完再撞下一条）。
+            </view>
+            <view wx:for="{{capRuleRows}}" wx:for-item="rr" wx:key="seq" class="cap-rule">
+              <text class="{{rr.outcomeClass}}">{{rr.seq}} {{rr.ruleLabel}} · {{rr.outcomeLabel}}</text>
+              <view class="cap-rule-detail">{{rr.detail}}</view>
+            </view>
+          </view>
+
+          <!-- ② 登记候选运力（页内表单，不用原生弹层） -->
+          <block wx:if="{{canRecordCapacity}}">
+            <view wx:if="{{capOpen}}" class="slot-form">
+              <view class="slot-note">登记一条候选运力事实（这一步不确认任何东西）</view>
+              <input
+                class="slot-input"
+                data-df="cap-carrier"
+                value="{{capForm.carrier}}"
+                placeholder="承运人（必填）"
+                placeholder-class="input-ph"
+                bindinput="onCapInput"
+              />
+              <input
+                class="slot-input"
+                data-df="cap-vessel"
+                value="{{capForm.vesselName}}"
+                placeholder="船名（选填）"
+                placeholder-class="input-ph"
+                bindinput="onCapInput"
+              />
+              <input
+                class="slot-input"
+                data-df="cap-tonnes"
+                value="{{capForm.capacityTonnes}}"
+                placeholder="运力吨位（必填，例如 900）"
+                placeholder-class="input-ph"
+                type="digit"
+                bindinput="onCapInput"
+              />
+              <input
+                class="slot-input"
+                data-df="cap-vessels"
+                value="{{capForm.vesselCount}}"
+                placeholder="船数（默认 1）"
+                placeholder-class="input-ph"
+                type="number"
+                bindinput="onCapInput"
+              />
+              <view class="slot-note">装载口径（判容量要用到：允许拆批或多船承运时，同样的吨位含义不同）</view>
+              <view class="cap-picks">
+                <view
+                  class="{{capForm.allowsPartialLoad ? 'cap-pick' : 'cap-pick cap-pick-on'}}"
+                  data-act-cap-partial="0"
+                  bindtap="onCapPickPartial"
+                  hover-class="hover-dim"
+                >不拆批</view>
+                <view
+                  class="{{capForm.allowsPartialLoad ? 'cap-pick cap-pick-on' : 'cap-pick'}}"
+                  data-act-cap-partial="1"
+                  bindtap="onCapPickPartial"
+                  hover-class="hover-dim"
+                >允许拆批</view>
+              </view>
+              <input
+                class="slot-input"
+                data-df="cap-rate"
+                value="{{capForm.rate}}"
+                placeholder="单价（选填，例如 45）"
+                placeholder-class="input-ph"
+                type="digit"
+                bindinput="onCapInput"
+              />
+              <input
+                class="slot-input"
+                data-df="cap-rate-unit"
+                value="{{capForm.rateUnit}}"
+                placeholder="计价单位（例如 吨）"
+                placeholder-class="input-ph"
+                bindinput="onCapInput"
+              />
+              <input
+                class="slot-input"
+                data-df="cap-currency"
+                value="{{capForm.currency}}"
+                placeholder="币种（例如 CNY）"
+                placeholder-class="input-ph"
+                bindinput="onCapInput"
+              />
+              <input
+                class="slot-input"
+                data-df="cap-valid"
+                value="{{capForm.validUntil}}"
+                placeholder="有效期至（例如 2026-12-31）"
+                placeholder-class="input-ph"
+                bindinput="onCapInput"
+              />
+              <view class="slot-note">证据类别（选填；可后补，但确认时「类别 + 引用」缺一不可）</view>
+              <view class="cap-picks">
+                <view
+                  wx:for="{{capEvidenceOptions}}"
+                  wx:for-item="option"
+                  wx:key="key"
+                  class="cap-pick {{capForm.evidenceKind === option.key ? 'cap-pick-on' : ''}}"
+                  data-act-cap-kind="{{option.key}}"
+                  bindtap="onCapPickKind"
+                  hover-class="hover-dim"
+                >{{option.label}}</view>
+              </view>
+              <input
+                class="slot-input"
+                data-df="cap-evidence-ref"
+                value="{{capForm.evidenceRef}}"
+                placeholder="证据引用（例如 报价单-20260917.pdf）"
+                placeholder-class="input-ph"
+                bindinput="onCapInput"
+              />
+              <view wx:if="{{capHint}}" class="slot-note slot-warn">{{capHint}}</view>
+              <view class="slot-actions">
+                <view
+                  class="slot-btn slot-btn-strong"
+                  data-act-cap-submit="1"
+                  bindtap="onSubmitCap"
+                  hover-class="hover-dim"
+                >登记候选</view>
+                <view
+                  class="slot-btn"
+                  data-act-cap-cancel="1"
+                  bindtap="onCancelCap"
+                  hover-class="hover-dim"
+                >取消</view>
+              </view>
+            </view>
+            <view wx:else class="slot-actions">
+              <view
+                class="slot-btn"
+                data-act-cap-open="1"
+                bindtap="onToggleCap"
+                hover-class="hover-dim"
+              >登记候选运力</view>
+            </view>
+          </block>
+        </view>
+
+        <!-- ③ 已作出的确认（**冻结副本**）+ 只读复算。
+             确认范围 agreed_scope 只落在「采购确认成果」的载荷里，确认行上没有它的落点
+             ⇒ 这里给的是**成果引用**（点进成果页看范围与金额），而不是在这一格里编一个空值。 -->
+        <view wx:if="{{capConfirmations.length}}" class="card slot-card">
+          <view class="row-between slot-head">
+            <text class="slot-title">运力确认</text>
+            <text class="slot-note">{{capConfirmations.length}} 条</text>
+          </view>
+          <view class="slot-note">
+            下面是确认那一刻的冻结值（候选行后来被改写也不影响它）。想看现在还成不成立，用「复算这条确认」。
+          </view>
+          <view wx:for="{{capConfirmations}}" wx:key="confirmationId" class="cap-row">
+            <view class="row-between">
+              <text class="cap-carrier">{{item.carrier}}{{item.vesselName ? ' · ' + item.vesselName : ''}}</text>
+              <text class="cap-confirmed">已确认运力</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">确认运力</text>
+              <text class="field-value">{{item.capacityText}} 吨 · {{item.loadBasis}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">单价</text>
+              <text class="field-value">{{item.rateText}}{{item.currency ? ' · ' + item.currency : ''}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">有效期至</text>
+              <text class="field-value">{{item.validUntil}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">需求快照</text>
+              <text class="field-value">{{item.demandText}}</text>
+            </view>
+            <view class="field-row row-between">
+              <text class="field-label">判定基准日</text>
+              <text class="field-value">{{item.asOfDate}} · 规则集 {{item.ruleSetVersion}}</text>
+            </view>
+            <view class="slot-note">{{item.ruleSummary}}</view>
+            <view wx:for="{{item.ruleRows}}" wx:for-item="rr" wx:key="seq" class="cap-rule">
+              <text class="{{rr.outcomeClass}}">{{rr.seq}} {{rr.ruleLabel}} · {{rr.outcomeLabel}}</text>
+              <view class="cap-rule-detail">{{rr.detail}}</view>
+            </view>
+            <view wx:if="{{item.note}}" class="slot-note">{{item.note}}</view>
+            <view class="slot-refs">
+              <view
+                class="slot-ref slot-ref-link"
+                data-id="{{item.artifactId}}"
+                data-kind="artifact"
+                bindtap="onOpenRef"
+                hover-class="hover-dim"
+              >{{item.artifactRefText}} ›</view>
+            </view>
+            <view class="slot-actions">
+              <view
+                class="slot-btn"
+                data-act-cap-recheck="{{item.confirmationId}}"
+                bindtap="onCapRecheck"
+                hover-class="hover-dim"
+              >复算这条确认</view>
+            </view>
+            <view wx:if="{{capRecheckId === item.confirmationId && capRecheck}}" class="cap-verdict">
+              <view class="cap-verdict-title">{{capRecheck.validLabel}}（复算基准日 {{capRecheck.asOfDate}}）</view>
+              <view class="cap-verdict-sub">判定输入的变化：{{capRecheck.changedText}}</view>
+              <view wx:if="{{capRecheck.failedText}}" class="cap-verdict-sub cap-warn">{{capRecheck.failedText}}</view>
+              <view class="cap-verdict-sub">{{capRecheck.note}}</view>
+            </view>
+            <view wx:if="{{capRecheckHint}}" class="slot-note slot-warn">{{capRecheckHint}}</view>
+          </view>
+        </view>
+      </block>
+
       <!-- 七槽位（顺序与 key 由 utils/entrust.js 的 WORKBENCH_SLOTS 决定） -->
       <view wx:for="{{slots}}" wx:key="key" class="card slot-card">
         <view class="row-between slot-head">

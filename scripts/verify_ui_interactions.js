@@ -1282,6 +1282,20 @@ section('⑤ 静态防线')
         decideCase: () => Promise.resolve({ case_id: 1 }),
         closeCase: () => Promise.resolve({ case_id: 1 }),
         reopenCase: () => Promise.resolve({ case_id: 1 }),
+        // 运力确认与有效期（第 4 条）：四条取数 + 两条写命令。本节把它们登记成**空实现**，
+        // 与上面六条写命令同一条理由 —— 将来有人改这个桩时，取数不会落到真实实现上
+        // （在 Node 里那是一个**永不 resolve** 的 Promise：页面停在 loading，断言全成空转）。
+        // ⚠️ 它们**故意不打日志**：本节的 `viewState` 桩恒为 `empty` ⇒
+        //    `canViewCapacity=false` ⇒ 页面按设计**一次都不发**（这正是"客户侧不发
+        //    必然 403 的请求"那条判据的代码形态）。而上面那条「取数都带同一编号」的断言
+        //    会把日志里**每一个含 ':' 的项**拿去比对，这三条里有两类带的不是委托编号
+        //    （复算带确认编号、写命令带候选编号）—— 一旦被调用就会以"编号不对"的形式
+        //    报出来，指向一个并不存在的问题。
+        fetchCapacityCandidates: () => Promise.resolve([]),
+        fetchCapacityConfirmations: () => Promise.resolve([]),
+        recheckCapacityConfirmation: () => Promise.resolve({}),
+        recordCapacityCandidate: () => Promise.resolve({ candidate_id: 1 }),
+        confirmCapacity: () => Promise.resolve({ confirmation_id: 1 }),
         viewState: () => ({ state: 'empty', title: '还没有委托', hint: '' })
       })
 
