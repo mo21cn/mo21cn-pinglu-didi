@@ -8161,10 +8161,467 @@ def sec_44(w: Walker) -> None:
         w.rep.rec("㊹ 本章运行期 console 无未归因错误", True, "增量 0 条")
 
 
+def sec_45(w: Walker) -> None:
+    """㊺ 运力确认闭环（BP-03 第 3 条 / 合同 §10.1 第 5 步）——设备侧运行取证。
+
+    合同 §10.1 第 5 步的原文：
+
+        Compare two quotations and record evidence-backed procurement confirmation
+
+    为什么单独一章
+    --------------
+    §7.16 / §7.18 两轮把这条的**服务端**与**界面**都做完了，但证据全是**自动化**的
+    （用例 + e2e 回放）。自动化证据回答得了"逻辑对不对"，回答不了"真机上点得动吗、
+    打的字进得了 `data` 吗" —— 而本切片恰好踩过一个**只在真机上暴露**的缺陷：
+    `data-df="cap-scope"` 在 handler 的映射表里没有对应项 ⇒ `bindinput` 照常触发、
+    查表查不到就**静默空转**，范围一个字符都写不进去，而三个前端静态门禁**全绿**。
+    ⇒ 本章存在的理由就是**把这一类沉默逼出来**。
+
+    本节覆盖（四条闭环证据，每条对应一个可能静默失效的环节）
+    ------------------------------------------------------
+    一、**运力块渲染**：经理侧详情页真的渲染出运力块、登记入口**唯一可点**。
+        没有入口时后面三条全都成立不了，故必须先证有（与 ㊵ ① 同一条做法）。
+    二、**登记表单可输入**：逐字段真机打字 ⇒ 页面 `capForm` **真的被写入**。
+        判据不是"输入框看得见"，而是"打完字 data 里有值" —— 直指上面那个缺陷。
+    三、**409 两种分流**：规则不过 ⇒ 页面把**逐条**判定（含**通过项**）显示出来、
+        且**不刷新**（刷新会把刚看到的那张判定表顶掉）；状态冲突 ⇒ 服务端 409 且带
+        `existing_confirmation_id`。两种处置**相反**，混在一起会把用户送进死循环。
+    四、**确认成功**：真实点击确认 ⇒ 确认卡出现（含成果引用与 `recheck` 入口），
+        且**服务端读得回来**（API 直证）—— "页面说成功"不算数。
+
+    ⚠️ 诚实边界（按档登记，**不计入通过**）
+    * 本章**自足**：前置只用 `seed_entrust_demo.py` 铺的演示组织（`演示经营主体·工作台`）、
+      `seed-owner`（该组织的经理，带 `entrust:quote:create`）与委托
+      `演示委托·工作台样本`（`claimed`）。**刻意不依赖 ㊸ 章** —— 依赖一条长链会让本章的
+      失败与 ㊸ 的失败混在一起，而两者的处置完全不同。
+    * 本章**不做**客户侧：整组运力端点**都没有客户面**（见 `S3-运力确认与有效期切片.md` §6）。
+      也**不验**「两个候选并排比较」—— 那是 §7.18 的界面，其设备证据另行登记。
+    * 登记与确认会**真的写库**（候选 + 确认 + 成果版本）。走查用的是
+      `run_walkthrough_devtools.py` 建的临时库，跑完即弃。
+    """
+    print("\n-- ㊺ 运力确认闭环（真实点击）--", flush=True)
+
+    import datetime as _dt
+
+    # console 基线：**只统计本章的增量**。IDE 可能被复用（`--skip-ide`），
+    # 其上 console 是累计的 ⇒ 不取基线会把上一章的报错算到本章头上。
+    err_base = w.c.errors()
+
+    CODE_MGR = "seed-owner"
+    ORG_NAME = "演示经营主体·工作台"
+    TITLE_MAIN = "演示委托·工作台样本"
+    DETAIL = "pages/entrust/detail/detail"
+    CAND_SEL = '[data-df="cap-carrier"]'
+
+    # ── 前置：全部**经 API 取**，不写死 id（种子重铺会变）──────────────────
+    tok = (api_login(CODE_MGR) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊺ 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == ORG_NAME:
+            org_id = str((r or {}).get("org_id") or "")
+    if not org_id:
+        w.rep.not_run("㊺ 全部断言", f"seed-owner 的组织里没有「{ORG_NAME}」")
+        return
+
+    def _org_rows() -> list:
+        data = api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}
+        return data.get("items") or []
+
+    def _newest_aid(title: str) -> str:
+        hit = [r for r in _org_rows() if str((r or {}).get("title") or "") == title]
+        hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+        return str((hit[0] or {}).get("assignment_id") or "") if hit else ""
+
+    aid = _newest_aid(TITLE_MAIN)
+    if not aid:
+        w.rep.not_run("㊺ 全部断言", f"该组织下找不到「{TITLE_MAIN}」（种子未铺？）")
+        return
+
+    if not w.open_workbench(CODE_MGR, tag="㊺"):
+        w.rep.not_run("㊺ 全部断言", "未能以 seed-owner 进入经理工作台")
+        return
+    # 组织显式钉住：`pickOrg` 的 `saved` 分支跨 IDE 重启保留 ⇒ 不钉就可能落在别的组织
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    d0 = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+
+    # ============ 一、运力块渲染（先证有）============
+    print("\n-- 一、运力块渲染（先证有）--", flush=True)
+    n_open = w.c.count('[data-act-cap-open="1"]')
+    w.rep.rec(
+        "㊺ ① 经理侧详情页真的渲染出运力块：**登记入口唯一可点**。"
+        "没有它，后面三条（可输入 / 409 分流 / 确认成功）全部无从谈起",
+        d0.get("canViewCapacity") is True and n_open == 1,
+        f"canViewCapacity={d0.get('canViewCapacity')!r} 入口命中={n_open}",
+    )
+    w.shot("45-1-运力块-登记入口")
+
+    # ============ 二、登记表单可输入（真机打字 ⇒ data 里真有值）============
+    print("\n-- 二、登记表单可输入 --", flush=True)
+    t_form = w.c.tap('[data-act-cap-open="1"]')
+    time.sleep(1.2)
+    d_form = w.c.page_data()
+    n_sub = w.c.count('[data-act-cap-submit="1"]')
+    n_cxl = w.c.count('[data-act-cap-cancel="1"]')
+    w.rep.rec(
+        "㊺ ②a 点「登记候选运力」⇒ 表单在**页内**展开（提交 / 取消同时可点）",
+        bool(t_form) and d_form.get("capOpen") is True and n_sub == 1 and n_cxl == 1,
+        f"tap={t_form} capOpen={d_form.get('capOpen')!r} submit={n_sub} cancel={n_cxl}",
+    )
+
+    stamp = time.strftime("%m%d-%H%M%S")
+    carrier_ok = "㊺ 甲承运 " + stamp
+    carrier_exp = "㊺ 过期承运 " + stamp
+    # ⚠️ 基准日用 **UTC 日期**：与后端 `capacity.today_utc()` 同一口径。
+    #    用本机时区的 `date.today()` 会在时区边界上与判定基准日差一天，
+    #    而"有效期至"恰好卡在边界时，差一天就是从"通过"变成"过期"。
+    today_utc = _dt.datetime.now(_dt.timezone.utc).date()
+    future = (today_utc + _dt.timedelta(days=90)).isoformat()
+    past = (today_utc - _dt.timedelta(days=90)).isoformat()
+
+    def _fill(carrier: str, valid: str) -> bool:
+        """按登记表单的字段顺序真机打字。返回到目前为止的输入是否都成功。"""
+        pairs = (
+            ('[data-df="cap-carrier"]', carrier),
+            ('[data-df="cap-vessel"]', "㊺-6688"),
+            ('[data-df="cap-tonnes"]', "900"),
+            ('[data-df="cap-vessels"]', "1"),
+            ('[data-df="cap-rate"]', "45"),
+            ('[data-df="cap-valid"]', valid),
+            ('[data-df="cap-evidence-ref"]', "att:451"),
+        )
+        ok_all = True
+        for sel, val in pairs:
+            # ⚠️ 先**滚进视口**：`input_text` 自己**不滚动**（只有 `tap` 自带重试）。
+            #    长页面里输入框掉到折叠线以下时，直接打会失败，而它只回一个
+            #    `ok=false` —— 不看返回值就等于"什么都没发生"。本章第一轮就是
+            #    这么在 ③/④ 段连着丢了两条证据（日志里只剩一句"判定行=0"）。
+            w.scroll_into(sel)
+            if not w.c.input_text(sel, val):
+                ok_all = False
+        # 装载口径与证据类别是**按钮**不是输入框（`data-act-cap-partial` / `-kind`）
+        w.c.tap('[data-act-cap-partial="1"]')
+        w.c.tap('[data-act-cap-kind="document"]')
+        time.sleep(0.8)
+        return ok_all
+
+    typed_ok = _fill(carrier_ok, future)
+    typed_ok = w.c.count(CAND_SEL) == 1 and typed_ok
+    f = w.c.page_data().get("capForm") or {}
+    ok_typed = (
+        typed_ok
+        and str(f.get("carrier") or "") == carrier_ok
+        and str(f.get("capacityTonnes") or "") == "900"
+        and str(f.get("validUntil") or "") == future
+        and str(f.get("evidenceKind") or "") == "document"
+        and f.get("allowsPartialLoad") is True
+    )
+    w.rep.rec(
+        "㊺ ②b 真机打的字**真的进了页面 data**（判据是 capForm 里有值，不是"
+        "「输入框看得见」）—— 本切片那个只在真机上暴露的缺陷（`data-df` 在 handler 的"
+        "映射表里没有对应项 ⇒ `bindinput` 照常触发、查表查不到就静默空转）正是死在这一条上",
+        ok_typed,
+        f"carrier={f.get('carrier')!r} 吨位={f.get('capacityTonnes')!r} "
+        f"有效期={f.get('validUntil')!r} 类别={f.get('evidenceKind')!r} "
+        f"拆批={f.get('allowsPartialLoad')!r} 输入回执={typed_ok}",
+    )
+    w.shot("45-2-登记表单-已打字")
+
+    # 真机提交 ⇒ 候选真的落库（**API 直证**，不看页面那张 toast）
+    t_submit = w.c.tap('[data-act-cap-submit="1"]')
+    got_cand: dict = {}
+
+    def _cand_of(carrier: str) -> dict:
+        got_cand.clear()
+        items = api_get(f"/entrust/assignments/{aid}/capacity-candidates", tok) or {}
+        rows = items if isinstance(items, list) else (items.get("items") or [])
+        for r in rows:
+            if str((r or {}).get("carrier") or "") == carrier:
+                got_cand.update(r or {})
+                return got_cand
+        return {}
+
+    ok_cand = False
+    for _ in range(20):
+        time.sleep(0.5)
+        if _cand_of(carrier_ok):
+            ok_cand = True
+            break
+    w.rep.rec(
+        "㊺ ②c 真实点击「登记候选运力」⇒ 候选**真的落库**（API 直证；页面 toast 不算证据）",
+        ok_cand,
+        f"tap={t_submit} candidate_id={got_cand.get('candidate_id')!r} "
+        f"status={got_cand.get('status')!r}",
+    )
+    w.shot("45-3-候选已登记")
+    if not ok_cand:
+        w.rep.not_run("㊺ ③④ 确认链路", "登记未落库 ⇒ 后面两条证据的前提不存在")
+        return
+
+    cid_ok = str(got_cand.get("candidate_id") or "")
+
+    # ============ 三、409 分流之一：**规则不过**（判定表要照实显示、且不刷新）============
+    print("\n-- 三、409 分流（规则不过）--", flush=True)
+    w.c.tap('[data-act-cap-open="1"]')  # 表单可能已被提交后收起
+    time.sleep(1.0)
+    _fill(carrier_exp, past)
+    w.c.tap('[data-act-cap-submit="1"]')
+    got_exp: dict = {}
+    for _ in range(20):
+        time.sleep(0.5)
+        if _cand_of(carrier_exp):
+            got_exp.update(got_cand)
+            break
+    if not got_exp:
+        w.rep.not_run("㊺ ③ 规则不过的 409 分流", "过期候选未登记成功，无法造出规则不过")
+    else:
+        cid_exp = str(got_exp.get("candidate_id") or "")
+        t_open_exp = w.c.tap(f'[data-act-cap-confirm-open="{cid_exp}"]')
+        time.sleep(1.2)
+        d_ok_open = w.c.page_data()
+        # ⚠️ 本断言原文写的是「范围 / 备注可输入 + 提交可点」，但第一版只看了
+        #    `capConfirmKey`（**内部状态**）—— 那个量在"条根本没渲染出来"时也照样被置上，
+        #    于是断言绿着、真机上却点不出任何输入框。判别依据必须落在**渲染树**上：
+        #    范围框 / 备注框 / 提交键各命中 1 次，且 `wx:if` 的两侧类型一致
+        #    （`capConfirmKey` 是字符串，`item.candidateId` 若给数字则 `===` 恒假）。
+        n_scope_exp = w.c.count('[data-df="cap-scope"]')
+        n_note_exp = w.c.count('[data-df="cap-note"]')
+        n_csub_exp = w.c.count(f'[data-act-cap-confirm-submit="{cid_exp}"]')
+        key_ok = (
+            d_ok_open.get("capConfirmKey") in (cid_exp, int(cid_exp))
+            if cid_exp.isdigit()
+            else False
+        )
+        w.rep.rec(
+            "㊺ ③a 点「确认这一条」⇒ 确认条在**页内**展开（范围 / 备注可输入 + 提交可点）"
+            " —— 判据取**渲染树**：三个可点/可输入锚点各命中一次，"
+            "不看内部状态键（它条都没渲染时也照样被置上）",
+            key_ok and n_scope_exp == 1 and n_note_exp == 1 and n_csub_exp == 1,
+            f"tap={t_open_exp} capConfirmKey={d_ok_open.get('capConfirmKey')!r} "
+            f"期望={cid_exp!r} 范围框={n_scope_exp} 备注框={n_note_exp} 提交键={n_csub_exp}",
+        )
+        w.scroll_into('[data-df="cap-scope"]')
+        i_scope_exp = w.c.input_text('[data-df="cap-scope"]', "㊺ 过期候选的范围")
+        w.scroll_into(f'[data-act-cap-confirm-submit="{cid_exp}"]')
+        t_csub_exp = w.c.tap(f'[data-act-cap-confirm-submit="{cid_exp}"]')
+        time.sleep(3.0)
+        d_exp = w.c.page_data()
+        rows_exp = d_exp.get("capRuleRows") or []
+        codes_exp = [str((r or {}).get("ruleCode") or "") for r in rows_exp]
+        passed_exp = [c for c, r in zip(codes_exp, rows_exp) if (r or {}).get("passed")]
+        w.rep.rec(
+            "㊺ ③b 规则不过 ⇒ 页面把**逐条**判定照实显示（四条规则全在，"
+            "**含通过项** —— 后端特意全给，前端不得过滤）",
+            len(rows_exp) >= 4,
+            f"判定行={len(rows_exp)} codes={codes_exp} "
+            f"提交键 tap={t_csub_exp} 范围输入回执={i_scope_exp} "
+            f"页内提示={d_exp.get('capHint')!r}",
+        )
+        w.rep.rec(
+            "㊺ ③c 过期候选**只在有效期上**不通过（根因要分得出来："
+            "「这一条为什么不行」与「这些规则都跑了」是两件事）",
+            "validity" in codes_exp
+            and len(
+                [r for r in rows_exp if not (r or {}).get("passed")]
+            )
+            == 1,
+            f"通过项={passed_exp} 未过项="
+            f"{[c for c, r in zip(codes_exp, rows_exp) if not (r or {}).get('passed')]}",
+        )
+        w.shot("45-4-规则不过的逐条判定")
+
+    # ============ 四、确认成功（合规候选）============
+    print("\n-- 四、确认成功 --", flush=True)
+    SCOPE = "㊺ 全程 900 吨舱位"
+    w.c.tap('[data-act-cap-cancel="1"]')  # 先把可能的展开条收起来
+    time.sleep(0.8)
+    t_open_ok = w.c.tap(f'[data-act-cap-confirm-open="{cid_ok}"]')
+    time.sleep(1.2)
+    # ⚠️ 与 ②③ 段同一坑：`input_text` **自己不滚动**，只回一个 `ok=false`。
+    #    不先滚进视口 ⇒ 范围打不进去 ⇒ `onSubmitCapConfirm` 的页内校验
+    #    （`if (!scope) setData({capHint:…}); return`）**静默拦住**，
+    #    连 Http 都不会发 —— 症状是 ④a 落库失败 + ⑤ 拿到 200 而非 409，
+    #    看起来像"后端没挡"，实际是"前端根本没提交"。第一轮就是这么红的。
+    w.scroll_into('[data-df="cap-scope"]')
+    n_scope_ok = w.c.count('[data-df="cap-scope"]')
+    i_scope_ok = w.c.input_text('[data-df="cap-scope"]', SCOPE)
+    time.sleep(0.4)
+    d_before = w.c.page_data()
+    n_conf_before = len(d_before.get("capConfirmations") or [])
+    w.scroll_into(f'[data-act-cap-confirm-submit="{cid_ok}"]')
+    t_csub_ok = w.c.tap(f'[data-act-cap-confirm-submit="{cid_ok}"]')
+    conf: dict = {}
+
+    def _conf_of() -> dict:
+        conf.clear()
+        data = api_get(f"/entrust/assignments/{aid}/capacity-confirmations", tok) or {}
+        rows = data if isinstance(data, list) else (data.get("items") or [])
+        hit = [r for r in rows if str((r or {}).get("candidate_id") or "") == cid_ok]
+        if hit:
+            conf.update(hit[0] or {})
+        return conf
+
+    ok_conf = False
+    for _ in range(24):
+        time.sleep(0.5)
+        if _conf_of():
+            ok_conf = True
+            break
+    d_after_submit = w.c.page_data()
+    w.rep.rec(
+        "㊺ ④a 真实点击「确认运力」⇒ 确认**真的落库**（API 直证：服务端读得回来）"
+        " —— 一条候选只能确认一次是库上的唯一约束，不是先查后写",
+        ok_conf,
+        f"confirmation_id={conf.get('confirmation_id')!r} "
+        f"artifact_id={conf.get('artifact_id')!r} "
+        f"rules={len(conf.get('rule_checks') or [])} "
+        f"范围框={n_scope_ok} 打开 tap={t_open_ok} 提交 tap={t_csub_ok} "
+        f"范围输入回执={i_scope_ok} 提交后页内提示={d_after_submit.get('capHint')!r}",
+    )
+    # ④b/④c/④d 都以「确认已落库」为前提。前提不在就记 `not_run`、不记 FAIL ——
+    # 一条根因摊成四个 FAIL 会让人以为有四处缺陷（第一轮正是如此：`input_text`
+    # 没滚动 ⇒ ④a④c④d 与 ⑤ 一起红，实际只有一个原因）。
+    # `not_run` 不是通过，它只是**不虚报**。
+    if ok_conf:
+        w.rep.rec(
+            "㊺ ④b 确认产出**采购确认成果**且逐规则判定落库（4 条；少一条＝有规则没跑）",
+            bool(conf.get("artifact_id")) and len(conf.get("rule_checks") or []) == 4
+            and str(conf.get("rule_set_version") or "") != "",
+            f"artifact={conf.get('artifact_id')!r} "
+            f"rules={len(conf.get('rule_checks') or [])} "
+            f"ruleset={conf.get('rule_set_version')!r}",
+        )
+    else:
+        w.rep.not_run("㊺ ④b 确认产出的成果与逐规则判定", "④a 未落库 ⇒ 没有成果可查")
+    time.sleep(2.0)
+    d_after = w.c.page_data()
+    n_conf_after = len(d_after.get("capConfirmations") or [])
+    if ok_conf:
+        w.rep.rec(
+            "㊺ ④c 确认成功后页面**重取并渲染**出确认卡（条数 +1），"
+            "而不是前端往数组里塞一行 —— 候选状态也从 confirmed 回来",
+            n_conf_after > n_conf_before,
+            f"确认前={n_conf_before} 确认后={n_conf_after}",
+        )
+    else:
+        w.rep.not_run("㊺ ④c 确认卡重取重渲染", "④a 未落库 ⇒ 页面上不会有新的确认卡")
+    n_recheck = w.c.count(f'[data-act-cap-recheck="{conf.get("confirmation_id")}"]')
+    if ok_conf:
+        w.rep.rec(
+            "㊺ ④d 确认卡上的「只读复算」入口可被**唯一命中**"
+            "（D1-09 的可点形态：用当前事实重跑同一套规则，不改任何行）",
+            n_recheck == 1,
+            f"data-act-cap-recheck 命中={n_recheck}",
+        )
+    else:
+        w.rep.not_run("㊺ ④d「只读复算」入口可被唯一命中", "④a 未落库 ⇒ 没有确认卡可点")
+
+    # ④e / ④f：把「复算」**真的点一次**。只证"入口可点"是不够的 ——
+    # 判定表的渲染条件是 `wx:if="{{capRecheckId === item.confirmationId && capRecheck}}"`，
+    # 两侧同样是"字符串 ⇄ API 的 int"这一对（`capRecheckId` 来自 `String(dataset)`）。
+    # 不点下去、不看渲染树，就正好漏掉 ③a 那一处缺陷的**同源第二例**。
+    if ok_conf and n_recheck == 1:
+        conf_before_rc = dict(conf)
+        sel_rc = f'[data-act-cap-recheck="{conf.get("confirmation_id")}"]'
+        w.scroll_into(sel_rc)
+        t_rc = w.c.tap(sel_rc)
+        n_verdict = 0
+        for _ in range(24):
+            time.sleep(0.5)
+            n_verdict = w.c.count(
+                f'[data-act-cap-recheck-verdict="{conf.get("confirmation_id")}"]'
+            )
+            if n_verdict:
+                break
+        rc_payload = (w.c.page_data().get("capRecheck") or {})
+        w.rep.rec(
+            "㊺ ④e 点「复算这条确认」⇒ **判定表真的渲染出来**（结果锚点唯一命中），"
+            "而不是「请求发了、页面什么都没多出来」—— 「点了没反应」与「算出来不成立」"
+            "在截图上长得一样，只有渲染树分得开",
+            n_verdict == 1 and bool(rc_payload),
+            f"tap={t_rc} 判定表锚点={n_verdict} "
+            f"validLabel={rc_payload.get('validLabel')!r} 基准日={rc_payload.get('asOfDate')!r} "
+            f"变化={rc_payload.get('changedText')!r}",
+        )
+        conf_after_rc = _conf_of() or {}
+        diff_keys = sorted(
+            k
+            for k in set(conf_before_rc) | set(conf_after_rc)
+            if conf_before_rc.get(k) != conf_after_rc.get(k)
+        )
+        w.rep.rec(
+            "㊺ ④f 复算**不改任何行**（D1-09 的「只读」）：复算前后确认行逐字相同 —— "
+            "「不再成立」是**按当时事实重跑**得出的结论，不是把这条确认作废掉",
+            bool(conf_after_rc) and not diff_keys,
+            f"不同的键={diff_keys} "
+            f"confirmation_id={conf_after_rc.get('confirmation_id')!r} "
+            f"artifact_id={conf_after_rc.get('artifact_id')!r} "
+            f"rules={len(conf_after_rc.get('rule_checks') or [])}",
+        )
+    else:
+        w.rep.not_run("㊺ ④e 复算判定表渲染", "④d 入口未命中 ⇒ 没有可点的复算键")
+        w.rep.not_run("㊺ ④f 复算只读（不改行）", "④d 入口未命中 ⇒ 复算没发生过")
+    w.shot("45-5-确认成功")
+
+    # ============ 五、负例：同一候选二次确认 ⇒ 状态冲突（API 直证）============
+    print("\n-- 五、负例：二次确认（状态冲突）--", flush=True)
+    if not ok_conf:
+        # 「二次」的前提是「一次」已经落库。前提不在 ⇒ 这一发只会**成功一条**，
+        # 拿到 200 是**必然**、不是缺陷；如实记 not_run。
+        w.rep.not_run(
+            "㊺ ⑤ 同一候选二次确认 ⇒ 409", "④a 未落库 ⇒ 不存在「第二次」"
+        )
+    else:
+        st, body = api_post(
+            f"/entrust/assignments/{aid}/capacity-confirmations",
+            tok,
+            {"candidate_id": int(cid_ok) if cid_ok.isdigit() else cid_ok,
+             "agreed_scope": "㊺ 二次确认"},
+            "walk45-dup-" + stamp,
+        )
+        # ⚠️ 后端的 409 把结构化信息放在 **`detail` 里**（FastAPI 的 `HTTPException(detail=…)`
+        #    会包一层）：规则不过 ⇒ `detail.rule_checks`；状态冲突 ⇒
+        #    `detail.existing_confirmation_id` / `detail.existing_artifact_id`。
+        #    第一版在这里按**顶层**读 `existing_confirmation_id`，于是实测 409 却判 FAIL ——
+        #    是断言读错了层，不是服务端少了字段。响应体原样收进回执，避免再猜。
+        det = (body or {}).get("detail") if isinstance(body, dict) else None
+        det = det if isinstance(det, dict) else {}
+        w.rep.rec(
+            "㊺ ⑤ 同一候选二次确认 ⇒ **409**，且 `detail.existing_confirmation_id` 指回"
+            "已存在的那条确认（客户端据此去读它，而不是拿一句「已经确认过了」把用户拦住）"
+            " —— 界面对这一种要**刷新**，与「规则不过⇒不刷新」处置相反；"
+            "混在一起会把用户送进死循环。注：界面侧的这条分支驱动不到"
+            "（候选确认后 `confirmable=false`，确认条不再出现）⇒ 前端那一支由静态门禁守",
+            st == 409 and bool(det.get("existing_confirmation_id")),
+            f"status={st} 顶层keys={sorted((body or {}).keys()) if isinstance(body, dict) else body} "
+            f"detail.message={det.get('message')!r} "
+            f"existing_confirmation_id={det.get('existing_confirmation_id')!r} "
+            f"existing_artifact_id={det.get('existing_artifact_id')!r} "
+            f"（本次确认 id={conf.get('confirmation_id')!r}）",
+        )
+
+    # ============ 六、本章运行期 console 无未归因错误 ============
+    errs = w.new_errors(err_base)
+    if errs is None:
+        w.rep.review_required(
+            "㊺ 本章运行期 console 无未归因错误",
+            "采集**失败**（返回 None，不是空串）—— 不能把'采不到'当成'没有错误'",
+        )
+    elif errs.strip():
+        w.rep.review_required("㊺ 本章运行期 console 无未归因错误", errs[:400])
+    else:
+        w.rep.rec("㊺ 本章运行期 console 无未归因错误", True, "增量 0 条")
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
     "44": sec_44,
+    "45": sec_45,
     "0": sec_00,
     "1": sec_01,
     "2": sec_02,
@@ -8300,6 +8757,14 @@ DEFAULT_ORDER = [
     #    ⇒ 这条发布此后既不可撤回也不可再响应，重跑会因"没有未发布版本"而 `NOT_RUN`
     #    （正确行为，不是缺陷）。排在 ㊸ 之后、全量序列最末。
     "44",
+    # ㊺ 运力确认闭环（BP-03 第 3 条 / 合同 §10.1 第 5 步）——设备侧运行取证。
+    # ⚠️ **自足**：只用 `seed_entrust_demo.py` 铺的演示组织与委托（`claimed`），
+    #    刻意**不依赖 ㊸** —— 依赖一条长链会让本章的失败与 ㊸ 的失败混在一起，
+    #    而两者的处置完全不同。故可单跑：`--section 45`。
+    # ⚠️ 副作用：会真登记 2 条候选并确认其中 1 条（写 1 份采购确认成果 + 1 行确认
+    #    + 4 行判定）。临时库跑完即弃；共享库上重跑会因候选累积而仍成立（断言按
+    #    本次唯一的承运人名定位），但会在库里留下痕迹。
+    "45",
 ]
 
 
