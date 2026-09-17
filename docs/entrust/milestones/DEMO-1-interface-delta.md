@@ -236,4 +236,22 @@ invokes AG-02」；编号接 §7.5（第 27 条）列出的那个缺口。本节
 | 37 | 新导出登记进两处 harness 的桩 | ✅ `verify_frontend_e2e.js` 的 `requireStub`（新增 `uploadAttachment` / `extractAttachment`，两者都走**真网络**而非回放）+ `verify_ui_interactions.js` 的 `entrustStub`（`Object.assign({}, REAL_ENTRUST, …)` 派生，新增导出自动可用）。漏登记的后果见 §7.4 第 23 条 |
 | 38 | ⚠️ **夹具与种子之间存在口径偏离，本片不自行裁定** | 合同 §3.1 写「初期 **800 吨** → 变更后 **950 吨**」，而演示种子 `ASSIGNMENT_MAIN` 是 **1200 吨**，且当前变更样本是**收货港变化**而非数量变化。两侧**均保持原状**，登记为待裁决（`DEMO-1-fixture-manifest.md` §4 的 F-Q1/F-Q2）。⇒ 在此之前**不得**声称"§3.1 夹具已完全对齐" |
 
+### 7.7 第八切片（S2 收口：来源完整性 + 附件恢复通道；HO 0917-3 裁定一/二/四）
+
+触发：`近期HO 决策…0917-3.docx`。裁定一（夹具以合同为准）、裁定二（来源修复不能只补一句
+"ref 写纯 ID"）、裁定四（重抽/人工转录最小通道）。本条登记与**接口面**有关的部分。
+
+| # | 条目 | 状态 |
+| --- | --- | --- |
+| 39 | ⚠️ **`validate_envelope` 此前只遍历顶层 `source_refs`** | **真缺陷，已修**。`findings[].source_refs` 里的引用**完全没被核对** —— 而 findings 恰恰是模型解释"我为什么这么判"的地方（本次 live 输出的描述性引用就有两处在 findings 内）。现在核对**所有**声明的引用，并在 `unverified_sources` 里带上 `where`（`source_refs` / `findings[i].source_refs`）—— 经理要能一眼看到**哪里**需要核对 |
+| 40 | **`query_parsed` 字段契约补 4 项**：`currency` / `rate_unit` / `includes` / `excludes` | **接口面变化（取值域扩张，纯增）**。此前它们不在契约里 ⇒ 真实模型给出的这四个字段被登记成**未知字段**，而它们恰好是 BP-02 要展示的业务内容。另外 `rate` 只说"45.00"、**不说这一价是每吨还是每柜** ⇒ 计价单位必须显式落在 `rate_unit` 上 |
+| 41 | ⚠️ `_parse_quote_text` 把**计价单位**记成了 `quantity_unit` | **真缺陷，已修**。`元/吨` 的"吨"是**单价的分母**，不是数量：两者恰好同名时看不出问题，换成"每柜 3000 元"就会凭空造出一个不存在的数量事实。现在 `rate_unit`（计价单位）与 `quantity_unit`（数量单位）分开，并新增数量的确定性抽取与币种识别 |
+| 42 | **提示词给出"可原样复制的来源目录"** | `runner.run_agent` 计算 `build_source_catalog` 后**同时**喂给提示词与来源核对（**同一个集合**）—— 提示词给 A、校验认 B 的话，模型照抄也会被判编造，比不给更坏。目录逐行渲染 `kind=... ref=...`，并在"文本来自附件提取"时点名必须出现 `attachment_text` |
+| 43 | **`GET /attachments/{id}` 与两个列表新增 `text_source`** | **接口面变化（纯增字段）**。它让界面能区分"机读提取 / 人工转录"，并据此决定"重抽要不要先问"。采用 `LEFT JOIN ent_attachment_text` 一次带出，**不是**每条再查一次 text 端点（避免 N+1） |
+| 44 | ⚠️ **重抽会覆盖、且失败分支还会 `drop_text`** ⇒ 人工转录可能被静默毁掉 | **新增守卫**：该附件当前文本来自 `manual_transcription` 时，`POST /attachments/{id}/extract` **默认拒绝（409）**，要求显式带 `acknowledge_transcription_overwrite=true`。新增异常 `AttachmentTranscriptionOverwriteError` → **409**（请求合法、与当前状态冲突）。响应新增 `previous_text_source`，让"这次覆盖掉的是人工还是机器文本"可查 |
+| 45 | ⚠️ **幂等载荷里掺进了"读自当前状态"的值** | **我自己引入又当场修掉的真缺陷**：把 `previous_text_source` 放进幂等 `payload` ⇒ 同一个键的第二次**合法**调用因载荷不同被判成"同键异体"→ 409（`test_extract_is_idempotent_under_same_key` 当场红）。**幂等载荷只能由请求派生**（附件 id / 内容指纹 / 参数）；状态类信息放**响应** |
+| 46 | **前端补两张镜像表 + 逐格比对** | `TEXT_SOURCE_LABELS`（⇄ `attachments.TEXT_SOURCE_*`）与 `SOURCE_KIND_LABELS`（⇄ `runner.KIND_*`），并断言「`attachment` 与 `attachment_text` 必须是两个不同的词」「未知取值照实回显」「只有 done 才 canReference」「只有人工转录才需要在重抽前确认」 |
+| 47 | **夹具：canonical 配置落地（裁定一）** | 新增 `backend/scripts/fixtures/demo1_canonical.json` + `DEMO1-canonical-sample-quotation.txt`（钢材 **800 吨**、公—水—公、CNY 45.00 元/吨、**单船承运不拆批**），候选 C-900（变更后不适用）与 C-1200（变更后仍可完成）。CI 端到端**改用 canonical**；旧件 F-1（1200 吨）**保留不动**作为旧回归数据。F-Q1/F-Q2 记为**已裁决**（`fixture-manifest` §4） |
+| 48 | **e2e 新增"未确认的重抽不得毁掉人写的内容"这条不变量** | 判据写成两种合法形态之一：① 页面知道来源是人写的 ⇒ 停在确认态、不发请求；② 页面信息过期（例如别人刚转录完）⇒ 请求发出但**服务端 409 拒掉**并进入确认态。**②不是缺陷** —— 它正是服务端守卫的意义；但"未确认的重抽**成功了**"必须红 |
+
 
