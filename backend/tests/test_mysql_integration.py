@@ -1010,3 +1010,109 @@ def test_offer_response_race_exactly_one_accept(mysql):
             verify.close()
 
     assert len(winners) == _ROUNDS
+
+
+# ─────────────────────────────────────── S3 合同派生并发（BP-03 第 8 条 / D1-08）
+
+
+def _seed_accepted_release(db, *, owner_id: int = 960, manager_id: int = 961) -> int:
+    """播种一条**已被客户接受**的发布，返回 release_id（并发派生的前置）。
+
+    与上面那条一样走**生产命令**（`release_offer` / `respond_to_offer`），不手写
+    INSERT —— 手写的话，一旦发布或响应命令的写入逻辑变了，这条并发用例会继续绿着
+    而实际已经失效。
+    """
+    from app.modules.entrust import offers as offers_svc
+
+    release_id = _seed_release_for_race(db, owner_id=owner_id, manager_id=manager_id)
+    offers_svc.respond_to_offer(
+        db, release_id=release_id, decision="accept", note=None, actor_user_id=owner_id
+    )
+    return release_id
+
+
+def test_contract_derivation_race_exactly_one_contract(mysql):
+    """两个派生请求同时到达 ⇒ 恰好一个成功，库里恰好**一份**合同与**一条**派生记录。
+
+    判据是 `ent_contract_derivation` 上的 `UNIQUE (release_id)`。这条尤其需要真 MySQL：
+
+    * 派生**一次写四张表**（合同成果 / 合同版本 / 派生记录 / 字段来源表）。靠"先查后写"
+      判重，并发下会派生出一式两份合同，而两份都"看起来"合法；
+    * 更糟的是两份合同各有独立的版本链 —— 事后审计无法判断哪一份才是"客户接受事实"
+      的那一份，而 D1-08 的全部价值就是这条可核对性。
+
+    SQLite 整库一把写锁，两个线程必然串行，怎么跑都只有一个赢家，**证明不了任何事**，
+    所以这条只能放在本模块（与上面客户响应并发同一条理由）。
+    """
+    from app.modules.entrust import contracts as ctr
+
+    owner_id = 960
+    manager_id = 961
+    for round_no in range(_ROUNDS):
+        db = mysql()
+        release_id = _seed_accepted_release(db, owner_id=owner_id, manager_id=manager_id)
+        db.close()
+
+        start = threading.Barrier(2)
+        outcomes: list[tuple[str, str]] = []
+
+        def derive(*, start=start, release_id=release_id, outcomes=outcomes) -> None:
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                try:
+                    got = ctr.derive_contract(
+                        session, release_id=release_id, actor_user_id=manager_id
+                    )
+                    outcomes.append(("won", str(got["contract_artifact_id"])))
+                except Exception as exc:  # noqa: BLE001 —— 输家的**具体形态**要记录，不掩盖
+                    outcomes.append(("lost", f"{type(exc).__name__}: {exc}"))
+            finally:
+                session.close()
+
+        t1 = threading.Thread(target=derive)
+        t2 = threading.Thread(target=derive)
+        t1.start()
+        t2.start()
+        t1.join(timeout=60)
+        t2.join(timeout=60)
+
+        assert len(outcomes) == 2, f"第 {round_no} 轮有线程未完成: {outcomes}"
+        won = [o for o in outcomes if o[0] == "won"]
+        assert len(won) == 1, (
+            f"第 {round_no} 轮赢家数错误（同一份已接受事实被派生了多次）: {outcomes}"
+        )
+
+        # ⚠️ 跨会话读取：MySQL 默认 REPEATABLE READ，同一个会话读过一次之后事务就一直开着，
+        #    后续读落在同一个快照上。终局一律用**新开的会话**去读（见本模块 H7b 段的同一纪律）。
+        verify = mysql()
+        try:
+            row = (
+                verify.execute(
+                    text(
+                        "SELECT COUNT(*) AS n, MIN(assignment_id) AS a FROM ent_contract_derivation "
+                        "WHERE release_id = :r"
+                    ),
+                    {"r": release_id},
+                )
+                .mappings()
+                .first()
+            )
+            assert int(row["n"]) == 1, (
+                f"第 {round_no} 轮库里出现了 {row['n']} 条派生记录 —— "
+                "唯一约束没兜住，同一份已接受事实被派生了多次"
+            )
+            # 只数"这条发布所在的委托单"下的合同成果：同一轮里没有别的来源会造它
+            contracts = verify.execute(
+                text(
+                    "SELECT COUNT(*) AS n FROM ent_artifact WHERE assignment_id = :a "
+                    "AND artifact_type = 'contract_review'"
+                ),
+                {"a": int(row["a"])},
+            ).scalar()
+            assert int(contracts) == 1, (
+                f"第 {round_no} 轮库里出现了 {contracts} 份合同成果 —— "
+                "并发下派生出了一式两份（各自还有独立版本链，事后无法判断哪份有效）"
+            )
+        finally:
+            verify.close()
