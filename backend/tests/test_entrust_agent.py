@@ -10,7 +10,10 @@
 6. **作业状态机**：提交与执行分离、重复推进 409、取消、租约过期可回收、
    有界重试、尝试日志逐条留痕；
 7. **权限与幂等（AC-10 / ENT-002）**：非参与方 404、只读成员 403、缺幂等键 400、
-   同键重放、同键异体 409、开关关闭 404。
+   同键重放、同键异体 409、开关关闭 404；
+8. **报价单附件引用链（S2 第三片 / BP-02 attachment selection）**：上传 → 提取 →
+   引用 → Agent 读到的**就是附件文本**；并钉住两个"看起来都对"的断点：
+   未提取的附件不可被当作文本来源；带 `quote_text` 时附件被**静默忽略**（优先序）。
 """
 
 from __future__ import annotations
@@ -1385,3 +1388,133 @@ def test_adopt_makes_the_proposal_a_real_artifact(env):
         headers=_headers(manager, uuid.uuid4().hex),
     )
     assert bad.status_code == 400, bad.text
+
+
+# ─────────────────────────────────────────── 8. 报价单附件引用链（S2 第三片）
+
+
+#: 合成样报价单（与 `backend/scripts/fixtures/DEMO1-SYNTHETIC-sample-quotation.txt` 同形）。
+#: 数值刻意与"操作者粘贴的那一份"不同 —— 否则分不清 Agent 读的是哪一份，
+#: 而"读错来源"恰恰是这条链最可能的失败形态。
+_SAMPLE_QUOTE = (
+    "数据标签：合成（Synthetic）\n"
+    "报价方：西江航运有限公司\n"
+    "单价：45.00 元/吨\n"
+    "有效期至：2026-12-31\n"
+    "航线：南宁 → 贵港\n"
+)
+
+
+def _upload_quote(env, manager, eid: int, text: str = _SAMPLE_QUOTE):
+    return env.client.post(
+        "/api/v1/entrust/attachments",
+        files={
+            "file": (
+                "DEMO1-SYNTHETIC-sample-quotation.txt",
+                text.encode("utf-8"),
+                "text/plain",
+            )
+        },
+        data={"entrustment_id": str(eid)},
+        headers=_headers(manager, uuid.uuid4().hex),
+    )
+
+
+def _submit_and_run(env, manager, sid: int, job_input: dict):
+    """提交并推进一次作业，返回作业详情（含 envelope）。"""
+    jid = env.client.post(
+        f"/api/v1/entrust/sessions/{sid}/jobs",
+        json={"base_revision": 1, "input": job_input},
+        headers=_headers(manager, uuid.uuid4().hex),
+    ).json()["job_id"]
+    env.client.post(f"/api/v1/entrust/agent/jobs/{jid}/run", headers=_headers(manager))
+    return env.client.get(f"/api/v1/entrust/agent/jobs/{jid}", headers=_headers(manager)).json()[
+        "job"
+    ]
+
+
+def _ref_kinds(job: dict) -> set[str]:
+    return {str(r.get("kind")) for r in ((job.get("envelope") or {}).get("source_refs") or [])}
+
+
+def test_quotation_attachment_chain_agent_reads_the_uploaded_text(env):
+    """演示第 2 步的整条链：**上传 → 提取 → 引用 → AG-02 读到的就是附件文本**。
+
+    判定不看 HTTP 码，看信封里的 `payload` 与 `source_refs`：
+    只断言"作业成功"是不够的 —— 不带输入时它也会**成功地**返回
+    `quote_unparsed`，那种"空成功"看起来一切正常。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    _task(db, assignment_id=aid, status="waiting")
+    sid = _make_session(env, manager, eid=eid, aid=aid, specialty="agent_02").json()["session_id"]
+
+    up = _upload_quote(env, manager, eid)
+    assert up.status_code == 200, up.text
+    att_id = int(up.json()["attachment_id"])
+    # 刚上传就是"未提取"：此刻它对 Agent 只是一个文件名
+    assert up.json()["extract_status"] == "not_requested"
+
+    # ---- 反事实 A：还没提取就引用 ⇒ Agent 读不到内容 ----
+    job_a = _submit_and_run(env, manager, sid, {"attachment_id": att_id})
+    assert "attachment_text" not in _ref_kinds(job_a), (
+        "未提取的附件不能被当作文本来源引用 —— 否则「编造来源」这条检查就失去意义"
+    )
+    props_a = (job_a.get("envelope") or {}).get("artifact_proposals") or []
+    assert not [p for p in props_a if p["artifact_type"] == "quote_parsed"], (
+        "没有文本就不该产出报价解析稿（产出了说明读到了不该读的东西）"
+    )
+
+    # ---- 提取 ----
+    ex = env.client.post(
+        f"/api/v1/entrust/attachments/{att_id}/extract",
+        headers=_headers(manager, uuid.uuid4().hex),
+    )
+    assert ex.status_code == 200, ex.text
+    assert ex.json()["extract_status"] == "done", ex.text
+
+    # ---- 正路：只带 attachment_id ----
+    job = _submit_and_run(env, manager, sid, {"attachment_id": att_id})
+    envelope = job.get("envelope") or {}
+    proposals = envelope.get("artifact_proposals") or []
+    parsed = [p for p in proposals if p["artifact_type"] == "quote_parsed"]
+    assert parsed, f"夹具必须真产出报价解析提案：{proposals}"
+    payload = parsed[0]["payload"]
+    assert payload["rate"] == "45.00", payload
+    assert str(payload["carrier"]).startswith("西江航运"), payload
+    assert payload["valid_until"] == "2026-12-31", payload
+    assert payload["route"] == "南宁→贵港", payload
+    kinds = _ref_kinds(job)
+    assert "attachment_text" in kinds, f"引用附件的作业必须把 attachment_text 记为来源：{kinds}"
+    assert "operator_input" not in kinds, "本次没有操作者粘贴文本，不该出现 operator_input"
+
+    # ---- 反事实 B：同时带 quote_text ⇒ 附件被**静默忽略**（优先序）----
+    # 这一条是界面的依据：会话页"引用附件"那条路径**绝不能**带 `quote_text`，
+    # 否则页面上一切正常，而 Agent 读的根本不是那份附件。
+    job_b = _submit_and_run(
+        env,
+        manager,
+        sid,
+        {"attachment_id": att_id, "quote_text": "报价方：另一家物流公司\n单价：999.00 元/吨\n"},
+    )
+    env_b = job_b.get("envelope") or {}
+    parsed_b = [
+        p for p in (env_b.get("artifact_proposals") or []) if p["artifact_type"] == "quote_parsed"
+    ]
+    assert parsed_b, "操作者文本在场时必须仍能解析"
+    assert parsed_b[0]["payload"]["rate"] == "999.00", (
+        "操作者当面粘贴的文本优先于附件 —— 这是刻意固定的优先序，不是巧合"
+    )
+    kinds_b = _ref_kinds(job_b)
+    assert "operator_input" in kinds_b and "attachment_text" not in kinds_b, (
+        f"引用必须是 operator_input，不能把附件也算成来源：{kinds_b}"
+    )
+
+
+def test_attachment_upload_is_scoped_to_the_entrustment(env):
+    """反事实：非参与方不能往这条委托授权上挂附件（否则等于往别人的会话里塞输入）。"""
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    outsider = _login(env.client, "outsider")
+    resp = _upload_quote(env, outsider, eid)
+    assert resp.status_code == 404, resp.text
