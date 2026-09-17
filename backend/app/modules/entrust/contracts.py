@@ -102,6 +102,18 @@ ALL_SOURCE_KINDS = frozenset(
     }
 )
 
+#: 来源类别标签（**唯一**实现，与 `EVIDENCE_KIND_LABELS` 同一条纪律）。
+#: 界面上那张来源表要显示"来自已接受报价"而不是 `accepted_release`；让前端自己
+#: 存一份 ⇒ 改一处、另一处静默显示旧说法。所以由投影层把文案一起给出。
+SOURCE_KIND_LABELS = {
+    SOURCE_ACCEPTED_RELEASE: "已接受报价",
+    SOURCE_CUSTOMER_RESPONSE: "客户响应",
+    SOURCE_ASSIGNMENT: "委托单",
+    SOURCE_LEG: "航段",
+    SOURCE_ORGANIZATION: "组织",
+    SOURCE_TEMPLATE: "模板",
+}
+
 #: 合同**必须**登记的字段路径前缀 —— 由注册表与本模块共同决定，测试对它做全覆盖断言。
 #: ⚠️ 运输方式标签表**不再**在这里存一份：唯一实现是 `plan.MODE_LABELS`
 #: （全仓两处各存一份 ⇒ 改一处、另一处静默留下旧口径）。取标签统一走 `plan.mode_label`。
@@ -255,15 +267,22 @@ def list_field_sources(session: Session, *, derivation_id: int) -> list[dict[str
         ),
         {"did": derivation_id},
     ).mappings()
-    return [
-        {
-            "field_path": str(r["field_path"]),
-            "value_text": str(r["value_text"]),
-            "source_kind": str(r["source_kind"]),
-            "source_ref": str(r["source_ref"]),
-        }
-        for r in rows
-    ]
+    out = []
+    for r in rows:
+        kind = str(r["source_kind"])
+        out.append(
+            {
+                "field_path": str(r["field_path"]),
+                "value_text": str(r["value_text"]),
+                # 原值与文案**同时**给出（与航段 `mode`/`mode_label` 同一取向）：
+                # 界面显示文案、比对用原值。只给文案的话，"这两个取值其实不同"
+                # 在库里就再也看不出来。
+                "source_kind": kind,
+                "source_kind_text": SOURCE_KIND_LABELS.get(kind, kind),
+                "source_ref": str(r["source_ref"]),
+            }
+        )
+    return out
 
 
 # ── 纯计算：合同内容与逐字段来源 ────────────────────────────────────────────
@@ -739,15 +758,296 @@ def project_derivation(session: Session, derivation: dict[str, Any]) -> dict[str
     }
 
 
+# ── 签署证据（§10.1 第 7 步的后半 / D1-08 的 `linked evidence`）──────────────
+#
+# 前半"生成合同"已落；这里补的是"**记录**签署证据并绑到合同的某个版本"。
+# 没有这一块，D1-08 的判据 `Contract version and linked evidence inspection`
+# 只有前半句成立 —— "合同版本"查得到，"关联证据"无处可查。
+#
+# ⚠️ 一条必须写死的边界：**本模块不制造签署**。它只记录"有这样一份标注为
+# 样件的证据"这件事。合同 §3.2 / D1-08 要求证据与状态不得等同于实时电子签，
+# 所以 `mode` 恒为 `labeled_sample`、且它是**服务端写死**的常量而不是入参 ——
+# 让调用方能传 `mode=live` 就等于让界面能自称"已完成电子签署"。
+
+#: 签署证据模式。与 `offers.SIGNATURE_MODE_LABELED_SAMPLE` 是**同一个常量**：
+#: 两边各写一份字符串，改一处另一处静默留下旧口径（航段 mode 标签表那次已踩过）。
+SIGNATURE_MODE = offers_svc.SIGNATURE_MODE_LABELED_SAMPLE
+
+KIND_SAMPLE_SCAN = "sample_scan"
+KIND_WRITTEN_CONFIRMATION = "written_confirmation"
+KIND_MANUAL_RECORD = "manual_record"
+ALL_EVIDENCE_KINDS = frozenset({KIND_SAMPLE_SCAN, KIND_WRITTEN_CONFIRMATION, KIND_MANUAL_RECORD})
+
+#: 形态标签（**唯一**实现）。⛔ 前端不得自己再存一份 —— 两处各存一份 ⇒
+#: 改一处、另一处静默显示旧说法（与 `plan.MODE_LABELS` 同一条纪律）。
+EVIDENCE_KIND_LABELS = {
+    KIND_SAMPLE_SCAN: "样件扫描件",
+    KIND_WRITTEN_CONFIRMATION: "书面确认",
+    KIND_MANUAL_RECORD: "人工记录",
+}
+
+#: 形态的**展示顺序**（`frozenset` 无序，界面上的选择条需要一个稳定顺序）。
+EVIDENCE_KIND_ORDER = (KIND_SAMPLE_SCAN, KIND_WRITTEN_CONFIRMATION, KIND_MANUAL_RECORD)
+
+#: 模式标签。这句话是**合同要求常驻**的声明，不是装饰文案 ——
+#: 删掉它就等于允许"一份证据"被读成"签过了"。
+SIGNATURE_MODE_LABELS = {
+    SIGNATURE_MODE: "样件标注（不构成实时电子签署）",
+}
+
+
+class SignatureEvidenceError(RuntimeError):
+    """签署证据的基础异常。HTTP 层按语义转 4xx（默认 400）。"""
+
+
+class SignatureEvidenceNotFoundError(SignatureEvidenceError):
+    """合同成果 / 指定版本不存在。HTTP 层应转 404。"""
+
+
+class SignatureEvidenceStateError(SignatureEvidenceError):
+    """同一版合同同一形态已经记过一条。HTTP 层应转 409。
+
+    `existing_evidence_id`：带上已存在的那条 —— "已经记过了"是一句没用的拒绝，
+    客户端需要能直接去读它（与 `ContractStateError` 同一取向）。
+    """
+
+    def __init__(self, message: str, *, existing_evidence_id: int | None = None) -> None:
+        super().__init__(message)
+        self.existing_evidence_id = existing_evidence_id
+
+
+_SIG_COLS = (
+    "id, assignment_id, entrustment_id, contract_artifact_id, contract_revision_id, "
+    "contract_revision_no, mode, evidence_kind, note, recorded_by, recorded_at"
+)
+
+
+def _row_to_signature(row: Any) -> dict[str, Any]:
+    return {
+        "evidence_id": int(row["id"]),
+        "assignment_id": int(row["assignment_id"]),
+        "entrustment_id": (
+            int(row["entrustment_id"]) if row["entrustment_id"] is not None else None
+        ),
+        "contract_artifact_id": int(row["contract_artifact_id"]),
+        "contract_revision_id": int(row["contract_revision_id"]),
+        "contract_revision_no": int(row["contract_revision_no"]),
+        "mode": str(row["mode"]),
+        "evidence_kind": str(row["evidence_kind"]),
+        "note": row["note"],
+        "recorded_by": int(row["recorded_by"]) if row["recorded_by"] is not None else None,
+        "recorded_at": _fmt(row["recorded_at"]),
+    }
+
+
+def list_signature_evidence(session: Session, *, contract_artifact_id: int) -> list[dict[str, Any]]:
+    """该合同**全部版本**的签署证据（按版本升序、同版本按形态）。"""
+    rows = session.execute(
+        text(
+            f"SELECT {_SIG_COLS} FROM ent_contract_signature_evidence "
+            "WHERE contract_artifact_id = :aid ORDER BY contract_revision_no, evidence_kind"
+        ),
+        {"aid": contract_artifact_id},
+    ).mappings()
+    return [_row_to_signature(r) for r in rows]
+
+
+def record_signature_evidence(
+    session: Session,
+    *,
+    contract_artifact_id: int,
+    evidence_kind: str,
+    actor_user_id: int,
+    note: str | None = None,
+    revision_no: int | None = None,
+) -> dict[str, Any]:
+    """就合同的**某个版本**记一条签署证据（幂等由调用方的 `run_write` 负责）。
+
+    `revision_no` 省略时取合同的**当前版本** —— 界面上的主路径就是"给现在这版记证据"。
+
+    Raises:
+        art.ArtifactNotFoundError: 合同成果不存在（404）。
+        SignatureEvidenceNotFoundError: 指定版本不存在（404）。
+        SignatureEvidenceError: 成果不是合同核对稿、形态不在取值域（400）。
+        SignatureEvidenceStateError: 该版本该形态已记过（409）。
+    """
+    contract = art.get_artifact(session, contract_artifact_id)
+    if str(contract["artifact_type"]) != CONTRACT_TYPE:
+        raise SignatureEvidenceError(
+            f"成果 #{contract_artifact_id} 的类型是 {contract['artifact_type']}，"
+            f"不是 {CONTRACT_TYPE} ⇒ 不能记合同签署证据"
+        )
+
+    kind = str(evidence_kind or "").strip()
+    if kind not in ALL_EVIDENCE_KINDS:
+        raise SignatureEvidenceError(
+            f"证据形态 {kind or '（空）'} 不在取值域内（{'、'.join(sorted(ALL_EVIDENCE_KINDS))}）—— "
+            "未知形态进库之后，「这份证据到底存不存在实物」这个问题就再也没有答案"
+        )
+
+    # 版本定位：**显式版本优先**，省略取当前版本。⚠️ 不给"猜一个版本"的分支：
+    # 证据绑错版本之后，"客户签的是哪一版"在库里就是错的，而这正是本切片的全部价值。
+    want_no = int(revision_no) if revision_no is not None else None
+    if want_no is None:
+        current = contract.get("current_revision") or {}
+        want_no = int(current["revision_no"]) if current.get("revision_no") is not None else 1
+    rev = (
+        session.execute(
+            text(
+                "SELECT id, revision_no FROM ent_artifact_revision "
+                "WHERE artifact_id = :aid AND revision_no = :no"
+            ),
+            {"aid": contract_artifact_id, "no": want_no},
+        )
+        .mappings()
+        .first()
+    )
+    if rev is None:
+        raise SignatureEvidenceNotFoundError(
+            f"合同 #{contract_artifact_id} 没有第 {want_no} 版 ⇒ 没有可绑证据的版本"
+        )
+
+    assignment_id = contract["assignment_id"]
+    if assignment_id is None:
+        # 合同成果没有委托单 ⇒ 证据无处可挂。宁可在这里炸，也不要挂到一个"不知道属于哪单"的行上。
+        raise SignatureEvidenceError(
+            f"合同 #{contract_artifact_id} 没有关联委托单 ⇒ 签署证据没有可归属的单据，已中止"
+        )
+
+    stamp = _fmt(utcnow_naive())
+    try:
+        row = cast(
+            "CursorResult[Any]",
+            session.execute(
+                text(
+                    "INSERT INTO ent_contract_signature_evidence "
+                    "(assignment_id, entrustment_id, contract_artifact_id, contract_revision_id, "
+                    " contract_revision_no, mode, evidence_kind, note, recorded_by, recorded_at) "
+                    "VALUES (:aid, :eid, :cart, :crev, :cno, :mode, :kind, :note, :by, :ts)"
+                ),
+                {
+                    "aid": int(assignment_id),
+                    "eid": contract["entrustment_id"],
+                    "cart": contract_artifact_id,
+                    "crev": int(rev["id"]),
+                    "cno": int(rev["revision_no"]),
+                    # ⛔ 不是入参：模式由服务端写死（见本节开头的边界说明）
+                    "mode": SIGNATURE_MODE,
+                    "kind": kind,
+                    "note": (note or None),
+                    "by": actor_user_id,
+                    "ts": stamp,
+                },
+            ),
+        )
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        existing = (
+            session.execute(
+                text(
+                    "SELECT id FROM ent_contract_signature_evidence "
+                    "WHERE contract_revision_id = :rid AND evidence_kind = :kind"
+                ),
+                {"rid": int(rev["id"]), "kind": kind},
+            )
+            .mappings()
+            .first()
+        )
+        raise SignatureEvidenceStateError(
+            f"合同第 {int(rev['revision_no'])} 版已经记过一条"
+            f"「{EVIDENCE_KIND_LABELS.get(kind, kind)}」证据 —— "
+            "同一版同一形态只记一条（这是重放/双击被唯一约束挡住，不是业务冲突）",
+            existing_evidence_id=int(existing["id"]) if existing is not None else None,
+        ) from exc
+
+    evidence_id = int(row.lastrowid or 0)
+    got = (
+        session.execute(
+            text(f"SELECT {_SIG_COLS} FROM ent_contract_signature_evidence WHERE id = :eid"),
+            {"eid": evidence_id},
+        )
+        .mappings()
+        .first()
+    )
+    if got is None:
+        raise SignatureEvidenceError("证据写入后读不到（不该发生）")
+    return project_signature_evidence(_row_to_signature(got))
+
+
+def project_signature_evidence(item: dict[str, Any]) -> dict[str, Any]:
+    """一条签署证据的**经理投影**：原值与显示文案**同时给出**。
+
+    同时给的理由与航段一致：界面既要能显示"样件扫描件"，也要能在回显/比对时
+    拿到 `sample_scan` 这个原值 —— 只给文案的话，"这两个取值其实不同"这件事
+    在库里就再也看不出来。
+    """
+    kind = str(item["evidence_kind"])
+    mode = str(item["mode"])
+    note = str(item["note"] or "").strip()
+    return {
+        "evidence_id": int(item["evidence_id"]),
+        "assignment_id": int(item["assignment_id"]),
+        "entrustment_id": item["entrustment_id"],
+        "contract_artifact_id": int(item["contract_artifact_id"]),
+        "contract_revision_id": int(item["contract_revision_id"]),
+        "contract_revision_no": int(item["contract_revision_no"]),
+        "revision_no_text": f"第 {int(item['contract_revision_no'])} 版",
+        "mode": mode,
+        "mode_text": SIGNATURE_MODE_LABELS.get(mode, mode),
+        "evidence_kind": kind,
+        "evidence_kind_text": EVIDENCE_KIND_LABELS.get(kind, kind),
+        "note": note,
+        "note_text": note or "未写说明",
+        "recorded_by": item["recorded_by"],
+        "recorded_at": str(item["recorded_at"]),
+    }
+
+
+def project_signature_evidence_list(
+    session: Session, *, contract_artifact_id: int
+) -> dict[str, Any]:
+    """某份合同的签署证据清单（**空列表也要能区分于读不到** ⇒ 带上 artifact_id）。"""
+    items = list_signature_evidence(session, contract_artifact_id=contract_artifact_id)
+    return {
+        "contract_artifact_id": int(contract_artifact_id),
+        "items": [project_signature_evidence(it) for it in items],
+        "has_items": bool(items),
+        # 形态选项**由服务端给出**（标签唯一实现在 `EVIDENCE_KIND_LABELS`）：
+        # 前端自己存一份 ⇒ 改一处、另一处静默显示旧说法；而"这个形态到底能不能选"
+        # 本就是服务端的取值域问题（`ALL_EVIDENCE_KINDS`）。
+        "kind_options": [
+            {"value": k, "label": EVIDENCE_KIND_LABELS[k]} for k in EVIDENCE_KIND_ORDER
+        ],
+        # 常驻声明：它是**合同要求**的措辞，不是界面装饰 —— 这一段在前端也要原样显示。
+        "disclaimer": (
+            f"签署证据按{SIGNATURE_MODE_LABELS.get(SIGNATURE_MODE, SIGNATURE_MODE)}"
+            "记录，不构成实时电子签署。"
+        ),
+    }
+
+
 __all__ = [
     "ACCEPTABLE_QUOTE_TYPE",
+    "ALL_EVIDENCE_KINDS",
     "ALL_SOURCE_KINDS",
     "CONTRACT_TYPE",
     "ContractError",
     "ContractNotFoundError",
     "ContractStateError",
+    "EVIDENCE_KIND_LABELS",
+    "EVIDENCE_KIND_ORDER",
+    "KIND_MANUAL_RECORD",
+    "KIND_SAMPLE_SCAN",
+    "KIND_WRITTEN_CONFIRMATION",
+    "SIGNATURE_MODE",
+    "SIGNATURE_MODE_LABELS",
+    "SignatureEvidenceError",
+    "SignatureEvidenceNotFoundError",
+    "SignatureEvidenceStateError",
     "SOURCE_ACCEPTED_RELEASE",
     "SOURCE_ASSIGNMENT",
+    "SOURCE_KIND_LABELS",
     "SOURCE_CUSTOMER_RESPONSE",
     "SOURCE_LEG",
     "SOURCE_ORGANIZATION",
@@ -759,6 +1059,10 @@ __all__ = [
     "get_derivation_by_contract",
     "get_derivation_by_release",
     "list_field_sources",
+    "list_signature_evidence",
     "project_derivation",
+    "project_signature_evidence",
+    "project_signature_evidence_list",
+    "record_signature_evidence",
     "utcnow_naive",
 ]

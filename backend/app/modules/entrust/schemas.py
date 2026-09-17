@@ -1269,6 +1269,8 @@ class ContractFieldSourceOut(BaseModel):
     #: 来源类别：`accepted_release` / `customer_response` / `assignment` / `leg` /
     #: `organization` / `template`
     source_kind: str
+    #: 来源类别的**显示文案**（服务端给出，标签唯一实现在 `contracts.SOURCE_KIND_LABELS`）
+    source_kind_text: str = ""
     #: 来源标识（内部编号）。**只在本表出现，不进合同正文**
     source_ref: str
 
@@ -1318,6 +1320,82 @@ def contract_derivation_out(data: dict[str, Any]) -> ContractDerivationOut:
 
 def contract_derivation_created_out(data: dict[str, Any]) -> ContractDerivationCreatedOut:
     return ContractDerivationCreatedOut.model_validate(data)
+
+
+# ── 签署证据（§10.1 第 7 步后半 / D1-08 的 linked evidence）─────────────────
+#
+# ⚠️ `SignatureEvidenceIn` **没有 `mode` 字段**，这是刻意的：
+# 模式由服务端写死为 `labeled_sample`（`contracts.SIGNATURE_MODE`）。
+# 让调用方能传 `mode` 就等于让界面能自称"已完成电子签署"，
+# 而合同 §3.2 与 D1-08 都要求证据与状态**不得**等同于实时电子签。
+
+
+class SignatureEvidenceIn(BaseModel):
+    """记一条签署证据的请求体。
+
+    `revision_no` 省略 ⇒ 记到合同的**当前版本**（界面主路径）。
+    """
+
+    #: 证据形态：`sample_scan` / `written_confirmation` / `manual_record`。
+    #: 未知取值由服务层拒（400），这里**不**做宽松解析 ——
+    #: 一个未登记的形态进库后，"这份证据到底存不存在实物"就再无答案。
+    evidence_kind: str = Field(min_length=1, max_length=32)
+    note: str | None = Field(default=None, max_length=255)
+    revision_no: int | None = Field(default=None, ge=1)
+
+
+class SignatureEvidenceOut(BaseModel):
+    """一条签署证据（经理投影）：原值与显示文案**同时**给出。"""
+
+    evidence_id: int
+    assignment_id: int
+    entrustment_id: int | None = None
+    contract_artifact_id: int
+    contract_revision_id: int
+    contract_revision_no: int
+    revision_no_text: str
+    mode: str
+    mode_text: str
+    evidence_kind: str
+    evidence_kind_text: str
+    note: str
+    note_text: str
+    recorded_by: int | None = None
+    recorded_at: str
+
+
+class EvidenceKindOptionOut(BaseModel):
+    """可选的一种证据形态。
+
+    与 `disclaimer` 同一条理由：**由服务端给出**。形态的取值域在
+    `contracts.ALL_EVIDENCE_KINDS`、标签在 `contracts.EVIDENCE_KIND_LABELS` ——
+    前端自己存一份就等于允许界面给出一个服务端根本不收的形态。
+    """
+
+    value: str
+    label: str
+
+
+class SignatureEvidenceListOut(BaseModel):
+    """某份合同的签署证据清单。
+
+    `disclaimer` 是**合同要求常驻**的声明（§3.2 / D1-08），由服务端给出而不是前端写死：
+    措辞只有一份，改了不会有的界面说、有的界面不说。
+    """
+
+    contract_artifact_id: int
+    items: list[SignatureEvidenceOut] = Field(default_factory=list)
+    has_items: bool = False
+    disclaimer: str = ""
+    kind_options: list[EvidenceKindOptionOut] = Field(default_factory=list)
+
+
+def signature_evidence_out(data: dict[str, Any]) -> SignatureEvidenceOut:
+    return SignatureEvidenceOut.model_validate(data)
+
+
+def signature_evidence_list_out(data: dict[str, Any]) -> SignatureEvidenceListOut:
+    return SignatureEvidenceListOut.model_validate(data)
 
 
 # ── 运力确认与有效期（capacity_api.py / S3 / BP-03 第 3 条 / D1-06）──────────
