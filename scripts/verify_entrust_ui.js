@@ -2878,6 +2878,70 @@ check('[接线] 登记入口只在已受理时出现（受理前 raise_case 必 
   )
 })()
 
+// ─────────────────────────────────────────────────────────────
+// 12. 「状态键 === 投影字段」：两侧类型必须先归一为字符串
+//     来源：2026-09-17 设备走查 ㊺ 章实测到的两处真实缺陷（此前 CI 全绿）
+// ─────────────────────────────────────────────────────────────
+// 为什么单列一节：WXML 的 `===` 是**严格比较**，而这两侧的类型来自两个不同世界 ——
+//   左：`dataset` 值 / 页面 `String(x)` 归一出来的状态键 ⇒ **恒为字符串**；
+//   右：投影字段，一度原样透传 API 的 `int`（`candidate_id` / `confirmation_id`）。
+// 两侧各自"看起来都对"，只有放在一起比才出错；而错法是**静默不渲染** ——
+// 点下去什么都不出现、也不报错。静态门禁查得到"锚点写在模板里"，查不到运行时类型。
+//
+// ⚠️ 这里只登记**有故障证据**的两个配对，不做全仓模糊扫描：其余同类比较
+//    （模板里还有若干 `*Id === item.<id>`）尚未逐条取证，按"未知保持未知"在案，
+//    不在这里默认它们没问题 —— 但一旦取证，必须补进这张表。
+const KEY_TYPE_PAIRS = [
+  {
+    what: '候选确认条（manager 侧运力块）',
+    tpl: 'miniapp/pages/entrust/detail/detail.wxml',
+    expr: 'capConfirmKey === item.candidateId',
+    // 左侧**模拟 dataset**：`onOpenCapConfirm` 里是 `String(dataset 值)` ⇒ 字符串
+    key: '2',
+    project: () =>
+      (E.decorateCapacityCandidate({ candidate_id: 2, status: 'candidate' }) || {}).candidateId,
+    symptom:
+      '点「确认这一条」后确认条不渲染：范围框 / 备注框 / 提交键在渲染树里都不存在',
+  },
+  {
+    what: '只读复算的判定表',
+    tpl: 'miniapp/pages/entrust/detail/detail.wxml',
+    expr: 'capRecheckId === item.confirmationId',
+    // 左侧**模拟页面归一**：`onCapRecheck` 里是 `String(id)`（id 来自 dataset）⇒ 字符串
+    key: '3',
+    project: () =>
+      (E.decorateCapacityConfirmation({ confirmation_id: 3, candidate_id: 2 }) || {})
+        .confirmationId,
+    symptom:
+      '点「复算这条确认」后判定表不出现（请求发了，页面像"复算了但没有结果"）',
+  },
+]
+KEY_TYPE_PAIRS.forEach((p) => {
+  const src = read(path.join(REPO, p.tpl))
+  const found = src.indexOf(p.expr) !== -1
+  check(
+    `[键类型] ${p.what}：${p.tpl} 里确有判据 \`${p.expr}\``,
+    found,
+    found ? '' : '模板里找不到该判据原文 —— 改判据必须同步改这一节，否则本节就查了个寂寞'
+  )
+  const got = p.project()
+  check(
+    `[键类型] ${p.what}：投影字段必须是**字符串**（与恒为字符串的状态键严格比较才可能成立）`,
+    typeof got === 'string',
+    typeof got === 'string'
+      ? `投影=${JSON.stringify(got)}（typeof ${typeof got}）`
+      : `投影=${JSON.stringify(got)}（typeof ${typeof got}）而状态键是字符串 ⇒ ` +
+        `\`${p.expr}\` 恒假，${p.symptom}`
+  )
+  check(
+    `[键类型] ${p.what}：两侧在 \`===\` 下**确实相等**（不只是"都叫字符串"）`,
+    got === p.key,
+    got === p.key
+      ? `${JSON.stringify(got)} === ${JSON.stringify(p.key)}`
+      : `${JSON.stringify(got)} !== ${JSON.stringify(p.key)} ⇒ 页面静默不渲染`
+  )
+})
+
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)
 if (errors.length) {

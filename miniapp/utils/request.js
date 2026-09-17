@@ -47,10 +47,34 @@ const BASE_URL = resolveBaseUrl()
 const BASE_HOST = BASE_URL.replace(/^https?:\/\//, '') // 供错误提示拼接，避免文案与真实地址脱节
 const TOKEN_KEY = 'access_token'
 
+/**
+ * 把后端的 `detail` 说成**一句人话**。
+ *
+ * ⚠️ 传输层**不替调用方决定** `detail` 的类型：后端的 `detail` 有两类 ——
+ *    纯字符串（400/403 那类"一句话拒绝"）和**结构体**（409 的两种分流：
+ *    规则不过带 `rule_checks` 逐条判定、状态冲突带 `existing_confirmation_id`）。
+ *    早先这里统一 `String(detail)` ⇒ 结构体在到达页面之前就被压成 `'[object Object]'`，
+ *    于是页面上那两条分支（`isObj ? capacityRuleRows(det)` / `det.existing_confirmation_id`）
+ *    **全是死代码**，用户只看到「确认未提交（服务端返回 409）：[object Object]」。
+ *    2026-09-17 设备走查 ㊺ 章实测到这一版：服务端响应体里四条判定都在，界面判定行=0。
+ * ⇒ 规则：`err.detail` **原样保留结构**；需要字符串的地方显式调本函数。
+ */
+function detailText(detail) {
+  if (detail == null) return ''
+  if (typeof detail === 'string') return detail
+  if (typeof detail === 'object') {
+    // 结构体里那句人话按后端约定在 `message`；没有就返回空串让调用方走自己的兜底文案，
+    // **绝不**退回 `'[object Object]'`（那等于把"没话可说"伪装成一句话）
+    return typeof detail.message === 'string' ? detail.message : ''
+  }
+  return String(detail)
+}
+
 /** 构造带诊断信息的 HTTP 错误（错误对象上带 httpStatus/detail，供 describeError 翻译） */
 function httpError(httpStatus, detail) {
-  const e = new Error(detail)
+  const e = new Error(detailText(detail))
   e.httpStatus = httpStatus
+  // ⚠️ 原样挂结构，不 `String()`：压成字符串会让 409 的两种分流在页面侧不可分辨
   e.detail = detail
   return e
 }
@@ -104,8 +128,12 @@ function describeError(err) {
     }
   }
   if (err && err.httpStatus) {
+    // ⚠️ 用 `detailText()` 而不是直接把 `err.detail` 拼进来：`detail` 可能是**结构体**
+    //    （409 的两种分流），拼对象会得到「接口返回 409：[object Object]」——
+    //    等于把"服务端说了原因"显示成"没原因"。结构体里那句人话在 `message`。
+    const dt = detailText(err.detail)
     return {
-      cause: '接口返回 ' + err.httpStatus + (err.detail ? '：' + err.detail : ''),
+      cause: '接口返回 ' + err.httpStatus + (dt ? '：' + dt : ''),
       hint: '看后端终端（uvicorn --reload 窗口）的日志定位'
     }
   }
@@ -156,9 +184,13 @@ function request(opts) {
           if (!silent) wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
           reject(httpError(401, '登录已过期，请重新登录'))
         } else {
-          const detail = (res.data && res.data.detail) || '请求失败'
-          if (!silent) wx.showToast({ title: String(detail), icon: 'none' })
-          reject(httpError(res.statusCode, String(detail)))
+          const rawDetail = res.data && res.data.detail
+          const detail =
+            rawDetail === undefined || rawDetail === null || rawDetail === ''
+              ? '请求失败'
+              : rawDetail
+          if (!silent) wx.showToast({ title: detailText(detail) || '请求失败', icon: 'none' })
+          reject(httpError(res.statusCode, detail))
         }
       },
       fail(err) {
@@ -180,4 +212,16 @@ function request(opts) {
   })
 }
 
-module.exports = { request, getToken, setToken, clearToken, describeError, BASE_URL }
+module.exports = {
+  request,
+  getToken,
+  setToken,
+  clearToken,
+  describeError,
+  // 给静态门禁用的纯函数：`httpError` 与 `detailText` 都不碰 wx，
+  // 可以在 Node 下直接调用 —— 「结构体 detail 不许被压成字符串」这条契约
+  // 因此是**可执行地**被验证的，而不是只写在注释里
+  httpError,
+  detailText,
+  BASE_URL
+}

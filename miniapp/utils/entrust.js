@@ -3647,7 +3647,18 @@ function decorateCapacityCandidate(c) {
   const evKind = row.evidence_kind ? capacityEvidenceLabel(row.evidence_kind) : ''
   const evRef = row.evidence_ref ? String(row.evidence_ref) : ''
   return {
-    candidateId: row.candidate_id == null ? '' : row.candidate_id,
+    /**
+     * ⚠️ **一律 `String()`**：模板里跟它比的那个键（`capConfirmKey`）来自 `dataset`
+     *    并经 `String()` 归一（`onOpenCapConfirm`），**恒为字符串**。确认条用的是
+     *    `wx:if="{{capConfirmKey === item.candidateId}}"`，严格比较 ——
+     *    这里若原样透传 API 的 `int`（`CapacityCandidateOut.candidate_id: int`），
+     *    就**恒不相等** ⇒ 确认条整块不渲染：点「确认这一条」界面上什么都不会出现，
+     *    范围框 / 提交键在渲染树里根本不存在。
+     *    设备走查 ㊺ 章 2026-09-17 实测：内部状态键已置上、三个锚点命中数全为 0，
+     *    而四个前端静态门禁与 e2e 全绿（它们查得到模板里有 `data-df`，查不到运行时类型）。
+     *    与 `taskOpenKey === item.key` 同一条口径（`WORKBENCH_SLOTS` 的 key 本就是字符串）。
+     */
+    candidateId: row.candidate_id == null ? '' : String(row.candidate_id),
     carrier: String(row.carrier == null ? '' : row.carrier),
     vesselName: row.vessel_name ? String(row.vessel_name) : '',
     capacityText: String(row.capacity_tonnes == null ? '' : row.capacity_tonnes),
@@ -3842,7 +3853,14 @@ function decorateCapacityConfirmation(c) {
     if (r.passed) passed += 1
   })
   return {
-    confirmationId: row.confirmation_id == null ? '' : row.confirmation_id,
+    /**
+     * ⚠️ 同 `decorateCapacityCandidate.candidateId`：模板里跟它比的是 `capRecheckId`，
+     *    而那是 `onCapRecheck` 里 **`String(id)`**（dataset 值）归一出来的字符串。
+     *    `wx:if="{{capRecheckId === item.confirmationId && capRecheck}}"` 是严格比较，
+     *    这里给 `int` 就恒假 ⇒ 「复算这条确认」点下去、请求也发了，**判定表却不出现**
+     *    （页面看着像"复算了但没结果"）。同一轮 ㊺ 章走查把这一处与候选那处一起暴露。
+     */
+    confirmationId: row.confirmation_id == null ? '' : String(row.confirmation_id),
     candidateId: row.candidate_id == null ? '' : row.candidate_id,
     artifactId: row.artifact_id == null ? '' : row.artifact_id,
     artifactRevisionNo: row.artifact_revision_no == null ? '' : row.artifact_revision_no,

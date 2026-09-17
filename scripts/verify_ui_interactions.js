@@ -735,6 +735,44 @@ section('⑤ 静态防线')
     check('describeError · 兜底给人话且保留原始 errMsg',
       d0.cause === '网络异常，请稍后重试' && /神秘错误/.test(d0.hint), JSON.stringify(d0))
 
+    // —— 结构体 detail 必须原样到达页面（后端的 409 有**两种分流**，靠结构体分辨）——
+    // 来源：2026-09-17 设备走查 ㊺ 章实测。`httpError` 曾经统一 `String(detail)`，
+    // 于是 `rule_checks` / `existing_confirmation_id` 在**传输层**就被压成
+    // `'[object Object]'`，页面上那两条分支（`isObj ? capacityRuleRows(det)` /
+    // `det.existing_confirmation_id`）成了死代码，用户只看到
+    // 「确认未提交（服务端返回 409）：[object Object]」，而服务端响应体里
+    // 四条判定一条不少。⇒ 这条契约必须**可执行地**被验证，不能只写在注释里。
+    check('utils/request 导出 httpError / detailText（错误形状可被直接验证）',
+      typeof RQ.httpError === 'function' && typeof RQ.detailText === 'function',
+      `httpError=${typeof RQ.httpError} detailText=${typeof RQ.detailText}`)
+    {
+      const eRule = RQ.httpError(409, {
+        message: '候选运力不满足确认条件',
+        rule_checks: [{ rule_code: 'validity', seq: 1, outcome: 'fail', detail: '已过期' }],
+      })
+      check('[错误形状] 规则不过的 409：`rule_checks` 逐条判定**原样**到达页面（判定表才有数据可渲染）',
+        !!(eRule.detail && Array.isArray(eRule.detail.rule_checks)
+          && eRule.detail.rule_checks.length === 1),
+        JSON.stringify(eRule.detail))
+      check('[错误形状] 规则不过的 409：界面拿到的仍是一句人话（不是 [object Object]）',
+        eRule.message === '候选运力不满足确认条件', JSON.stringify(eRule.message))
+      const eState = RQ.httpError(409, {
+        message: '这条候选已经确认过',
+        existing_confirmation_id: 7,
+      })
+      check('[错误形状] 状态冲突的 409：`existing_confirmation_id` 原样保留（页面据此刷新去读那条确认）',
+        !!(eState.detail && eState.detail.existing_confirmation_id === 7),
+        JSON.stringify(eState.detail))
+      check('[错误形状] 纯字符串 detail 一如既往原样透传（400/403 那类"一句话拒绝"不受影响）',
+        RQ.httpError(400, '候选不存在').detail === '候选不存在')
+      check('[错误形状] 结构体缺 `message` 时不编一句话、也不吐 [object Object]',
+        RQ.detailText({ rule_checks: [] }) === '' && RQ.detailText(null) === ''
+          && RQ.detailText('x') === 'x')
+      check('describeError · 结构体 detail 不再拼出 [object Object]',
+        RQ.describeError({ httpStatus: 409, detail: { message: '这条候选已经确认过' } }).cause
+          === '接口返回 409：这条候选已经确认过')
+    }
+
     // —— 真机 / 模拟器的提示必须分流 ——
     // 开发者工具里的「不校验合法域名」只对电脑模拟器生效，真机照做无效。
     // 若提示不区分环境，真机用户会被指向一个永远修不好问题的开关（真实踩坑）。
