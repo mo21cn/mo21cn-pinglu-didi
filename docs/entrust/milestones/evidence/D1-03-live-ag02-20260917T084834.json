@@ -1,0 +1,138 @@
+{
+  "evidence_label": "D1-03 live invocation evidence（一次受控真实调用）",
+  "contract_ref": "DEMO-1-contract-v1.0 §9 D1-03 / §3.1 Canonical fixture / §10.1 第 2 步",
+  "recorded_at": "2026-09-17T08:48:34.211455+08:00",
+  "invocation": {
+    "provider": "minimax",
+    "model": "MiniMax-M2.7",
+    "endpoint_host": "api.minimax.chat",
+    "mocked": false,
+    "latency_ms": 13266,
+    "temperature": 0.1,
+    "agent": "AG-02（agent_02 / 方案与采购）",
+    "prompt_sha256": "751411a924cd0e608989b590fd20c88476b8dc4d122132fb7719025c34f4a2a4",
+    "raw_response_sha256": "0d8b206895852257442c356072827a6f65fc34bef99ea1ba7dbc36e2076ad463",
+    "raw_response_chars": 1798
+  },
+  "input": {
+    "fixture_path": "backend/scripts/fixtures/DEMO1-SYNTHETIC-sample-quotation.txt",
+    "fixture_sha256": "3456314d19d7cfd20f4664d5a227ad3e707a7d3a1790f3735cd58e4764b767d6",
+    "fixture_data_label": "合成 / 人工录入（Synthetic — 不是真实客户材料）",
+    "source_channel": "attachment_text（附件提取文本）",
+    "attachment_id": 1
+  },
+  "result": {
+    "summary": "解析西江航运有限公司钢材内河货运报价：南宁→贵港，45元/吨，有效期至2026-12-31",
+    "requires_review": true,
+    "artifact_proposals": [
+      {
+        "artifact_type": "quote_parsed",
+        "payload": {
+          "carrier": "西江航运有限公司",
+          "rate": "45.00",
+          "currency": "CNY",
+          "cargo_name": "钢材",
+          "quantity": "1200",
+          "quantity_unit": "吨",
+          "route": "南宁 → 贵港",
+          "valid_until": "2026-12-31",
+          "includes": [
+            "船舶运输",
+            "装船",
+            "卸船",
+            "常规内河航段通行费用"
+          ],
+          "excludes": [
+            "港口建设费",
+            "滞期费（滞留费）",
+            "超期堆存费",
+            "保险与货损赔付",
+            "因委托变更产生的重新报价"
+          ]
+        },
+        "note": "已提取报价方、单价、货物数量、航线、有效期及包含/不包含项"
+      }
+    ],
+    "missing_fields": [],
+    "findings": [
+      {
+        "code": "SYNTHETIC_DATA",
+        "severity": "warn",
+        "message": "本报价为合成数据（DEMO-1-SYNTHETIC），仅供软件行为演示使用，非真实业务数据",
+        "source_refs": [
+          {
+            "kind": "text",
+            "ref": "附件提取文本 - DEMO-1-SYNTHETIC-sample-quotation.txt"
+          }
+        ]
+      },
+      {
+        "code": "UNVERIFIED_CAPACITY",
+        "severity": "info",
+        "message": "承运人资质与船舶运力均未核实，本样件不宣称任何真实运力",
+        "source_refs": [
+          {
+            "kind": "text",
+            "ref": "附件提取文本 - 证据与口径声明"
+          }
+        ]
+      },
+      {
+        "code": "SUPPLIER_SIDE_QUOTE",
+        "severity": "info",
+        "message": "本报价是供应商侧报价，不是对客报价，两者口径不同",
+        "source_refs": [
+          {
+            "kind": "text",
+            "ref": "附件提取文本 - 证据与口径声明"
+          }
+        ]
+      }
+    ],
+    "source_refs": [
+      {
+        "kind": "attachment",
+        "ref": "#1 DEMO1-SYNTHETIC-sample-quotation.txt（text/plain）"
+      }
+    ],
+    "proposed_actions": [
+      {
+        "action": "assemble_customer_quote",
+        "target_type": "assignment",
+        "target_id": 1,
+        "reason": "已成功解析供应商侧报价，建议基于此生成对客报价单（需按对客口径调整）"
+      }
+    ]
+  },
+  "validation": {
+    "proposal_missing_fields": {},
+    "proposal_unknown_fields": {
+      "quote_parsed": [
+        "currency",
+        "excludes",
+        "includes"
+      ]
+    },
+    "unverified_sources": [
+      {
+        "kind": "attachment",
+        "ref": "#1 DEMO1-SYNTHETIC-sample-quotation.txt（text/plain）"
+      }
+    ],
+    "forced_review": false
+  },
+  "scope": {
+    "dropped_actions": []
+  },
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Windows",
+    "app_env": "development"
+  },
+  "not_evidence_of": [
+    "不是模型质量结论（H7a 的 calibration 仍记未达标；本脚本不产生准确率）",
+    "不是 R1 验收，不能替代任何一条 D1",
+    "不是 D1-05（离线/人工可完成）的证据 —— live 与 offline 互不替代",
+    "不是真实航线、真实运力或真实成交的证据（输入是标注为合成的夹具）"
+  ]
+}
