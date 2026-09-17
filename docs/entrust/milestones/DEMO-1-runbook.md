@@ -150,6 +150,7 @@ python scripts/seed_entrust_demo.py        # ② 委托支线演示（工作台�
 python scripts/seed_entrust_orgpicker.py   # ③ 甲 / 乙组织 + 五个 manager 身份 + 两张样本单
 python scripts/seed_contract_cases.py      # ④ 仅 ⑦b / ⑨b 章需要（智能合同规则命中）
 python scripts/seed_entrust_revalidation.py # ⑤ 仅演示「变更复核检查点」时需要（§7 第 2 行，须先跑 ②）
+python scripts/seed_entrust_canonical.py    # ⑥ 仅演示 §10.1 第 5 步（两家可比 + 确认运力）时需要（须先跑 ②）
 ```
 
 | 种子 | 铺什么 | 幂等语义 |
@@ -159,8 +160,9 @@ python scripts/seed_entrust_revalidation.py # ⑤ 仅演示「变更复核检查
 | `seed_entrust_orgpicker.py` | 甲 / 乙组织 + `seed-mgr-*` 四个身份 + `seed-shipper-orgpicker` + 甲/乙各一张标题不同的已提交单 | 同上 |
 | `seed_contract_cases.py` | 智能合同仿真案例（货主 / 船东各 3 张专项订单） | 同上，但**需先跑 ①** |
 | `seed_entrust_revalidation.py` | `演示委托·变更复核样本`（`claimed`）+ 4 个成果 + 一条**走完整条链路**的变更案件（`applied`）⇒ **4 条 `open` 复核项** + **3 类 `unconfirmed`** | 同上（第 2 跑显示「复用」），但**需先跑 ②** |
+| `seed_entrust_canonical.py` | `DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港`（`claimed`）+ **3 段航段** + **3 条候选运力**（C-900 / C-1200 / C-EXPIRED），**全部只登记、未确认** | 同上（第 2 跑行数指纹逐项相同：`ent_leg`=3、`ent_capacity_candidate`=3、`ent_assignment`=3），但**需先跑 ②** |
 
-⚠️ **④ / ⑤ 都按需运行，不进 `reset_demo_env.py` 的 `SEED_ORDER`（即复位基线）**：
+⚠️ **④ / ⑤ / ⑥ 都按需运行，不进 `reset_demo_env.py` 的 `SEED_ORDER`（即复位基线）**：
 复位要的起点是「一致、可复制的**干净**起点」（§6.1），而 ⑤ 铺的**就是**一种夹具状态 ——
 把它塞进基线，§6.3 那张基线表（`ent_exception`=2、`ent_revalidation`=0 …）会逐格失效，
 "复位后环境是干净的"这句话也不再成立。⇒ 它们的定位是"要演示这个状态时再铺"。
@@ -388,6 +390,50 @@ python scripts/seed_entrust_revalidation.py
 同一事务内、且在追加新版本**之后**执行。这是既有实现（A2 五之二）的行为，本夹具如实照抄、
 **未做任何改动**；读这张夹具时不要把它当成"被替换掉的那一版"。
 
+### 7.2 实测记录（2026-09-17，隔离库）—— canonical 运力候选夹具
+
+**命令**（`backend` 目录下；**须先跑 ② `seed_entrust_demo.py`**）：
+
+```bash
+python scripts/seed_entrust_canonical.py
+```
+
+| 项 | 实测 |
+| --- | --- |
+| 委托 | `DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港` → `claimed`；货量 `800.000 吨` |
+| 航段 | **3 段**（`road` 厂区→南宁港 ／ `water` 南宁港→贵港港 ／ `road` 贵港港→卸货地） |
+| 候选 | **3 条**，`status` 全部 `candidate`，全部挂在水运段（腿 2） |
+| 规则预演 | C-900：变更前四条全过 ⇒ 变更后 **仅 `capacity` 不过**；C-1200：前 800 / 后 950 **都四条全过**；C-EXPIRED：**仅 `validity` 不过** |
+| 未确认 | `ent_capacity_confirmation` = **0**、`ent_capacity_rule_check` = **0** ⇒ 「只登记候选 ≠ 确认运力」的正面证据 |
+| 幂等 | **第 2 跑行数指纹逐项相同**（`ent_leg`=3、`ent_capacity_candidate`=3、`ent_assignment`=3；三条都走**复用**分支） |
+
+候选的三条口径 —— **不是文档里的口号，是库里的字段**：
+
+| 候选 | 承运人 | 吨位 | 船数／拆批 | 单价 | 有效期 | 证据引用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| C-900 | 桂平航 6688 | 900.000 | 1／不拆批 | 45.00 元/吨 | 2026-12-31 | `DEMO1-canonical-sample-quotation.txt` |
+| C-1200 | 横州集运 101 | 1200.000 | 1／不拆批 | 47.50 元/吨 | 2026-12-31 | `DEMO1-canonical-candidate-C1200-quotation.txt` |
+| C-EXPIRED | 平南航运 303 | 950.000 | 1／不拆批 | 43.00 元/吨 | **2026-01-31** | `DEMO1-canonical-candidate-EXPIRED-quotation.txt` |
+
+⚠️ 三条必须写死的口径（写进脚本，不是"写进本文档就完事"）：
+① 容量口径落**数据字段**（`capacity_tonnes` / `vessel_count` / `allows_partial_load`）；
+② 过期用**绝对日期**（相对日期会让"过期"随运行日漂移，历史证据无法复算）；
+③ `evidence_kind` + `evidence_ref` 必须指向**具体夹具文件**、不留空 ——
+否则 `evidence` 与 `validity` 会**同时**不通过，§10.2 的 `expired` 负例就分不出"到底因为什么被拒"。
+
+⚠️ **时效性**：① 的两组日期都是绝对的 ⇒ 进入 **2027 年**后 C-900 / C-1200 会一起"过期"，
+"变更后仍适用"那一半就演示不出来了。届时处置是**重新生成**夹具日期（允许改绝对值，
+**不允许**改成相对日期），且夹具正文的「有效期至」与候选行的 `valid_until` **两处必须同改**。
+脚本会在**真实基准日**下重跑规则，与固定演示基准日结论不一致时**显式告警**（不静默）。
+
+⚠️ **已知缺口（如实登记）**：canonical 夹具用 `candidate_id`（`C-900` / `C-1200`）标识候选，
+但 `ent_capacity_candidate` **没有业务编号列** ⇒ 该编号在库里**没有落点**。脚本把它保留为
+打印用的 `label`，**不塞进任何列**（塞进 `vessel_name` 之类会造出一个语义错误的字段）。
+接口与表若要承载它，需另开切片。
+
+⚠️ **本条只说"夹具可复现、判据能复算"**，**不说** §10.1 第 5 步验收通过 ——
+界面与设备走查仍未做（见 §9 第 4 条）。
+
 ---
 
 ## 8. 走查与证据约定
@@ -492,9 +538,22 @@ python scripts/verify_miniapp_devtools.py --section 43
 | 4 | `GET  /capacity-confirmations/{cid}` | 读**冻结**的判定输入 + 逐规则判定 |
 | 5 | `GET  /capacity-confirmations/{cid}/recheck` | 用**当前事实**重跑同一套规则，回答"这条确认现在还成立吗"（**只读**） |
 
-⚠️ **夹具缺口（未擅自补）**：`demo1_canonical.json` 的候选是 900 吨**单船**；要演出夹具第 25 行的
-「若允许拆批或多船承运，950 吨未必装不下」，需要**多船或允许拆批**的候选。补它要动 CI 共用的那份
-夹具 ⇒ 已入档待 HO 定口径，**本切片没有夹带**。
+⚠️ **夹具缺口 → 已按口径补齐（2026-09-17；HO 同意按需种子的方案 A）**
+
+原记：「`demo1_canonical.json` 的候选是 900 吨**单船**；要演出夹具第 25 行的
+『若允许拆批或多船承运，950 吨未必装不下』，需要**多船或允许拆批**的候选。」
+
+**订正（回查原文后）**：夹具第 25 行那句（`candidates[0].why_the_basis_matters`）是在解释
+**为什么容量口径必须写进数据**，不是在要求另备一条多船候选 ⇒ 把它读成"缺一条候选"是误读。
+合同对候选的真实要求只有两处：§3.1 的「900 吨候选在变更后不再适用」与 §10.1 第 5 步的
+「**两家**可比」—— **现有 C-900 / C-1200 已经满足**。真正**零数据**的是 §10.2 的
+`expired resource` 负例：两条候选的 `valid_until` 都是 2026-12-31，**没有一条能演示"过期"**。
+
+⇒ 处置：新增**按需**种子 `backend/scripts/seed_entrust_canonical.py`（§5 第 ⑥ 行），
+把 C-900 / C-1200 连同为 §10.2 补的 **C-EXPIRED** 一起铺出来。三条口径写死在脚本里：
+容量口径落**数据字段**、过期用**绝对日期**、证据引用指向**具体夹具文件**。
+实测见 §7.2。
+
 在没有界面之前，第 5 步的证据只能到**后端用例 + 本地 e2e**，**不是设备走查**。
 
 ---
@@ -507,6 +566,13 @@ python scripts/verify_miniapp_devtools.py --section 43
    2026-09-16，实测见 §7.1）；"干净起点"仍只到**部分**（"环境属性"那一半归 S5-1）、
    "已完成历史委托"仍**缺失**（订正后：卡在**委托状态机无终态、`claimed` 无出边**，
    依赖 S4；口径设计见 `docs/entrust/S4-委托结案状态机口径设计.md`）。
-3. `seed_contract_cases.py`（④）与 `seed_entrust_revalidation.py`（⑤）**都不在 §5 的标准启动
-   序列里**，属于「要演示哪个状态就铺哪个」。§5 已把"什么时候必须跑"逐份写清；
-   若要进一步做成**环境属性**（一个固定的环境脚本按场景选择铺哪些），归 S5-1。
+3. `seed_contract_cases.py`（④）、`seed_entrust_revalidation.py`（⑤）与
+   `seed_entrust_canonical.py`（⑥）**都不在 §5 的标准启动序列里**，属于「要演示哪个状态就铺哪个」。
+   §5 已把"什么时候必须跑"逐份写清；若要进一步做成**环境属性**
+   （一个固定的环境脚本按场景选择铺哪些），归 S5-1。
+4. **§10.1 第 5 步**（`Compare two quotations and record evidence-backed procurement
+   confirmation`）：**数据侧已补齐**（⑥ 铺出 3 条候选，规则预演实测见 §7.2），
+   确认命令与逐规则判定在后端已实现（见 `docs/entrust/S3-运力确认与有效期切片.md`）。
+   ⚠️ 但**界面未做、设备走查未跑** ⇒ **不得**声称该步"按业务结果可演示"，
+   也**不得**声称 §10.2 的 `unsuitable/expired resource confirmation` 负例已验收 ——
+   目前只有**后端用例 + 本地 e2e** 证据，没有设备侧证据。
