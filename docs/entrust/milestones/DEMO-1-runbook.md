@@ -195,7 +195,13 @@ python scripts/seed_entrust_revalidation.py # ⑤ 仅演示「变更复核检查
 
 | 夹具 | 路径 | 用于 | 数据标签 |
 | --- | --- | --- | --- |
-| F-1 样报价单 | `backend/scripts/fixtures/DEMO1-SYNTHETIC-sample-quotation.txt` | **主演示脚本第 2 步**「A1 uploads the sample quotation and invokes AG-02」 | **合成 / 人工录入**（文件名 + 首行双重标注） |
+| **F-2 canonical（演示与 CI 共用）** | `backend/scripts/fixtures/DEMO1-canonical-sample-quotation.txt`<br>+ `backend/scripts/fixtures/demo1_canonical.json` | **主演示脚本第 2 步**「A1 uploads the sample quotation and invokes AG-02」；第 8 步变更的候选运力判据 | **合成 / 人工录入**（文件名 + 首行双重标注） |
+| F-1 旧件（保留不动） | `backend/scripts/fixtures/DEMO1-SYNTHETIC-sample-quotation.txt` | 无（旧回归数据，1200 吨） | 同上 |
+
+⚠️ **HO 0917-3 裁定一**：canonical 以**合同**为准（800 → 950 吨、900 吨单船候选失效），
+但**不全局替换**旧种子的 1200 吨（会让既有测试基线漂移）⇒ 旧件作为旧回归数据保留。
+canonical 的候选运力必须写进数据（**单船承运、不拆批**），否则"950 装不下 900"这条
+判据不成立；另备一个 1200 吨候选，让变更后业务仍能完成。
 
 **它和种子的区别（别混）**：
 
