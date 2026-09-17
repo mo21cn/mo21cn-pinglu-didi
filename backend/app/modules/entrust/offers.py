@@ -59,6 +59,24 @@ CHECK_VERIFIED = "verified"
 CHECK_REJECTED = "rejected"
 ALL_CHECK_STATES = frozenset({CHECK_DECLARED, CHECK_VERIFIED, CHECK_REJECTED})
 
+# ── 数据来源标注（合同 BP-03 第 9 条 / §11.1 "labeled synthetic/manual/live sources"）──
+#
+# 与上面的**来源核验**是两件事，别混：
+#   · `ent_offer_source_check` 回答"人核过没有"（门槛用它拦发布）；
+#   · 这里回答"这份内容**是怎么产出的**"（机器事实，客户要看到的那一行标注）。
+ORIGIN_LIVE = "live"
+ORIGIN_SYNTHETIC = "synthetic"
+ORIGIN_MANUAL = "manual"
+#: 拿不到事实依据时的**唯一诚实取值**。⛔ 不得用 `manual` 或 `live` 顶上 ——
+#: "不知道"与"不是模型产的"是两句不同的话，混起来会让标注变成口号。
+ORIGIN_UNKNOWN = "unknown"
+ALL_ORIGINS = frozenset({ORIGIN_LIVE, ORIGIN_SYNTHETIC, ORIGIN_MANUAL, ORIGIN_UNKNOWN})
+
+#: 客户响应的**签署证据模式**（合同 §10.1 第 7 步 "labeled sample signature evidence"）。
+#: 它声明的是"这条确认是在演示/样张语境下取得的"，不是真实法律签署 ——
+#: 标注出来才不会让下游把它当成已生效的合同签署。
+SIGNATURE_MODE_LABELED_SAMPLE = "labeled_sample"
+
 
 class OfferError(RuntimeError):
     """业务错误 → 400（请求合法但当前事实不允许这么做）。"""
@@ -437,6 +455,117 @@ def record_source_check(
     raise OfferError("核验记录写入后读不到（不该发生）")
 
 
+# ── 数据来源标注（`ent_artifact_origin`）────────────────────────────────────
+
+
+def record_origin(
+    session: Session,
+    *,
+    artifact_id: int,
+    revision_no: int,
+    mode: str,
+    basis: dict[str, Any],
+    actor_user_id: int | None = None,
+) -> dict[str, Any]:
+    """记录"这个版本的内容是怎么产出的"。**幂等**（同一版本只留一行）。
+
+    ⚠️ 调用方**不得**把"用户说它是 live"当依据传进来。`basis` 必须是可复核的事实
+    （如作业行 id 与其 `mocked` 标志）。判据是"标注能不能被第三方重放出来"，
+    而不是"写的时候有没有填"。
+    """
+    if mode not in ALL_ORIGINS:
+        raise OfferError(f"来源标注只能是 {sorted(ALL_ORIGINS)} 之一，收到 {mode!r}")
+    existing = get_origin(session, artifact_id=artifact_id, revision_no=revision_no)
+    if existing is not None:
+        return existing
+    now = _fmt(utcnow_naive())
+    session.execute(
+        text(
+            "INSERT INTO ent_artifact_origin "
+            "(artifact_id, revision_no, mode, basis_json, recorded_by, recorded_at, "
+            " created_at, updated_at) "
+            "VALUES (:aid, :rev, :m, :basis, :by, :now, :now, :now)"
+        ),
+        {
+            "aid": artifact_id,
+            "rev": revision_no,
+            "m": mode,
+            "basis": json.dumps(basis or {}, ensure_ascii=False),
+            "by": actor_user_id,
+            "now": now,
+        },
+    )
+    session.commit()
+    saved = get_origin(session, artifact_id=artifact_id, revision_no=revision_no)
+    if saved is None:
+        raise OfferError("来源标注写入后读不到（不该发生）")
+    return saved
+
+
+def get_origin(session: Session, *, artifact_id: int, revision_no: int) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            text(
+                "SELECT id, artifact_id, revision_no, mode, basis_json, recorded_by, recorded_at "
+                "FROM ent_artifact_origin WHERE artifact_id = :aid AND revision_no = :rev"
+            ),
+            {"aid": artifact_id, "rev": revision_no},
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    try:
+        basis = json.loads(str(row["basis_json"]) or "{}")
+    except (TypeError, ValueError):
+        basis = {}
+    return {
+        "artifact_id": int(row["artifact_id"]),
+        "revision_no": int(row["revision_no"]),
+        "mode": str(row["mode"]),
+        "basis": basis if isinstance(basis, dict) else {},
+        "recorded_by": int(row["recorded_by"]) if row["recorded_by"] is not None else None,
+        "recorded_at": _fmt(row["recorded_at"]),
+    }
+
+
+def resolve_origin(
+    session: Session, *, artifact_id: int, revision_no: int, revision_source: str | None
+) -> dict[str, Any]:
+    """解析某个版本的来源标注（**发布快照与两侧投影的唯一入口**）。
+
+    顺序（每一步都是"事实优先、不知道就说不知道"）：
+
+    1. 有 `ent_artifact_origin` 行 ⇒ 用它（采纳时由服务端按作业行写入）；
+    2. 版本 `source == 'manual'` ⇒ `manual`（表格里那一列本来就是事实，可直接定）；
+    3. 其余（`agent` 产出但没有标注行）⇒ **`unknown`**。
+       ⛔ 不猜成 `live`：猜错会把"可复现的合成数据"包装成"真实模型产出"，
+       而这两者在审计上价值完全不同（合同 §3.2 Required truth distinctions）。
+    """
+    saved = get_origin(session, artifact_id=artifact_id, revision_no=revision_no)
+    if saved is not None:
+        return {
+            "mode": saved["mode"],
+            "basis": saved["basis"],
+            "artifact_id": artifact_id,
+            "revision_no": revision_no,
+        }
+    if str(revision_source or "") == "manual":
+        return {
+            "mode": ORIGIN_MANUAL,
+            "basis": {"revision_source": "manual"},
+            "artifact_id": artifact_id,
+            "revision_no": revision_no,
+        }
+    return {
+        "mode": ORIGIN_UNKNOWN,
+        "basis": {"revision_source": revision_source, "why": "没有来源标注行，无从判定"},
+        "artifact_id": artifact_id,
+        "revision_no": revision_no,
+    }
+
+
 # ── 命令：发布 ──────────────────────────────────────────────────────────────
 
 
@@ -544,6 +673,15 @@ def release_offer(
         #    重算会悄悄改变客户已看到的内容 —— 而记录上还写着"同一个版本"。
         "payload": projected,
         "content_source": target["source"],
+        # 数据来源标注**冻结进快照**（合同 BP-03 第 9 条）：它必须与"客户当时看到的内容"
+        # 同一时刻定格。事后重算会因为后来补了标注行而改写历史结论。
+        "data_origin": resolve_origin(
+            session,
+            artifact_id=artifact_id,
+            revision_no=int(revision_no),
+            revision_source=target["source"],
+        ),
+        "signature_mode": SIGNATURE_MODE_LABELED_SAMPLE,
         "snapshot_taken_at": stamp,
         "snapshot_excludes_internal": True,
     }
@@ -716,6 +854,15 @@ def project_release_for_manager(
         # 经理要能回答"客户当初看到的到底是哪一份内容" ⇒ 快照原样给出
         "customer_snapshot": release["snapshot"],
         "authorized_attachment_ids": release["authorized_attachment_ids"],
+        # 经理看**完整依据**（含作业行 id 与 mocked 标志）——他本来就有权看内部数据，
+        # 而"凭什么说这是 live"必须有据可查，不能只给一个词。
+        "data_origin": release["snapshot"].get("data_origin")
+        or resolve_origin(
+            session,
+            artifact_id=release["artifact_id"],
+            revision_no=release["revision_no"],
+            revision_source=release["snapshot"].get("content_source"),
+        ),
         "source_gate": gate,
         "response": response,
     }
@@ -728,7 +875,11 @@ def project_release_for_customer(
 
     刻意**不**回 `released_by` / `closed_by` / `artifact_id` 的内部控制信息与
     来源台账 —— 客户不该看到内部是谁发布的、有哪些内部来源待核验。
+
+    来源标注**给客户**，但只给 `mode`（"真实模型 / 演示合成 / 人工录入"），
+    **不给 `basis`** —— 依据里有作业 id 这类内部编号，那是内部审计信息。
     """
+    origin = release["snapshot"].get("data_origin") or {}
     return {
         "release_id": release["release_id"],
         "assignment_id": release["assignment_id"],
@@ -738,6 +889,9 @@ def project_release_for_customer(
         "content": release["snapshot"].get("payload") or {},
         "artifact_type": release["snapshot"].get("artifact_type"),
         "content_source": release["snapshot"].get("content_source"),
+        "data_origin_mode": origin.get("mode") or ORIGIN_UNKNOWN,
+        "signature_mode": release["snapshot"].get("signature_mode")
+        or SIGNATURE_MODE_LABELED_SAMPLE,
         "authorized_attachment_ids": release["authorized_attachment_ids"],
         "can_respond": release["status"] in RESPONDABLE_STATUSES and response is None,
         "response": response,
@@ -747,21 +901,28 @@ def project_release_for_customer(
 __all__ = [
     "ALL_CHECK_STATES",
     "ALL_DECISIONS",
+    "ALL_ORIGINS",
     "ALL_RELEASE_STATUSES",
     "CHECK_DECLARED",
     "CHECK_REJECTED",
     "CHECK_VERIFIED",
     "DECISION_ACCEPT",
     "DECISION_REJECT",
+    "ORIGIN_LIVE",
+    "ORIGIN_MANUAL",
+    "ORIGIN_SYNTHETIC",
+    "ORIGIN_UNKNOWN",
     "OfferError",
     "OfferForbiddenError",
     "OfferNotFoundError",
     "OfferSourceGateError",
     "OfferStateError",
     "RESPONDABLE_STATUSES",
+    "SIGNATURE_MODE_LABELED_SAMPLE",
     "STATUS_RELEASED",
     "STATUS_SUPERSEDED",
     "STATUS_WITHDRAWN",
+    "get_origin",
     "get_release",
     "list_releases",
     "list_responses",
@@ -769,8 +930,10 @@ __all__ = [
     "project_release_for_customer",
     "project_release_for_manager",
     "record_declared_sources",
+    "record_origin",
     "record_source_check",
     "release_offer",
+    "resolve_origin",
     "respond_to_offer",
     "response_of",
     "source_gate",

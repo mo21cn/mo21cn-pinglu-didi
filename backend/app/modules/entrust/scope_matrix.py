@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（70 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（72 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -710,6 +710,16 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         idempotent=True,
         note="登记核验：权限同发布（谁能发布谁负责核验）；**依据必填**，"
         "且只能记 declared 的核验结果（verified/rejected），不能手工造声明",
+    ),
+    _r(
+        "GET",
+        "/offer-releases/{release_id}/attachments/{attachment_id}/download",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        note="客户按**发布冻结的授权清单**下载附件（BP-03 第 10 条）。"
+        "判据**只有**那份清单：清单外一律 404（不用 403 —— 403 会承认文件存在）。"
+        "⚠️ 有意**不**复用 attachments_api.load_visible_attachment：客户对整条授权下的附件"
+        "都有可见性，复用等于把内部底稿一起开给他。经理走本端点看到的是**客户视角**那几份",
     ),
 )
 

@@ -35,6 +35,20 @@ HO 0917-3 的裁定二要求在**发布环节**落实一件事：发布前必须
 `UNIQUE (artifact_id, revision_no, source_kind, source_ref, state)`：同一条来源同一状态
 只留一行（幂等），但 **declared → verified / rejected 是追加新行**，不 UPDATE 旧行 ——
 "谁在什么时候核了什么"必须留痕，不能因为后来核过了就抹掉"当初是未核验声明"。
+
+第 2 张表 `ent_artifact_origin`：**数据来源标注**（合同 BP-03 第 9 条 / §11.1 的
+"labeled synthetic/manual/live sources"）
+--------------------------------------------------------------------------------------
+与上面的来源核验**是两件不同的事**，所以不共用一张表：
+
+* `ent_offer_source_check` 回答"**人核过没有**"（门槛用它拦发布）；
+* `ent_artifact_origin` 回答"**这份内容是怎么产出的**"（机器事实，客户要看到的标注）。
+
+混在一张表里会让门槛判定被污染：一条 `agent_job` 的产出事实若被写成 `declared`，
+就会永远卡在"未核验"上（人没法"核验"一个作业行的 mocked 标志）。
+
+`mode` 的判定**只认事实**：来自作业行的 `mocked` 列（服务端写的），**不采信调用方自述** ——
+"让经理自己选 live/合成"就是把标注变成一句口号。无依据时写 `unknown`，**不得猜**。
 """
 
 from __future__ import annotations
@@ -92,5 +106,49 @@ CREATE INDEX IF NOT EXISTS `idx_ent_offer_source_check_rev`
 """,
         },
         "checks": ["SELECT COUNT(*) FROM `ent_offer_source_check`"],
+    },
+    {
+        "id": 2,
+        "description": (
+            "创建成果版本的数据来源标注 ent_artifact_origin（live / synthetic / manual，"
+            "由服务端按作业行的 mocked 事实推导；不采信调用方自述）"
+        ),
+        "sql": {
+            "mysql": """
+CREATE TABLE IF NOT EXISTS `ent_artifact_origin` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `artifact_id` BIGINT UNSIGNED NOT NULL COMMENT '所属成果（ent_artifact.id）',
+  `revision_no` INT NOT NULL COMMENT '所属精确版本（ent_artifact_revision.revision_no）',
+  `mode` VARCHAR(16) NOT NULL
+    COMMENT 'live（真实模型调用）/ synthetic（桩/夹具）/ manual（人工产出）/ unknown（无事实依据，不猜）',
+  `basis_json` TEXT NULL
+    COMMENT '判定依据（可复核的事实，如作业行 id 与其 mocked 标志）；**不是**调用方自述',
+  `recorded_by` BIGINT NULL COMMENT '记录者（采纳时＝采纳人）',
+  `recorded_at` DATETIME NOT NULL,
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ent_artifact_origin` (`artifact_id`, `revision_no`),
+  KEY `idx_ent_artifact_origin_mode` (`mode`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+""",
+            "sqlite": """
+CREATE TABLE IF NOT EXISTS `ent_artifact_origin` (
+  `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+  `artifact_id` INTEGER NOT NULL,
+  `revision_no` INTEGER NOT NULL,
+  `mode` TEXT NOT NULL,
+  `basis_json` TEXT NULL,
+  `recorded_by` INTEGER NULL,
+  `recorded_at` TEXT NOT NULL,
+  `created_at` TEXT NOT NULL,
+  `updated_at` TEXT NOT NULL,
+  UNIQUE (`artifact_id`, `revision_no`)
+);
+
+CREATE INDEX IF NOT EXISTS `idx_ent_artifact_origin_mode` ON `ent_artifact_origin` (`mode`)
+""",
+        },
+        "checks": ["SELECT COUNT(*) FROM `ent_artifact_origin`"],
     },
 ]
