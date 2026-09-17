@@ -179,6 +179,15 @@ const ORG_PERMISSION_LABELS = {
  */
 const ORG_PERM_CLAIM = 'entrust:assignment:claim'
 
+/**
+ * 「制作报价」权限码（= 后端 `access.PERM_QUOTE_CREATE`）。
+ *
+ * 与 `ORG_PERM_CLAIM` 同一条用法：详情页拿它去**本地组织权限投影**里查
+ * "我在**这张委托所属的**组织里能不能组装对客报价"，只决定入口显不显示。
+ * ⚠️ 判定不得读 `ORG_PERMISSION_LABELS`（那张表只做展示，理由见上）。
+ */
+const ORG_PERM_QUOTE_CREATE = 'entrust:quote:create'
+
 function statusLabel(status) {
   const meta = STATUS_META[status]
   return meta ? meta.label : '未知状态'
@@ -3525,6 +3534,37 @@ function withdrawOffer(releaseId, body, idempotencyKey) {
   })
 }
 
+// ── 组装成果（人工定版；UI-06 / 计划 §5.2 S3）──────────────────────────────
+
+/**
+ * 手工创建成果（`POST /entrustments/{eid}/artifacts`，幂等）。
+ *
+ * 这是**「组装对客报价」的落点**，也是后端那条"把内容变成成果"的写入口之一
+ * （另一条是采纳作业提案 `adoptJobProposal` —— 两者在后端共用一个服务函数，
+ * 归属规则只有一份）。
+ *
+ * 为什么对客报价走**人工组装**而不是采纳 Agent 提案：
+ *   1. 计划 §4 UI-06 与 §5.2 的 S3 DoD 都写着"对客报价**可人工组装**"；
+ *   2. AG-02 自己的提案备注就写着"对客报价草稿 —— **定版发布前必须人工组装并确认口径**"；
+ *   3. 发布前的**来源门槛**对两种来源判定不同（`offers.source_gate`）：人工直写的版本
+ *      没有"待核验的模型声明"⇒ 无待核验项 ⇒ 可发布；而采纳模型提案时服务端会写下
+ *      声明行 ⇒ 必须逐条核验后才放行。在核验入口尚未上线前，人工组装是唯一
+ *      **不依赖未实现功能**的主演示通路。
+ *
+ * `body` 的字段按注册表契约（`GET /artifact-types` 的 `customer_quote`）：
+ * 必填 `payload.amount` / `payload.currency` / `payload.includes`，
+ * 可选 `payload.valid_until` / `payload.excludes` / `payload.note`。
+ * `assignment_id` 一起传，成果才会落到**这一张**委托单上（不传就是"历史未归属成果"）。
+ */
+function createArtifact(entrustmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/entrustments/' + entrustmentId + '/artifacts',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
 // ── 授权附件下载 ────────────────────────────────────────────────────────────
 
 /**
@@ -3754,6 +3794,7 @@ module.exports = {
   MESSAGE_ROLE_LABELS,
   MESSAGE_SOURCE_LABELS,
   ORG_PERM_CLAIM,
+  ORG_PERM_QUOTE_CREATE,
   ORG_PERMISSION_LABELS,
   ORG_ROLE_LABELS,
   REF_PROJECTORS,
@@ -3808,6 +3849,7 @@ module.exports = {
   createCase,
   createSession,
   createTask,
+  createArtifact,
   decideCase,
   decorateAssignment,
   decorateAttachment,
@@ -3862,6 +3904,11 @@ module.exports = {
   newIdempotencyKey,
   pageHint,
   permittedOrgIds,
+  // 单组织查询（`permittedOrgIds` 的配套）。此前只在模块内部被 `canClaimAssignment`
+  // 用着、没导出 —— 页面因此只能自己写 `permitted[String(orgId)]`，那就是**第二份判据**：
+  // 归一规则（`org_id` 为空 / 数字与字符串同型）一旦在一侧漂移，表现是"按钮时而出现
+  // 时而不出现"，两边单看都对。
+  isPermittedOrg,
   pickEntrustment,
   pickOrg,
   probeEntry,

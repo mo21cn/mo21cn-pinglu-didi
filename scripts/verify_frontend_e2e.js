@@ -1166,6 +1166,13 @@ function loadPage(file, ctx) {
         // 采纳提案为成果（BP-02：提案 ≠ 成果，必须人工采纳，AC-09）
         adoptJobProposal: (jid, body, key) =>
           pageWrite('POST', '/entrust/agent/jobs/' + jid + '/adopt', body, key)
+            .then(rejectIfNotOk),
+        // 人工组装对客报价（S3）：`customer_quote` 的**人工直写**入口。
+        // 与上面诸条同一通道：只在 `WRITE_ENABLED` 的段里真发，取数阶段一律被拒 ——
+        // 建成果会改库（新成果会进「对客方案与合同」槽位），在"读"的段里发生它
+        // 会让后续断言拿到一个被自己污染的世界。
+        createArtifact: (eid, body, key) =>
+          pageWrite('POST', '/entrust/entrustments/' + eid + '/artifacts', body, key)
             .then(rejectIfNotOk)
       })
     }

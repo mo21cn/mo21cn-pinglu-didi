@@ -170,8 +170,7 @@ def create_offer_release(
 
 @router.get(
     "/entrustments/{entrustment_id}/offer-releases",
-    response_model=sm.OfferReleaseListOut,
-    summary="该授权的发布记录（经理视角，含客户快照与来源门槛）",
+    summary="该授权的发布记录（按调用者身份走不同投影）",
     dependencies=[Depends(require_entrust_enabled)],
 )
 def list_entrustment_releases(
@@ -179,18 +178,53 @@ def list_entrustment_releases(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Any:
+    """一条路径，两个投影 —— 判据与 `GET /offer-releases/{id}` **逐字一致**。
+
+    ⚠️ 这里曾经是**恒回经理投影**的。它不算越权（货主本人当然读得到自己的发布），
+    但算**投影泄漏**：`project_release_for_manager` 里带着 `data_origin.basis`
+    （`job_id` 与 `job_mocked`）、`source_gate` 的待核验明细与 `released_by`/
+    `close_reason` —— 那些是内部台账，客户不该拿到。六机制里"客户白名单投影
+    **不得先返回前端再隐藏**"约束的正是服务端这一刻的取舍：前端不显示不等于没返回。
+
+    为什么不是"货主干脆 404"：客户在**自己那一屏**上需要能看到"这条委托下发过什么"，
+    否则客户侧的入口只剩 `/my-offer-releases` 一张全量列表，页面拿它就分不出单。
+    因此与详情端点同一条规则：先判"是不是客户本人"，是 ⇒ **客户投影**（只含冻结内容），
+    不是 ⇒ 按委托单可见性判定（经理）⇒ **经理投影**；都不可见才 404。
+    """
     entrustment = load_entrustment(db, entrustment_id)
     if entrustment is None:
         raise not_found("委托授权不存在")
-    assert_can_view_entrustment(db, user_id=int(user.id), entrustment=entrustment)
     rows = svc.list_releases(db, entrustment_id=entrustment_id)
-    items = [
-        svc.project_release_for_manager(
-            db, r, response=svc.response_of(db, release_id=r["release_id"])
+
+    # ⚠️ 顺序是有意的（同 `get_offer_release`）：先判"是不是客户本人"。同一个账号既是
+    #    组织经理又是货主时，在**这一屏**上他就是客户 —— 按具体委托归属判断。
+    if int(user.id) == int(entrustment["entrust_user_id"]):
+        mine = [r for r in rows if int(user.id) == int(r["customer_user_id"])]
+        # 变量名**有意与下面那一支不同**（`cust_items` / `mgr_items`）：同名会让 mypy
+        # 把两支的元素类型统一成一个并集，然后在第二支上如实报 arg-type ——
+        # 那个报错是对的，它说明"同一个名字承担了两种投影"，而这在运行期看不出来。
+        cust_items = [
+            sm.offer_release_customer_out(
+                svc.project_release_for_customer(
+                    r, response=svc.response_of(db, release_id=r["release_id"])
+                )
+            )
+            for r in mine
+        ]
+        return sm.OfferReleaseCustomerListOut(total=len(cust_items), items=cust_items).model_dump(
+            mode="json"
+        )
+
+    assert_can_view_entrustment(db, user_id=int(user.id), entrustment=entrustment)
+    mgr_items = [
+        sm.offer_release_out(
+            svc.project_release_for_manager(
+                db, r, response=svc.response_of(db, release_id=r["release_id"])
+            )
         )
         for r in rows
     ]
-    return sm.OfferReleaseListOut(total=len(items), items=[sm.offer_release_out(i) for i in items])
+    return sm.OfferReleaseListOut(total=len(mgr_items), items=mgr_items).model_dump(mode="json")
 
 
 # ── 客户：我的发布 ──────────────────────────────────────────────────────────
