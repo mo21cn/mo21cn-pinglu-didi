@@ -3688,6 +3688,100 @@ function decorateCapacityCandidate(c) {
 }
 
 /**
+ * 「两家可比」的**并排形态**：列 = 候选，行 = 维度（吨位 / 装载口径 / 单价 / 有效期 / 证据）。
+ *
+ * 为什么需要它：候选清单是纵向卡片，两家以上时要靠上下滚动 + 记忆对齐 ——
+ * 而"这两家在哪一点上不同"正是**要不要选它**的判断依据，纵向列表恰恰把这条信息拆散了。
+ * 卡片头那句「两家可比」在只有纵向列表时是**没有载体的承诺**。
+ *
+ * ⚠️ 只标「有差异」，**不标「哪条更好」**：哪一条更合适取决于货量、时效、能不能拆批，
+ *    那是**方案判断**，不是投影能算出来的。给它一个"推荐"就是在替用户做商业决定 ——
+ *    与 `capacity.list_candidates` 不按吨位排序是同一条取向（"哪一种排序更对"是方案判断，
+ *    后端只保证清单稳定、可复现）。
+ * ⚠️ 行的顺序**固定为定义序**，不按"有差异"重排：排序会随数据变，于是同一份数据
+ *    两次打开表长得不一样 —— 与上面同一条取向（顺序稳定比"看起来聪明"重要）。
+ * ⚠️ 只在 **≥2 条**时产出：一条候选没有"并排"可言，渲染出来只是白占一屏。
+ *    返回空数组 ⇒ 模板 `wx:if="{{capCompareRows.length}}"` 自然不渲染（不需要额外的布尔量）。
+ * ⚠️ `cells` 的每一项是**对象**（带 `i` = 列下标）而不是裸字符串：模板内层 `wx:for` 的
+ *    `wx:key` 必须唯一，而两列的取值**可能真的相同**（比如两家都"未登记"证据）——
+ *    拿取值当 key 会撞，拿列下标不会。这是模板约束，不是数据形状的偏好。
+ *
+ * ⚠️ 空值参与比较：「这家没写有效期」本身就是差异，不该被当成"没这一项"跳过。
+ *    这与候选卡片的三态证据是同一条取向 —— **判不了的那一格必须自己说话**。
+ */
+function buildCapacityComparison(candidates) {
+  const rows = Array.isArray(candidates) ? candidates : []
+  if (rows.length < 2) return { cols: [], rows: [] }
+
+  const cols = rows.map(function (c) {
+    return {
+      candidateId: c.candidateId,
+      /**
+       * 列头 = 承运人 · 船名。两家的承运人**可能同名**（同一条船在不同代理名下），
+       * 所以列头不承担"分清哪一列"的全部责任 —— 状态标签与操作区仍以卡片为准。
+       */
+      head: String(c.carrier || '') + (c.vesselName ? ' · ' + c.vesselName : '')
+    }
+  })
+
+  const dims = [
+    {
+      key: 'capacity',
+      label: '运力',
+      pick: function (c) {
+        return c.capacityText ? c.capacityText + ' 吨' : ''
+      }
+    },
+    {
+      key: 'loadBasis',
+      label: '装载口径',
+      pick: function (c) {
+        return String(c.loadBasis || '')
+      }
+    },
+    {
+      key: 'rate',
+      label: '单价',
+      pick: function (c) {
+        return String(c.rateText || '') + (c.currency ? ' · ' + c.currency : '')
+      }
+    },
+    {
+      key: 'validUntil',
+      label: '有效期至',
+      pick: function (c) {
+        return String(c.validUntil || '')
+      }
+    },
+    {
+      key: 'evidence',
+      label: '证据',
+      pick: function (c) {
+        return String(c.evidenceText || '')
+      }
+    }
+  ]
+
+  const out = dims.map(function (d) {
+    const texts = rows.map(d.pick)
+    const first = texts[0]
+    let diff = false
+    texts.forEach(function (t) {
+      if (t !== first) diff = true
+    })
+    return {
+      key: d.key,
+      label: d.label,
+      diff: diff,
+      cells: texts.map(function (t, i) {
+        return { i: i, text: t }
+      })
+    }
+  })
+  return { cols: cols, rows: out }
+}
+
+/**
  * 409 响应体里的逐规则判定 → 展示行（**含通过的**）。
  *
  * 后端刻意把**全部**判定都回（通过的也在内）：只回没过的会让人改完再撞下一条；
@@ -3732,11 +3826,11 @@ function capacityRuleRows(detail) {
  * 用 `recheckCapacityConfirmation()`；界面把两者并排显示，就是为了让
  * 「改过之后不再成立」看得见（D1-09 那句话的可见形态）。
  *
- * ⚠️ `agreedScope` **不在**确认行的读模型上（服务端只把它写进采购确认成果的载荷）
- * ⇒ 本函数**不伪造它**：给的是成果引用（`artifactId` / `artifactRevisionNo`），
- * 由界面按**既有的成果引用导航**把用户带到那份成果上看范围与金额。
- * （这是一处**已登记的口径缺口**，不是"这里忘了读"：要"确认清单里直接读到范围"，
- * 得先给它在确认行上一个落点。）
+ * ⚠️ `agreedScope`（对应下面的 `scopeText`）的事实来源是这次确认产出的**成果版本** ——
+ * 确认表上**没有**这一列（有意的：同一个事实在库里只留一份）。服务端按冻结在确认行上的
+ * `artifact_revision_id` 投影（`capacity._scope_from_payload`），前端只搬运、不推导。
+ * ⇒ 界面上显示的范围，与成果里写着的那一版**永远是同一份**，不需要任何同步动作。
+ * （此前这里记的是"口径缺口：读模型不带范围"；那一缺口已落地。）
  */
 function decorateCapacityConfirmation(c) {
   const row = c || {}
@@ -3769,6 +3863,16 @@ function decorateCapacityConfirmation(c) {
         : String(row.demand_tonnes) + (row.demand_unit ? ' ' + row.demand_unit : ''),
     asOfDate: row.as_of_date ? String(row.as_of_date) : '',
     ruleSetVersion: row.rule_set_version ? String(row.rule_set_version) : '',
+    /**
+     * 这一次确认**覆盖的范围**。
+     *
+     * ⚠️ 它**不来自确认行** —— 确认表上没有这一列。事实来源是这次确认产出的
+     *    **成果版本**：后端按冻结在确认行上的 `artifact_revision_id` 投影
+     *    （`capacity._scope_from_payload`）⇒ 界面显示的东西与成果里写着的东西
+     *    永远是同一份，不需要任何同步动作。
+     * ⚠️ 空值时**不编一句话**：模板那边会明说「未记录」，而不是让它看起来像没这一项。
+     */
+    scopeText: row.agreed_scope ? String(row.agreed_scope) : '',
     note: row.note ? String(row.note) : '',
     confirmedAt: row.confirmed_at ? String(row.confirmed_at) : '',
     /**
@@ -4196,6 +4300,7 @@ module.exports = {
   artifactFieldLabel,
   artifactStatusClass,
   artifactStatusLabel,
+  buildCapacityComparison,
   buildPayload,
   canClaimAssignment,
   candidateStatusLabel,

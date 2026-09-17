@@ -53,6 +53,7 @@ const {
   TASK_TYPE_LABELS,
   TASK_TYPE_ORDER,
   VIEW,
+  buildCapacityComparison,
   canClaimAssignment,
   capacityRuleRows,
   claimAssignment,
@@ -270,6 +271,13 @@ Page({
     canRecordCapacity: false,
     /** 候选运力（已装饰：吨位/装载口径/单价/有效期/证据三态/状态标签） */
     capCandidates: [],
+    /**
+     * 「两家可比」的并排形态（列 = 候选，行 = 维度）。**≥2 条候选时才非空** ——
+     * 一条候选没有"并排"可言。空数组 ⇒ 模板 `wx:if="{{capCompareRows.length}}"` 不渲染。
+     * 只有差异标记、没有"推荐"：哪条更合适是方案判断，见 `buildCapacityComparison`。
+     */
+    capCompareCols: [],
+    capCompareRows: [],
     /** 已作出的运力确认（**冻结副本** + 逐规则判定 + 成果引用） */
     capConfirmations: [],
     /** 登记表单展开（页内；理由同「受理委托」—— 原生弹层不在渲染树里、工具点不到确认键） */
@@ -988,15 +996,21 @@ Page({
   loadCapacity() {
     const self = this
     if (!this.data.canViewCapacity) {
-      this.setData({ capCandidates: [], capConfirmations: [] })
+      this.setData({ capCandidates: [], capConfirmations: [], capCompareCols: [], capCompareRows: [] })
       return Promise.resolve()
     }
     const id = this.data.assignmentId
     return Promise.all([fetchCapacityCandidates(id), fetchCapacityConfirmations(id)])
       .then(function (res) {
+        const cands = (res[0] || []).map(decorateCapacityCandidate)
+        // 并排比较**由已装饰的候选算出**：两份投影共用同一批对象，否则
+        // "卡片上写的"与"比较表里写的"会各自演化 —— 同一个事实两个落点。
+        const compared = buildCapacityComparison(cands)
         self.setData({
-          capCandidates: (res[0] || []).map(decorateCapacityCandidate),
-          capConfirmations: (res[1] || []).map(decorateCapacityConfirmation)
+          capCandidates: cands,
+          capConfirmations: (res[1] || []).map(decorateCapacityConfirmation),
+          capCompareCols: compared.cols,
+          capCompareRows: compared.rows
         })
       })
       .catch(function (err) {
@@ -1004,6 +1018,10 @@ Page({
         self.setData({
           capCandidates: [],
           capConfirmations: [],
+          // 取不到候选时**比较表必须一起清掉**：留着上一次的表 =
+          // 拿旧数据当现状展示（而这一格恰恰是"要不要选它"的依据）。
+          capCompareCols: [],
+          capCompareRows: [],
           capHint: status
             ? '运力数据未能读取（服务端返回 ' + status + '）—— 本地权限投影与授权结论不一致时也会这样'
             : '运力数据未能读取：网络异常'
