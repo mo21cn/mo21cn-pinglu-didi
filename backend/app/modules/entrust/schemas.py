@@ -1524,3 +1524,52 @@ def capacity_confirmation_created_out(data: dict[str, Any]) -> CapacityConfirmat
 
 def capacity_recheck_out(data: dict[str, Any]) -> CapacityRecheckOut:
     return CapacityRecheckOut.model_validate(data)
+
+
+# ── 运输计划与必需任务前置（BP-03 第 1 条 / 合同 §10.1 第 4 步）──────────────
+# 读模型，无请求体：所有字段都来自 `ent_leg` 与 `ent_workflow_task`。
+
+
+class PlanLegOut(BaseModel):
+    """一个航段（`ent_leg`）。"""
+
+    leg_id: int
+    seq: int
+    #: 原始取值（`road` / `water` / …）—— **保留**：标签表会演进，原始值不会
+    mode: str
+    #: 展示标签；未登记的取值**等于** `mode` 本身（未知保持未知，不兜底成"公路"）
+    mode_label: str
+    from_name: str
+    to_name: str
+
+
+class PlanTaskOut(BaseModel):
+    """一个**必需任务**及其固定前置（`ent_workflow_task`）。
+
+    字段面照抄 `workbench._load_tasks` 的先例，**不夹带** `required_evidence` ——
+    本读模型只回答 §10.1 第 4 步问的那件事（计划**与前置**），
+    多带的字段会在界面之外多一个会各自演化的落点。
+    """
+
+    task_id: int
+    task_type: str
+    title: str
+    status: str
+    #: 固定前置任务 id；`None` = **没有前置**（不是"前置未知"）
+    precondition_task_id: int | None = None
+
+
+class AssignmentPlanOut(BaseModel):
+    """§10.1 第 4 步的读模型：`Show the road–water–road plan and required task prerequisites`。
+
+    ⚠️ 本模型**不含**"三段"/"公路—内河—公路"这类**结论性文案**：段数是 `legs` 的
+    属性，由界面按行渲染。在服务端把它拼成一句话，就多了一个会与数据脱节的落点。
+    """
+
+    assignment_id: int
+    legs: list[PlanLegOut] = Field(default_factory=list)
+    task_prerequisites: list[PlanTaskOut] = Field(default_factory=list)
+
+
+def assignment_plan_out(data: dict[str, Any]) -> AssignmentPlanOut:
+    return AssignmentPlanOut.model_validate(data)
