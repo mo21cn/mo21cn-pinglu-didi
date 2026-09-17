@@ -59,6 +59,7 @@ from app.models.user import User
 from app.modules.auth.dependencies import get_current_user
 from app.modules.entrust import agentjobs as jobs_svc
 from app.modules.entrust import artifacts as art
+from app.modules.entrust import offers as offers_svc
 from app.modules.entrust import sessions as sess_svc
 from app.modules.entrust._http import (
     guard_or_400,
@@ -835,13 +836,20 @@ def adopt_job_proposal(
         )
     source_assignment_id = job.get("assignment_id")
     payload = {"job_id": job_id, **data.model_dump(mode="json")}
-    return run_write(
-        db,
-        scope=_SCOPE_JOB_ADOPT,
-        key=key,
-        actor_user_id=int(user.id),
-        payload=payload,
-        business=lambda: art.create_artifact(
+
+    def _adopt() -> dict[str, Any]:
+        """采纳为成果，并把**信封里声明过的来源**记成待核验项。
+
+        ⚠️ 为什么这一步必须在采纳时做，而不是等到发布时现查：来源只存在于**作业信封**，
+        而成果/版本表**没有任何溯源列**（DR-0012 未完成项）。不在采纳时把"模型当初声明了
+        什么"落到台账上，发布门槛就只剩下一个没有对象的勾选 —— 那是假门槛。
+
+        `artifacts.create_artifact` 内部自己 commit ⇒ 台账写入是**紧随其后**的第二次提交，
+        两者不在一个事务里。因此门槛把"模型产出却一条声明都没有"判为**不得发布**
+        （`offers.source_gate` 的 `missing_declaration`）—— 那条缝由此变成一句可读的拒绝理由，
+        而不是一次静默放行。
+        """
+        created = art.create_artifact(
             db,
             entrustment_id=int(entrustment_id),
             artifact_type=artifact_type,
@@ -850,6 +858,28 @@ def adopt_job_proposal(
             source=art.SOURCE_AGENT,
             note=data.note,
             assignment_id=(int(source_assignment_id) if source_assignment_id is not None else None),
-        ),
+        )
+        envelope = job.get("envelope") or {}
+        declared = [
+            {"kind": str((r or {}).get("kind") or ""), "ref": str((r or {}).get("ref") or "")}
+            for r in (envelope.get("source_refs") or [])
+        ]
+        written = offers_svc.record_declared_sources(
+            db,
+            artifact_id=int(created["artifact_id"]),
+            revision_no=1,  # 采纳产出的成果首版本即 revision_no=1
+            sources=declared,
+        )
+        if written:
+            db.commit()
+        return created
+
+    return run_write(
+        db,
+        scope=_SCOPE_JOB_ADOPT,
+        key=key,
+        actor_user_id=int(user.id),
+        payload=payload,
+        business=_adopt,
         map_domain_error=map_artifact_error,
     )
