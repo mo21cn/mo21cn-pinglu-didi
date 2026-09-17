@@ -1261,3 +1261,127 @@ def test_session_context_is_invisible_to_outsiders(env):
     )
     assert resp.status_code == 404
     assert "拒绝" in resp.text or "不存在" in resp.text
+
+
+# ─────────────────────────── BP-02：作业投影带「模式」与「可采纳提案」
+
+
+def test_job_projection_carries_attempt_mode_and_stays_unknown(env):
+    """作业投影必须带「最近一次尝试是不是 fixture」，且**未知保持未知**。
+
+    为什么这是必须的：界面要标明"这是桩输出、不是真实模型结果" —— 合同 §3.2
+    把 deterministic fixture 与 live invocation 列为**必须区分**的两种事实。
+    而 `mocked` 只存在于尝试行上：投影不带它，页面就**无从判断**，
+    只能把桩显示成真实结果（这是"数据没下发"，不是"界面没做"）。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    _task(db, assignment_id=aid, status="waiting")
+    sid = _make_session(env, manager, eid=eid, aid=aid).json()["session_id"]
+
+    job = env.client.post(
+        f"/api/v1/entrust/sessions/{sid}/jobs",
+        json={"base_revision": 1, "input": {"quote_text": "贵港到梧州，水泥 3000 吨"}},
+        headers=_headers(manager, uuid.uuid4().hex),
+    )
+    assert job.status_code == 200, job.text
+    jid = job.json()["job_id"]
+
+    # ① 还没跑过 ⇒ None。**不是 False**："没跑过"与"跑过且不是桩"是两句不同的话。
+    listing = env.client.get(
+        f"/api/v1/entrust/agent/jobs?assignment_id={aid}", headers=_headers(manager)
+    )
+    assert listing.status_code == 200, listing.text
+    row = [x for x in listing.json()["items"] if x["job_id"] == jid]
+    assert row, "刚提交的作业必须出现在列表里（否则下面的断言是空转）"
+    assert row[0]["mocked"] is None, "未尝试的作业不得被写成 False"
+
+    # ② 跑完 ⇒ True（`LLM_MOCK=true` ⇒ 规则模板输出）
+    run = env.client.post(f"/api/v1/entrust/agent/jobs/{jid}/run", headers=_headers(manager))
+    assert run.status_code == 200, run.text
+    assert run.json()["job"]["mocked"] is True
+
+    # ③ 列表与详情必须**同口径** —— 两条路径给出互相矛盾的模式结论是最坏情况
+    after = env.client.get(
+        f"/api/v1/entrust/agent/jobs?assignment_id={aid}", headers=_headers(manager)
+    ).json()
+    row2 = [x for x in after["items"] if x["job_id"] == jid][0]
+    assert row2["mocked"] is True
+    detail = env.client.get(f"/api/v1/entrust/agent/jobs/{jid}", headers=_headers(manager)).json()
+    assert detail["job"]["mocked"] is True
+    assert detail["attempts"][-1]["mocked"] is True, "投影与尝试行必须一致"
+
+
+def test_adopt_makes_the_proposal_a_real_artifact(env):
+    """BP-02 出口证据：「提案 → 人工采纳 → 同一成果」。
+
+    合同 §10.1 第 3 步要求"更正一个字段并**从工作台打开同一份成果**"，
+    所以采纳必须真的落成成果（可被单委托成果清单读到），而不是只回一个 200。
+    """
+    db = env.make_session()
+    manager, owner, org, eid, aid = _seed(env, db)
+    _task(db, assignment_id=aid, status="waiting")
+    # ⚠️ 必须是 **AG-02**：`artifact_proposals` 是报价专业产出的信封结构。
+    # `_make_session` 默认 AG-01（那个专业产出的是另一套信封），拿它跑会得到
+    # 一个**空提案列表** —— 断言会以"夹具没产出对象"的形式失败，而真因是专业选错。
+    sid = _make_session(env, manager, eid=eid, aid=aid, specialty="agent_02").json()["session_id"]
+
+    jid = env.client.post(
+        f"/api/v1/entrust/sessions/{sid}/jobs",
+        json={"base_revision": 1, "input": {"quote_text": "贵港到梧州，水泥 3000 吨，每吨 45 元"}},
+        headers=_headers(manager, uuid.uuid4().hex),
+    ).json()["job_id"]
+    env.client.post(f"/api/v1/entrust/agent/jobs/{jid}/run", headers=_headers(manager))
+
+    detail = env.client.get(f"/api/v1/entrust/agent/jobs/{jid}", headers=_headers(manager)).json()
+    proposals = (detail["job"].get("envelope") or {}).get("artifact_proposals") or []
+    assert proposals, "夹具必须真产出提案（否则本用例没有对象）"
+
+    before = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/artifacts", headers=_headers(manager)
+    ).json()
+    n_before = len(before["items"])
+
+    p0 = proposals[0]
+    adopted = env.client.post(
+        f"/api/v1/entrust/agent/jobs/{jid}/adopt",
+        json={
+            "artifact_type": p0["artifact_type"],
+            "payload": p0.get("payload") or {},
+            "note": "人工确认后采纳",
+        },
+        headers=_headers(manager, uuid.uuid4().hex),
+    )
+    assert adopted.status_code == 200, adopted.text
+    new_id = adopted.json()["artifact_id"]
+
+    # 真事实：本单成果清单里多出**这一份**（不是"接口返回了 200"）
+    after = env.client.get(
+        f"/api/v1/entrust/assignments/{aid}/artifacts", headers=_headers(manager)
+    ).json()
+    ids = [int(x["artifact_id"]) for x in after["items"]]
+    assert len(ids) == n_before + 1, f"成果数应 +1：{n_before} → {len(ids)}"
+    assert new_id in ids, "采纳产生的成果必须出现在单委托成果清单里（工作台读的同一份）"
+
+    # 幂等：同一幂等键重复采纳不得再产生一份
+    key = uuid.uuid4().hex
+    first = env.client.post(
+        f"/api/v1/entrust/agent/jobs/{jid}/adopt",
+        json={"artifact_type": p0["artifact_type"], "payload": p0.get("payload") or {}},
+        headers=_headers(manager, key),
+    )
+    again = env.client.post(
+        f"/api/v1/entrust/agent/jobs/{jid}/adopt",
+        json={"artifact_type": p0["artifact_type"], "payload": p0.get("payload") or {}},
+        headers=_headers(manager, key),
+    )
+    assert first.status_code == 200 and again.status_code == 200
+    assert again.json()["artifact_id"] == first.json()["artifact_id"], "同键重放必须返回同一份"
+
+    # 张冠李戴：该作业没提出的类型必须被拒（400），不是静默成功
+    bad = env.client.post(
+        f"/api/v1/entrust/agent/jobs/{jid}/adopt",
+        json={"artifact_type": "settlement_draft", "payload": {}},
+        headers=_headers(manager, uuid.uuid4().hex),
+    )
+    assert bad.status_code == 400, bad.text

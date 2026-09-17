@@ -516,6 +516,11 @@ class AgentJobOut(BaseModel):
     error_kind: str | None
     error_message: str | None
     requires_review: bool
+    #: 最近一次尝试是否是**规则模板（fixture）**输出。
+    #: 三态是刻意的 —— `None` 表示"还没有任何尝试记录、无从判断"，
+    #: 与 `False`（"跑过，且不是桩"）是两句不同的话（合同 §3.2 要求区分
+    #: deterministic fixture 与 live invocation）。界面的 fixture 提示条据此显示。
+    mocked: bool | None = None
     created_by: int
     started_at: str | None
     finished_at: str | None
