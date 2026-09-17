@@ -606,6 +606,59 @@ python scripts/run_walkthrough_devtools.py --section 46,47   # 两章一起（�
   ⇒ 假红 / 假绿（断言"不该有"时恒真）。已在 `wechatide_client.count()` 加运行期守卫，
   并在 `verify_miniapp.js` 加静态闸门。详见 `DEMO-1-interface-delta.md` §7.23 #179 / §7.24 #191。
 
+### 8.5 主演示第 7 步：合同派生 + 签署证据 —— **㊽ 章（货主建段）＋ ㊾ 章（合同与证据）**
+
+> 合同 §10.1 第 7 步：*`Create the contract and record labeled sample signature evidence.`*
+> 判据 D1-08：*`Contract version and linked evidence inspection`*。
+
+```bash
+python scripts/run_walkthrough_devtools.py --section 49      # 合同派生 + 签署证据（依赖下述前置）
+python scripts/run_walkthrough_devtools.py --section 48      # 货主身份建段（自足）
+python scripts/run_walkthrough_devtools.py --section 48,49   # 两章一起（㊾ 排在 ㊽ 之后，见下）
+```
+
+| 章 | 覆盖 | 前置 |
+| --- | --- | --- |
+| **㊽** | 货主（`seed-shipper`）**经界面**在 canonical 委托上建一段（方式 `rail`，与 ㊼ 的 `air` 错开） | `seed_entrust_canonical.py` |
+| **㊾** | ① 未派生时页面有入口且它**不带业务入参**；② 经**界面**派生 ⇒ 页面与服务端**同一成果同一版本**；③ 逐字段来源表行数 = 服务端行数；④ 缺失项「未提供」可见；⑤ 经**界面**记一条证据 ⇒ 出现「第 1 版 · 样件扫描件 · 样件标注」且与服务端同源；⑥ 同形态二次页内说清"已经记过"；⑦ 常驻声明在页面上 + 零新增 console 报错 | `seed_entrust_canonical.py` **＋** `seed_entrust_contract_flow.py`（第 7 步夹具） |
+
+* ⚠️ **㊾ 的前置分两个种子**：`seed_entrust_canonical`（委托本体）与
+  `seed_entrust_contract_flow`（**客户已接受的对客报价发布**）。缺后者 ⇒ 本章整章 `NOT_RUN`
+  （脚本自己报出"要先跑哪个种子"，不假绿）。
+* ⚠️ **`seed_entrust_contract_flow.py` 刻意不做第 7 步的动作**（不派生、不记证据）——
+  派生正是本章要**经界面**证明的那一步；种子替它做完就等于把被测对象换成夹具
+  （与 `seed_entrust_canonical.py`"只登记候选、不做任何确认"同一条纪律）。
+* **㊾ 会写库**（派生一份合同 + 记一条证据）。一份已接受事实**只派生一份** ⇒
+  重跑时若已派生，本章走「读回已有那份」的分支（不重复派生，也不报红）。
+* ⚠️ **㊾ 排在 ㊽ 之后是有理由的**：㊽ 加的那段会出现在**派生那一刻**的 `route_scope` 里 ——
+  这是"派生用派生那一刻的航段"的真实形态，不是污染。两章顺序固定，不做顺序无关性断言。
+* ⚠️ **档位**：这两章答的是"真机上点得动 / 写进去读得回来"，**不是**业务验收。
+  而第 7 步还包含**合同本身的签署**（谁能签、签了算不算数）—— 本切片只记录
+  "存在一份**标注为样件**的证据"，守住的是 D1-08「证据与状态不得等同实时电子签」的边界。
+  ⇒ §10.1 第 7 步**不得由我方声称 PASS**。
+
+#### ⚠️ 全量序列（`--section all`）的种子配方 —— 跑之前必须照抄
+
+全量序列的前置**分散在多个种子脚本**里，漏一个就会得到一份"看起来像产品缺陷"的读数
+（2026-09-18 实测：漏跑 `seed_entrust_orgpicker` / `seed_contract_cases` ⇒ `FAIL=51`，
+失败全部落在依赖它们的章节上）。**权威顺序**是 `backend/scripts/reset_demo_env.py` 的
+`SEED_ORDER`：
+
+```bash
+python backend/scripts/seed_demo.py
+python backend/scripts/seed_entrust_demo.py
+python backend/scripts/seed_entrust_orgpicker.py      # 甲乙组织 / seed-mgr-multi / orgpicker 身份
+python backend/scripts/seed_contract_cases.py         # R3/R4/R5 仿真案例（㊴/㊶/⑨b）
+python backend/scripts/seed_entrust_canonical.py      # canonical 委托（㊼/㊽/㊾）；不进 SEED_ORDER
+python backend/scripts/seed_entrust_contract_flow.py  # 已接受的对客报价发布（㊾）
+python scripts/verify_login_flow.js
+python scripts/verify_miniapp_devtools.py --section all
+```
+
+* ⛔ `seed_entrust_canonical.py` / `seed_entrust_contract_flow.py` **不进** `SEED_ORDER`：
+  它们是有状态的夹具，塞进 `reset_demo_env.py` 会让 §6.3 的基线表逐格失效。
+  跑全量走查时**手工排在最后**。
+
 ---
 
 ## 9. 本切片（S1）未闭合的项
