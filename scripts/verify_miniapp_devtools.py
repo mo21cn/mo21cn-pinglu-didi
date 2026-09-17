@@ -980,14 +980,30 @@ class Walker:
         tabs = {t.get("pagePath") for t in ((cfg.get("tabBar") or {}).get("list") or []) if t}
         return pages, tabs
 
-    def login_as(self, code: str) -> str:
-        """写 `dev_login_code` + 清 token → reLaunch 首页（不点击身份卡）。"""
+    def login_as(self, code: str, tries: int = 20) -> str:
+        """写 `dev_login_code` + 清 token → reLaunch 首页（不点击身份卡）。
+
+        ⚠️ **必须轮询，不能固定 sleep**：`reLaunch` 是异步的，页面栈要等小程序
+        把目标页创建出来才会变。模拟器**冷启动**时会输 —— 2026-09-18 实测：
+        开窗阶段探测了 38.5s，紧随其后的 `reLaunch` 在 1.5s 后读到的仍是
+        `pages/shipper/shipper`，于是 ㊸ 的前置被记成 `FAIL`（"未停在身份页"），
+        而实情只是**还没跳过去**。这类假红最贵：它看起来像"登录坏了"。
+
+        未命中时**再补发一次** `reLaunch`：冷启动下第一条导航指令可能落在
+        页面创建之前而被丢掉。返回最终读到的路径，调用方照旧比对 `INDEX`。
+        """
         self.c.set_storage("dev_login_code", code)
         self.c.remove_storage("access_token")
         self.c.remove_storage("user_info")
-        self.c.navigate("reLaunch", "/" + INDEX)
-        time.sleep(1.5)
-        return self.c.current_path()
+        path = ""
+        for _attempt in range(2):
+            self.c.navigate("reLaunch", "/" + INDEX)
+            for _ in range(max(1, tries // 2)):
+                path = self.c.current_path()
+                if path == INDEX:
+                    return path
+                time.sleep(0.5)
+        return path
 
     def enter_role(self, role: str, want: str, tries: int = 30) -> bool:
         """按身份卡进入工作台。
@@ -7699,12 +7715,22 @@ def sec_44(w: Walker) -> None:
     tok_owner, role_note = ensure_role(tok_owner_raw, "owner")
     org_id = my_org_id(CODE_OWNER, ORG_WORKBENCH)
     aid = newest_by_title(org_id, A1_MAIN_TITLE, tok_owner) if org_id else ""
-    w.rep.rec(
-        "㊹ 前置 · 定位 ㊸ 建的那张委托（标题匹配取**最大** assignment_id，不限状态）",
-        bool(aid),
-        f"aid={aid} org={org_id}（{ORG_WORKBENCH}）token={role_note}",
-    )
-    if not aid:
+    if aid:
+        w.rep.rec(
+            "㊹ 前置 · 定位 ㊸ 建的那张委托（标题匹配取**最大** assignment_id，不限状态）",
+            True,
+            f"aid={aid} org={org_id}（{ORG_WORKBENCH}）token={role_note}",
+        )
+    else:
+        # ⚠️ 这是**依赖缺失**、不是"行为违反预期" ⇒ 记 `NOT_RUN`。
+        #    2026-09-18 订正：此前记 `FAIL`，于是单跑 `--section 44` 时本轮总
+        #    `FAIL` 数被抬高两格（一条前置 + 一条全章），读者会以为"第 6 步跑错了"，
+        #    而实情是**根本没跑**。与 ㊻ 那条过期 `LIMITATION` 是同一类读数错。
+        w.rep.not_run(
+            "㊹ 前置 · 定位 ㊸ 建的那张委托（标题匹配取**最大** assignment_id，不限状态）",
+            f"org={org_id}（{ORG_WORKBENCH}）里没有标题为 {A1_MAIN_TITLE!r} 的委托 ⇒ "
+            "本章依赖 ㊸ 先建单，本次没跑（正式取证用 `--section 43,44` 同跑）。",
+        )
         w.rep.not_run(
             "㊹ 全章",
             f"未找到标题为 {A1_MAIN_TITLE!r} 的委托。本章依赖 ㊸ 建单，"
@@ -7728,29 +7754,111 @@ def sec_44(w: Walker) -> None:
         f"成果 {art_list.get('total')} 份：{typed or '无'}；"
         f"未归属 {art_list.get('unassigned_total')} 份（只统计归属恰好等于本委托的）",
     )
-    w.rep.rec(
-        "㊹ 前置 · 该委托下有**客户可见**的成果（第 6 步只能发布客户可见类型）",
-        bool(aid_art),
-        f"客户可见白名单={sorted(customer_visible)}；命中类型={carrier_type or '无'} "
-        f"id={aid_art or '无'}。依据：`offers.release_offer` 要求 "
-        "`registry.project_for_customer(...)` 非空 —— 内部成果（如 `quote_parsed` 船东报价）"
-        "一律 400，这是**设计**而非缺陷。",
-    )
+    # ⚠️ 前置**不成立**记 `NOT_RUN`，**不是** `FAIL`（2026-09-18 订正）。
+    #    合同 §10.3 把 `FAIL` 定义为「行为违反预期」，而 `NOT_RUN` 是「检查未执行」；
+    #    "这一单上没有可发布的载体"属于后者。混在一格会让**总 FAIL 数说错话**，
+    #    而读者会据此去找一个并不存在的缺陷 —— 与 ㊻ 那条过期 `LIMITATION`
+    #    同属**读数错误**（那一条的代价是整份走查从"全绿"变成"未跑"）。
+    if aid_art:
+        w.rep.rec(
+            "㊹ 前置 · 该委托下有**客户可见**的成果（第 6 步只能发布客户可见类型）",
+            True,
+            f"命中类型={carrier_type} id={aid_art}；白名单={sorted(customer_visible)}",
+        )
+    else:
+        w.rep.not_run(
+            "㊹ 前置 · 该委托下有**客户可见**的成果（第 6 步只能发布客户可见类型）",
+            f"客户可见白名单={sorted(customer_visible)}；命中类型=无 id=无。依据："
+            "`offers.release_offer` 要求 `registry.project_for_customer(...)` 非空 —— "
+            "内部成果（如 `quote_parsed` 船东报价）一律 400，这是**设计**而非缺陷。"
+            "⇒ 前置不成立（不是行为违反预期），故记 `NOT_RUN` 而不是 `FAIL`。",
+        )
     if not typed:
         w.rep.not_run(
             "㊹ 第6步 · 发布与客户接受",
             "该委托下没有成果 ⇒ 没有可发布的载体。㊸ 的成果若已存在，请确认标题常量与种子一致。",
         )
         return
+
+    # ==================== 〇、载体：缺**客户可见**成果时，经界面组装一份 ====================
+    #
+    # 为什么要有这一步（这是本章最值钱的一段）
+    # ------------------------------------------
+    # 主链路（㊸：客户提单 → 上传样本 → AG-02 → 更正字段）产出的是 `quote_parsed`
+    # （**船东侧**报价），它不在客户白名单内 ⇒ 第 6 步没有可发布的载体。
+    # 而三点事实合起来说明"缺的是一步**本该有的**人工动作"：
+    #   ① 服务端自己在 AG-02 的 envelope 里就写了 `NOTE_VENDOR_QUOTE`：
+    #      「本报价为**供应商侧报价，不是对客报价**，两者口径不同，**不得互相替代**」；
+    #   ② `customer_quote` 的产出条件是作业输入带 `amount`（对客口径金额），主链路没给过；
+    #   ③ 「对客报价**可人工组装**」是 S3 的 DoD（`DEMO-1-plan.md` §5.2 / UI-06）与
+    #      BP-03 第 3–8 条（内部规划 → **受控客户承诺**）明写的能力，界面入口就在**委托详情页**。
+    #
+    # ⇒ 本章**经界面**把它组装出来，而不是去借种子/夹具上的现成成果：
+    #    借现成的会让"经理组装"这一步**永远没有证据** —— 而它恰是第 1–3 步与第 6 步之间
+    #    那段隐含动作（合同 §10.1 的 13 步没写它，BP-03 隐含它）。
+    # ⚠️ 诚实边界：这一步**证明的是第 6 步的前置可经界面达成**，
+    #    它本身**不是** §10.1 的任何一步 ⇒ 单独编号「〇」，不与第 6 步合并计数。
+    if not aid_art:
+        print("\n-- 〇、经理经界面组装一份对客报价（第 6 步的载体）--", flush=True)
+        if not w.open_workbench(CODE_OWNER, tag="㊹"):
+            w.rep.not_run("㊹ 〇 经界面组装对客报价", "未能进入经理工作台")
+        else:
+            w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+            w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+            w.wait_data(lambda x: x.get("canAssembleQuote") is not None, tries=40, gap=0.5)
+            n_qopen = w.c.count('[data-act-quote-open="1"]')
+            w.rep.rec(
+                "㊹ 〇 经理在该委托详情页有「组装对客报价」入口"
+                "（判据＝授权可唯一定位 ∧ 所在组织内有 `entrust:quote:create`）",
+                n_qopen == 1,
+                f"入口数={n_qopen}",
+            )
+            if n_qopen == 1:
+                w.c.scroll_into('[data-act-quote-open="1"]')
+                w.c.tap('[data-act-quote-open="1"]')
+                d_q = w.wait_data(lambda x: x.get("quoteOpen") is True, tries=20, gap=0.3)
+                # ⚠️ `input_text` 是**键入**（往现有值后面追加）⇒ 只打**空框**。
+                #    `currency` 已预填 `CNY`，一个字符都不打（打了会得到 `CNYCNY`）。
+                typed_q = (
+                    w.c.input_text('input[data-df="amount"]', "36800")
+                    and w.c.input_text('input[data-df="includes"]', "船舶运输、装船、卸船")
+                    and w.c.input_text('input[data-df="validUntil"]', "2026-12-31")
+                )
+                w.rep.rec(
+                    "㊹ 〇 表单渲染出来且三个输入框真的接上 `bindinput`"
+                    "（`data-df` 认领表；币种已预填故不键入）",
+                    d_q.get("quoteOpen") is True and typed_q,
+                    "三个输入框都键入成功" if typed_q else "有输入框没接上（漏映射时正是这个症状）",
+                )
+                w.c.scroll_into('[data-act-quote-submit="1"]')
+                w.c.tap('[data-act-quote-submit="1"]')
+                time.sleep(2.0)
+            # 重新读成果清单：组装成功的判据是**服务端的成果里真的有**一份客户可见类型，
+            # 不是"页面 toast 说成功了"（与"页面说成功不算数"同一条纪律）。
+            art_list = api_get(f"/entrust/assignments/{aid}/artifacts", tok_owner) or {}
+            typed2 = [
+                (art_id_of(it), str((it or {}).get("artifact_type") or ""))
+                for it in (art_list.get("items") or [])
+            ]
+            picked = next(((i, t) for i, t in typed2 if t in customer_visible), ("", ""))
+            if picked[0]:
+                aid_art, carrier_type = picked
+            w.rep.rec(
+                "㊹ 〇 经**界面**组装出的对客报价出现在服务端成果清单里，且类型在客户可见白名单内",
+                bool(picked[0]) and picked[1] == "customer_quote",
+                f"成果清单：{typed2 or '无'}；命中 {picked[1] or '无'} id={picked[0] or '无'}",
+            )
+            w.shot("44-0-组装对客报价")
+
     if not aid_art:
         # ① 先把"服务端确实禁止发布内部成果"这条**负例**直证出来 ——
         #    它本身就是六机制之一（客户白名单投影）的证据，不该因为主流程走不通就丢掉。
         #    取 entrustment_id：发布端点挂在 `entrustments/{id}/offer-releases` 下。
-        art_detail = api_get(f"/artifacts/{typed[0][0]}", tok_owner) or {}
+        art_detail = api_get(f"/entrust/artifacts/{typed[0][0]}", tok_owner) or {}
         eid_probe = str(art_detail.get("entrustment_id") or "")
         st_neg, body_neg = (
             api_post(
-                f"/entrustments/{eid_probe}/offer-releases",
+                f"/entrust/entrustments/{eid_probe}/offer-releases",
                 tok_owner,
                 {
                     "artifact_id": int(typed[0][0]),
@@ -7763,12 +7871,23 @@ def sec_44(w: Walker) -> None:
             else (0, None)
         )
         detail_neg = str((body_neg or {}).get("detail") or "")
-        w.rep.rec(
-            "㊹ 第6步 · **负例**：内部成果不得对客发布（客户白名单投影在发布口生效）",
-            st_neg == 400 and "白名单投影" in detail_neg,
-            f"POST /entrustments/{eid_probe}/offer-releases artifact={typed[0][0]}"
-            f"（{typed[0][1]}）⇒ HTTP {st_neg}；detail={detail_neg[:120]!r}",
-        )
+        if not eid_probe:
+            # 发布端点挂在 `entrustments/{id}/offer-releases` 下 ⇒ 拿不到 id 时
+            # URL 会变成 `//offer-releases`，得到 HTTP 0 —— 那**不是**"负例通过"，
+            # 也**不是**"产品拒绝了"，而是这条负例**根本没执行**。记 `NOT_RUN`。
+            # （首跑实测就是这么记成 `FAIL` 的：`HTTP 0；detail=''`。）
+            w.rep.not_run(
+                "㊹ 第6步 · **负例**：内部成果不得对客发布（客户白名单投影在发布口生效）",
+                "该成果读不到 `entrustment_id` ⇒ 发布端点没有可用的挂载点，"
+                "负例无法执行 ⇒ 记 `NOT_RUN`（不是 `FAIL`）。",
+            )
+        else:
+            w.rep.rec(
+                "㊹ 第6步 · **负例**：内部成果不得对客发布（客户白名单投影在发布口生效）",
+                st_neg == 400 and "白名单投影" in detail_neg,
+                f"POST /entrust/entrustments/{eid_probe}/offer-releases artifact={typed[0][0]}"
+                f"（{typed[0][1]}）⇒ HTTP {st_neg}；detail={detail_neg[:120]!r}",
+            )
         w.rep.not_run(
             "㊹ 第6步 · 发布与客户接受（**阻塞：主演示链路缺「组装对客报价」这一步**）",
             "㊸ 那条链路（客户提单 → 上传样本 → AG-02 → 更正字段）产出的是 "
@@ -7781,11 +7900,10 @@ def sec_44(w: Walker) -> None:
             "（对客口径金额）—— 主链路没给过这个入参；\n"
             "           ③ 合同 §10.1 的 13 步里**没有**「组装对客报价」这一步，"
             "而 BP-03 第 3–8 条（内部规划 → 受控客户承诺）隐含它。\n"
-            "           ⇒ 这是**主演示链路的缺口**，不是页面或断言的问题；"
-            "交 HO 裁决（三选一）：① 链路补一次 AG-02 `assemble_customer_quote` 并采纳"
-            "（最贴近合同口径，顺带把第 7 步的输入备好）；② 第 6 步改发种子委托上现成的 "
-            "`customer_quote`（快，但与 ㊸ 的主链路脱钩，'精确版本'证据链变弱）；"
-            "③ 按合同 §8.4 作为阻塞项上报，本片只交付缺口与证据。",
+            "           ⇒ 这是**主演示链路的缺口**，不是页面或断言的问题。\n"
+            "           本轮处置：本章新增「〇」节，**经界面组装**一份对客报价来补这个前置。"
+            "走到这里说明**那一步也没成**（组装入口不在 / 提交被拒 / 成果类型仍不达标）"
+            "⇒ 按合同 §10.3 记 `NOT_RUN` 并交 HO 裁决。",
         )
         return
 
@@ -7856,8 +7974,25 @@ def sec_44(w: Walker) -> None:
         )
         return
 
-    # ==================== 二、发布（首次：撞门槛） ====================
+    # ==================== 二、发布（先读门槛，再决定走哪条剧本） ====================
     print("\n-- 二、真实点击发布 → 来源门槛 --", flush=True)
+    # ⭐ 判据先取**服务端事实**：这条载体的来源门槛到底过不过。
+    #    • 人工组装（本章「〇」节）产出的是 **manual 直写**版本 ⇒ 没有待核验的模型声明
+    #      ⇒ `gate.ok=True` ⇒ **一次发布即成功**；
+    #    • AG-02 产出会写下声明行 ⇒ 首次发布应**被门槛拒绝**，要逐条核验才能发。
+    #    ⚠️ 两种载体的**预期完全相反**：把"一次就成功"套进"被拒 ⇒ 核验 ⇒ 再发布"的剧本里，
+    #    会把一次**成功**读成**失败**（2026-09-18 首跑就是这么得到 3 条 FAIL 的）。
+    gate_pre = (
+        api_get(f"/entrust/artifacts/{aid_art}/source-checks?revision_no={rev}", tok_owner) or {}
+    ).get("gate") or {}
+    gate_ok_pre = bool(gate_pre.get("ok"))
+    w.rep.rec(
+        "㊹ 第6步 · 发布前先取**服务端**的门槛结论（它决定下面走哪条剧本）",
+        True,
+        f"gate.ok={gate_ok_pre} declared={len(gate_pre.get('declared') or [])} "
+        f"pending={len(gate_pre.get('pending') or [])} ⇒ "
+        + ("人工直写：无待核验声明，一次发布即成功" if gate_ok_pre else "模型产出：首次发布应被拒"),
+    )
     sel_rel = f'[data-act-release="1"][data-no="{rev}"]'
     w.c.scroll_into(sel_rel)
     n_rel = w.c.count(sel_rel)
@@ -7898,12 +8033,28 @@ def sec_44(w: Walker) -> None:
     # 说明本章的 `CUSTOMER_VISIBLE` 与服务端漂移了 —— 那是**章节配置错**，不是产品错。
     # 首跑就是被这一条挡住，却混在"门槛生效"的断言里，读数时不易一眼分开。
     drift = "白名单投影" in hint
+    # ⭐ **服务端事实才是判据**：页面上的 `published` 是发布记录的**投影**，
+    #    依赖 `load()` 完成与 `releasedRevisionOf` 的匹配。首跑实测到
+    #    「服务端已有 `released` 记录、页面仍读到 `published=False`」
+    #    ⇒ 只看页面会把一次**成功**的发布记成失败。这里去问服务端，页面那一位只作对照。
+    rel_rows = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok_owner) or {}).get(
+        "items"
+    ) or []
+    v_rows_now = [
+        r
+        for r in rel_rows
+        if str((r or {}).get("artifact_id")) == aid_art
+        and int((r or {}).get("revision_no") or 0) == rev
+    ]
+    released_srv = any(str((r or {}).get("status")) == "released" for r in v_rows_now)
     w.rep.rec(
         "㊹ 第6步 · 发布前**来源门槛**生效：未核验的来源不得作为已发布依据 —— "
         "被拒时页面把**待核验清单**显示出来（只说'不能发布'是没法干活的）",
-        published_now or (gate_blocked and not drift and ("待核验" in hint or "门槛" in hint)),
-        f"submit={t_rel_submit} published={published_now} 载体白名单漂移={drift} "
-        f"releaseHint={hint[:200]!r}（published=True 说明该版本本就不在门槛下）",
+        (released_srv and gate_ok_pre)
+        or (gate_blocked and not drift and ("待核验" in hint or "门槛" in hint)),
+        f"submit={t_rel_submit} published(页面)={published_now} released(服务端)={released_srv} "
+        f"门槛预读={gate_ok_pre} 漂移={drift} releaseHint={hint[:160]!r}"
+        "（人工直写的载体不在门槛下 ⇒ 预期是一次发布即成功）",
     )
     if drift:
         w.rep.not_run(
@@ -7914,18 +8065,17 @@ def sec_44(w: Walker) -> None:
         )
         return
 
-    gate = (
-        api_get(f"/entrust/artifacts/{aid_art}/source-checks?revision_no={rev}", tok_owner) or {}
-    ).get("gate") or {}
+    gate = gate_pre
     w.rep.rec(
-        "㊹ 第6步 · 门槛状态经 **API 直证**（页面文案与后端判定一致）",
-        bool(gate.get("ok")) == published_now,
+        "㊹ 第6步 · 门槛状态经 **API 直证**（页面判定与后端同源）",
+        bool(gate.get("ok")) == (released_srv or published_now),
         f"gate.ok={gate.get('ok')!r} declared={len(gate.get('declared') or [])} "
         f"pending={len(gate.get('pending') or [])} "
-        f"missing_declaration={gate.get('missing_declaration')!r}",
+        f"missing_declaration={gate.get('missing_declaration')!r} ⇒ "
+        f"页面 published={published_now} / 服务端 released={released_srv}",
     )
 
-    if gate_blocked:
+    if gate_blocked and not released_srv:
         # —— 缺口：界面没有登记核验的入口 ——
         pend_txt = (
             "、".join(f"{p.get('kind')}:{p.get('ref')}" for p in (gate.get("pending") or []))
@@ -7996,7 +8146,29 @@ def sec_44(w: Walker) -> None:
             f"tap={t_rel2} submit={t_sub2} published={published_now}",
         )
 
-    if not published_now:
+    else:
+        # 载体**不在门槛下**（人工直写）⇒ 上面那三格（被拒 / 核验入口缺口 / 二次发布）
+        # **不适用**。如实记 `NOT_RUN` 并说清原因，不静默跳过 ——
+        # 否则读者会以为"来源门槛这条路本轮已经验过了"。
+        for _label in (
+            "㊹ 第6步 · 界面提供登记「来源核验」的入口（把待核验项变成已核验，才能发布）",
+            "㊹ 第6步 · 【替代通路】经 API 逐条登记核验后，门槛转为通过",
+            "㊹ 第6步 · 门槛通过后**重新真实点击**发布 ⇒ 该版本变为已发布",
+        ):
+            w.rep.not_run(
+                _label,
+                f"本轮载体是**经界面人工组装**的对客报价（`aid={aid_art}`，来源 `manual`）⇒ "
+                f"服务端没有待核验的模型声明（`gate.ok={gate_ok_pre}`、`pending` 0 条）"
+                "⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。"
+                "⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— "
+                "**那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，"
+                "于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。"
+                "缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体"
+                "（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 "
+                "`DEMO-1-readiness.md` §10.4 的 O-1。",
+            )
+
+    if not (published_now or released_srv):
         w.rep.not_run("㊹ 第6步 · 客户接受该版本", "发布未成功，客户侧没有可接受的版本")
         return
 
@@ -8010,24 +8182,47 @@ def sec_44(w: Walker) -> None:
     )
 
     # —— API 直证：发布记录冻结了**精确版本**与客户快照 ——
-    rels = (api_get(f"/entrustments/{eid}/offer-releases", tok_owner) or {}).get("items") or []
-    mine_rel = [r for r in rels if int((r or {}).get("revision_no") or 0) == rev]
+    rels = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok_owner) or {}).get(
+        "items"
+    ) or []
+    # ⚠️ 两处收窄都要：**按 artifact**（同一授权下的发布可能跨多个成果 —— 首跑实测
+    #    只按 `revision_no` 过滤会把别的成果的 v1 一起算进来，得到 4 条）
+    #    + **按状态**（重发布会把前一条置为 `superseded` ⇒「该版本有 2 条记录」是正常的，
+    #    要挑出 `released` 那条）。
+    v_rows = [
+        r
+        for r in rels
+        if str((r or {}).get("artifact_id")) == aid_art
+        and int((r or {}).get("revision_no") or 0) == rev
+    ]
+    mine_rel = [r for r in v_rows if str((r or {}).get("status")) == "released"]
     snap = (mine_rel[0] or {}).get("customer_snapshot") if mine_rel else None
     snap = snap if isinstance(snap, dict) else {}
     w.rep.rec(
         "㊹ 第6步 · 服务端的发布记录指向**精确 revision**，且冻结了客户快照"
         "（`customer_snapshot.payload` 非空 —— 空快照是本切片踩过的静默降级）",
         len(mine_rel) == 1 and bool(snap.get("payload")),
-        f"该版本发布 {len(mine_rel)} 条；快照键={sorted(snap.keys())[:6]} "
-        f"payload 字段数={len(snap.get('payload') or {})}",
+        f"该版本发布 {len(v_rows)} 条（其中 released {len(mine_rel)} 条）；"
+        f"快照键={sorted(snap.keys())[:6]} payload 字段数={len(snap.get('payload') or {})}",
     )
     row_rel = mine_rel[0] if mine_rel else {}
     rid = rid or str(row_rel.get("release_id") or "")
-    w.rep.rec(
-        "㊹ 第6步 · 授权下载清单**冻结在发布记录上**（不是「同属一条委托就全开」）",
-        [str(x) for x in (row_rel.get("authorized_attachment_ids") or [])] == auth_ids,
-        f"页面注入 {auth_ids} ⇒ 服务端 {row_rel.get('authorized_attachment_ids')}",
-    )
+    if auth_ids:
+        w.rep.rec(
+            "㊹ 第6步 · 授权下载清单**冻结在发布记录上**（不是「同属一条委托就全开」）",
+            [str(x) for x in (row_rel.get("authorized_attachment_ids") or [])] == auth_ids,
+            f"页面注入 {auth_ids} ⇒ 服务端 {row_rel.get('authorized_attachment_ids')}",
+        )
+    else:
+        # ⚠️ 两侧都是空时 `[] == []` **恒真** ⇒ 那一格是"真空通过"（2026-09-18 订正：
+        #    此前本格就是这么绿的，日志写着「页面注入 [] ⇒ 服务端 None」）。
+        #    判据要能失败才算判据 —— 载体没有附件时，这条**没什么可证**，如实记 `NOT_RUN`。
+        w.rep.not_run(
+            "㊹ 第6步 · 授权下载清单**冻结在发布记录上**（不是「同属一条委托就全开」）",
+            f"本轮载体 `artifact#{aid_art}` **没有附件**（授权清单两侧都是空）⇒ 断言会"
+            "**真空通过**（`[] == []` 恒真）⇒ 记 `NOT_RUN`。要取证这条，需让载体本身带附件；"
+            "本章 〇 节组装的对客报价是没有附件的（㊸ 上传的附件挂在**会话**上，不在成果上）。",
+        )
 
     # —— 负例：经理**响应**客户发布 ⇒ 403（看得见、无权）；与局外人的 404 区分 ——
     st_mgr_resp, _ = api_post(
@@ -8151,7 +8346,7 @@ def sec_44(w: Walker) -> None:
     )
 
     # —— 落库直证（客户通道 + 经理通道各看一次）——
-    my_rels = (api_get("/my-offer-releases", tok_cust) or {}).get("items") or []
+    my_rels = (api_get("/entrust/my-offer-releases", tok_cust) or {}).get("items") or []
     mine_my = rel_of(my_rels, rid)
     resp_my = mine_my.get("response") or {}
     w.rep.rec(
@@ -8162,7 +8357,9 @@ def sec_44(w: Walker) -> None:
         f"revision={mine_my.get('revision_no')} decision={resp_my.get('decision')!r} "
         f"responded_at={resp_my.get('responded_at')!r}",
     )
-    rels2 = (api_get(f"/entrustments/{eid}/offer-releases", tok_owner) or {}).get("items") or []
+    rels2 = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok_owner) or {}).get(
+        "items"
+    ) or []
     mine2 = [r for r in rels2 if str((r or {}).get("release_id")) == str(rid)]
     resp2 = (mine2[0] or {}).get("response") or {} if mine2 else {}
     w.rep.rec(
