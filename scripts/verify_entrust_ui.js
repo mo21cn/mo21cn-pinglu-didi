@@ -3103,6 +3103,121 @@ check('[计划] 原值与显示文案确实**不同**（否则上面那条断言
   check(`[航段命令] 模板 detail.wxml 里有写侧锚点 ${attr}`, detailTpl.indexOf(attr) !== -1)
 })
 
+// ─────────────────────────────────────────────────────────────
+// 合同派生与签署证据的投影（§10.1 第 7 步 / BP-03 第 8 条 / D1-08）
+//
+// 本节钉的是三件「看起来一样但其实不同」的事：
+//   · 派生**绑版本**：报价版本与合同版本各自成串 —— 只写「已派生」，
+//     等于把「这份合同是从哪一版来的」留在库里没人回答；
+//   · 来源行**原值与文案两份**（界面显示「已接受报价」、比对用 `accepted_release`）；
+//   · 证据行**必须带版本串**：「有证据」与「证据签在哪个版本上」是两个问题。
+// ⚠️ 模板接线这一节只查锚点**存在**（存在 ≠ 走查跑过；取证在 ㊾ 章）。
+// ─────────────────────────────────────────────────────────────
+const contractProj = E.decorateContractDerivation({
+  derivation_id: 7, assignment_id: 3, entrustment_id: 2, release_id: 12, response_id: 5,
+  quote_artifact_id: 4, quote_revision_id: 9, quote_revision_no: 3,
+  contract_artifact_id: 8, contract_revision_id: 11, contract_revision_no: 1,
+  template_code: 'CN_TRANSPORT', template_version: 'v1',
+  effective_date: '2026-09-20', derived_by: 6, derived_at: '2026-09-18T10:00:00',
+  note: null,
+  absent_quote_fields: ['excludes', 'note'],
+  field_sources: [
+    { field_path: 'clauses[1].text', value_text: '金额 36000 CNY',
+      source_kind: 'accepted_release', source_kind_text: '已接受报价',
+      source_ref: 'release:12@v3' },
+    // 「运输范围」一条条款由**多个航段**构成 ⇒ 同一字段多行来源
+    { field_path: 'route', value_text: '南宁仓 → 贵港码头',
+      source_kind: 'leg', source_kind_text: '航段', source_ref: 'leg:4' },
+    { field_path: 'route', value_text: '贵港码头 → 梧州码头',
+      source_kind: 'leg', source_kind_text: '航段', source_ref: 'leg:5' }
+  ]
+})
+const contractProjEmpty = E.decorateContractDerivation(null)
+
+check('[合同] decorateContractDerivation 是纯函数（`null` 入参也不抛，且不编版本号）',
+  typeof E.decorateContractDerivation === 'function' && !!contractProjEmpty &&
+    contractProjEmpty.sources.length === 0 && contractProjEmpty.hasAbsent === false,
+  '实际 ' + JSON.stringify(contractProjEmpty))
+
+check('[合同] ⭐ 报价与合同的**精确版本各自成串**（D1-08 的 inspection 面 —— ' +
+  '只写「已派生」就把来源留在库里没答）',
+  contractProj.quoteRevisionNoText === '报价 v3' &&
+    contractProj.contractRevisionNoText === '第 1 版',
+  '实际 ' + JSON.stringify([contractProj.quoteRevisionNoText, contractProj.contractRevisionNoText]))
+
+check('[合同] 来源行**同时给原值与文案**，且两者不同（界面显示文案、比对用原值）',
+  contractProj.sources[0].sourceKind === 'accepted_release' &&
+    contractProj.sources[0].sourceKindText === '已接受报价' &&
+    contractProj.sources[0].sourceKind !== contractProj.sources[0].sourceKindText,
+  '实际 ' + JSON.stringify(contractProj.sources[0]))
+
+check('[合同] ⭐ 同一字段可以有多行来源，且每行的 `rowKey` 唯一 —— ' +
+  '模板 `wx:key` 若用 `fieldPath`，重复的字段会被静默少渲染（"来源行数不对"正是要抓的那类问题）',
+  contractProj.sources.length === 3 && contractProj.sourceCount === 3 &&
+    new Set(contractProj.sources.map((s) => s.rowKey)).size === 3,
+  '实际 ' + JSON.stringify(contractProj.sources.map((s) => s.rowKey)))
+
+check('[合同] 缺失项**如实列出**（列出来而不是编默认值 —— 这是「派生」与「编造」的分界）',
+  contractProj.hasAbsent === true && contractProj.absentText === 'excludes、note',
+  '实际 ' + JSON.stringify([contractProj.hasAbsent, contractProj.absentText]))
+
+check('[合同] 备注为空写「未写备注」（不是空白格、也不是「说明未知」）',
+  contractProj.noteText === '未写备注', '实际 ' + JSON.stringify(contractProj.noteText))
+
+check('[合同] 生效日缺失写「未提供」（缺值必须自己说话，不留空）',
+  E.decorateContractDerivation({ effective_date: null }).effectiveDateText === '未提供')
+
+const sigProj = E.decorateSignatureEvidence({
+  contract_artifact_id: 8,
+  has_items: true,
+  disclaimer: '签署证据按样件标注（不构成实时电子签署）记录，不构成实时电子签署。',
+  kind_options: [
+    { value: 'sample_scan', label: '样件扫描件' },
+    { value: 'written_confirmation', label: '书面确认' },
+    { value: 'manual_record', label: '人工记录' }
+  ],
+  items: [
+    { evidence_id: 21, contract_revision_no: 1, revision_no_text: '第 1 版',
+      evidence_kind: 'sample_scan', evidence_kind_text: '样件扫描件',
+      mode: 'labeled_sample', mode_text: '样件标注（不构成实时电子签署）',
+      note: '', note_text: '未写说明', recorded_by: 6, recorded_at: '2026-09-18T10:05:00' }
+  ]
+})
+const sigProjEmpty = E.decorateSignatureEvidence(null)
+
+check('[签署证据] decorateSignatureEvidence 是纯函数（`null` 入参也不抛）',
+  typeof E.decorateSignatureEvidence === 'function' && !!sigProjEmpty &&
+    sigProjEmpty.items.length === 0 && sigProjEmpty.hasItems === false)
+
+check('[签署证据] ⭐ 每一行都带**版本串** —— 「有证据」与「证据签在哪个版本上」是两个问题',
+  sigProj.items[0].revisionNoText === '第 1 版',
+  '实际 ' + JSON.stringify(sigProj.items[0].revisionNoText))
+
+check('[签署证据] 形态给原值与文案两份（界面显示文案、比对用原值）',
+  sigProj.items[0].kind === 'sample_scan' && sigProj.items[0].kindText === '样件扫描件' &&
+    sigProj.items[0].kind !== sigProj.items[0].kindText)
+
+check('[签署证据] ⭐ 常驻标注没被丢掉（「不构成实时电子签署」必须在文案里 —— ' +
+  '页面上不写这句，「有证据」就会被读成「签过了」）',
+  sigProj.items[0].modeText.indexOf('电子签署') !== -1 &&
+    sigProj.disclaimer.indexOf('电子签署') !== -1,
+  '实际 ' + JSON.stringify([sigProj.items[0].modeText, sigProj.disclaimer]))
+
+check('[签署证据] 说明为空写「未写说明」（不留空白格）',
+  sigProj.items[0].noteText === '未写说明')
+
+check('[签署证据] 形态选项**来自服务端**（三项都非空；前端不另存一份取值域）',
+  sigProj.kindOptions.length === 3 && sigProj.hasKindOptions === true &&
+    sigProj.kindOptions.every(function (o) { return !!o.key && !!o.label && o.key !== o.label }),
+  '实际 ' + JSON.stringify(sigProj.kindOptions))
+
+// 模板接线：合同卡与证据表单的锚点必须真的在模板里（存在 ≠ 走查跑过）。
+;['data-act-contract-derive', 'data-act-contract-sources', 'data-act-sig-open',
+  'data-act-sig-kind', 'data-act-sig-submit', 'data-df="sig-note"',
+  'sig.disclaimer', 'contract-card'].forEach(function (attr) {
+  check(`[合同] 模板 detail.wxml 里有锚点 ${attr}`, detailTpl.indexOf(attr) !== -1)
+})
+
 // 页面 handler 的认领表：五条映射一条都不能少（少一条＝那一格静默空转）
 const detailJs = read(path.join(MINI, 'pages/entrust/detail/detail.js'))
 ;["'leg-seq': 'legForm.seq'", "'leg-mode': 'legForm.mode'", "'leg-from': 'legForm.from'",

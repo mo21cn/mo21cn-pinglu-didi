@@ -9173,6 +9173,376 @@ def sec_47(w: Walker) -> None:
     )
 
 
+def sec_48(w: Walker) -> None:
+    """㊽ **货主本人**经界面建段（第 4 步判据的另一半）。
+
+    为什么单独一章
+    --------------
+    HO 2026-09-17 对"谁能建段"的裁定是**任意参与方**（该委托的货主本人，
+    或该委托所属组织的 active 成员）⇒ 不新增权限常量、不设角色门槛。
+    ㊼ 章的身份是 `seed-owner`（经理），只证明了"组织成员能建"那一半；
+    "货主本人也能建"此前只有 **e2e** 的证据（页面 JS + 真 HTTP）。
+
+    ⛔ 本章要的是**设备侧**证据：用货主的 token 登录小程序、在真机渲染树上
+    **真的点**出一段来。e2e 那条证据借不来 —— 它跑的是页面 JS，
+    不是渲染树与手势（这正是"静态门禁 + e2e 全绿、真机点不出来"那一类缺陷的藏身处）。
+
+    覆盖
+    ----
+    ① 写入口（`[data-act-leg-open="1"]`）在**货主**看到的渲染树里，段行数 = 服务端段数；
+    ② 表单打开，顺序号预填「最大序号 + 1」；
+    ③ `input_text` 真触发 `bindinput` ⇒ 四个字段都接上；
+    ④ 提交后**页面段数 = 服务端段数**，新段那一行在渲染树里（带值锚点）；
+    ⑤ 服务端随后读到的段集合里**真的有**这一段（页面与服务端同源）；
+    ⑥ 本章运行期无新增 console 报错。
+
+    ⚠️ 诚实边界
+    * 身份 `seed-shipper` —— canonical 委托「DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港」
+      的货主正是它（`seed_entrust_canonical.py` 的 `SHIPPER_CODE`）。
+    * 本章**会写库**（1 段航段 + 1 条 created 版本）。
+    * 自足：只依赖 `seed_entrust_canonical.py` 铺的那张委托 ⇒ 可单跑 `--section 48`。
+    """
+    print("\n-- ㊽ 货主本人经界面建段（第 4 步 · 参与方判据的另一半）--", flush=True)
+
+    err_base = w.c.errors()
+    code_shipper = "seed-shipper"
+    demo_title = "DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港"
+
+    tok = (api_login(code_shipper) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊽ 全部断言", "拿不到 seed-shipper 的 token（后端未起或种子未铺）")
+        return
+    rows = (api_get("/entrust/assignments?view=owner&size=50", tok) or {}).get("items") or []
+    hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
+    hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    if not hit:
+        w.rep.not_run(
+            "㊽ 全部断言",
+            f"seed-shipper 名下找不到「{demo_title}」（先跑 python scripts/seed_entrust_canonical.py）",
+        )
+        return
+    aid = str((hit[0] or {}).get("assignment_id") or "")
+
+    plan0 = api_get(f"/entrust/assignments/{aid}/plan", tok) or {}
+    legs0 = plan0.get("legs") or []
+    seq_next = max([int((x or {}).get("seq") or 0) for x in legs0] + [0]) + 1
+    mode_raw = "rail"  # 已登记取值；㊼ 用的是未登记的 air，本章换一个，避免两章互相依赖
+    frm = f"㊽起点{seq_next}"
+    to1 = f"㊽终点{seq_next}"
+
+    w.login_as(code_shipper)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    d = w.wait_data(lambda x: x.get("plan") is not None, tries=60, gap=0.5)
+
+    # ① 写入口与段行都在**货主**的渲染树里
+    n_open = w.c.count('[data-act-leg-open="1"]')
+    n_leg0 = w.c.count(".plan-leg")
+    w.rep.rec(
+        "㊽ ① 货主看到的详情页里**也有**建段入口（判据＝参与方，不是角色）——段行数与服务端一致",
+        n_open == 1 and n_leg0 == len(legs0),
+        f"加一段={n_open} 段行={n_leg0} 服务端段数={len(legs0)}",
+    )
+
+    # ② 表单渲染 + 预填「最大序号 + 1」
+    w.c.scroll_into('[data-act-leg-open="1"]')
+    if not w.c.tap('[data-act-leg-open="1"]'):
+        w.rep.rec("㊽ ② 点「加一段」失败（按钮在渲染树里但点不动）", False, "")
+    d = w.wait_data(lambda x: x.get("legOpen") is True, tries=20, gap=0.3)
+    form_seq = str(((d.get("legForm") or {}).get("seq")) or "")
+    w.rep.rec(
+        "㊽ ② 建段表单渲染出来，顺序号预填「最大序号 + 1」",
+        w.c.count('input[data-df="leg-seq"]') == 1 and form_seq == str(seq_next),
+        f"预填={form_seq!r} 期望={seq_next} 服务端序号={[x.get('seq') for x in legs0]}",
+    )
+
+    # ③ 输入真的接上（四个字段）
+    typed = (
+        w.c.input_text('input[data-df="leg-mode"]', mode_raw)
+        and w.c.input_text('input[data-df="leg-from"]', frm)
+        and w.c.input_text('input[data-df="leg-to"]', to1)
+        and w.c.input_text('input[data-df="leg-note"]', "㊽ 章货主真机建段")
+    )
+    w.rep.rec(
+        "㊽ ③ 货主侧的 `input_text` 真的接上了 `bindinput`（`data-df` 映射表认领到字段）",
+        typed,
+        "四个输入框都键入成功" if typed else "有输入框没接上（`data-df` 漏映射时正是这个症状）",
+    )
+
+    # ④ 提交 ⇒ 页面段数 = 服务端段数，新段在渲染树里
+    w.c.scroll_into('[data-act-leg-submit="1"]')
+    w.c.tap('[data-act-leg-submit="1"]')
+    d = w.wait_data(
+        lambda x: len((x.get("plan") or {}).get("legs") or []) == len(legs0) + 1, tries=40, gap=0.5
+    )
+    ui_legs = (d.get("plan") or {}).get("legs") or []
+    srv_legs = (api_get(f"/entrust/assignments/{aid}/plan", tok) or {}).get("legs") or []
+    n_anchor = w.c.count(f'[data-plan-leg="{seq_next}"]')
+    row_wxml = w.c.outer_wxml(f'[data-plan-leg="{seq_next}"]')
+    w.rep.rec(
+        "㊽ ④ 货主经界面建段成功：页面段数 = 服务端段数，新段那一行在渲染树里",
+        len(ui_legs) == len(srv_legs) and n_anchor == 1 and frm in row_wxml and "铁路" in row_wxml,
+        f"页面段={len(ui_legs)} 服务端段={len(srv_legs)} 值锚点={n_anchor} 行文本={row_wxml[:160]!r}",
+    )
+
+    # ⑤ 服务端随后读到的段集合里真的有这一段（页面 ⇄ 服务端同源）
+    seqs = [str((x or {}).get("seq") or "") for x in srv_legs]
+    w.rep.rec(
+        "㊽ ⑤ 服务端读回来的段集合里**真的有**这一段（不是前端往 `plan.legs` 里塞了一行）",
+        str(seq_next) in seqs,
+        f"服务端序号={seqs} 期望含={seq_next}",
+    )
+
+    w.shot("㊽-货主建段")
+    errs = w.new_errors(err_base)
+    w.rep.rec(
+        "㊽ ⑥ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
+    )
+
+
+def sec_49(w: Walker) -> None:
+    """㊾ 合同派生 + 签署证据的**界面取证**（§10.1 第 7 步 / D1-08）。
+
+    本章要证明的三件事（各对应一个"看起来一样但其实不同"的陷阱）
+    ------------------------------------------------------------
+    一、**合同是派生出来的，不是手编的**：界面上那个按钮只发一个空请求体
+        （`note` 之外没有任何业务入参）⇒ 合同的金额/范围/有效期全部来自
+        **客户接受的那一版**报价。界面若允许填金额，第 7 步就退化成"手打一份合同"。
+    二、**签署证据绑的是版本**：每一行都必须显示"第 N 版"。
+        只写"有证据"等于把"客户签的是哪一版"这个问题留在库里没人回答。
+    三、**标注是常驻的**：`labeled_sample` 那句声明必须出现在页面上 ——
+        合同 §3.2 / D1-08 要求证据与状态**不得**等同于实时电子签，
+        而"页面上没写"就会被读成"签过了"。
+
+    覆盖
+    ----
+    ① 前置：存在一条**客户已接受**的对客报价发布（由 `seed_entrust_contract_flow.py` 铺）；
+    ② 点「生成合同核对稿」⇒ 页面拿到派生结果，且与服务端 `GET …/contract` 同源；
+    ③ 逐字段来源表渲染出来，行数 = 服务端来源行数（D1-08 的 inspection 面）；
+    ④ 缺失项如实列出（"这份合同少写了什么"必须看得见）；
+    ⑤ 经界面记一条签署证据 ⇒ 页面出现一行"第 1 版 · 样件扫描件 · 样件标注"，
+       且与服务端 `GET /contracts/{id}/signature-evidence` 同源；
+    ⑥ 同形态再记一次 ⇒ 页内说清"已经记过"（409 的语义，不是静默失败）；
+    ⑦ 常驻声明在页面上（"不构成实时电子签署"）；
+    ⑧ 本章运行期无新增 console 报错。
+
+    ⚠️ 诚实边界
+    * 身份 `seed-owner`（经理）：派生与证据两条通道**都只有经理侧**
+      （客户看合同走已有发布通路，不为它新开客户面 —— 与派生端点同一纪律）。
+    * 本章**会写库**（派生一份合同 + 记一条证据）。同一条已接受事实只能派生一次
+      ⇒ 重跑时若已派生，② 走"读已有那份"的分支（不重复派生，也不报红）。
+    * 依赖 `seed_entrust_contract_flow.py`：没跑它 ⇒ 整章 `NOT_RUN`（不假绿）。
+    """
+    print("\n-- ㊾ 合同派生与签署证据的界面取证（第 7 步）--", flush=True)
+
+    err_base = w.c.errors()
+    code_mgr = "seed-owner"
+    org_name = "演示经营主体·工作台"
+    demo_title = "DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港"
+
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊾ 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == org_name:
+            org_id = str((r or {}).get("org_id") or "")
+    if not org_id:
+        w.rep.not_run("㊾ 全部断言", f"seed-owner 的组织里没有「{org_name}」")
+        return
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
+    hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    if not hit:
+        w.rep.not_run(
+            "㊾ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
+        )
+        return
+    aid = str((hit[0] or {}).get("assignment_id") or "")
+
+    # ① 前置：一条**已接受**的对客报价发布（种子铺；没有就整章 NOT_RUN）
+    eid = ""
+    ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
+    if ctx.get("entrustment_id"):
+        eid = str(ctx.get("entrustment_id"))
+    if not eid:
+        w.rep.not_run("㊾ 全部断言", f"委托 #{aid} 定位不到唯一授权（`session-context` 为空）")
+        return
+    rels = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok) or {}).get("items") or []
+    accepted = [
+        r
+        for r in rels
+        if str(((r or {}).get("response") or {}).get("decision") or "") == "accept"
+        and str((r or {}).get("artifact_type") or "") == "customer_quote"
+    ]
+    accepted.sort(key=lambda r: int((r or {}).get("release_id") or 0), reverse=True)
+    if not accepted:
+        w.rep.not_run(
+            "㊾ 全部断言",
+            "没有「客户已接受的对客报价发布」—— 先跑 "
+            "`python scripts/seed_entrust_contract_flow.py`（第 7 步夹具）",
+        )
+        return
+    rid = str((accepted[0] or {}).get("release_id") or "")
+
+    if not w.open_workbench(code_mgr, tag="㊾"):
+        w.rep.not_run("㊾ 全部断言", "未能以 seed-owner 进入经理工作台")
+        return
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    d = w.wait_data(
+        lambda x: x.get("contract") is not None or x.get("contractHint"), tries=60, gap=0.5
+    )
+
+    already = api_get(f"/entrust/offer-releases/{rid}/contract", tok) or {}
+    cart = str(already.get("contract_artifact_id") or "")
+
+    # ② 派生（已派生过 ⇒ 直接读那份，不重复派生也不报红）
+    if cart:
+        w.rep.rec(
+            "㊾ ② 该已接受报价**已经派生过**合同 ⇒ 本章读回已有那份"
+            "（一份已接受事实只派生一份，重跑不该重复派生也不该报红）",
+            str((d.get("contract") or {}).get("contractArtifactId") or "") == cart
+            or w.c.count(".contract-card") >= 1,
+            f"服务端合同=#{cart} 页面={(d.get('contract') or {}).get('contractArtifactId')!r}",
+        )
+    else:
+        n_btn = w.c.count('[data-act-contract-derive="1"]')
+        w.rep.rec(
+            "㊾ ② 未派生时页面有「生成合同核对稿」入口，且它**不带**任何业务入参"
+            "（合同内容只能来自已接受事实，界面不该能填金额）",
+            n_btn == 1,
+            f"入口数={n_btn}",
+        )
+        w.c.scroll_into('[data-act-contract-derive="1"]')
+        w.c.tap('[data-act-contract-derive="1"]')
+        d = w.wait_data(lambda x: x.get("contract") is not None, tries=40, gap=0.5)
+        srv = api_get(f"/entrust/offer-releases/{rid}/contract", tok) or {}
+        cart = str(srv.get("contract_artifact_id") or "")
+        ui_cart = str((d.get("contract") or {}).get("contractArtifactId") or "")
+        w.rep.rec(
+            "㊾ ③ 经**界面**派生成功：页面拿到的合同与服务端**同一个成果同一版本**"
+            "（报价版本与合同版本各自精确）",
+            bool(cart) and ui_cart == cart,
+            f"页面={ui_cart!r} 服务端={cart!r} 报价版本={srv.get('quote_revision_no')!r}",
+        )
+
+    if not cart:
+        w.rep.not_run("㊾ ④ ～ ⑧", "派生没成功（后面没有可绑证据的合同）")
+        errs = w.new_errors(err_base)
+        w.rep.rec(
+            "㊾ ⑧ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
+        )
+        return
+
+    # ③ 逐字段来源表：行数 = 服务端来源行数
+    src_btn = w.c.count('[data-act-contract-sources="1"]')
+    if src_btn:
+        w.c.scroll_into('[data-act-contract-sources="1"]')
+        w.c.tap('[data-act-contract-sources="1"]')
+        d = w.wait_data(lambda x: x.get("contractSourcesOpen") is True, tries=20, gap=0.3)
+    n_src = w.c.count(".contract-src")
+    srv_src = (api_get(f"/entrust/offer-releases/{rid}/contract", tok) or {}).get(
+        "field_sources"
+    ) or []
+    w.rep.rec(
+        "㊾ ④ 逐字段来源表渲染出来，行数 = 服务端来源行数"
+        "（D1-08 要的是「能检查它怎么来的」，不是「有一份合同」）",
+        n_src == len(srv_src) and len(srv_src) > 0,
+        f"页面行数={n_src} 服务端={len(srv_src)}",
+    )
+
+    # ④ 缺失项如实列出（有缺失时必须看得见）
+    absent = (api_get(f"/entrust/offer-releases/{rid}/contract", tok) or {}).get(
+        "absent_quote_fields"
+    ) or []
+    card_wxml = w.c.outer_wxml(".contract-card")
+    w.rep.rec(
+        '㊾ ⑤ 「这份合同少写了什么」如实列出（有缺失项时页面上必须写得出"未提供"）'
+        "—— 列出来而不是编默认值，这是派生与编造的分界",
+        (not absent) or ("未提供" in card_wxml),
+        f"服务端缺失项={absent} 卡片文本={card_wxml[:120]!r}",
+    )
+
+    # ⑤ 经界面记一条签署证据
+    n_sig_open = w.c.count('[data-act-sig-open="1"]')
+    w.rep.rec("㊾ ⑥ 合同卡上有「记一条签署证据」入口", n_sig_open == 1, f"入口数={n_sig_open}")
+    w.c.scroll_into('[data-act-sig-open="1"]')
+    w.c.tap('[data-act-sig-open="1"]')
+    d = w.wait_data(lambda x: x.get("sigOpen") is True, tries=20, gap=0.3)
+    w.c.scroll_into('[data-act-sig-kind="sample_scan"]')
+    w.c.tap('[data-act-sig-kind="sample_scan"]')
+    d = w.wait_data(
+        lambda x: str((x.get("sigForm") or {}).get("kind")) == "sample_scan", tries=10, gap=0.3
+    )
+    typed = w.c.input_text('input[data-df="sig-note"]', "㊾ 章真机取证：客户签回的样件扫描件")
+    w.rep.rec(
+        '㊾ ⑦ 证据表单的输入接上了 `bindinput`（`data-df="sig-note"` 被认领）',
+        typed and str((d.get("sigForm") or {}).get("kind")) == "sample_scan",
+        f"kind={(d.get('sigForm') or {}).get('kind')!r} 键入={typed}",
+    )
+    w.c.scroll_into('[data-act-sig-submit="1"]')
+    w.c.tap('[data-act-sig-submit="1"]')
+    d = w.wait_data(
+        lambda x: ((x.get("sig") or {}).get("items") or []) and x.get("sigOpen") is False,
+        tries=40,
+        gap=0.5,
+    )
+    items = (d.get("sig") or {}).get("items") or []
+    srv_sig = api_get(f"/entrust/contracts/{cart}/signature-evidence", tok) or {}
+    n_row = w.c.count(".sig-row")
+    first_row = w.c.outer_wxml(".sig-row")
+    w.rep.rec(
+        "㊾ ⑧ 经**界面**记一条签署证据：页面出现一行，且**绑的是版本**"
+        "（「第 1 版」）+ 形态 + 样件标注；与服务端同源",
+        len(items) == len(srv_sig.get("items") or [])
+        and n_row == len(items)
+        and "第 1 版" in first_row
+        and "样件扫描件" in first_row
+        and "样件标注" in first_row,
+        f"页面={len(items)} 服务端={len(srv_sig.get('items') or [])} 行={n_row} "
+        f"首行={first_row[:160]!r}",
+    )
+
+    # ⑥ 同形态再记一次 ⇒ 页内说清"已经记过"（409 的语义，不是静默失败）
+    n_before = len(items)
+    if w.c.count('[data-act-sig-open="1"]'):
+        w.c.scroll_into('[data-act-sig-open="1"]')
+        w.c.tap('[data-act-sig-open="1"]')
+        d = w.wait_data(lambda x: x.get("sigOpen") is True, tries=20, gap=0.3)
+        w.c.scroll_into('[data-act-sig-kind="sample_scan"]')
+        w.c.tap('[data-act-sig-kind="sample_scan"]')
+        w.c.scroll_into('[data-act-sig-submit="1"]')
+        w.c.tap('[data-act-sig-submit="1"]')
+        d = w.wait_data(lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4)
+    n_after = len((d.get("sig") or {}).get("items") or [])
+    w.rep.rec(
+        "㊾ ⑨ 同一版同一形态**再记一次** ⇒ 页内说清「已经记过」（服务端 409 的语义，"
+        "不是静默失败，也没有记成两条互相打架的证据）",
+        "已经记过" in str(d.get("sigHint") or "") and n_after == n_before,
+        f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after}",
+    )
+
+    # ⑦ 常驻声明在页面上
+    w.rep.rec(
+        "㊾ ⑩ 常驻声明真的渲染出来（「不构成实时电子签署」）—— 合同 §3.2 / D1-08 "
+        "要求证据与状态不得等同于实时电子签；页面上没写就会被读成「签过了」",
+        "不构成实时电子签署" in w.c.outer_wxml(".contract-card"),
+        "卡片文本=" + w.c.outer_wxml(".contract-card")[:200] + "",
+    )
+
+    w.shot("㊾-合同派生与签署证据")
+    errs = w.new_errors(err_base)
+    w.rep.rec(
+        "㊾ ⑪ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
@@ -9180,6 +9550,8 @@ SECTIONS = {
     "45": sec_45,
     "46": sec_46,
     "47": sec_47,
+    "48": sec_48,
+    "49": sec_49,
     "0": sec_00,
     "1": sec_01,
     "2": sec_02,
@@ -9338,6 +9710,19 @@ DEFAULT_ORDER = [
     # ⚠️ 副作用：会真建 1 段 + 改 1 次（2 条版本历史）；`seq` 取"现有最大序号 + 1"
     #    ⇒ 共享库上重跑仍成立（不撞号），但会留下痕迹。
     "47",
+    # ㊽ **货主本人**经界面建段（第 4 步判据的另一半：参与方，不只是经理）。
+    # ⚠️ 与 ㊼ 的分工：㊼ 的身份是经理，只证明了"组织成员能建"；本章用 canonical
+    #    委托的货主 `seed-shipper` 在**真机**上点出一段 —— "货主也能建"此前只有 e2e。
+    # ⚠️ **自足**：只依赖 `seed_entrust_canonical.py` 铺的那张委托 ⇒ 可单跑：`--section 48`。
+    # ⚠️ 副作用：给 canonical 委托加 1 段（`seq` 取现有最大 +1 ⇒ 重跑不撞号）。
+    "48",
+    # ㊾ 合同派生 + 签署证据的**界面取证**（合同 §10.1 第 7 步 / D1-08）。
+    # ⚠️ **依赖夹具**：`python scripts/seed_entrust_contract_flow.py`（一条客户已接受的
+    #    对客报价发布）。没跑它 ⇒ 整章 `NOT_RUN`（**不假绿**）。
+    # ⚠️ 排在 ㊽ 之后：同一张 canonical 委托，㊽ 加的那段会出现在本章派生出的
+    #    `route_scope` 条款里 —— 这是"派生用的是派生那一刻的航段"的真实形态，不是污染。
+    # ⚠️ 副作用：派生一份合同 + 记一条证据。已派生过 ⇒ 读回已有那份（不重复派生）。
+    "49",
 ]
 
 

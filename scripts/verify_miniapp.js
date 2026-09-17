@@ -298,6 +298,28 @@ const WALK_ANCHORS = [
     value: '1', handler: 'onCancelLeg' },
   { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'plan-rev',
     attr: 'data-plan-rev', value: '{{rev.revisionNoText}}' },
+  // 合同派生与签署证据（§10.1 第 7 步 / BP-03 第 8 条 / D1-08）。
+  // 与上面两组同一条理由：本页的 `.slot-btn` 已有十几个（记录任务 / 受理 / 组装报价 /
+  // 建段 …），走查工具**没有 index 参数** ⇒ 没有专属锚点就只能点到第一个。
+  // 两个**行**锚点是判据本身：
+  //   * `.contract-src` 的行数 = 服务端来源行数（D1-08 要的「能检查它怎么来的」）；
+  //   * `.sig-row` 的行数 = 该合同已记的证据条数，且每行必须带「第 N 版」。
+  // ⚠️ 本章同样**先登记、取证随后**（㊾ 章）：登记不等于取证 ——
+  //    计一档「已实现」，不计「已设备运行」。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-contract-derive',
+    value: '1', handler: 'onDeriveContract' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-contract-sources',
+    value: '1', handler: 'onToggleContractSources' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-sig-open',
+    value: '1', handler: 'onToggleSig' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-sig-kind',
+    value: '{{opt.key}}', handler: 'onPickSigKind' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-sig-submit',
+    value: '1', handler: 'onSubmitSig' },
+  { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'contract-src',
+    attr: 'data-contract-src', value: '{{item.fieldPath}}' },
+  { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'sig-row',
+    attr: 'data-sig-row', value: '{{item.evidenceIdText}}' },
   // 页内输入框（文本靠 setData 注值，见走查脚本的声明），与案件页的 `act-input`+`data-df` 同形
   { kind: 'static', file: 'pages/entrust/detail/detail.wxml', class: 'slot-input', attr: 'data-df' },
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-toggle-links',
