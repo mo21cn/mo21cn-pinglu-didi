@@ -410,6 +410,26 @@ python scripts/run_walkthrough_devtools.py --section all --pay   # 含 ⑧b 的�
   shell 结束被回收** ⇒ 「起后端」与「跑走查」必须在**同一个进程**里（见各切片
   `_walk*_run.py`），否则走查里所有页面会显示"无法连接后端"，看起来像页面全坏了。
 
+### 8.1 主演示第 1–3 步（合同 §10.1）—— **㊸ 章**
+
+```bash
+python scripts/verify_miniapp_devtools.py --section 43
+```
+
+* ㊸ 章把合同 §10.1 的**前三步连着走一遍**（既有 ㉞ / ㊳ / ㊶ / ㊷ 各只覆盖**一跳**）：
+  ① 客户提交新委托 → A1 受理；② A1 上传样报价单 → 提取 → 引用 → 调 AG-02；
+  ③ A1 **更正一个字段** → 从工作台打开**同一份**成果（D1-04）。
+* **前置**：三份种子（`seed_demo` → `seed_entrust_demo` → `seed_entrust_orgpicker`）。
+  本章会**真写**一张委托并把它受理掉、上传一份附件、建一份成果并推进到 v2 生效
+  ⇒ 排在 `DEFAULT_ORDER` **最末**（它前面的章节按条数 / 按状态断言，会被它搅动）。
+* ⚠️ **两条上传通路，分别记、互不替代**：
+  * 「从系统里选文件」＝ 原生文件选择器（`wx.chooseMessageFile`）⇒ 走查工具够不着
+    它的选择项 ⇒ 记 **`LIMITATION`**（不计入通过）；
+  * 「用内置示例报价单」＝ **页内入口**（复用同一条 `uploadQuote`）⇒ 本节实际取证的
+    通路。两者的差别是"这一步的人工动作不同"，不是"功能有没有"。
+* ⚠️ 跑之前定好**模型模式**：`LLM_MOCK=true` 跑出来的是 **fixture 证据**，**不是**
+  live invocation 证据（合同 §3.2 Required truth distinctions）—— 报告里必须标明。
+
 ---
 
 ## 9. 本切片（S1）未闭合的项
