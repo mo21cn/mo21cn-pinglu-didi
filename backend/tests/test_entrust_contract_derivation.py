@@ -228,6 +228,10 @@ def test_derive_produces_contract_with_every_field_sourced(env):
     assert amount_rows, body["field_sources"]
     assert all(s["source_kind"] == "accepted_release" for s in amount_rows)
     assert all(s["source_ref"] == f"release:{release['release_id']}@v1" for s in amount_rows)
+    # 来源类别给了原值与文案**两份**：界面显示文案、比对用原值（标签唯一实现在服务端）
+    for src in body["field_sources"]:
+        assert src["source_kind_text"], f"来源行缺文案：{src}"
+        assert src["source_kind_text"] != src["source_kind"], f"文案与原值同形：{src}"
 
     # 内部成本口径绝不出现在合同里（它连发布快照都进不去）
     assert not any("30000" in str(s["value_text"]) for s in body["field_sources"])
