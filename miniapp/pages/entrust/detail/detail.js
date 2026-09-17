@@ -47,6 +47,7 @@
 const {
   CAPACITY_EVIDENCE_LABELS,
   CAPACITY_EVIDENCE_ORDER,
+  LEG_MODE_CHOICES,
   ORG_PERM_CLAIM,
   ORG_PERM_QUOTE_CREATE,
   ORG_PERM_VIEW,
@@ -59,6 +60,7 @@ const {
   claimAssignment,
   confirmCapacity,
   createArtifact,
+  createLeg,
   createTask,
   decorateAssignmentPlan,
   decorateCapacityCandidate,
@@ -66,12 +68,14 @@ const {
   decorateCapacityRecheck,
   decorateCustomerOffer,
   decorateDetail,
+  decorateLegRevisions,
   decorateWorkbench,
   downloadOfferAttachment,
   fetchAssignment,
   fetchAssignmentPlan,
   fetchCapacityCandidates,
   fetchCapacityConfirmations,
+  fetchLegRevisions,
   fetchMyOfferReleases,
   fetchMyOrgs,
   fetchSessionContext,
@@ -83,6 +87,7 @@ const {
   respondOffer,
   recordCapacityCandidate,
   recheckCapacityConfirmation,
+  updateLeg,
   viewState
 } = require('../../../utils/entrust')
 
@@ -136,6 +141,25 @@ function emptyCapForm() {
     validUntil: '',
     evidenceKind: '',
     evidenceRef: ''
+  }
+}
+
+/**
+ * 建段 / 改段表单的空白草稿。
+ *
+ * 与 `emptyCapForm` 同一形态与理由（做成**函数**、键名与模板 `data-df` 一一对应、
+ * 到后端字段名的转换只在 `buildLegBody()` 一处发生）。
+ *
+ * `seq` 留空由调用方填：建段时预填"下一段"（段数 + 1），改段时回填服务端的原值。
+ * 预填是**可编辑的建议**，不是判据 —— 顺序号的唯一性由服务端判（撞号 409）。
+ */
+function emptyLegForm() {
+  return {
+    seq: '',
+    mode: '',
+    from: '',
+    to: '',
+    note: ''
   }
 }
 
@@ -322,7 +346,32 @@ Page({
      * "本单没有结构化计划"与"计划读取失败"必须长得不一样 —— 前者要落方案，
      * 后者要查为什么读不到，一律显示"暂无计划"会把后者说成前者。
      */
-    planHint: ''
+    planHint: '',
+
+    // ── 建段 / 改段（§10.1 第 4 步的**写侧**）─────────────────────────────
+    /**
+     * 表单是否展开。`legEditingId` 为空 ⇒ 这是**建段**；否则是改那一段。
+     *
+     * 两件事共用一个表单是**有意**的：字段面完全一样（顺序 / 方式 / 起终点 / 改动说明），
+     * 分成两张表就会出现"建段能填的字段、改段填不了"这种漂移，而它只在第二次改时暴露。
+     */
+    legOpen: false,
+    legEditingId: '',
+    legForm: emptyLegForm(),
+    /** 页内常驻提示（校验不过 / 服务端拒绝的原话），不用 toast —— 理由同运力表单 */
+    legHint: '',
+    legSubmitting: false,
+    /** 运输方式快捷填入项（**不是**取值域，见 `LEG_MODE_CHOICES`） */
+    legModeOptions: LEG_MODE_CHOICES,
+    /**
+     * 正在看版本历史的那一段（`''` ＝ 不展开）。
+     *
+     * 历史**按段查**、一次只开一段：它是"这一段改过几次"的答案，
+     * 把三段的版本混在一个列表里，历史就退化成了一条时间线，读不出"哪一段变了"。
+     */
+    legHistoryId: '',
+    legHistory: null,
+    legHistoryHint: ''
   },
 
   onLoad(query) {
@@ -418,7 +467,17 @@ Page({
       capRecheck: null,
       capRecheckHint: '',
       plan: null,
-      planHint: ''
+      planHint: '',
+      // 写侧交互面与运力那两块同一取向：整页刷新后表单**收起**、历史**收起**。
+      // 刷新之后它们是空的（判据可能已经变了），留着展开只会让人以为还能直接提交。
+      legOpen: false,
+      legEditingId: '',
+      legForm: emptyLegForm(),
+      legHint: '',
+      legSubmitting: false,
+      legHistoryId: '',
+      legHistory: null,
+      legHistoryHint: ''
     })
     // 前两个请求是**页面内容**：工作台是主内容，委托本体是它的头卡。任一失败都按失败
     // 处理 ——「显示半个工作台」会让用户以为槽位就是这些，比直接说加载失败更糟。
@@ -1078,6 +1137,274 @@ Page({
           planHint: status
             ? '运输计划未能读取（服务端返回 ' + status + '）'
             : '运输计划未能读取：网络异常'
+        })
+      })
+  },
+
+  // ── 建段 / 改段 / 版本历史（§10.1 第 4 步的**写侧**）─────────────────────
+  //
+  // 判权**不在前端**：能打开这一页就说明调用方看得见这张委托，而后端
+  // `assert_can_view_assignment` 给货主本人与组织成员一并放行（HO 口径「任意验收者/测试者
+  // 都能建段」）。非参与方即使在页面外面调，也拿 404 —— 与读模型同一取向。
+
+  /** 按 `legId` 在当前计划里找那一段（找不到返回 null，**不猜**）。 */
+  findLegById(legId) {
+    const want = String(legId || '')
+    const legs = (this.data.plan && this.data.plan.legs) || []
+    for (let i = 0; i < legs.length; i++) {
+      if (String(legs[i].legId) === want) return legs[i]
+    }
+    return null
+  },
+
+  /**
+   * 展开**建段**表单。顺序号预填"下一个空闲序号"（**最大序号 + 1**），可改。
+   *
+   * ⚠️ 不是"段数 + 1"：两者只在 `seq` 连续时相等，而契约只要求"自 1 起、委托内唯一"
+   * —— 夹具/历史数据里完全可以有空洞（比如 1、3 两段），此时"段数 + 1 = 3"会与
+   * 已有的第 3 段撞号，用户点开表单就拿到一个必然 409 的默认值。
+   *
+   * 预填是**建议**不是判据：唯一性仍由服务端判（撞号 409，并把原话写在 `detail` 里）。
+   * 同时把版本历史收起来 —— 两张面同时开着，会让人分不清"我要改的是哪一段"。
+   */
+  onOpenLeg() {
+    if (this.data.legSubmitting) return
+    const legs = (this.data.plan && this.data.plan.legs) || []
+    const maxSeq = legs.reduce(function (m, l) {
+      const n = Number(l.seqText)
+      return isFinite(n) && n > m ? n : m
+    }, 0)
+    const form = emptyLegForm()
+    form.seq = String(maxSeq + 1)
+    this.setData({
+      legOpen: true,
+      legEditingId: '',
+      legForm: form,
+      legHint: '',
+      legHistoryId: '',
+      legHistory: null,
+      legHistoryHint: ''
+    })
+  },
+
+  /** 收起并清空（取消就是取消，不留半份草稿 —— 与「登记候选」同一取向）。 */
+  onCancelLeg() {
+    this.setData({
+      legOpen: false,
+      legEditingId: '',
+      legForm: emptyLegForm(),
+      legHint: ''
+    })
+  },
+
+  /**
+   * 表单输入：按 `data-df` 决定写回哪个字段。
+   *
+   * ⚠️ **模板上每一个 `data-df` 都必须在这张表里被认领** —— 查不到就**静默空转**
+   * （`bindinput` 照常触发、`ds.df` 也读得到，只是没人接），表现成"这一格永远填不上、
+   * 提交永远提示必填"，而页面看起来完全正常。运力那块就踩过一次（`cap-scope` 漏登记）。
+   */
+  onLegInput(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const field = String(ds.df || '')
+    if (!field) return
+    const map = {
+      'leg-seq': 'legForm.seq',
+      'leg-mode': 'legForm.mode',
+      'leg-from': 'legForm.from',
+      'leg-to': 'legForm.to',
+      'leg-note': 'legForm.note'
+    }
+    const path = map[field]
+    if (!path) return
+    // 按**路径**写回（不整对象替换，避免输入法组字被打断）
+    this.setData({ [path]: (e && e.detail && e.detail.value) || '', legHint: '' })
+  },
+
+  /**
+   * 快捷填入一种**已登记**的运输方式；再点一次清空。
+   *
+   * 清空而不是"回到默认"：没选就是没填，替用户补一个 `road` 会造出"我明明没填、
+   * 却提交了公路"的事实。而填不出别的值也不行 —— 所以下面还有一个自由输入框，
+   * 非 `road/water/rail` 的方式（如空运）照样能提交。
+   */
+  onPickLegMode(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const mode = String(ds.actLegMode || '')
+    if (!mode) return
+    this.setData({
+      'legForm.mode': this.data.legForm.mode === mode ? '' : mode,
+      legHint: ''
+    })
+  },
+
+  /**
+   * 打开**改段**表单，回填**服务端原值**（`modeRaw`/`fromRaw`/`toRaw`，不是显示文案）。
+   *
+   * 见 `decorateAssignmentPlan`：拿 `modeText`（"公路"）去回填 `mode`，提交之后库里
+   * 就会同时存在 `road` 与 `公路` —— 而两者在界面上长得一模一样，没人会发现。
+   */
+  onEditLeg(e) {
+    if (this.data.legSubmitting) return
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    // ⚠️ 读的是 `data-act-leg-edit` 对应的 **dataset 键 `actLegEdit`**（小驼峰），
+    //    不是 `ds.id` —— `data-act-*` 被属性名转写过了。写成 `ds.id` 会恒为 undefined
+    //    ⇒ 按钮点了没反应，且不报错（㊺ 章踩过一次）。
+    const legId = String(ds.actLegEdit == null ? '' : ds.actLegEdit)
+    if (!legId) return
+    const leg = this.findLegById(legId)
+    if (!leg) {
+      // 不猜、也不用别段的值凑一个表单：页面数据与服务端不一致时，唯一正确的动作是重取。
+      this.setData({ legHint: '这一段不在当前计划里（页面数据可能已过期）—— 请返回列表重新进入' })
+      return
+    }
+    this.setData({
+      legOpen: true,
+      legEditingId: legId,
+      legForm: {
+        seq: String(leg.seqText || ''),
+        mode: String(leg.modeRaw || ''),
+        from: String(leg.fromRaw || ''),
+        to: String(leg.toRaw || ''),
+        note: ''
+      },
+      legHint: '',
+      legHistoryId: '',
+      legHistory: null,
+      legHistoryHint: ''
+    })
+  },
+
+  /**
+   * 表单 → 请求体。**转换只在这一处**（模板的 kebab 名 → 后端字段名）。
+   *
+   * 前端这几条只挡"必然被后端拒"的输入（少一次往返），**服务端才是判据**：
+   * 顺序号唯一性、长度上限、空改动都由它判，且把原话写在 `detail` 里（页面上照实显示）。
+   */
+  buildLegBody() {
+    const f = this.data.legForm || {}
+    const seqText = String(f.seq || '').trim()
+    // 先判空再判数：`Number('')` 是 0，只判 `isFinite` 会让空顺序号静默变成第 0 段
+    const seq = seqText ? Number(seqText) : NaN
+    if (!seqText || !isFinite(seq) || Math.floor(seq) !== seq || !(seq >= 1)) {
+      return { hint: '「第几段」必须是不小于 1 的整数' }
+    }
+    const mode = String(f.mode || '').trim()
+    if (!mode) return { hint: '请填写「运输方式」（可用上面的快捷项，也可直接输入）' }
+    const from = String(f.from || '').trim()
+    if (!from) return { hint: '请填写「起点」（必填）' }
+    const to = String(f.to || '').trim()
+    if (!to) return { hint: '请填写「终点」（必填）' }
+    const body = { seq: seq, mode: mode, from_name: from, to_name: to }
+    const note = String(f.note || '').trim()
+    if (note) body.change_note = note
+    return { body: body }
+  },
+
+  /**
+   * 提交建段 / 改段。
+   *
+   * 改段的两条本地前置（都对应服务端的一次 400，先说清就少一次注定失败的往返）：
+   * ① 那一段必须还在当前计划里（找不到 ⇒ 页面数据过期，要重取而不是硬发）；
+   * ② 四个字段与当前版本**完全相同** ⇒ "这不是一次改动"。⚠️ 只写 `change_note` 不算
+   *    改动 —— 服务端的判据是**值**，所以本地也按值判，否则用户会看到"服务端说没改动"
+   *    而页面上明明填了说明。
+   *
+   * 成功走**整页 `load()`**：段要经服务端的读模型回到清单里，而不是前端自己往
+   * `plan.legs` 里塞一行 —— 那就成了第二份"计划是什么"的实现（与登记候选同一理由）。
+   */
+  onSubmitLeg() {
+    const self = this
+    if (this.data.legSubmitting) return Promise.resolve()
+    const built = this.buildLegBody()
+    if (built.hint) {
+      this.setData({ legHint: built.hint })
+      return Promise.resolve()
+    }
+    const editingId = String(this.data.legEditingId || '')
+    if (editingId) {
+      const leg = this.findLegById(editingId)
+      if (!leg) {
+        this.setData({
+          legHint: '这一段不在当前计划里（页面数据可能已过期）—— 请返回列表重新进入'
+        })
+        return Promise.resolve()
+      }
+      const same =
+        String(leg.seqText) === String(built.body.seq) &&
+        String(leg.modeRaw) === built.body.mode &&
+        String(leg.fromRaw) === built.body.from_name &&
+        String(leg.toRaw) === built.body.to_name
+      if (same) {
+        this.setData({
+          legHint: '与当前版本完全相同 —— 这不是一次改动（只写改动说明也不算），所以没有可提交的内容'
+        })
+        return Promise.resolve()
+      }
+    }
+    this.setData({ legSubmitting: true, legHint: '' })
+    wx.showLoading({ title: editingId ? '保存中' : '建段中', mask: true })
+    const done = editingId
+      ? updateLeg(this.data.assignmentId, editingId, built.body, newIdempotencyKey('leg-upd'))
+      : createLeg(this.data.assignmentId, built.body, newIdempotencyKey('leg-new'))
+    return done
+      .then(function () {
+        wx.hideLoading()
+        self.setData({ legSubmitting: false })
+        wx.showToast({ title: editingId ? '已留新版本' : '已建段', icon: 'success' })
+        return self.load()
+      })
+      .catch(function (err) {
+        wx.hideLoading()
+        const status = (err && err.httpStatus) || 0
+        // `detail` **只在它是字符串时**才拿来显示：后端这三条端点的 400/404/409
+        // 都是 `detail=str(exc)`（原话最有用）；万一将来变成结构体，这里就退回状态码，
+        // 而不是把结构体压成 `[object Object]`（跨层契约，见 request.js 的 detailText）。
+        const reason = err && typeof err.detail === 'string' ? err.detail : ''
+        self.setData({
+          legSubmitting: false,
+          legHint: reason
+            ? (editingId ? '保存被拒绝：' : '建段被拒绝：') + reason
+            : status
+              ? (editingId ? '保存失败' : '建段失败') +
+                '（服务端返回 ' + status + '），请按提示核对字段口径'
+              : (editingId ? '保存失败' : '建段失败') + '：网络异常（表单已保留，可重试）'
+        })
+        return null
+      })
+  },
+
+  /**
+   * 展开 / 收起某一段的**版本历史**（`GET …/legs/{leg_id}/revisions`）。
+   *
+   * 再点同一段即收起。历史一次只开一段，理由见 `data.legHistoryId`。
+   * 取不到时 `legHistory` 置 null 并写明原因 —— **不显示成"没有历史"**：
+   * 航段存在就至少有一版（建段即写第 1 版），"读不到"与"没有过改动"是两件事。
+   */
+  onToggleLegHistory(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const legId = String(ds.actLegHist == null ? '' : ds.actLegHist)
+    if (!legId) return
+    if (String(this.data.legHistoryId) === legId) {
+      this.setData({ legHistoryId: '', legHistory: null, legHistoryHint: '' })
+      return
+    }
+    const self = this
+    this.setData({ legHistoryId: legId, legHistory: null, legHistoryHint: '' })
+    return fetchLegRevisions(this.data.assignmentId, legId)
+      .then(function (payload) {
+        // 期间用户可能已切到别段/收起 ⇒ 只认还在等这条的那一次
+        if (String(self.data.legHistoryId) !== legId) return
+        self.setData({ legHistory: decorateLegRevisions(payload), legHistoryHint: '' })
+      })
+      .catch(function (err) {
+        if (String(self.data.legHistoryId) !== legId) return
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          legHistory: null,
+          legHistoryHint: status
+            ? '版本历史未能读取（服务端返回 ' + status + '）'
+            : '版本历史未能读取：网络异常'
         })
       })
   },

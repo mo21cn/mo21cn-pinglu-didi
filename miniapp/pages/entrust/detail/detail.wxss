@@ -286,13 +286,18 @@
   color: #B45309;
 }
 
-.cap-picks {
+/* 选择条（页内展开）。`plan-picks` 与 `cap-picks` 共用同一组声明：本页的 "chip"
+   只有一种长相，分成两份写着写着就会漂移（一处改了圆角、另一处没跟上），
+   而那类差异没人会当成缺陷。两个类名各自留着，是为了让模板读起来知道它属于哪一块。 */
+.cap-picks,
+.plan-picks {
   display: flex;
   flex-wrap: wrap;
   margin: 10rpx 0;
 }
 
-.cap-pick {
+.cap-pick,
+.plan-pick {
   margin: 0 12rpx 12rpx 0;
   padding: 8rpx 20rpx;
   border: 1rpx solid #DCE3EE;
@@ -302,7 +307,8 @@
   background: #FFFFFF;
 }
 
-.cap-pick-on {
+.cap-pick-on,
+.plan-pick-on {
   border-color: #0F2540;
   background: #0F2540;
   color: #FFFFFF;
@@ -416,14 +422,19 @@
 /* ---- 运输计划（三段航段）与必需任务前置（合同 §10.1 第 4 步）----
    段与任务都**按行**渲染：段数是行的属性，样式只管"一行长什么样"，
    不在样式层表达"一共三段"（那会让改数据变成改样式）。 */
+/* 一段航段：**头行 + 操作行**两块。头行保持原来的横向布局（序号 / 方式 / 路线），
+   操作行（改这一段 / 版本历史）另起一行 —— 挤在同一行时，长路线名会把按钮推出屏幕。 */
 .plan-leg {
-  display: flex;
-  align-items: center;
   margin-top: 12rpx;
   padding: 12rpx 16rpx;
   border: 1rpx solid #DCE3EE;
   border-radius: 12rpx;
   background: #FFFFFF;
+}
+
+.plan-leg-head {
+  display: flex;
+  align-items: center;
 }
 
 .plan-leg-seq {
@@ -445,6 +456,68 @@
   flex: 1;
   font-size: 26rpx;
   color: #0F2540;
+}
+
+/* 行内小动作（加一段 / 改这一段 / 版本历史）。比 `slot-btn` 小一号：它们是
+   **行内操作**，与"提交"不在一个层级 —— 长得一样会让人以为点了就生效。 */
+.plan-actions {
+  padding-top: 12rpx;
+}
+
+.plan-act {
+  display: inline-block;
+  margin: 0 12rpx 0 0;
+  padding: 6rpx 18rpx;
+  border: 1rpx solid #DCE3EE;
+  border-radius: 999rpx;
+  font-size: 23rpx;
+  color: #3B5BDB;
+  background: #FFFFFF;
+}
+
+.plan-leg-acts {
+  padding-top: 8rpx;
+}
+
+/* 版本历史（按段展开）。左缩进一格，让"它属于上面那一段"在版面上就成立。 */
+.plan-hist {
+  margin-top: 10rpx;
+  padding-left: 12rpx;
+  border-left: 4rpx solid #EEF2F8;
+}
+
+.plan-rev {
+  margin-top: 8rpx;
+  padding: 10rpx 14rpx;
+  border-radius: 10rpx;
+  background: #F7F9FC;
+}
+
+.plan-rev-no {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #0F2540;
+}
+
+.plan-rev-body {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 24rpx;
+  color: #0F2540;
+}
+
+.plan-rev-note {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: #6B7A8C;
+}
+
+.plan-rev-at {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 21rpx;
+  color: #93A0B2;
 }
 
 .plan-task-head {

@@ -4064,7 +4064,13 @@ function decorateAssignmentPlan(payload) {
       legId: leg.leg_id == null ? '' : String(leg.leg_id),
       seqText: leg.seq == null ? '' : String(leg.seq),
       modeText: leg.mode_label == null ? '' : String(leg.mode_label),
-      routeText: from + ' → ' + to
+      routeText: from + ' → ' + to,
+      // 原始字段：**改段表单要回填**，而回填的必须是服务端的原值而不是显示文案。
+      // 拿 `modeText`（标签，"公路"）去回填，提交时就会把"公路"当 `mode` 写回去 ——
+      // 库里于是同时存在 `road` 与 `公路` 两种取值，而两种在界面上长得一模一样。
+      modeRaw: leg.mode == null ? '' : String(leg.mode),
+      fromRaw: from,
+      toRaw: to
     }
   })
   const rawTasks = data.task_prerequisites || []
@@ -4089,6 +4095,107 @@ function decorateAssignmentPlan(payload) {
     tasks: tasks,
     hasLegs: legs.length > 0,
     hasTasks: tasks.length > 0
+  }
+}
+
+// ── 航段命令（建段 / 改段留版本 / 版本历史）────────────────────────────────
+//
+// HO 2026-09-17 裁定的三条口径（转述，权威在 `backend/migrations/ent_leg_revision.py`）：
+//   ① **参与方**都能建段 —— 不设角色门槛（货主与经理都行），但组织边界仍是硬界（非参与方 404）；
+//   ② **不强制公–水–公** —— `mode` 不是枚举，未登记的取值原样显示；
+//   ③ **改段留版本** —— 旧版不覆盖，每改一次追加一版快照。
+//
+// ⚠️ 界面上"能建段"这件事**不该**由前端再判一次：判权只在后端（非参与方拿 404）。
+// 页面把按钮摆出来，是因为**能看到这张委托的人就是参与方** —— 与读模型的取向完全一致
+// （见 `decorateAssignmentPlan` 的说明）。前端多写一份"我猜你能不能写"，只会多一处会过期的判断。
+
+/**
+ * 快捷填入的已登记运输方式。
+ *
+ * ⛔ 这是**输入助手**，不是取值域 —— 后端 `mode` 是自由字符串，本表外的值（如 `air`）
+ * 照样能提交、并按原文显示。把这里当白名单校验，就等于用前端把"不强制 公–水–公"
+ * 这条裁定推翻一半（`water` 之外的段会被拒），而那正是裁定要避免的事。
+ */
+const LEG_MODE_CHOICES = [
+  { key: 'road', label: '公路' },
+  { key: 'water', label: '内河' },
+  { key: 'rail', label: '铁路' }
+]
+
+/** 版本历史的改动类型。未登记取值**原样显示**（同 `mode_label` 的口径）。 */
+const LEG_CHANGE_KIND_LABELS = {
+  created: '建段',
+  updated: '改段'
+}
+
+/** 建一段航段（`POST /assignments/{aid}/legs`，幂等）。建段同时写下该段的第 1 版历史。 */
+function createLeg(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/legs',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * 改一段航段（`PATCH /assignments/{aid}/legs/{leg_id}`，幂等）。
+ *
+ * `body` 只需带**要改的那些字段**：服务端以"值有没有变"为判据（传了但值相同 ⇒ 400
+ * "这不是一次改动"），所以整份表单发过去也安全 —— 但这不等于前端可以不判：
+ * **一条都没变**时页面应当在本地就把话说清（见 `buildLegBody`），少一次注定失败的往返。
+ */
+function updateLeg(assignmentId, legId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/legs/' + legId,
+    method: 'PATCH',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 某一段的版本历史（`GET /assignments/{aid}/legs/{leg_id}/revisions`）。 */
+function fetchLegRevisions(assignmentId, legId) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/legs/' + legId + '/revisions',
+    method: 'GET'
+  })
+}
+
+/**
+ * 版本历史投影：一版一行，每行说清**四件事** —— 第几版、是建还是改、当时是什么、谁/何时。
+ *
+ * 四条处置：
+ * 1. `modeText` 只搬运服务端的 `mode_label`（同 `decorateAssignmentPlan`）；
+ * 2. `routeText` 拼的是**这一版当时**的起终点 —— 这正是"留版本"要回答的问题，
+ *    所以**不能**拿当前行去覆盖它（那就等于把历史抹平成现状）；
+ * 3. `noteText` 空时写"未写改动说明"：`change_note` 为 `None` 是"当时没写"，
+ *    不是"说明未知" —— 两种都不该显示成空白格；
+ * 4. 时间**原样透出**（同 `_caseTime`）：不重排格式，是因为版本历史要靠时分秒排序 ——
+ *    截成 `yyyy-MM-dd` 会让同一天的两版看起来一样，而那正是这条通道要回答的问题。
+ */
+function decorateLegRevisions(payload) {
+  const rows = Array.isArray(payload) ? payload : []
+  const items = rows.map(function (r) {
+    const from = r.from_name == null ? '' : String(r.from_name)
+    const to = r.to_name == null ? '' : String(r.to_name)
+    const note = r.change_note == null ? '' : String(r.change_note)
+    return {
+      revisionIdText: r.revision_id == null ? '' : String(r.revision_id),
+      revisionNoText: r.revision_no == null ? '' : '第 ' + String(r.revision_no) + ' 版',
+      kindText:
+        LEG_CHANGE_KIND_LABELS[r.change_kind] ||
+        (r.change_kind == null ? '' : String(r.change_kind)),
+      modeText: r.mode_label == null ? '' : String(r.mode_label),
+      routeText: from + ' → ' + to,
+      noteText: note || '未写改动说明',
+      changedAtText: r.changed_at == null ? '' : String(r.changed_at)
+    }
+  })
+  return {
+    legId: rows.length ? String(rows[0].leg_id) : '',
+    items: items,
+    hasItems: items.length > 0
   }
 }
 
@@ -4349,6 +4456,8 @@ module.exports = {
   ISSUE_KIND_LABELS,
   JOB_STATUS_CLASS,
   JOB_STATUS_LABELS,
+  LEG_CHANGE_KIND_LABELS,
+  LEG_MODE_CHOICES,
   MESSAGE_ROLE_LABELS,
   MESSAGE_SOURCE_LABELS,
   ORG_PERM_CLAIM,
@@ -4413,6 +4522,7 @@ module.exports = {
   confirmCard,
   createAssignment,
   createCase,
+  createLeg,
   createSession,
   createTask,
   createArtifact,
@@ -4421,6 +4531,7 @@ module.exports = {
   decorateAssignmentPlan,
   decorateAttachment,
   decorateArtifact,
+  decorateLegRevisions,
   decorateCase,
   decorateCaseLinkTargets,
   decorateCaseList,
@@ -4456,6 +4567,7 @@ module.exports = {
   fetchEntrustmentAttachments,
   fetchJob,
   fetchJobs,
+  fetchLegRevisions,
   fetchMine,
   fetchMyEntrustments,
   fetchMyOrgs,
@@ -4501,6 +4613,7 @@ module.exports = {
   submitJob,
   textSourceLabel,
   transcribeAttachment,
+  updateLeg,
   uploadAttachment,
   viewState,
   CANDIDATE_STATUS_LABELS,

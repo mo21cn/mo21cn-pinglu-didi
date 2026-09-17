@@ -71,6 +71,18 @@
           <text class="slot-note">{{plan.legs.length}} 段</text>
         </view>
 
+        <!-- 建段入口。**页内表单**（`legOpen`），不用原生弹层 —— 弹层不在渲染树里，
+             真机走查点不到，只能记 LIMITATION（⑧b / ㉕D / 运力确认的先例）。
+             判权不在这里：能打开本页就说明看得见这张委托，写端仍按同一个参与方判据。 -->
+        <view class="plan-actions">
+          <view
+            class="plan-act"
+            data-act-leg-open="1"
+            bindtap="onOpenLeg"
+            hover-class="hover-dim"
+          >加一段</view>
+        </view>
+
         <view wx:if="{{plan.hasLegs}}">
           <view
             wx:for="{{plan.legs}}"
@@ -78,12 +90,136 @@
             class="plan-leg"
             data-plan-leg="{{item.seqText}}"
           >
-            <text class="plan-leg-seq">{{item.seqText}}</text>
-            <text class="plan-leg-mode">{{item.modeText}}</text>
-            <text class="plan-leg-route">{{item.routeText}}</text>
+            <view class="plan-leg-head">
+              <text class="plan-leg-seq">{{item.seqText}}</text>
+              <text class="plan-leg-mode">{{item.modeText}}</text>
+              <text class="plan-leg-route">{{item.routeText}}</text>
+            </view>
+            <view class="plan-leg-acts">
+              <view
+                class="plan-act"
+                data-act-leg-edit="{{item.legId}}"
+                bindtap="onEditLeg"
+                hover-class="hover-dim"
+              >改这一段</view>
+              <view
+                class="plan-act"
+                data-act-leg-hist="{{item.legId}}"
+                bindtap="onToggleLegHistory"
+                hover-class="hover-dim"
+              >版本历史</view>
+            </view>
+
+            <!-- 版本历史（**按段**展开）。判据是 `legHistoryId === item.legId`：
+                 两侧都是字符串（投影里 `legId` 已 `String()`），不是"字符串 vs 数字"。 -->
+            <view wx:if="{{legHistoryId === item.legId}}" class="plan-hist">
+              <view wx:if="{{legHistoryHint}}" class="slot-note slot-warn">{{legHistoryHint}}</view>
+              <block wx:elif="{{legHistory}}">
+                <block wx:if="{{legHistory.hasItems}}">
+                  <view
+                    wx:for="{{legHistory.items}}"
+                    wx:for-item="rev"
+                    wx:key="revisionIdText"
+                    class="plan-rev"
+                    data-plan-rev="{{rev.revisionNoText}}"
+                  >
+                    <view class="row-between">
+                      <text class="plan-rev-no">{{rev.revisionNoText}}</text>
+                      <text class="slot-note">{{rev.kindText}}</text>
+                    </view>
+                    <text class="plan-rev-body">{{rev.seqText}} · {{rev.modeText}} · {{rev.routeText}}</text>
+                    <text class="plan-rev-note">{{rev.noteText}}</text>
+                    <text class="plan-rev-at">{{rev.changedAtText}}</text>
+                  </view>
+                </block>
+                <!-- 空列表要**单独说话**：航段存在就至少有一版（建段即第 1 版），
+                     服务端回空列表说明这条响应不是我们以为的那条 —— 不是"没有改动过"。 -->
+                <view wx:else class="slot-note">服务端没有返回任何版本 —— 这与「没有改动过」不是一回事</view>
+              </block>
+            </view>
           </view>
         </view>
         <view wx:else class="slot-note">本单还没有结构化运输计划</view>
+
+        <!-- 建段 / 改段表单（**页内**）。字段名与 handler 的 `data-df` 映射表一一对应 ——
+             ⚠️ 少一条映射就是**静默空转**（那一格永远填不上、提交永远说必填，
+             而页面看起来完全正常）。`slot-form` / `slot-input` / `slot-btn` 是本页
+             通用的表单词汇（与运力登记、记录任务同一套），不另造一套长得像的。 -->
+        <view wx:if="{{legOpen}}" class="slot-form">
+          <view class="slot-note">{{legEditingId ? '改一段航段（旧版本会保留）' : '加一段航段'}}</view>
+          <input
+            class="slot-input"
+            type="number"
+            data-df="leg-seq"
+            value="{{legForm.seq}}"
+            placeholder="第几段（不小于 1 的整数）"
+            placeholder-class="input-ph"
+            bindinput="onLegInput"
+          />
+          <input
+            class="slot-input"
+            data-df="leg-mode"
+            value="{{legForm.mode}}"
+            placeholder="运输方式（必填，如 road / water / rail）"
+            placeholder-class="input-ph"
+            bindinput="onLegInput"
+          />
+          <!-- 快捷填入**已登记**的方式；这不是取值域 —— 上面那个输入框可以填别的值 -->
+          <view class="plan-picks">
+            <view
+              wx:for="{{legModeOptions}}"
+              wx:for-item="option"
+              wx:key="key"
+              class="plan-pick {{legForm.mode === option.key ? 'plan-pick-on' : ''}}"
+              data-act-leg-mode="{{option.key}}"
+              bindtap="onPickLegMode"
+              hover-class="hover-dim"
+            >{{option.label}}</view>
+          </view>
+          <input
+            class="slot-input"
+            data-df="leg-from"
+            value="{{legForm.from}}"
+            placeholder="起点（必填）"
+            placeholder-class="input-ph"
+            bindinput="onLegInput"
+          />
+          <input
+            class="slot-input"
+            data-df="leg-to"
+            value="{{legForm.to}}"
+            placeholder="终点（必填）"
+            placeholder-class="input-ph"
+            bindinput="onLegInput"
+          />
+          <input
+            class="slot-input"
+            data-df="leg-note"
+            value="{{legForm.note}}"
+            placeholder="改动说明（选填；会随这一版一起留档）"
+            placeholder-class="input-ph"
+            bindinput="onLegInput"
+          />
+          <view wx:if="{{legHint}}" class="slot-note slot-warn">{{legHint}}</view>
+          <view class="plan-actions">
+            <view
+              class="slot-btn slot-btn-strong"
+              data-act-leg-submit="1"
+              bindtap="onSubmitLeg"
+              hover-class="hover-dim"
+            >{{legEditingId ? '保存（留新版本）' : '建段'}}</view>
+            <view
+              class="slot-btn"
+              data-act-leg-cancel="1"
+              bindtap="onCancelLeg"
+              hover-class="hover-dim"
+            >取消</view>
+          </view>
+        </view>
+
+        <!-- 表单收起时的提示（例如「这一段不在当前计划里」）—— 不随表单一起消失，
+             否则用户看到的是"点了没反应" -->
+        <view wx:if="{{!legOpen && legHint}}" class="slot-note slot-warn">{{legHint}}</view>
 
         <view class="plan-task-head">必需任务与前置</view>
         <block wx:if="{{plan.hasTasks}}">

@@ -281,6 +281,23 @@ const WALK_ANCHORS = [
     attr: 'data-plan-task', value: '{{item.taskIdText}}' },
   { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'plan-task-pre',
     attr: 'data-plan-task-pre', value: '{{item.preText}}' },
+  // 航段命令（建段 / 改段留版本 / 版本历史）—— §10.1 第 4 步的**写侧**。
+  // ⚠️ 与上面那组同一处境：**先登记、走查章节随后写**（㊼ 章）。
+  // 判据是"渲染树里数得出来的事实"：段行 / 版本行 / 表单三个键。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-leg-open',
+    value: '1', handler: 'onOpenLeg' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-leg-edit',
+    value: '{{item.legId}}', handler: 'onEditLeg' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-leg-hist',
+    value: '{{item.legId}}', handler: 'onToggleLegHistory' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-leg-mode',
+    value: '{{option.key}}', handler: 'onPickLegMode' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-leg-submit',
+    value: '1', handler: 'onSubmitLeg' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-leg-cancel',
+    value: '1', handler: 'onCancelLeg' },
+  { kind: 'row', file: 'pages/entrust/detail/detail.wxml', class: 'plan-rev',
+    attr: 'data-plan-rev', value: '{{rev.revisionNoText}}' },
   // 页内输入框（文本靠 setData 注值，见走查脚本的声明），与案件页的 `act-input`+`data-df` 同形
   { kind: 'static', file: 'pages/entrust/detail/detail.wxml', class: 'slot-input', attr: 'data-df' },
   { kind: 'act', file: 'pages/entrust/case-create/case-create.wxml', attr: 'data-act-toggle-links',
@@ -507,6 +524,37 @@ for (const a of WALK_ANCHORS) {
         errors.push(`${label}: 应绑定 ${a.handler}，实际 ${JSON.stringify(bind || null)}`)
       }
     }
+  }
+}
+
+// ---- 走查脚本里**禁止**用裸属性选择器数个数 ----
+//
+// 2026-09-17 实测（㊻ 章）：本工具链的 `querySelectorAll` **不认**裸属性选择器
+// `[data-x]`，静默回 **0**（同一页同一语义：类名 → 1、`[data-x="值"]` → 1、裸属性 → 0）。
+// 它比"报错"更坏，因为两种写法都会骗过审阅：
+//   · `count('[data-x]') >= 1` ⇒ **假红**（看起来像模板没渲染）；
+//   · `count('[data-x]') == 0`（断言"不该有"）⇒ **假绿**，真出问题也照样绿。
+//
+// 入口处已加运行期守卫（`scripts/wechatide_client.py` 的 `count()` 直接抛 `ValueError`），
+// 这里再加一道**静态**检查：让它在"还没跑起来"的时候就红，而不是等一轮真机走查白跑。
+// ⇒ 要按属性定位，写 `[data-x="值"]`；只按"有这个属性"筛，改用类名。
+// ⚠️ 覆盖范围是 `scripts/*.py`（走查消费者），不是 miniapp —— 所以这里用独立的 REPO 根路径。
+{
+  const REPO = path.resolve(__dirname, '..')
+  const bareCall = /\.count\(\s*f?(['"])\s*\[\s*[A-Za-z_][\w-]*\s*\]\s*\1/
+  const pyDir = path.join(REPO, 'scripts')
+  for (const f of fs.readdirSync(pyDir).filter((x) => x.endsWith('.py'))) {
+    const abs = path.join(pyDir, f)
+    fs.readFileSync(abs, 'utf8').split('\n').forEach((line, i) => {
+      const t = line.trim()
+      if (!t || t.startsWith('#')) return
+      if (bareCall.test(line)) {
+        errors.push(
+          `[SELECTOR] scripts/${f}:${i + 1}: 用了裸属性选择器数个数（本工具链静默回 0）` +
+            ` ⇒ 改用 [data-x="值"] 或类名`
+        )
+      }
+    })
   }
 }
 
