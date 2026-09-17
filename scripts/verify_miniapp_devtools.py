@@ -8207,23 +8207,22 @@ def sec_45(w: Walker) -> None:
     # 其上 console 是累计的 ⇒ 不取基线会把上一章的报错算到本章头上。
     err_base = w.c.errors()
 
-    CODE_MGR = "seed-owner"
-    ORG_NAME = "演示经营主体·工作台"
-    TITLE_MAIN = "演示委托·工作台样本"
-    DETAIL = "pages/entrust/detail/detail"
-    CAND_SEL = '[data-df="cap-carrier"]'
+    code_mgr = "seed-owner"
+    org_name = "演示经营主体·工作台"
+    title_main = "演示委托·工作台样本"
+    cand_sel = '[data-df="cap-carrier"]'
 
     # ── 前置：全部**经 API 取**，不写死 id（种子重铺会变）──────────────────
-    tok = (api_login(CODE_MGR) or {}).get("access_token") or ""
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
     if not tok:
         w.rep.not_run("㊺ 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
         return
     org_id = ""
     for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
-        if str((r or {}).get("name") or "") == ORG_NAME:
+        if str((r or {}).get("name") or "") == org_name:
             org_id = str((r or {}).get("org_id") or "")
     if not org_id:
-        w.rep.not_run("㊺ 全部断言", f"seed-owner 的组织里没有「{ORG_NAME}」")
+        w.rep.not_run("㊺ 全部断言", f"seed-owner 的组织里没有「{org_name}」")
         return
 
     def _org_rows() -> list:
@@ -8235,12 +8234,12 @@ def sec_45(w: Walker) -> None:
         hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
         return str((hit[0] or {}).get("assignment_id") or "") if hit else ""
 
-    aid = _newest_aid(TITLE_MAIN)
+    aid = _newest_aid(title_main)
     if not aid:
-        w.rep.not_run("㊺ 全部断言", f"该组织下找不到「{TITLE_MAIN}」（种子未铺？）")
+        w.rep.not_run("㊺ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
 
-    if not w.open_workbench(CODE_MGR, tag="㊺"):
+    if not w.open_workbench(code_mgr, tag="㊺"):
         w.rep.not_run("㊺ 全部断言", "未能以 seed-owner 进入经理工作台")
         return
     # 组织显式钉住：`pickOrg` 的 `saved` 分支跨 IDE 重启保留 ⇒ 不钉就可能落在别的组织
@@ -8279,7 +8278,7 @@ def sec_45(w: Walker) -> None:
     # ⚠️ 基准日用 **UTC 日期**：与后端 `capacity.today_utc()` 同一口径。
     #    用本机时区的 `date.today()` 会在时区边界上与判定基准日差一天，
     #    而"有效期至"恰好卡在边界时，差一天就是从"通过"变成"过期"。
-    today_utc = _dt.datetime.now(_dt.timezone.utc).date()
+    today_utc = _dt.datetime.now(_dt.UTC).date()
     future = (today_utc + _dt.timedelta(days=90)).isoformat()
     past = (today_utc - _dt.timedelta(days=90)).isoformat()
 
@@ -8310,7 +8309,7 @@ def sec_45(w: Walker) -> None:
         return ok_all
 
     typed_ok = _fill(carrier_ok, future)
-    typed_ok = w.c.count(CAND_SEL) == 1 and typed_ok
+    typed_ok = w.c.count(cand_sel) == 1 and typed_ok
     f = w.c.page_data().get("capForm") or {}
     ok_typed = (
         typed_ok
@@ -8412,7 +8411,9 @@ def sec_45(w: Walker) -> None:
         d_exp = w.c.page_data()
         rows_exp = d_exp.get("capRuleRows") or []
         codes_exp = [str((r or {}).get("ruleCode") or "") for r in rows_exp]
-        passed_exp = [c for c, r in zip(codes_exp, rows_exp) if (r or {}).get("passed")]
+        passed_exp = [
+            c for c, r in zip(codes_exp, rows_exp, strict=True) if (r or {}).get("passed")
+        ]
         w.rep.rec(
             "㊺ ③b 规则不过 ⇒ 页面把**逐条**判定照实显示（四条规则全在，"
             "**含通过项** —— 后端特意全给，前端不得过滤）",
@@ -8425,18 +8426,15 @@ def sec_45(w: Walker) -> None:
             "㊺ ③c 过期候选**只在有效期上**不通过（根因要分得出来："
             "「这一条为什么不行」与「这些规则都跑了」是两件事）",
             "validity" in codes_exp
-            and len(
-                [r for r in rows_exp if not (r or {}).get("passed")]
-            )
-            == 1,
+            and len([r for r in rows_exp if not (r or {}).get("passed")]) == 1,
             f"通过项={passed_exp} 未过项="
-            f"{[c for c, r in zip(codes_exp, rows_exp) if not (r or {}).get('passed')]}",
+            f"{[c for c, r in zip(codes_exp, rows_exp, strict=True) if not (r or {}).get('passed')]}",
         )
         w.shot("45-4-规则不过的逐条判定")
 
     # ============ 四、确认成功（合规候选）============
     print("\n-- 四、确认成功 --", flush=True)
-    SCOPE = "㊺ 全程 900 吨舱位"
+    scope_text = "㊺ 全程 900 吨舱位"
     w.c.tap('[data-act-cap-cancel="1"]')  # 先把可能的展开条收起来
     time.sleep(0.8)
     t_open_ok = w.c.tap(f'[data-act-cap-confirm-open="{cid_ok}"]')
@@ -8448,7 +8446,7 @@ def sec_45(w: Walker) -> None:
     #    看起来像"后端没挡"，实际是"前端根本没提交"。第一轮就是这么红的。
     w.scroll_into('[data-df="cap-scope"]')
     n_scope_ok = w.c.count('[data-df="cap-scope"]')
-    i_scope_ok = w.c.input_text('[data-df="cap-scope"]', SCOPE)
+    i_scope_ok = w.c.input_text('[data-df="cap-scope"]', scope_text)
     time.sleep(0.4)
     d_before = w.c.page_data()
     n_conf_before = len(d_before.get("capConfirmations") or [])
@@ -8489,7 +8487,8 @@ def sec_45(w: Walker) -> None:
     if ok_conf:
         w.rep.rec(
             "㊺ ④b 确认产出**采购确认成果**且逐规则判定落库（4 条；少一条＝有规则没跑）",
-            bool(conf.get("artifact_id")) and len(conf.get("rule_checks") or []) == 4
+            bool(conf.get("artifact_id"))
+            and len(conf.get("rule_checks") or []) == 4
             and str(conf.get("rule_set_version") or "") != "",
             f"artifact={conf.get('artifact_id')!r} "
             f"rules={len(conf.get('rule_checks') or [])} "
@@ -8532,12 +8531,10 @@ def sec_45(w: Walker) -> None:
         n_verdict = 0
         for _ in range(24):
             time.sleep(0.5)
-            n_verdict = w.c.count(
-                f'[data-act-cap-recheck-verdict="{conf.get("confirmation_id")}"]'
-            )
+            n_verdict = w.c.count(f'[data-act-cap-recheck-verdict="{conf.get("confirmation_id")}"]')
             if n_verdict:
                 break
-        rc_payload = (w.c.page_data().get("capRecheck") or {})
+        rc_payload = w.c.page_data().get("capRecheck") or {}
         w.rep.rec(
             "㊺ ④e 点「复算这条确认」⇒ **判定表真的渲染出来**（结果锚点唯一命中），"
             "而不是「请求发了、页面什么都没多出来」—— 「点了没反应」与「算出来不成立」"
@@ -8572,15 +8569,15 @@ def sec_45(w: Walker) -> None:
     if not ok_conf:
         # 「二次」的前提是「一次」已经落库。前提不在 ⇒ 这一发只会**成功一条**，
         # 拿到 200 是**必然**、不是缺陷；如实记 not_run。
-        w.rep.not_run(
-            "㊺ ⑤ 同一候选二次确认 ⇒ 409", "④a 未落库 ⇒ 不存在「第二次」"
-        )
+        w.rep.not_run("㊺ ⑤ 同一候选二次确认 ⇒ 409", "④a 未落库 ⇒ 不存在「第二次」")
     else:
         st, body = api_post(
             f"/entrust/assignments/{aid}/capacity-confirmations",
             tok,
-            {"candidate_id": int(cid_ok) if cid_ok.isdigit() else cid_ok,
-             "agreed_scope": "㊺ 二次确认"},
+            {
+                "candidate_id": int(cid_ok) if cid_ok.isdigit() else cid_ok,
+                "agreed_scope": "㊺ 二次确认",
+            },
             "walk45-dup-" + stamp,
         )
         # ⚠️ 后端的 409 把结构化信息放在 **`detail` 里**（FastAPI 的 `HTTPException(detail=…)`
