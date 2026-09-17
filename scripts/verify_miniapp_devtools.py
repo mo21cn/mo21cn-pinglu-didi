@@ -9230,7 +9230,16 @@ def sec_48(w: Walker) -> None:
     frm = f"㊽起点{seq_next}"
     to1 = f"㊽终点{seq_next}"
 
-    w.login_as(code_shipper)
+    # ⚠️ 必须走 `open_workbench`（＝ `login_as` **＋ 点身份卡进工作台**），不能只用 `login_as`：
+    #    `login_as` 只写 `dev_login_code`、清 token、reLaunch 首页，**不点身份卡**
+    #    ⇒ 那一刻还没有 token，直接深链详情页会停在 `expired` / `denied` 态，
+    #    而症状恰好是「段行 0、写入口 0」—— 读起来像「货主看不到写入口」这条**产品结论**，
+    #    实际是本章前置没做完。
+    #    （2026-09-18 首跑实测：`加一段=0 段行=0 服务端段数=3`。
+    #     对照 ㊼ 章用的是 `open_workbench`，所以它没这个问题。）
+    if not w.open_workbench(code_shipper, tag="㊽"):
+        w.rep.not_run("㊽ 全部断言", "未能以 seed-shipper 进入货主工作台")
+        return
     w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
     w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
     d = w.wait_data(lambda x: x.get("plan") is not None, tries=60, gap=0.5)
@@ -9372,6 +9381,13 @@ def sec_49(w: Walker) -> None:
         w.rep.not_run("㊾ 全部断言", f"委托 #{aid} 定位不到唯一授权（`session-context` 为空）")
         return
     rels = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok) or {}).get("items") or []
+    # ⚠️ 判据读的是发布行**顶层的** `artifact_type`：它是 `OfferReleaseOut` 显式声明的
+    #    字段（2026-09-18 起；此前只藏在 `customer_snapshot` 里，前端因此只能瞎猜）。
+    #    ⭐ 有意**不去**"先查成果清单再按 `artifact_id` 对上"那种绕法：那样即使
+    #    接口把字段弄丢了，本章照样通过 —— 于是"页面坏了、走查绿着"。
+    #    走查章必须验**页面依赖的那份契约**，接口一改，两边一起红才是对的。
+    #    （首跑实测：读了一个不存在的顶层键 ⇒ `accepted` 恒为空 ⇒ 整章 `NOT_RUN`，
+    #      而夹具其实铺好了。读错键名不会报错，只会静默为 0。）
     accepted = [
         r
         for r in rels
