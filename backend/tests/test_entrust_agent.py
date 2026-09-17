@@ -495,6 +495,44 @@ def test_quote_parsing_separates_rate_unit_from_quantity():
     assert full["currency"] == "CNY"
 
 
+@pytest.mark.parametrize(
+    ("filename", "quantity"),
+    [
+        ("DEMO1-canonical-sample-quotation.txt", "800.00"),
+        ("DEMO1-SYNTHETIC-sample-quotation.txt", "1200.00"),
+    ],
+)
+def test_quote_parsing_on_the_real_fixtures_does_not_slice_sentences(
+    filename: str, quantity: str
+) -> None:
+    """真夹具上的抽取边界：**不许把句子片段当成公司名、把并列短语当成航线**。
+
+    这是 HO 0917-3 待裁决清单第 3 行「fixture 解析误判」的回归钉子。
+
+    为什么必须**读真夹具文件**、而不是复用上面的 `_SAMPLE_QUOTE`：那份删减副本
+    只有 5 行，**不含夹具首部的数据标签句**（`…也不是真实航运报价`）与
+    「运输方案（公路 — 内河 — 公路）」那一行 —— 而缺陷恰好长在这两处。
+    实测：旧规则在删减副本上一直绿，在真夹具上给出
+    `carrier="也不是真实航运"`、`route="公路→内河"`。
+
+    修的是**规则边界**，**不改夹具文本**：夹具是对外承诺的一部分（合同 §3.1 /
+    `DEMO-1-fixture-manifest.md`），靠改夹具让用例变绿等于把缺陷藏起来。
+    """
+    import pathlib
+
+    from app.modules.entrust.agents import ag02
+
+    fixture = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "fixtures" / filename
+    payload = ag02._parse_quote_text(fixture.read_text(encoding="utf-8"))
+
+    assert payload["carrier"] == "西江航运有限公司", payload
+    assert payload["route"] == "南宁→贵港", payload
+    assert payload["rate"] == "45.00", payload
+    assert payload["rate_unit"] == "吨", payload
+    assert payload["valid_until"] == "2026-12-31", payload
+    assert payload["quantity"] == quantity, payload
+
+
 def test_quote_parsed_contract_now_covers_currency_and_unit():
     """`currency` / `rate_unit` / `includes` / `excludes` 必须在字段契约内。
 
