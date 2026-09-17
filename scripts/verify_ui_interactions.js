@@ -1918,7 +1918,10 @@ section('⑤ 静态防线')
             note: ''
           })
         },
-        createSession: () => Promise.resolve({ session_id: 5, entrustment_id: 1, assignment_id: 7 })
+        createSession: () => Promise.resolve({ session_id: 5, entrustment_id: 1, assignment_id: 7 }),
+        // 采纳（写）：本节的用例不点它，但**必须登记** —— 漏登记的会落到真实
+        // `request.js`，在 Node 里直接抛错（而抛点会在页面里，看起来像页面坏了）。
+        adoptJobProposal: () => Promise.resolve({ artifact_id: 12, revision_no: 1 })
       })
 
     const sessLog = []
