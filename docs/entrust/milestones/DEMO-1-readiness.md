@@ -885,10 +885,10 @@ IDE / uvicorn 随发起 shell 结束被回收）。
 | 规则纯函数探针 | **20/20**（含 C-900 / 950t ⇒ 缺口 50.000 吨、900×2 船 ⇒ 通过、允许拆批 ⇒ 需 2 趟） |
 | `scope_matrix` | **13/13**（证明 6 条新路径与 openapi 逐条对上） |
 | 运力用例 | **25/25**（含闸门红绿对照与 1 条回归） |
-| pytest（junitxml 判据） | **804 项 = 通过 790 + 跳过 14 + 失败 0 + 错误 0**（较 §9.14 的 779 **+25**） |
+| pytest（junitxml 判据） | **806 项 = 通过 792 + 跳过 14 + 失败 0 + 错误 0**（较 §9.14 的 779 **+25**，其中 **+2** 为后续 cherry-pick 进来的迁移 SQL 闸门用例，见 ⑥） |
 | 13 项本机门禁 | **PASS 13 / FAIL 0**（含 `ruff format --check` 与 `mypy` —— 首次跑时这两项分别红了 **3 个文件** 与 **4 处**，见下） |
 | mypy | `Success: no issues found in 108 source files`（+3：两个新模块 + 一个迁移）。本轮为**类型收窄**修了 4 处（`demand_ok` 是 bool，mypy 不从它反推 `demand`；`_as_date` 双调用同理） |
-| ruff（**CI 同 CWD `backend/`**） | `check rc=0` / `format --check rc=0`（142 files）。⚠️ **`check` 绿不等于 `format` 绿**：新写的 3 个文件全部被判"would be reformatted" |
+| ruff（**CI 同 CWD `backend/`**） | `check rc=0` / `format --check rc=0`（143 files）。⚠️ **`check` 绿不等于 `format` 绿**：新写的 3 个文件全部被判"would be reformatted" |
 | 迁移冒烟 | **全新库**建成 34 条；三条新迁移排在 `ent_commitment:4` **之后**（`ORDER = OK`）；**复跑待执行 0** |
 | 跳过项 | **14 条全部是 `test_mysql_integration`**（未设 `MYSQL_TEST_URL`）⇒ 并发用例在本机是 **`NOT_RUN`**，由 CI 第 6 job 真跑 |
 | 并发**预跑**（文件版 SQLite 双线程，4 轮） | **1 赢 1 输**（输家是 `CapacityStateError`，不是 500）；终局恒为 **确认 = 1 / 判定 = 4 / 成果 = 1** —— 按技能纪律，**不把"从没跑过的测试"推上去** |
@@ -901,4 +901,30 @@ IDE / uvicorn 随发起 shell 结束被回收）。
 * **夹具缺口（未擅自补）**：canonical 的候选是 900 吨**单船**，要演"拆批 / 多船 ⇒ 950 装得下"
   需要新候选，补它会**动 CI 共用的那份夹具** ⇒ 待 HO 定口径；
 * **未声称任何 AC 通过，未声称任何 D1 通过**。
+
+#### ⑥ 首轮 CI 红与修复（**补记**，2026-09-17）
+
+首轮推送后 CI **4 绿 2 红**，两个 MySQL job 同一行真因：`ent_contract_field_source.source_kind`
+的列注释在源码里被折成两行**相邻字符串字面量**（三引号体内**没有** Python 的"相邻字面量自动
+拼接"）⇒ MySQL `1064`。**本机零症状**：本机没有 MySQL（未装 `mysqld` / 无 `docker` / 3306 关闭），
+迁移的 `"mysql"` 那段 SQL 从不执行，而 SQLite 分支既不写列注释、也不跑那条语句。
+
+> ⚠️ 上一轮那 14 条 MySQL 用例是 **setup 阶段的 `ERROR`（建表失败）**，**没有一条断言执行过**
+> ⇒ 「并发正确性」在这一轮之前**没有任何证据**：既不能算通过，也不能算"并发实现有问题"。
+
+修复与防回归（三笔，从 #139 `cherry-pick`：`e03dff0` fix / `4a6355b` test / `64ae978` docs）：
+
+* 两行合并为一条注释（文案一字未删）；
+* 新增 `backend/tests/test_migration_sql_literals.py` —— **零依赖**文本闸门（相邻字符串字面量 +
+  双方言列名集合一致）；有效性**已取证**（修前红并指出源文件行号 / 修后绿 / 全仓 34 条带方言
+  分支的条目零误报）；它是 pytest 用例 ⇒ **不新增 CI 步骤**；
+* `S3-合同派生切片.md` §9 复盘（含"仍然覆盖不到的部分"）。
+
+**cherry-pick 后复测**：pytest **806**（通过 792 / 跳过 14 / 失败 0 /
+错误 0，即上表 804 **+2**）、ruff format **143** files、mypy **108** files、
+门禁 **13/13 PASS**；两个 PR 的 CI 均 **6/6 全绿**（`mergeable_state=clean`）。
+
+⚠️ 仍未覆盖：闸门只拦"纯文本层面即非法"的写法；**列类型可移植性、索引/键长上限、字符集与
+排序规则**仍必须由 MySQL 8.0 job 真实执行 ⇒ **本机 13 项全绿推不出 MySQL job 会绿**。
+
 
