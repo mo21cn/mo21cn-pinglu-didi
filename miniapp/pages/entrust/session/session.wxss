@@ -540,6 +540,21 @@
   color: #4a4a4a;
 }
 
+/* 内置示例报价单入口：与「上传」并列，但视觉上更弱一档 ——
+   它是便捷通路，不是主通路（真实演示仍以上传真文件为主）。 */
+.att-sample {
+  margin-top: 12rpx;
+  padding: 18rpx 24rpx;
+  border: 1rpx dashed #c9ccd4;
+  border-radius: 10rpx;
+  background: #fafbfc;
+}
+
+.att-sample-text {
+  font-size: 25rpx;
+  color: #576b95;
+}
+
 /* 附件行的文本来源标记（机读提取 / 人工转录）。
    它决定"重抽要不要先问"——所以不能省：省了用户就是在不知情下覆盖掉人写的内容。 */
 .att-src {

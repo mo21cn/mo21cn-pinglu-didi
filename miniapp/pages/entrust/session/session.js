@@ -27,6 +27,8 @@
 // 运行期导航治理与其它委托页同口径：`onLoad` 走 `guardEntry()`，跳转走 `go()`，
 // 本页登记在 `MIGRATED_PAGES`（CI 会核对不得出现裸 `wx.navigateTo` 等）。
 const {
+  SAMPLE_QUOTE_FILENAME,
+  SAMPLE_QUOTE_TEXT,
   VIEW,
   decorateArtifact,
   decorateJob,
@@ -550,6 +552,38 @@ Page({
         // 用户取消选择：不是错误，不提示、不报错
       }
     })
+  },
+
+  /**
+   * 用**内置示例报价单**走同一套上传 / 提取链（不经过原生文件选择器）。
+   *
+   * 两条独立理由，任一成立都足够：
+   *   1. **可走查**：`wx.chooseMessageFile` 打开的是 OS 级原生弹层，不在小程序渲染树里
+   *      ⇒ 自动走查够不着它的选择项，"演示第 2 步"就永远拿不到设备证据
+   *      （技能 `miniapp-device-walkthrough` 的负面清单把这条写成了**界面要求**）。
+   *   2. **可演示**：演示者不必先把文件塞进模拟器才能演这一步。
+   *
+   * 刻意复用 `uploadQuote`：另写一份上传逻辑的话，"示例通路能过、真实通路没过"
+   * 这种分叉会在演示当天才暴露。
+   */
+  onUseSampleQuote() {
+    const self = this
+    if (this.data.uploading) return
+    if (!this.data.sessionId) {
+      wx.showToast({ icon: 'none', title: '会话尚未就绪，请稍后重试' })
+      return
+    }
+    const name = SAMPLE_QUOTE_FILENAME
+    const path = wx.env.USER_DATA_PATH + '/' + name
+    try {
+      // 先落成真实文件，再走与"上传真文件"完全同一条链 —— 这样拿到的设备证据
+      // 覆盖的是真实上传路径，而不是一条只为走查准备的旁路。
+      wx.getFileSystemManager().writeFileSync(path, SAMPLE_QUOTE_TEXT, 'utf8')
+    } catch (e) {
+      wx.showToast({ icon: 'none', title: '写入示例文件失败：' + ((e && e.errMsg) || '') })
+      return
+    }
+    return this.uploadQuote({ path: path, name: name })
   },
 
   /**
