@@ -144,11 +144,11 @@
 | **选择 ≠ 资源确认** 的门禁 | **缺连接** | `supplier_compare.selected_candidate` 与 `procurement_confirm` 是两个类型，但**无「选择→确认」门禁连接** |
 | 资源确认的授权 / 证据 / 有效期 | **缺连接** | `registry.py:procurement_confirm`（`evidence_kinds`/`effective_from`）**无专用确认端点** |
 | 服务端客户白名单投影 | **缺连接** | `registry.py:project_for_customer` 存在但**无调用方**（孤儿函数）；`envelope.py:project_envelope_for_operator` 只覆盖 Agent 侧 |
-| **释放不可变报价版本** | ✅ **后端已实现**（表已在；命令与端点在 S3 纵向切片落地） | `ent_offer_release` + `offers.release_offer` + `POST /entrustments/{eid}/offer-releases`。**界面未做** |
-| 客户按精确版本接受/拒绝（含三类负例） | ✅ **后端已实现**（三类负例均已验：未发布/已撤回/已被取代 ⇒ 409；经理冒充 ⇒ 403；重复 ⇒ 唯一约束） | `offers.respond_to_offer` + `POST /offer-releases/{id}/responses`。**界面未做** |
+| **释放不可变报价版本** | ✅ **后端与界面均已实现**（表已在；命令与端点在 S3 纵向切片落地，界面在其收口切片上线） | `ent_offer_release` + `offers.release_offer` + `POST /entrustments/{eid}/offer-releases`；经理侧入口在成果页**版本行**上（页内确认条） |
+| 客户按精确版本接受/拒绝（含三类负例） | ✅ **后端与界面均已实现**（三类负例均已验：未发布/已撤回/已被取代 ⇒ 409；经理冒充 ⇒ 403；重复 ⇒ 唯一约束） | `offers.respond_to_offer` + `POST /offer-releases/{id}/responses`；客户侧入口在委托详情页「对客报价」卡（页内展开条） |
 | 从已接受事实生成合同草稿 | **缺失** | 未找到 |
-| 签名证据记录（来源/模式标注） | **缺失** | 只有 `registry.py` 的 `EVIDENCE_CONFIRMATION` 枚举 |
-| 客户查看/下载字段与附件裁剪 | **缺连接** | `project_for_customer` 游离，客户端点未接 |
+| 签名证据记录（来源/模式标注） | ✅ **已实现**（合同 BP-03 第 9 条 / §11.1） | `offers.SIGNATURE_MODE_LABELED_SAMPLE = "labeled_sample"` 随发布快照冻结；**数据来源标注**另表 `ent_artifact_origin`（`live`/`synthetic`/`manual`/`unknown`），判据取作业行的 `mocked` 事实、**不采信调用方自述**，`unknown` 不猜成 `live` |
+| 客户查看/下载字段与附件裁剪 | ✅ **后端与界面均已实现**（`project_for_customer` 不再游离） | 两条投影函数（`project_release_for_manager` / `project_release_for_customer`，服务端选投影，AC-26）+ **`GET /offer-releases/{id}/attachments/{aid}/download`**：判据只有发布时冻结的授权清单，**清单外一律 404**（不用 403 —— 403 会承认内部底稿存在） |
 | 航段（三段式）结构化对象 | **表已落** | `ent_leg`（稳定 ID / 运输方式 / 起终点 / `seq`）已在；**命令与界面未实现** |
 | 历史版本保留 | 已有 | `artifacts.py` append-only + `artifacts_api.py:list_revisions` |
 
@@ -357,6 +357,13 @@ inaccessible to B），任一句未取证则**整体不通过** —— 逐句的
 **出口判据**：客户接受绑定到精确的已释放版本；仅「选择了一份报价」**不产生**已确认运力。
 估算：**L**（4 项新域能力 + 2 屏 + 迁移）。外部等待：**无**。
 ⚠️ 风险：这是唯一「客户侧 0 实现」的环，且 S2/S4 的演示脚本都要用到它。
+
+> **进度（2026-09-17）**：第 4/5/6/8 项已落地（后端 + 界面），第 7 项**部分**落地
+> （签署模式标注已随快照冻结为 `labeled_sample`，**合同派生本身仍未做**）。
+> 第 1/2/3 项（三段式编排、比价接 UI、选择≠资源确认门禁）**仍未做** ——
+> 即"客户侧 0 实现"这句已不成立，但**本里程碑整体仍未完成**。
+> 逐条依据见 `DEMO-1-interface-delta.md` §7.10/§7.11 与
+> `docs/entrust/S3-发布与客户响应数据设计.md` §5/§6。**不声称任何 D1 通过。**
 
 ### S4 — 履约到结案（BP-04）
 
