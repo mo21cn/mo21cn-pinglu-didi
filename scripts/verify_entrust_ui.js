@@ -3019,6 +3019,102 @@ const detailTpl = read(path.join(MINI, 'pages/entrust/detail/detail.wxml'))
   check(`[计划] 模板 detail.wxml 里有行锚点 ${attr}`, detailTpl.indexOf(attr) !== -1)
 })
 
+// ─────────────────────────────────────────────────────────────
+// 14. 航段命令的写侧（建段 / 改段留版本 / 版本历史 —— §10.1 第 4 步）
+//
+// 本节钉的是**"留版本"这件事在投影里没有被抹平**，以及**回填用的是原值不是文案**：
+//   · 历史每一行是**当时**的取值快照（拿当前行去覆盖它，"2 版"照样显示、语义全错）；
+//   · 改段表单回填 `modeRaw`（`air`），不是 `modeText`（标签）—— 回填标签会在库里
+//     造出 `公路` 这个取值，而它与 `road` 在界面上长得一模一样；
+//   · 说不了的那一格必须自己说话（没写改动说明 ≠ 说明未知 ≠ 显示空白）。
+// ─────────────────────────────────────────────────────────────
+const legRevProj = E.decorateLegRevisions([
+  { revision_id: 91, leg_id: 8, seq: 1, mode: 'air', mode_label: 'air',
+    from_name: '甲地', to_name: '乙地', revision_no: 1, change_kind: 'created',
+    change_note: null, actor_user_id: 5, changed_at: '2026-09-18T00:01:02' },
+  { revision_id: 92, leg_id: 8, seq: 1, mode: 'water', mode_label: '内河',
+    from_name: '甲地', to_name: '丙地', revision_no: 2, change_kind: 'updated',
+    change_note: '终点改到丙地', actor_user_id: 5, changed_at: '2026-09-18T00:03:04' },
+])
+const legRevNull = E.decorateLegRevisions(null)
+const legRevEmpty = E.decorateLegRevisions([])
+const legRevOdd = E.decorateLegRevisions([
+  { revision_id: 93, leg_id: 8, seq: 2, mode: 'air', mode_label: 'air',
+    from_name: '甲地', to_name: '乙地', revision_no: 3, change_kind: 'rewritten',
+    change_note: '', changed_at: '' },
+])
+
+check('[航段历史] decorateLegRevisions 是纯函数（`null` / 空数组都不抛）',
+  typeof E.decorateLegRevisions === 'function' && !!legRevNull && !!legRevEmpty &&
+    legRevNull.items.length === 0)
+
+check('[航段历史] ⭐ 每一版保留**当时**的取值（第 1 版仍是 air 与旧终点，' +
+  '不是被当前值覆盖 —— 覆盖了也照样显示"2 版"）',
+  legRevProj.items[0].modeText === 'air' && legRevProj.items[0].routeText === '甲地 → 乙地' &&
+    legRevProj.items[1].modeText === '内河' && legRevProj.items[1].routeText === '甲地 → 丙地',
+  '实际 ' + JSON.stringify(legRevProj.items.map((r) => [r.modeText, r.routeText])))
+
+check('[航段历史] 改动类型走标签表（created→建段 / updated→改段）',
+  legRevProj.items[0].kindText === '建段' && legRevProj.items[1].kindText === '改段',
+  '实际 ' + JSON.stringify(legRevProj.items.map((r) => r.kindText)))
+
+check('[航段历史] 未登记的改动类型**原样显示**（不臆造成"改段"，也不留空）',
+  legRevOdd.items[0].kindText === 'rewritten',
+  '实际 ' + JSON.stringify(legRevOdd.items[0].kindText))
+
+check('[航段历史] `change_note` 为 null / 空串 ⇒ 「未写改动说明」' +
+  '（既不留空白格，也不写成"说明未知"）',
+  legRevProj.items[0].noteText === '未写改动说明' && legRevOdd.items[0].noteText === '未写改动说明',
+  '实际 ' + JSON.stringify([legRevProj.items[0].noteText, legRevOdd.items[0].noteText]))
+
+check('[航段历史] 版号拼成「第 N 版」（行首要有可读的版本号，不是裸数字）',
+  legRevProj.items[0].revisionNoText === '第 1 版' &&
+    legRevProj.items[1].revisionNoText === '第 2 版',
+  '实际 ' + JSON.stringify(legRevProj.items.map((r) => r.revisionNoText)))
+
+check('[航段历史] 时间**原样透出**（截成日期会让同一天的两版看起来一样 —— ' +
+  '而"同一天改了两版还是同一版"正是这条通道要回答的问题）',
+  legRevProj.items[0].changedAtText === '2026-09-18T00:01:02' &&
+    legRevOdd.items[0].changedAtText === '')
+
+check('[航段历史] 空列表与"有行"分得开（`hasItems`），且空列表时不编一个 legId',
+  legRevProj.hasItems === true && legRevProj.legId === '8' &&
+    legRevEmpty.hasItems === false && legRevEmpty.legId === '')
+
+// ⭐ 回填判据：投影必须同时给出**原值**与显示文案。只给文案 ⇒ 改段表单只能拿
+//   "公路"去填 `mode`，提交后库里就多出一个 `公路` 取值（与 `road` 长得一样）。
+check('[计划] ⭐ 段行同时带**原值**与显示文案（改段回填要用原值，不是标签）',
+  planProj.legs[0].modeRaw === 'road' && planProj.legs[0].modeText === '公路' &&
+    planProj.legs[1].modeRaw === 'air' && planProj.legs[0].fromRaw === '厂区' &&
+    planProj.legs[0].toRaw === '南宁港',
+  '实际 ' + JSON.stringify([planProj.legs[0].modeRaw, planProj.legs[0].modeText,
+    planProj.legs[1].modeRaw]))
+
+check('[计划] 原值与显示文案确实**不同**（否则上面那条断言可能只是两个同名字段）',
+  planProj.legs[0].modeRaw !== planProj.legs[0].modeText)
+
+// 模板接线：写侧的锚点与 `data-df` 必须真的在模板里。
+// ⚠️ 与 `verify_ui_interactions.js` 的分工：那边查"每个 data-df 都被 handler 认领"
+//    （认领表在页面 .js 里），这里查"锚点存在"（走查脚本要用它定位）。
+;['data-act-leg-open', 'data-act-leg-edit', 'data-act-leg-hist', 'data-plan-rev',
+  'data-act-leg-submit', 'data-act-leg-cancel', 'data-act-leg-mode',
+  'data-df="leg-seq"', 'data-df="leg-mode"', 'data-df="leg-from"',
+  'data-df="leg-to"', 'data-df="leg-note"'].forEach(function (attr) {
+  check(`[航段命令] 模板 detail.wxml 里有写侧锚点 ${attr}`, detailTpl.indexOf(attr) !== -1)
+})
+
+// 页面 handler 的认领表：五条映射一条都不能少（少一条＝那一格静默空转）
+const detailJs = read(path.join(MINI, 'pages/entrust/detail/detail.js'))
+;["'leg-seq': 'legForm.seq'", "'leg-mode': 'legForm.mode'", "'leg-from': 'legForm.from'",
+  "'leg-to': 'legForm.to'", "'leg-note': 'legForm.note'"].forEach(function (pair) {
+  check(`[航段命令] 页面 data-df 认领表里有 ${pair}`, detailJs.indexOf(pair) !== -1)
+})
+
+// 空改动的本地闸门：页面必须先把"没改动"这件事说清（服务端也会 400），
+// 而不是把注定失败的请求发出去、再把服务端的拒绝显示给用户。
+check('[航段命令] 页面在本地就拦住"空改动"（改段一个字段都没变时不发请求）',
+  detailJs.indexOf('完全相同') !== -1 && detailJs.indexOf('buildLegBody') !== -1)
+
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)
 if (errors.length) {
