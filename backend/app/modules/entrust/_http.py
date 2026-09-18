@@ -74,6 +74,36 @@ def map_artifact_error(exc: Exception) -> HTTPException | None:
     return None
 
 
+def map_closure_error(exc: Exception) -> HTTPException | None:
+    """结案服务异常 → HTTP 语义（**含 409 的结构化 `missing[]`**）。
+
+    为什么单独有一条：`ClosureBlockedError` 的 `detail` **不是字符串而是一个对象**
+    （`{"message": ..., "missing": [...]}`）。走 `detail=str(exc)` 的通用映射，
+    调用方只会看到"不满足结案前置"这一句，拿不到"缺哪五条里的哪几条" ——
+    而合同 §6.4 与 DR-0013 §3.3 要的正是后者（调用方要能自助）。
+
+    无法识别的异常返回 `None`，由 `run_write` 原样抛出（不吞真实 bug）。
+    """
+    from app.modules.entrust import assignments as assignment_svc
+    from app.modules.entrust import closure as cl
+
+    mapped = map_access_denied(exc)
+    if mapped is not None:
+        return mapped
+    if isinstance(exc, cl.ClosureBlockedError):
+        return HTTPException(
+            status_code=409,
+            detail={"message": str(exc), "missing": exc.missing},
+        )
+    if isinstance(exc, assignment_svc.AssignmentNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (assignment_svc.RevisionConflictError, assignment_svc.AssignmentStateError)):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, assignment_svc.AssignmentError):
+        return HTTPException(status_code=400, detail=str(exc))
+    return None
+
+
 def run_write(
     db: Session,
     *,
@@ -114,6 +144,7 @@ __all__ = [
     "guard_or_400",
     "map_access_denied",
     "map_artifact_error",
+    "map_closure_error",
     "require_entrust_enabled",
     "replay",
     "run_write",

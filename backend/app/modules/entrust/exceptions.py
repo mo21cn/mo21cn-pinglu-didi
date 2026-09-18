@@ -34,6 +34,7 @@ from typing import Any, Final, cast
 from sqlalchemy import CursorResult, text
 from sqlalchemy.orm import Session
 
+from app.modules.entrust import locks
 from app.modules.entrust.access import (
     PERM_TASK_DISPATCH,
     AccessContext,
@@ -1629,6 +1630,21 @@ def raise_case(
             f"委托状态为 {assignment['status']}，只有已受理（{ASSIGNMENT_ACTIVE_STATUS}）"
             "的委托才能登记异常或变更案件"
         )
+    # ⭐ 与**结案命令**的竞态收口（合同 §6.4 点名的 close-versus-new-blocking-case）。
+    #    上面那次读是普通读（可能是旧快照），而结案那边是"先取 `ent_assignment` 行锁
+    #    → 评估前置 → 条件 UPDATE"。这里必须在**同一把锁**下**复核一次状态**，
+    #    否则"我读到 claimed → 结案提交 → 我插入阻断案件"会让一条阻断案件落在**已结案**
+    #    的委托上。锁顺序两边一致（都先锁 `ent_assignment`）⇒ 不会互相死锁。
+    #    ⚠️ SQLite 上 `FOR UPDATE` 是空操作（方言守卫在 `locks`），所以这里的绿灯**不是**
+    #    并发证据 —— 证据在 `tests/test_mysql_integration.py` 的 `mysql` 标记用例里。
+    locks.lock_assignment_row(session, assignment_id=assignment_id)
+    locked = _assignment_or_404(session, assignment_id)
+    if str(locked["status"]) != ASSIGNMENT_ACTIVE_STATUS:
+        raise ExceptionCaseConflictError(
+            f"委托状态为 {locked['status']}（在登记期间被其他写者改为该状态），"
+            f"只有已受理（{ASSIGNMENT_ACTIVE_STATUS}）的委托才能登记异常或变更案件"
+        )
+    assignment = locked
     org_id = int(assignment["org_id"])
     if request_org_id is not None and int(request_org_id) != org_id:
         raise ExceptionCaseScopeError(

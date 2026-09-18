@@ -39,6 +39,21 @@ class AssignmentSubmit(BaseModel):
     org_id: int = Field(ge=1)
 
 
+class AssignmentCompleteIn(BaseModel):
+    """结案（`claimed → completed`）：**只带乐观锁**。
+
+    ⚠️ `expected_revision` 在这里是**必填**（`claim` / `cancel` 不收它，因为它们的
+    裁决点就是状态本身）。结案要同时评估五个维度的一堆事实，两个经理同时结案必须
+    有一个拿到 409（HO 0917 第 3 条）—— 条件 UPDATE 里带上 `revision` 才是那条裁决。
+
+    ⛔ 没有"跳过前置"/"强制结案"参数，也不接受管理员标记：PRD 的结案硬检查
+    `cannot be bypassed by chat, generic "complete", or administrator UI`。
+    缺什么由 409 的 `missing[]` 逐条给出。
+    """
+
+    expected_revision: int = Field(ge=1)
+
+
 class AssignmentOut(BaseModel):
     """委托单投影。
 
@@ -69,6 +84,11 @@ class AssignmentOut(BaseModel):
     claimed_at: str | None
     submitted_at: str | None
     cancelled_at: str | None
+    #: 运营完成时间（S4-b 的 `complete` 写入）。⚠️ 与 `financial_status`（财务维度）
+    #: **是两个维度**：合同 §6.4 要求接口能把"运营完成"与"财务结案"分开说，
+    #: `financial_status` 走它自己的派生端点（`/assignments/{id}/financial-status`），
+    #: 不塞进这里 —— 一个字段同时表达两件事就是把 §5.3 的两个维度又合回去。
+    completed_at: str | None = None
     created_at: str
     updated_at: str
 

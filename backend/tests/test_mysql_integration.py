@@ -1309,3 +1309,266 @@ def test_capacity_confirmation_race_exactly_one_confirmation(mysql):
             )
         finally:
             verify.close()
+
+
+# ── 7. 结案：五维度原子评估 ＋ 两条并发锚点（S4-b / 合同 §6.4）────────────────
+
+
+def _seed_closure_ready(db, *, owner_id: int = 970, manager_id: int = 971) -> int:
+    """造一张**五个维度全部满足**的委托，返回 assignment_id。
+
+    两条纪律：
+
+    * 全部走**真实业务命令**（受理 → 任务 → 费用 → 结算 → 收付），⛔ 不手改状态 ——
+      "可以结案"这件事本身就是这些命令产生的，手改出来的前提不证明链路可用；
+    * 授权里的 `permissions` 必须含 `entrust:assignment:complete`：结案**另开了一个
+      权限码**（认领是接单、结案是对客户宣告做完，两件事不该共用一个码）。
+    """
+    from app.modules.entrust import charges as charge_svc
+    from app.modules.entrust import settlement as settle_svc
+    from app.modules.entrust import tasks as task_svc
+
+    now = utcnow_naive().strftime(_TS)
+    org_id = _seed_org_with_entrustment(db, owner_id)
+    db.execute(
+        text(
+            "UPDATE ent_entrustment SET permissions = :p WHERE org_id = :o AND entrust_user_id = :u"
+        ),
+        {
+            "p": '["entrust:view","entrust:assignment:complete","entrust:task:dispatch",'
+            '"entrust:settlement:create"]',
+            "o": org_id,
+            "u": owner_id,
+        },
+    )
+    db.execute(
+        text(
+            "INSERT INTO ent_org_member (org_id, user_id, member_role, status, created_at) "
+            "VALUES (:o, :u, 'manager', 'active', :c)"
+        ),
+        {"o": org_id, "u": manager_id, "c": now},
+    )
+    db.commit()
+
+    created = svc.create_assignment(db, owner_user_id=owner_id, title=f"结案-{_unique('x')}")
+    aid = int(created["assignment_id"])
+    svc.submit_assignment(
+        db,
+        assignment_id=aid,
+        actor_id=owner_id,
+        org_id=org_id,
+        expected_revision=int(created["revision"]),
+    )
+    svc.claim_assignment(db, assignment_id=aid, actor_id=manager_id)
+
+    task = task_svc.create_task(
+        db,
+        assignment_id=aid,
+        actor_id=manager_id,
+        task_type=task_svc.TASK_TYPE_HANDOVER,
+        title="卸货交接",
+    )
+    task_svc.start_task(db, task_id=int(task["task_id"]), actor_id=manager_id)
+    task_svc.complete_task(db, task_id=int(task["task_id"]), actor_id=manager_id)
+
+    charge = charge_svc.record_charge(
+        db,
+        assignment_id=aid,
+        direction="receivable",
+        charge_kind="freight",
+        amount="1000",
+        currency="CNY",
+        basis="费率表",
+        actor_id=manager_id,
+    )
+    charge_svc.confirm_charge(db, charge_id=charge["charge_id"])
+    version = settle_svc.create_settlement(db, assignment_id=aid, actor_id=manager_id)
+    sid = int(version["settlement_id"])
+    settle_svc.approve_settlement(db, settlement_id=sid, actor_id=manager_id)
+    settle_svc.confirm_settlement(
+        db, settlement_id=sid, customer_user_id=owner_id, decision="accepted"
+    )
+    settle_svc.record_payment(
+        db,
+        settlement_id=sid,
+        actor_id=manager_id,
+        direction="receivable",
+        amount="1000",
+        ref="水单-SAMPLE-001",
+    )
+    return aid
+
+
+def test_complete_race_exactly_one_winner(mysql):
+    """HO 0917 第 3 条在真实 MySQL 上：同一 `expected_revision` 并发结案，恰好一个成功。
+
+    为什么由 `revision` 裁决而不是状态：状态判据只能保证"第二个到达者看到已完成"，
+    那是**碰巧**对 —— 中途任何一次编辑都会让 revision 先变。条件 UPDATE 里同时带
+    `status` 与 `revision`，两条裁决点都在 SQL 里。
+    """
+    from app.modules.entrust import closure as closure_svc
+
+    for round_no in range(_ROUNDS):
+        db = mysql()
+        aid = _seed_closure_ready(db, owner_id=970 + round_no, manager_id=1070 + round_no)
+        rev = int(svc.get_assignment(db, aid)["revision"])
+        db.close()
+
+        start = threading.Barrier(2)
+        outcomes: list[str] = []
+
+        def complete(*, start=start, aid=aid, rev=rev, outcomes=outcomes, round_no=round_no):
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                try:
+                    closure_svc.complete_assignment(
+                        session,
+                        assignment_id=aid,
+                        actor_id=1070 + round_no,
+                        expected_revision=rev,
+                    )
+                    outcomes.append("won")
+                except svc.AssignmentError as exc:
+                    outcomes.append(f"lost:{exc}")
+            finally:
+                session.close()
+
+        threads = [threading.Thread(target=complete) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        assert len(outcomes) == 2, f"第 {round_no} 轮有线程未完成: {outcomes}"
+        assert outcomes.count("won") == 1, f"第 {round_no} 轮赢家数错误: {outcomes}"
+
+        verify = mysql()
+        try:
+            row = svc.get_assignment(verify, aid)
+            assert row is not None
+            assert row["status"] == "completed"
+            assert row["completed_at"], "赢家必须落下完成时间"
+            # revision 只该涨 1（受理 → 认领 → 结案各一次）⇒ 输家**没有**写第二次
+            assert int(row["revision"]) == rev + 1, (
+                f"第 {round_no} 轮 revision 涨了 {int(row['revision']) - rev} 次 —— "
+                "说明两个写者都改到了同一张委托"
+            )
+        finally:
+            verify.close()
+
+
+def test_close_versus_new_blocking_case_is_serialized(mysql):
+    """⭐ 合同 §6.4 点名的竞态：**结案**与**并发登记一条阻断案件**不许都成功。
+
+    不许出现的结局是"结案成功 **且** 一条阻断案件存在于该委托上" —— 那等于合同
+    §6.4 的 `No unresolved blocking case` 在结案那一刻成立、之后被静默破坏。
+    两侧各取同一把 `ent_assignment` 行锁并复核状态 ⇒ 必然有一方拿到明确的拒绝：
+
+    * 案件先提交 ⇒ 结案评估看得见它 ⇒ 结案 409（`blocking_cases_open`）；
+    * 结案先提交 ⇒ `raise_case` 在锁下复核发现状态不是 `claimed` ⇒ 409。
+
+    ⚠️ 这条就是合同说的"**代码里有一个案件查询不算这个证明**"那个证明：
+    SQLite 上（单写者 ＋ `FOR UPDATE` 空操作）它**永远**只会走其中一条路径，
+    跑不出另一条的拒绝者。
+    """
+    from app.modules.entrust import closure as closure_svc
+    from app.modules.entrust import exceptions as case_svc
+    from app.modules.entrust import tasks as task_svc
+
+    for round_no in range(_ROUNDS):
+        db = mysql()
+        owner_id, manager_id = 980 + round_no, 1080 + round_no
+        aid = _seed_closure_ready(db, owner_id=owner_id, manager_id=manager_id)
+        rev = int(svc.get_assignment(db, aid)["revision"])
+        # 阻断案件必须至少有一条受影响项（C2）⇒ 先备一个任务供 link
+        link_task = task_svc.create_task(
+            db,
+            assignment_id=aid,
+            actor_id=manager_id,
+            task_type=task_svc.TASK_TYPE_HANDOVER,
+            title="待核项",
+        )
+        db.close()
+
+        start = threading.Barrier(2)
+        outcomes: list[str] = []
+
+        def do_complete(*, start=start, aid=aid, rev=rev, manager_id=manager_id, outcomes=outcomes):
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                try:
+                    closure_svc.complete_assignment(
+                        session, assignment_id=aid, actor_id=manager_id, expected_revision=rev
+                    )
+                    outcomes.append("closed")
+                except svc.AssignmentError as exc:
+                    outcomes.append(f"close-refused:{exc}")
+            finally:
+                session.close()
+
+        def do_raise(
+            *,
+            start=start,
+            aid=aid,
+            manager_id=manager_id,
+            link_task=link_task,
+            outcomes=outcomes,
+        ):
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                try:
+                    case_svc.raise_case(
+                        session,
+                        assignment_id=aid,
+                        actor_id=manager_id,
+                        kind="exception",
+                        title="并发登记的阻断案件",
+                        severity="critical",
+                        impact_kind="execution-blocking",
+                        links=[{"target_kind": "task", "target_id": int(link_task["task_id"])}],
+                    )
+                    outcomes.append("case-raised")
+                except Exception as exc:  # 案件层的四个异常类没有共同基类
+                    outcomes.append(f"case-refused:{exc}")
+            finally:
+                session.close()
+
+        threads = [threading.Thread(target=do_complete), threading.Thread(target=do_raise)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        assert len(outcomes) == 2, f"第 {round_no} 轮有线程未完成: {outcomes}"
+        closed = "closed" in outcomes
+        raised = "case-raised" in outcomes
+        assert not (closed and raised), (
+            f"第 {round_no} 轮两个都成功了：{outcomes} —— 已结案的委托上出现了一条阻断案件，"
+            "结案那一刻的前置被静默破坏"
+        )
+        assert closed or raised, f"第 {round_no} 轮两个都被拒了，没有任何一方推进: {outcomes}"
+
+        verify = mysql()
+        try:
+            row = svc.get_assignment(verify, aid)
+            assert row is not None
+            if closed:
+                assert row["status"] == "completed"
+                open_cases = int(
+                    verify.execute(
+                        text(
+                            "SELECT COUNT(*) FROM ent_exception "
+                            "WHERE assignment_id = :a AND status != 'closed'"
+                        ),
+                        {"a": aid},
+                    ).scalar()
+                    or 0
+                )
+                assert open_cases == 0, "结案成功了却带着一条未关闭的案件"
+            else:
+                assert row["status"] == "claimed", "案件赢了就该保持已受理"
+        finally:
+            verify.close()
