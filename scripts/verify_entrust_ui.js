@@ -273,7 +273,12 @@ const ENTRUST_PAGES = [
   // S1 工作项 5：「我的委托」（货主侧状态屏）。它从 utils/entrust 解构导入 5 个成员，
   // 列进来才会被下面那三项现成检查扫到：解构的每个成员都被导出、已在 app.json 注册、
   // 模板里的类名都有定义 —— 这三件漏掉都不报错，只是静默不生效。
-  'pages/entrust/assignments/assignments'
+  'pages/entrust/assignments/assignments',
+  // §10.1 第 10–11 步（S7-1 / S7-2 / S7-3 的界面入口）—— 裁定 Q4=A 要求这三步
+  // **经现有产品界面演示**。本页从 utils/entrust 解构导入 20 余个成员，
+  // 列进来才会被下面那三项现成检查扫到：解构的每个成员都被导出、已在 app.json 注册、
+  // 模板里的类名都有定义 —— 这三件漏掉都不报错，只是静默不生效。
+  'pages/entrust/finance/finance'
 ]
 
 /**
@@ -294,6 +299,7 @@ const PAGE_CSS_CHECKS = [
   { path: 'pages/entrust/session/session', knownEmpty: [] },
   { path: 'pages/entrust/intake/intake', knownEmpty: [] },
   { path: 'pages/entrust/assignments/assignments', knownEmpty: [] },
+  { path: 'pages/entrust/finance/finance', knownEmpty: [] },
   { path: 'pages/mine/mine', knownEmpty: ['nav', 'bell-icon', 'role-chip-label'] }
 ]
 
