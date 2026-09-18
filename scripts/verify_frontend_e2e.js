@@ -4194,6 +4194,78 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     } else ok()
   }
 
+  // ⑱ 受控重开（S4-c）：把「提交」这一段**真的跑一遍**（载荷形状 ＋ 空理由护栏）
+  //
+  // 为什么单开一段：静态门禁只能读源码**文本**，而设备侧走查本轮拿不到读数
+  // （本机会话级资源到限，见 PR 说明）⇒ 这个**撤销结案**的 handler 此前**没有任何执行验证**。
+  // ⚠️ 本段**不**依赖"已结案的委托"夹具：它断言的是**页面发了什么**（与业务结果无关）——
+  //    真实后端会因状态不符而拒绝，而那正好用来验"把服务端给的理由说给用户看"这一档。
+  // ⚠️ 位置：必须排在前面那个写段（`pageWrites.length !== writesDriven` 的收口）**之后**
+  //    —— 那条会数**全量**写请求，多一条就红。
+  if (D.entrustCases.length) {
+    console.log('\n--- ⑱ 受控重开：提交载荷与空理由护栏 ---')
+    const raid = String(D.entrustCases[0][0])
+    const REOPEN_REASON = 'e2e：理由必填与载荷形状'
+    try {
+      const rc = loadPage(path.join(ROOT, 'miniapp/pages/entrust/detail/detail.js'),
+        { role: 'manager' })
+      const rp = instantiate(rc, { role: 'manager', arg: { assignment_id: raid } })
+      rc.onLoad.call(rp, { assignment_id: raid })
+      await tick(90)
+      const rev = (rp._final().detail || {}).revision
+      if (rev === undefined || rev === null) {
+        fail('⑱ 详情页未产出 revision（重开的 expected_revision 取不到）', String(rev))
+      } else ok()
+
+      // ① 空理由：**不得发请求**，且要给出可读的理由（"受控"的第一道）
+      rp.setData({ reopenReason: '   ', reopenOpen: true })
+      const n1 = pageWrites.length
+      let thrown1 = null
+      try { await rc.onReopenSubmit.call(rp) } catch (e) { thrown1 = e }
+      await tick(40)
+      if (thrown1) fail('⑱ 空理由提交抛异常', thrown1.message)
+      else if (pageWrites.length !== n1) {
+        fail('⑱ 空理由仍然发出了写请求', String(pageWrites.length - n1))
+      } else if (!String(rp._final().reopenHint || '').trim()) {
+        fail('⑱ 空理由没有给出提示（用户会以为按钮坏了）')
+      } else ok()
+
+      // ② 有理由：恰好一条 POST，载荷＝{expected_revision, reason}（真发；服务端可拒）
+      rp.setData({ reopenReason: REOPEN_REASON })
+      const n2 = pageWrites.length
+      WRITE_ENABLED = true
+      let thrown2 = null
+      try { await rc.onReopenSubmit.call(rp) } catch (e) { thrown2 = e } finally { WRITE_ENABLED = false }
+      await tick(60)
+      if (thrown2) fail('⑱ 有理由提交抛异常', thrown2.message)
+      else {
+        const wrote = pageWrites.slice(n2)
+        if (wrote.length !== 1) {
+          fail('⑱ 有理由时写请求数不为 1', String(wrote.length))
+        } else {
+          const w = wrote[0]
+          if (w.method !== 'POST' || w.path !== '/entrust/assignments/' + raid + '/reopen') {
+            fail('⑱ 重开打到了别的路径', w.method + ' ' + w.path)
+          } else if (!w.body || Number(w.body.expected_revision) !== Number(rev)) {
+            fail('⑱ 载荷的 expected_revision 不是页面持有的那一版', JSON.stringify(w.body))
+          } else if (String(w.body.reason) !== REOPEN_REASON) {
+            fail('⑱ 载荷的 reason 与输入不一致', JSON.stringify(w.body))
+          } else ok()
+          if (w.status >= 400) {
+            // 被拒时必须把**服务端给的理由**说给用户看（本单未结案 ⇒ 预期就是这一档）
+            if (!String(rp._final().reopenHint || '').trim()) {
+              fail('⑱ 被拒但页面没有提示原因', String(w.status) + ' ' + JSON.stringify(w.data))
+            } else ok()
+          } else {
+            note('⑱ 重开请求被接受（本单处于可重开状态）：' + String(w.status))
+          }
+        }
+      }
+    } catch (e) {
+      fail('⑱ 详情页装载/取数抛异常', e.message)
+    }
+  }
+
   auditTemplates()
 
   console.log('\n' + '='.repeat(78))
