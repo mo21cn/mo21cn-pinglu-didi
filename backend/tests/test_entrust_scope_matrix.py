@@ -178,8 +178,22 @@ def test_matrix_size_matches_baseline():
     ⛔ `resolve` 那条**刻意要三个字段**（`outcome` / `counts_in_total` / `final_amount`）：
     裁定 Q2=B 明确 `resolved` 一词**决定不了**是否计入 —— 把"处置了 / 金额定了 /
     计不计入"压成一个状态，就是合计出现歧义的来源。
+
+    92 → 94（**S7-2 交接与缺证据**，§10.1 第 10 步 / 合同 S4 段第 1、2、4、8 条）：
+
+    * `GET  /assignments/{assignment_id}/evidence-gaps` —— 缺什么、谁在等、交接齐没齐；
+      **派生**读数（不落库、不新建实体），**读不加严**：与任务列表同一格
+      （`entrust:view` ＋ 货主旁路），因为"还缺什么"是参与方本来就该看见的事。
+    * `POST /tasks/{task_id}/evidence` —— 在**原任务**上补录一条证据。
+
+    ⛔ **不另造工作流**（HO 0918-2 边界 1）：缺件条件不是新实体，它就是任务自己的
+    `waiting` ＋ `wait_reason`；补救出口也不是新流程，就是在**本任务**上补齐证据。
+    因此这里**没有**第四个 guard 值、也**没有**新的权限常量 —— 补录与 `start`/`wait`/
+    `complete` 同一格（执行是本职，被指派人本人可做）。
+    ⛔ **也不新建"交接成果"实体**：交接＝`task_type = handover` 的任务
+    （合同 S4 段 `Do not invent a "handover artifact"`），缺件视图只是把它汇总出来。
     """
-    assert len(sm.SCOPE_MATRIX) == 92
+    assert len(sm.SCOPE_MATRIX) == 94
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

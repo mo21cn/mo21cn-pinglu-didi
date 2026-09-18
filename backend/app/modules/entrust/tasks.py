@@ -107,6 +107,10 @@ EVIDENCE_KINDS = frozenset(
     {"document", "photo", "email", "receipt", "contract", "payment", "confirmation"}
 )
 
+#: 证据条目里由**服务端**管理的字段（S4 段 §2 的"记录时间"与"记录人"）。
+#: 它们不是普通字段，是记账：调用方给了要报 400，而不是被静默覆盖。
+_EVIDENCE_SERVER_FIELDS = ("recorded_at", "recorded_by")
+
 #: 前置链遍历上限：正常数据不会这么深；超出只可能是脏数据，宁可报错也不死循环。
 _MAX_PRECONDITION_DEPTH = 1000
 
@@ -327,22 +331,143 @@ def _normalize_required_evidence(raw: list[str] | None) -> list[str] | None:
     return unique
 
 
-def _normalize_evidence_refs(raw: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
-    """规整证据条目：每条必须带 kind 与 ref，且 kind 在取值域内。"""
+def _evidence_identity(entry: dict[str, Any]) -> tuple[str, str]:
+    """一条证据的**身份** = `(类别, 来源)`。
+
+    同一个任务下，同一类别 + 同一来源就是同一份材料：重复补录**幂等**
+    （不新增第二条、也不刷新它的记录时间）。换类别则视为另一条 ——
+    同一份文件既可以当"合同"也可以当"回执"，那是两件要分别核对的事。
+    """
+    return str(entry.get("kind") or ""), str(entry.get("ref") or "")
+
+
+def _parse_business_ts(raw: Any) -> str | None:
+    """业务发生时间 → `YYYY-MM-DD HH:MM:SS`（带时区的按 UTC 归一）。
+
+    **空值原样回 `None`**：本层不提供"默认现在"这种便利 ——
+    业务发生时间被悄悄填成记录时间，正是 §2 要求把两者分开的原因。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        moment = raw
+    else:
+        text_value = str(raw).strip()
+        if not text_value:
+            return None
+        try:
+            moment = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise TaskValidationError(
+                f"业务发生时间无法解析：{raw!r}（应给 ISO 8601，例如 2026-09-18T09:30:00）"
+            ) from exc
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(UTC).replace(tzinfo=None)
+    return _fmt(moment)
+
+
+def _normalize_evidence_refs(
+    raw: list[dict[str, Any]] | None,
+    *,
+    existing: list[dict[str, Any]] | None = None,
+    actor_id: int | None = None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]] | None:
+    """规整证据条目（S4 段 §2：业务发生时间与记录时间**分开**，带 actor 与 source）。
+
+    每条的字段分工：
+
+    * `kind` / `ref` —— 调用方给，构成这条证据的**身份**（见 `_evidence_identity`）；
+    * `occurred_at` —— **业务发生时间**，调用方给；不给就**缺着**，绝不用"现在"顶上；
+    * `source` —— 来源（`manual` / `upload` / `agent` / 外部凭据类型…），调用方给，本层不解释；
+    * `recorded_at` / `recorded_by` —— **记录时间与记录人**，**服务端写**。
+      调用方自带这两个键一律 400：提交方自称的记录时间没有证据价值，
+      而它一旦被采纳，`recorded_at` 就不再是"我们什么时候知道的"，审计就断了。
+
+    已登记过的条目（`(kind, ref)` 相同）**保留原有的记录时间与记录人** ——
+    重复提交同一份材料不该刷新"我们什么时候知道的"。`occurred_at` / `source`
+    属于事实本身，允许在重复提交时补齐或更正。
+    """
     if not raw:
         return None
+    prior: dict[tuple[str, str], dict[str, Any]] = {}
+    for kept in existing or []:
+        if isinstance(kept, dict):
+            prior[_evidence_identity(kept)] = kept
+
+    stamp = _fmt(now or utcnow_naive())
     normalized: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
     for item in raw:
         if not isinstance(item, dict):
             raise TaskValidationError(f"证据条目必须是对象，实际为 {type(item).__name__}")
+        for managed in _EVIDENCE_SERVER_FIELDS:
+            if item.get(managed) is not None:
+                raise TaskValidationError(
+                    f"证据条目的 {managed} 由服务端写入，不接受调用方提供"
+                    "（记录时间与记录人不能由提交方自称）"
+                )
         kind = str(item.get("kind", ""))
         ref = str(item.get("ref", "") or "").strip()
         if kind not in EVIDENCE_KINDS:
             raise TaskValidationError(f"未知证据类型 {kind!r}；R1 取值域：{sorted(EVIDENCE_KINDS)}")
         if not ref:
             raise TaskValidationError("证据条目的 ref 不能为空（证据必须有来源）")
-        normalized.append({"kind": kind, "ref": ref})
+
+        entry: dict[str, Any] = {"kind": kind, "ref": ref}
+        occurred = _parse_business_ts(item.get("occurred_at"))
+        if occurred is not None:
+            entry["occurred_at"] = occurred
+        source = str(item.get("source") or "").strip()
+        if source:
+            entry["source"] = source[:64]
+
+        previous = prior.get((kind, ref))
+        if previous is None:
+            entry["recorded_at"] = stamp
+            if actor_id is not None:
+                entry["recorded_by"] = int(actor_id)
+        else:
+            for managed in _EVIDENCE_SERVER_FIELDS:
+                if previous.get(managed) is not None:
+                    entry[managed] = previous[managed]
+            for optional in ("occurred_at", "source"):
+                if optional not in entry and previous.get(optional) is not None:
+                    entry[optional] = previous[optional]
+
+        ident = (kind, ref)
+        if ident in seen:
+            # 同一批里重复给同一条：留第一条，不制造"两条一样的证据"。
+            continue
+        seen.add(ident)
+        normalized.append(entry)
     return normalized
+
+
+def _merge_evidence(
+    existing: list[dict[str, Any]] | None,
+    fresh: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """已登记的证据**只增不删**；同身份的新提交按"补齐 / 更正"落在原位上。
+
+    为什么不做替换语义：`complete` 曾经是证据的**唯一**入口（补录入口是 S7-2 才有的），
+    那时"提交即全量"与"提交即追加"没有区别。现在有了补录，替换语义会让
+    「先补录两份、完成时只提交第三份」把前两份**悄悄删掉** —— 而证据是审计事实，
+    要纠正它应当走 `reopen`，不该在完成时顺手抹掉。
+    """
+    fresh_by_id = {_evidence_identity(item): item for item in fresh or []}
+    merged: list[dict[str, Any]] = []
+    replaced: set[tuple[str, str]] = set()
+    for entry in existing or []:
+        ident = _evidence_identity(entry)
+        replacement = fresh_by_id.get(ident)
+        if replacement is None:
+            merged.append(entry)
+        else:
+            merged.append(replacement)
+            replaced.add(ident)
+    merged.extend(item for ident, item in fresh_by_id.items() if ident not in replaced)
+    return merged or None
 
 
 def _assert_title(title: str) -> str:
@@ -753,6 +878,78 @@ def wait_task(
     )
 
 
+def record_task_evidence(
+    session: Session,
+    *,
+    task_id: int,
+    actor_id: int,
+    kind: str,
+    ref: str,
+    occurred_at: Any = None,
+    source: str | None = None,
+    expected_revision: int | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """在**原任务**上补录一条证据 —— 缺件的补救入口（S4 段 §8）。
+
+    ⛔ **不另造工作流**（HO 0918-2 边界 1）：缺件条件就是任务自己的
+    `waiting` ＋ `wait_reason`，补救出口就是**在本任务上**把证据补齐。
+    本函数不新建任务、不新建等待实体、不做通用等待引擎 ——
+    它只做一件现有能力做不到的事：**在完成之前**登记证据。
+
+    几条口径：
+
+    * **只增不删**：补录不会移除任何已登记的证据（纠正走 `reopen`）；
+    * **幂等**：`(kind, ref)` 相同即同一条，重复补录不新增、也不刷新它的记录时间；
+    * `occurred_at` 是**业务发生时间**（这张单子上"什么时候真的发生了"），
+      与 `recorded_at`（我们什么时候知道的）**分开存**；
+    * 终态任务（`done` / `cancelled`）拒绝 —— 已完成的任务要补证据，先 `reopen`。
+      否则"完成时的证据齐备"这个判定会被事后改写。
+
+    Returns:
+        `{"task": <更新后的任务>, "gap": <重算后的齐备度>}`。
+    """
+    task, _ = authorize(
+        session,
+        task_id=task_id,
+        user_id=actor_id,
+        permission=PERM_TASK_DISPATCH,
+        allow_assignee=True,
+    )
+    _assert_assignment_active(task)
+    if task["status"] in TERMINAL_STATUSES:
+        raise TaskStateError(
+            f"任务 {task_id} 状态为 {task['status']}，终态任务不能补录证据"
+            "（要补证据请先 reopen，否则完成时的证据齐备会被事后改写）"
+        )
+
+    current = now or utcnow_naive()
+    existing = task["evidence_refs"] or []
+    merged = _merge_evidence(
+        existing,
+        _normalize_evidence_refs(
+            [{"kind": kind, "ref": ref, "occurred_at": occurred_at, "source": source}],
+            existing=existing,
+            actor_id=actor_id,
+            now=current,
+        ),
+    )
+    expected = int(expected_revision) if expected_revision is not None else int(task["revision"])
+    updated = _apply_update(
+        session,
+        task_id=task_id,
+        expected_revision=expected,
+        sets=["evidence_refs = :refs"],
+        params={
+            "tid": task_id,
+            "ts": _fmt(current),
+            "rev": expected,
+            "refs": json.dumps(merged, ensure_ascii=False) if merged else None,
+        },
+    )
+    return {"task": updated, "gap": gap_for_task(updated)}
+
+
 def complete_task(
     session: Session,
     *,
@@ -782,7 +979,12 @@ def complete_task(
     _assert_assignment_active(task)
     _check_generation(task, expected_generation)
 
-    refs = _normalize_evidence_refs(evidence_refs)
+    current = now or utcnow_naive()
+    existing = task["evidence_refs"] or []
+    refs = _merge_evidence(
+        existing,
+        _normalize_evidence_refs(evidence_refs, existing=existing, actor_id=actor_id, now=current),
+    )
     required = task["required_evidence"] or []
     provided_kinds = {item["kind"] for item in (refs or [])}
     missing = [kind for kind in required if kind not in provided_kinds]
@@ -797,7 +999,6 @@ def complete_task(
             f"{listed}（先处置案件：记录决定并关闭，或由管理动作解除其阻断影响）"
         )
 
-    current = now or utcnow_naive()
     done = _transition(
         session,
         task_id=task_id,
@@ -1013,16 +1214,12 @@ def list_tasks(
     return total, [_row_to_task(row) for row in rows]
 
 
-def list_visible_tasks(
-    session: Session,
-    *,
-    user_id: int,
-    assignment_id: int,
-    task_status: str | None = None,
-    page: int = 1,
-    size: int = 20,
-) -> tuple[int, list[dict[str, Any]]]:
-    """带可见性校验的列表：委托不可见即 404（不泄漏存在性）。"""
+def _assert_assignment_visible(session: Session, *, assignment_id: int, user_id: int) -> None:
+    """委托可见性（货主本人或该组织成员）；不可见与不存在**都** 404。
+
+    抽出来是因为可见性现在有**两个**调用方（任务列表、缺件派生）——
+    判据抄两遍，迟早出现"列表里看得见、派生里看不见"。
+    """
     assignment = (
         session.execute(
             text("SELECT id, owner_user_id, org_id FROM ent_assignment WHERE id = :aid"),
@@ -1043,6 +1240,111 @@ def list_visible_tasks(
     if not visible:
         raise TaskNotFoundError(f"委托 {assignment_id} 不存在")
 
+
+def gap_for_task(task: dict[str, Any]) -> dict[str, Any]:
+    """**一个任务的证据齐备度** —— 纯派生，不落库、不新建实体（S4 段 §8）。
+
+    §8 要求"缺失证据记为等待/阻塞条件 ＋ 可执行补救"。这一格做的就是
+    **把缺什么算出来**：所需（`required_evidence`）减去已登记（`evidence_refs` 的类别）。
+    等待条件不另建实体 —— 它就是任务自己的 `waiting` ＋ `wait_reason`。
+
+    `waiting_on_evidence` 的判据是"状态为等待 **且** 确实还缺必需证据"。
+    这里**不解析 `wait_reason` 的自由文本**（它是给人看的）：两个可核对的字段合起来
+    就已经说明了"在等、且缺的是证据"，猜文本只会把不确定当确定。
+    """
+    required = list(task.get("required_evidence") or [])
+    registered: list[str] = []
+    for entry in task.get("evidence_refs") or []:
+        kind = str((entry or {}).get("kind") or "")
+        if kind and kind not in registered:
+            registered.append(kind)
+    missing = [kind for kind in required if kind not in registered]
+    return {
+        "task_id": int(task["task_id"]),
+        "task_type": task["task_type"],
+        "title": task["title"],
+        "status": task["status"],
+        "is_handover": task["task_type"] == TASK_TYPE_HANDOVER,
+        "required": required,
+        "registered": registered,
+        "missing": missing,
+        "satisfied": not missing,
+        "wait_reason": task.get("wait_reason"),
+        "waiting_on_evidence": task["status"] == STATUS_WAITING and bool(missing),
+    }
+
+
+def _union_in_order(values: list[str]) -> list[str]:
+    """按首次出现顺序去重（不做字母序 —— 顺序本身是可读性的一部分）。"""
+    out: list[str] = []
+    for value in values:
+        if value not in out:
+            out.append(value)
+    return out
+
+
+def list_evidence_gaps(session: Session, *, user_id: int, assignment_id: int) -> dict[str, Any]:
+    """一张委托上"还缺什么证据"（S4 段 §8）的**派生读模型**。
+
+    ⛔ 这里**不走分页**（与 `list_visible_tasks` 的区别是刻意的）：缺件清单回答的是
+    "这张委托的必需证据齐了没有"，被截断的清单会**静默地**少报缺项 ——
+    那正是 O-9 记下的那类缺陷。要翻页的是"列表"，不是"清单"。
+    因此本条查询一次取全该委托的任务（同一事务内）。
+
+    `handover` 汇总对应 §1「交接证据挂在**任务**上」＋ 合同 S4 段
+    `Do not invent a "handover artifact"`：交接**没有**独立成果实体，
+    它就是 `task_type = handover` 的那些任务。汇总里 `satisfied` 在
+    **没有交接任务**时为 `None`（= 无从判断），不是 `True`。
+    """
+    _assert_assignment_visible(session, assignment_id=assignment_id, user_id=user_id)
+    rows = (
+        session.execute(
+            text(
+                f"SELECT {_TASK_COLS} FROM ent_workflow_task t "
+                "JOIN ent_assignment a ON a.id = t.assignment_id "
+                "WHERE t.assignment_id = :aid ORDER BY t.id ASC"
+            ),
+            {"aid": assignment_id},
+        )
+        .mappings()
+        .all()
+    )
+    items = [gap_for_task(_row_to_task(row)) for row in rows]
+    handover_items = [item for item in items if item["is_handover"]]
+    handover_satisfied: bool | None = (
+        all(item["satisfied"] for item in handover_items) if handover_items else None
+    )
+    return {
+        "assignment_id": assignment_id,
+        "tasks_total": len(items),
+        "tasks_with_requirement": sum(1 for item in items if item["required"]),
+        "tasks_waiting_on_evidence": sum(1 for item in items if item["waiting_on_evidence"]),
+        "missing_total": sum(len(item["missing"]) for item in items),
+        "handover": {
+            "present": bool(handover_items),
+            "task_ids": [item["task_id"] for item in handover_items],
+            "required": _union_in_order([k for item in handover_items for k in item["required"]]),
+            "registered": _union_in_order(
+                [k for item in handover_items for k in item["registered"]]
+            ),
+            "missing": _union_in_order([k for item in handover_items for k in item["missing"]]),
+            "satisfied": handover_satisfied,
+        },
+        "items": items,
+    }
+
+
+def list_visible_tasks(
+    session: Session,
+    *,
+    user_id: int,
+    assignment_id: int,
+    task_status: str | None = None,
+    page: int = 1,
+    size: int = 20,
+) -> tuple[int, list[dict[str, Any]]]:
+    """带可见性校验的列表：委托不可见即 404（不泄漏存在性）。"""
+    _assert_assignment_visible(session, assignment_id=assignment_id, user_id=user_id)
     return list_tasks(
         session, assignment_id=assignment_id, task_status=task_status, page=page, size=size
     )
@@ -1071,9 +1373,12 @@ __all__ = [
     "cancel_task",
     "complete_task",
     "create_task",
+    "gap_for_task",
     "get_task",
+    "list_evidence_gaps",
     "list_tasks",
     "list_visible_tasks",
+    "record_task_evidence",
     "reassign_task",
     "reopen_task",
     "set_precondition",
