@@ -165,7 +165,7 @@ def test_matrix_size_matches_baseline():
     两条都**只有经理通道**（与派生同一口径：证据行带内部编号与审计措辞，
     客户看合同走已有发布通路，不为它新开一条客户面）。
     """
-    assert len(sm.SCOPE_MATRIX) == 86
+    assert len(sm.SCOPE_MATRIX) == 87
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────
