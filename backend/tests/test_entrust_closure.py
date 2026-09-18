@@ -852,3 +852,149 @@ def test_finance_blocker_mapping_is_exhaustive():
     )
     # 每个 code 都要落在**五个维度之一**里（写错一个维度名不会被上面的集合比较发现）
     assert set(cl.FINANCE_BLOCKER_DIMENSIONS.values()) <= set(cl.DIMENSIONS)
+
+
+# ───────────────────────── 5. 读端点（界面入口的只读前置）
+
+READINESS_PATH = "/api/v1/entrust/assignments/{aid}/closure-readiness"
+
+
+def _readiness(env, user, aid: int):
+    return env.client.get(READINESS_PATH.format(aid=aid), headers=_headers(user))
+
+
+def test_readiness_endpoint_answers_exactly_what_the_service_does(env):
+    """⭐ 读端点与 `closure_readiness()` **逐字段相同** —— 同一份评估，不是两套判据。
+
+    断言取**键集合相等 ＋ 逐字段相等**（不是"包含"）：每多带一个字段，界面之外就多
+    一个会各自演化的落点；而少带一个字段则是界面自己补默认值（静默降级）。
+    """
+    from app.modules.entrust import closure as cl
+
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+    finally:
+        db.close()
+
+    resp = _readiness(env, seeded["manager"], seeded["aid"])
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    session = env.make_session()
+    try:
+        expected = cl.closure_readiness(
+            session, assignment_id=seeded["aid"], user_id=seeded["manager"]["user_id"]
+        )
+    finally:
+        session.close()
+
+    assert sorted(body.keys()) == sorted(expected.keys())
+    for key in (
+        "assignment_id",
+        "ready",
+        "missing",
+        "missing_by_dimension",
+        "tasks_total",
+        "handover",
+        "financial_status",
+        "applicable_settlement",
+        "balances",
+    ):
+        assert body[key] == expected[key], f"字段 {key} 与派生不一致"
+
+
+def test_readiness_endpoint_is_200_with_missing_before_and_empty_after(env):
+    """未齐备 ⇒ **200 ＋ 非空 `missing[]`**（不是 4xx）；齐备 ⇒ 200 ＋ 空数组。
+
+    ⚠️ 「这张单还不能结」是本支线的一种**正常**状态：报 4xx 会让它与「端点坏了」
+    在客户端长得一样，而两者的处置完全不同（一个是去补事实，一个是报障）。
+    另钉一条：五个维度的键**恒在**（界面据此画五格，不必自己补空）。
+    """
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+    finally:
+        db.close()
+
+    before = _readiness(env, seeded["manager"], seeded["aid"])
+    assert before.status_code == 200, before.text
+    assert before.json()["ready"] is False
+    assert before.json()["missing"], "未齐备时 missing 不能为空"
+    assert sorted(before.json()["missing_by_dimension"]) == [
+        "balance",
+        "evidence",
+        "exceptions",
+        "settlement",
+        "tasks",
+    ], "五个维度的键必须恒在"
+
+    _fully_ready(env, seeded)
+    after = _readiness(env, seeded["manager"], seeded["aid"])
+    assert after.status_code == 200, after.text
+    assert after.json()["ready"] is True
+    assert after.json()["missing"] == []
+
+
+def test_readiness_endpoint_permissions(env):
+    """权限四档：经理 200 ／ **只读成员 403** ／ 局外人 404 ／ **货主本人 404**。
+
+    ⭐ 与 `charges`（判据 `entrust:view`）的差别**落在只读成员这一档**：那里他看得到
+    费用合计，这里他看不到缺项清单 —— 因为「看得到缺项的人就是能结案的人」
+    （清单里带结算版本、余额与案件处置）。货主两边都是 404，但**理由不同**
+    （这里是"你没资格宣布完成"，不是"你没资格看财务"）。
+
+    ⚠️ 构造 403 必须**换一个货主**（权限按 (组织, 货主) 对解析，同一对上再插一条
+    只读授权是并集、收不回已有权限）—— 与 `test_only_the_org_manager_can_complete`
+    同一条理由，别在图省事的地方退化成假 403。
+    """
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+        other = _login(env.client, "shipper2")
+        db.execute(
+            text(
+                "INSERT INTO ent_entrustment "
+                "(org_id, entrust_user_id, permissions, status, created_at) "
+                "VALUES (:o, :u, :p, 'active', :c)"
+            ),
+            {"o": seeded["org_id"], "u": other["user_id"], "p": VIEWER_PERMS, "c": _TS},
+        )
+        res = db.execute(
+            text(
+                "INSERT INTO ent_assignment "
+                "(owner_user_id, org_id, title, status, revision, created_at, updated_at) "
+                "VALUES (:o, :g, 'S4-b 只读授权（读端点）', 'claimed', 1, :c, :c)"
+            ),
+            {"o": other["user_id"], "g": seeded["org_id"], "c": _TS},
+        )
+        aid2 = int(res.lastrowid or 0)
+        db.commit()
+    finally:
+        db.close()
+
+    assert _readiness(env, seeded["manager"], seeded["aid"]).status_code == 200
+    assert _readiness(env, seeded["viewer"], aid2).status_code == 403
+    assert _readiness(env, seeded["outsider"], seeded["aid"]).status_code == 404
+    assert _readiness(env, seeded["owner"], seeded["aid"]).status_code == 404
+
+
+def test_readiness_stays_true_after_complete_while_the_command_conflicts(env):
+    """⭐ 两条判据的差别被钉住：结案之后 `ready` **仍为 True**，而命令给 409。
+
+    把状态塞进 `ready` 会让一个字段同时回答「可以结吗」与「现在能结吗」，
+    调用方就分不清该去补事实、还是该先重开。⇒ 界面按**委托自身**的 `status`
+    决定按钮态，`ready` 只回答"五条前置是否成立"。
+    """
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+    finally:
+        db.close()
+    rev = _fully_ready(env, seeded)
+    assert _complete(env, seeded["manager"], seeded["aid"], rev).status_code == 200
+
+    after = _readiness(env, seeded["manager"], seeded["aid"])
+    assert after.status_code == 200, after.text
+    assert after.json()["ready"] is True, "前置事实没变，ready 不该因为状态而翻转"
+    assert _complete(env, seeded["manager"], seeded["aid"], rev).status_code == 409
