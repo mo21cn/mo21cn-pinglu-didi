@@ -720,7 +720,11 @@ Page({
       // 齐备度整页刷新就重取：它的语义是"**现在**缺什么"，缓存它等于让界面说旧话。
       closure: null,
       closureHint: '',
-      completeHint: '',
+      // ⚠️ `completeHint` / `reopenHint` **刻意不在这里复位**：它们是"**上一次尝试的结果**"，
+      //    而结案/重开的 409 分支做的正是「**先设提示、再 `load()`**」——在这里把它们复位，
+      //    等于把服务端刚给出的原因**吞掉**，用户只看到"点了没反应"（e2e ⑱ 段实测抓到：
+      //    `被拒但页面没有提示原因 → 409 委托单 3 状态为 claimed…`）。
+      //    清除点＝用户重新展开表单（`onCompleteOpen` / `onReopenOpen`）。
       completing: false,
       // 「重开」入口：**已结案** ∧ 组织内有 `entrust:assignment:reopen`。
       // 判据用**委托本体**的 status（已结案的委托，工作台载荷可能为空）。
@@ -729,7 +733,6 @@ Page({
         isPermittedOrg(this.permittedReopenOrgs, detail && detail.orgId),
       reopenOpen: false,
       reopenReason: '',
-      reopenHint: '',
       reopening: false,
       unassignedHint: board ? board.unassignedHint : '',
       offer: offer ? decorateCustomerOffer(offer) : null,
