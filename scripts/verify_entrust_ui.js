@@ -3230,6 +3230,162 @@ const detailJs = read(path.join(MINI, 'pages/entrust/detail/detail.js'))
 check('[航段命令] 页面在本地就拦住"空改动"（改段一个字段都没变时不发请求）',
   detailJs.indexOf('完全相同') !== -1 && detailJs.indexOf('buildLegBody') !== -1)
 
+// ─────────────────────────────────────────────────────────────
+// 「读方向」也要有闸门：前端读的字段必须后端**真的声明过**
+//
+// 上面第「载荷字段名」那段钉的是**反方向**（后端声明了，前端有没有读）。
+// 这里钉的是把本轮咬了两口的那一个方向：**前端读了 `x.foo`，而响应模型里没有 `foo`**。
+//
+// 为什么它必然是"静默"的：读一个不存在的键不抛错，值就是 `undefined`，
+// 随后落进 `|| ''` / `|| null` / `|| []` 之类的兜底 ⇒ 症状是**某个集合恒为空**。
+// 而人看到"空"的第一反应是查业务（"是不是还没有客户接受？"），不是查键名。
+//
+// 实证（2026-09-18，同一轮咬了两口）：第 7 步的派生前置判据读
+// `release.artifact_type`，而 `OfferReleaseOut` 当时**没有**这个字段 ——
+// 它只藏在 `customer_snapshot` 里（客户视角的 `OfferReleaseCustomerOut` 反倒给了
+// 顶层同名字段）。⇒「客户已接受的对客报价」恒为空 ⇒ 前端不给派生入口、
+// 走查 ㊾ 章整章 `NOT_RUN`，而夹具其实铺得好好的。
+//
+// 判据：对每一对 (函数, 响应模型)，函数体里所有 `alias.字段` 的读取都必须落在
+// 那**份**模型的声明字段里 —— 或者落进该对的 `allow`（**必须给理由**）。
+// ⚠️ 登记表是**白名单**：新写一个消费后端载荷的投影/挑选用函数，就要在这里登记；
+// 没登记的函数不受保护（这一点与「新增取数函数必须登记 e2e 桩」同一性质）。
+// ─────────────────────────────────────────────────────────────
+const WIRE_READS = [
+  // 挑「客户已接受的对客报价」——**就是咬到我的那一个**，登记它才有意义
+  { fn: 'pickAcceptedQuoteRelease', model: 'OfferReleaseOut', alias: 'r', allow: {} },
+  { fn: 'decorateManagerRelease', model: 'OfferReleaseOut', alias: 'd', allow: {} },
+  { fn: 'decorateContractDerivation', model: 'ContractDerivationOut', alias: 'd', allow: {} },
+  { fn: 'decorateSignatureEvidence', model: 'SignatureEvidenceListOut', alias: 'd', allow: {} }
+]
+
+/** 取一个 `function NAME(...) { … }` 的函数体源码（按大括号配对，不靠缩进猜测）。 */
+function fnBody(src, name) {
+  const at = src.indexOf('function ' + name + '(')
+  if (at === -1) return ''
+  const open = src.indexOf('{', at)
+  if (open === -1) return ''
+  let depth = 0
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++
+    else if (src[i] === '}') {
+      depth--
+      if (depth === 0) return src.slice(open, i + 1)
+    }
+  }
+  return src.slice(open)
+}
+
+const wireSummary = []
+WIRE_READS.forEach(function (pair) {
+  const body = fnBody(entrustJs, pair.fn)
+  const declared = schemaFields(schPy, pair.model)
+  check(
+    `[读方向] 抽到了 ${pair.fn} 的函数体与 ${pair.model} 的声明字段` +
+      '（抽不到会让下面两条断言变成空转）',
+    body.length > 0 && declared.length > 0,
+    '函数体 ' + body.length + ' 字符 / 字段 ' + declared.length + ' 个'
+  )
+  const reads = {}
+  const re = new RegExp('\\b' + pair.alias + '\\.([a-zA-Z_][a-zA-Z0-9_]*)', 'g')
+  let m
+  while ((m = re.exec(body))) reads[m[1]] = true
+  const keys = Object.keys(reads)
+  const missing = keys.filter(function (k) {
+    return declared.indexOf(k) === -1 && !pair.allow[k]
+  })
+  check(
+    `[读方向] ${pair.fn} 读的字段都在 ${pair.model} 里声明过` +
+      '（读了不存在的键不会报错，只会让某个集合恒为空）',
+    keys.length > 0 && missing.length === 0,
+    missing.length
+      ? '未声明：' + missing.join(', ') + '｜已声明：' + declared.join(', ')
+      : '读了 ' + keys.length + ' 个字段'
+  )
+  // 豁免必须带理由；豁免表里若出现**已经声明过**的键，说明那条豁免过期了（该删）
+  const stale = Object.keys(pair.allow).filter(function (k) {
+    return declared.indexOf(k) !== -1
+  })
+  check(`[读方向] ${pair.fn} 的豁免表没有过期条目（已声明的键不该再豁免）`,
+    stale.length === 0, stale.join(', '))
+  wireSummary.push(pair.fn + '→' + pair.model + '(' + keys.length + ')')
+})
+check('[读方向] 本节确实覆盖到了消费后端载荷的函数（否则上面的断言全是空转）',
+  WIRE_READS.length >= 4, wireSummary.join(' / '))
+
+// ---- 装饰层与消费层之间的**键名契约**（不是后端声明，是本层内部）----
+//
+// ⚠️ 为什么单独一节：上面那节的判据是"读的键在后端模型里声明过"，它抓不到
+// **投影层改名后的**读法。2026-09-18 的真例：
+//
+//   `decorateManagerRelease()` 把发布行的版本号改名成 `revisionNo`（驼峰），
+//   而消费者 `releasedRevisionOf(releases, no)` 读的是 `r.revision_no`（下划线）。
+//   两处**各自都"有出处"**（一个来自 API 原文、一个来自本层改名）⇒ 读方向门禁
+//   全绿；`Number(undefined)` 是 `NaN` ⇒ 恒挑不到 ⇒ 成果页版本行**恒显示未发布**，
+//   并且**继续给**「发布这一版」的入口。静态门禁与 e2e 全绿，是 ㊹ 章**设备走查**
+//   抓到的（它的夹具里从来没有"已发布"这一形态）。
+//
+// ⇒ 判据落**行为**：拿一个真实的 API 原文行走一遍装饰，再问消费者能不能挑到它。
+//   这是纯函数，不接触 wx，能在 Node 里直接算。
+const relRaw = {
+  release_id: 9,
+  assignment_id: 3,
+  artifact_id: 7,
+  revision_no: 2,
+  status: 'released',
+  authorized_attachment_ids: [],
+  customer_snapshot: { payload: { amount: '1.00' } }
+}
+const relDec = E.decorateManagerRelease(relRaw)
+check('[装饰契约] decorateManagerRelease 把 `revision_no` 改名为 `revisionNo`'
+  + '（这是本层的事实，消费者必须按它读）',
+  relDec.revisionNo === 2 && relDec.revision_no === undefined,
+  'revNo=' + JSON.stringify(relDec.revisionNo) + ' revision_no=' + JSON.stringify(relDec.revision_no))
+const hit = E.releasedRevisionOf([relDec], 2)
+check('[装饰契约] `releasedRevisionOf` 能用**装饰后**的行挑到该版本'
+  + '（挑不到 ⇒ 成果页恒显示"未发布"且继续给发布入口）',
+  !!hit && hit.status === 'released',
+  '命中的行=' + JSON.stringify(hit && hit.releaseId))
+check('[装饰契约] 同一个函数也认 API 原文的 `revision_no`（它是导出的，调用方可能递原文）',
+  !!E.releasedRevisionOf([relRaw], 2),
+  '原文行命中=' + JSON.stringify(!!E.releasedRevisionOf([relRaw], 2)))
+check('[装饰契约] 版本号不匹配时**返回 null**（不许退化成"总有发布"）',
+  E.releasedRevisionOf([relDec], 3) === null,
+  'no=3 ⇒ ' + JSON.stringify(E.releasedRevisionOf([relDec], 3)))
+
+// ⭐⭐ **第二个缺陷 —— 修好"恒假"之后才暴露出来的那一半：跨成果误判。**
+//
+// 发布记录是按**授权**取的（`/entrustments/{eid}/offer-releases`），同一授权下可能有
+// **多个成果**的发布；而版本号只在成果**内部**唯一（`v1` 每份成果都有）。
+// 只比版本号 ⇒ "别的成果发过 v1"被读成"**本成果的 v1 发过了**" ⇒ 版本行显示已发布、
+// **不给「发布这一版」入口** ⇒ 用户发不出去，且页面上看不出为什么（**静默**）。
+//
+// ⚠️ 顺序很重要：先把"恒假"（读错键名）修掉，这个"跨成果误判"才**第一次**显形 ——
+//    在此之前每一次都是"恒未发布"，把误判严严实实盖住了。
+//    ⇒ 教训写在这里：修掉一个"恒假"之后，必须回到**真实数据的形状**上再验一遍"恒真"的那一半。
+const relOther = E.decorateManagerRelease({
+  release_id: 11,
+  assignment_id: 3,
+  artifact_id: 99,
+  revision_no: 1,
+  status: 'released',
+  authorized_attachment_ids: [],
+  customer_snapshot: { payload: {} }
+})
+check('[装饰契约] 别的成果发过 v1 ⇒ **不能**把本成果的 v1 判成已发布'
+  + '（跨成果误判会把发布入口藏掉，用户发不出去且看不出原因）',
+  E.releasedRevisionFor([relOther], 7, 1) === null,
+  'artifact 7 v1 命中=' + JSON.stringify(E.releasedRevisionFor([relOther], 7, 1)))
+check('[装饰契约] `releasedRevisionFor` 在**本成果**的发布上仍能挑到它'
+  + '（过滤没把该留的也滤掉）',
+  !!E.releasedRevisionFor([relOther, relDec], 7, 2),
+  'artifact 7 v2 命中=' + JSON.stringify(!!E.releasedRevisionFor([relOther, relDec], 7, 2)))
+check('[装饰契约] 成果页的版本行必须**按本成果过滤**（`releasedRevisionFor`），'
+  + '不许直接拿整条授权的发布列表去比版本号',
+  /releasedRevisionFor\(list,\s*artifact/.test(
+    fs.readFileSync(path.join(REPO, 'miniapp/pages/entrust/artifact/artifact.js'), 'utf8')),
+  'artifact.js 里的调用形态')
+
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)
 if (errors.length) {

@@ -4591,13 +4591,54 @@ function offersForArtifact(items, artifactId) {
     })
 }
 
-/** 某份成果的某个版本是否已经发布过（成果页在版本行上给结论，不让用户猜）。 */
+/** 某份成果的某个版本是否已经发布过（成果页在版本行上给结论，不让用户猜）。
+ *
+ * ⚠️ **这里必须同时认 `revisionNo` 与 `revision_no`**，两个名字各有一段来历：
+ * 传进来的通常是 `decorateManagerRelease` 的产出，那一层已经把名字改成
+ * `revisionNo`；而导出出去之后，调用方也可能递来 API 原文（snake_case）。
+ *
+ * 只认一种的后果**不是报错，是整块静默失效**：`Number(undefined)` 是 `NaN`，
+ * 而 `NaN === want` 恒为 `false` ⇒ 永远挑不到那条发布 ⇒ 成果页的版本行恒显示
+ * 「未发布」、`releaseId` 恒为空串、**并且继续给**「发布这一版」的入口
+ * （重复发布只会把客户手上那份取代掉，没有任何收益 —— 点下去就是一次误操作）。
+ *
+ * 2026-09-18 由 ㊹ 章**设备走查**抓到：静态门禁与 e2e 全绿，因为它们的夹具里
+ * 没有「已发布」这一形态（`published=true` 的版本行从未被渲染出来过）。
+ * 与 2149 行那类"读错键名就静默为 0"是同一种病。
+ */
 function releasedRevisionOf(releases, revisionNo) {
   const want = Number(revisionNo)
   const hit = (releases || []).filter(function (r) {
-    return Number(r.revision_no) === want
+    const no = r && (r.revisionNo !== undefined ? r.revisionNo : r.revision_no)
+    return Number(no) === want
   })[0]
   return hit || null
+}
+
+/** 某份成果的某个版本是否已经发布过 —— **按成果过滤后**再比版本号。
+ *
+ * ⚠️ 为什么必须有这一层（而不是让调用方自己 `filter`）：
+ * 发布记录是按**授权**取的（`/entrustments/{eid}/offer-releases`），
+ * **同一授权下可能有多个成果的发布**。而版本号只是成果**内部**的序号 ——
+ * `v1` 在每份成果里都有。只比版本号会把"别的成果发过 v1"读成
+ * "**本成果的 v1 发过了**" ⇒ 版本行显示"已发布"、**并且不给「发布这一版」入口**
+ * ⇒ 用户再也发不出这一版，而页面上看不出为什么（**静默**）。
+ *
+ * 2026-09-18 由 ㊹ 章设备走查抓到；它是**第二个**缺陷 —— 第一个
+ * （`releasedRevisionOf` 读错键名 ⇒ 恒不命中、`published` 恒 false）修好之后
+ * 它才暴露出来：此前每次都是"恒未发布"，把这里的跨成果误判**掩盖**住了。
+ * ⇒ 教训：修掉"恒假"之后，要回到**真实数据的形状**上再验一遍"恒真"的那一半。
+ *
+ * `releases` 可以是 `decorateManagerRelease` 的产出（驼峰）或 API 原文（下划线），
+ * 两种形状都认。
+ */
+function releasedRevisionFor(releases, artifactId, revisionNo) {
+  const wantArt = _sid(artifactId)
+  const mine = (releases || []).filter(function (rel) {
+    const id = rel && (rel.artifactId !== undefined ? rel.artifactId : rel.artifact_id)
+    return _sid(id) === wantArt
+  })
+  return releasedRevisionOf(mine, revisionNo)
 }
 
 module.exports = {
@@ -4830,6 +4871,7 @@ module.exports = {
   offersForArtifact,
   pickOfferForAssignment,
   releaseOffer,
+  releasedRevisionFor,
   releasedRevisionOf,
   respondOffer,
   signatureModeHint,
