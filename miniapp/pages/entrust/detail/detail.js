@@ -743,12 +743,19 @@ Page({
 
   /** 头卡字段行（模板只做 wx:for，不做表达式）。货类/货量已进 `overview` 槽位，此处不重复。 */
   buildFields(detail) {
-    return [
+    const rows = [
       { label: '委托编号', value: '#' + detail.assignmentId },
       { label: '归属', value: detail.orgText },
       { label: '提交时间', value: detail.createdAt || '—' },
       { label: '数据版本', value: 'r' + (detail.revision || 1) }
     ]
+    // 结案时间：**结案之后才存在**的事实（合同 §6.4「保留历史」在界面上的最小可查验形态）。
+    // ⛔ 未结案时**不出这一行** —— "还没有结案"不是"未知"，给它一个「—」会让它
+    //    与"时间取不到"长得一模一样（本页反复防的那类静默降级）。
+    if (detail.completedAt) {
+      rows.push({ label: '结案时间', value: detail.completedAt })
+    }
+    return rows
   },
 
   // ── 人工落点：记录任务（每个开放槽位）────────────────────────────────

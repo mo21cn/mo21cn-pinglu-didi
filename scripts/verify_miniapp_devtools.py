@@ -11092,12 +11092,71 @@ def sec_53(w: Walker) -> None:
         f"页面 detail.status={str((mdd2.get('detail') or {}).get('status'))!r}",
     )
 
-    w.rep.not_run(
-        "53 ⑧ 「齐备 ⇒ 结案成功」这段",
-        "需要一张五维度齐备的委托（任务全处置 ＋ 必需证据齐 ＋ 案件全关闭 ＋ "
-        "结算已批准且客户已确认 ＋ 余额结清）；现成种子都停在前置不齐那一步 ⇒ "
-        "缺一个「五维齐备」夹具，本轮如实记 NOT_RUN（⛔ 不用接口伪造）",
+    # ---- ④ 齐备 ⇒ 结案成功（**同一张委托连跑**：受理 → 任务 → 费用 → 结算 →
+    #        客户确认 → 收付 → 结案，全部由 `seed_entrust_completion_ready.py` 经
+    #        **真实业务命令**铺出；本章负责"齐备之后结案"这一段，并查验结案留痕）。
+    #
+    # ⚠️ 标题与夹具逐字一致（`seed_entrust_completion_ready.ASSIGNMENT_TITLE`）——
+    #    改一处要改两处，否则这里会静默记 NOT_RUN。
+    ready_aid = ""
+    org_rows = (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
+    for r in org_rows:
+        if str((r or {}).get("title") or "") == "演示委托·五维齐备（可结案）":
+            ready_aid = str((r or {}).get("assignment_id") or "")
+            break
+    if not ready_aid:
+        w.rep.not_run(
+            "53 ⑧ 齐备 ⇒ 结案成功",
+            "队列里没有「五维齐备」的委托 ⇒ 用 "
+            "`--extra-seeds seed_entrust_completion_ready.py` 跑本章"
+            "（那个夹具会自己断言 ready=True；⛔ 不在这里用接口伪造一个「已齐备」的读数）",
+        )
+        return
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={ready_aid}", DETAIL):
+        w.rep.not_run("53 ⑧ 齐备 ⇒ 结案成功", f"打不开齐备委托的详情页（aid={ready_aid}）")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    mdd3 = w.c.page_data()
+    cl3 = mdd3.get("closure") or {}
+    w.rep.rec(
+        "53 ⑧-a 齐备的委托上，界面直接说「可以结案」（缺项清单为空）",
+        cl3.get("ready") is True and not (cl3.get("missingTotal") or 0),
+        f"ready={cl3.get('ready')!r} 缺项={cl3.get('missingTotal')!r} "
+        f"summary={str(cl3.get('summary'))[:56]!r}",
     )
+    w.shot("53-结案前（可结案）")
+    w.c.scroll_into('[data-act-complete-open="1"]')
+    w.c.tap('[data-act-complete-open="1"]')
+    time.sleep(0.5)
+    w.c.scroll_into('[data-act-complete-submit="1"]')
+    w.c.tap('[data-act-complete-submit="1"]')
+    d4 = w.wait_data(
+        lambda x: str((x.get("detail") or {}).get("status")) == "completed", tries=60, gap=0.5
+    )
+    dd4 = d4.get("detail") or {}
+    w.rep.rec(
+        "53 ⑧-b **齐备 ⇒ 结案成功**：状态变 completed 且写下结案时间（不是「点了没反应」）",
+        str(dd4.get("status")) == "completed" and bool(dd4.get("completedAt")),
+        f"status={dd4.get('status')!r} completedAt={dd4.get('completedAt')!r}",
+    )
+    # 结案改变的是"后续还能做什么"的全部前置 ⇒ 页面重取之后，入口必须消失。
+    entry_after = w.c.count('[data-act-complete-open="1"]')
+    w.rep.rec(
+        "53 ⑧-c 结案之后入口**消失**（已结案的单不该再显示「可以结案」）",
+        entry_after == 0,
+        f"结案入口数={entry_after}",
+    )
+    # ⚠️ `fields` 是页面 data 的**顶层**键（`setData({ fields })`），**不是** `detail` 的子键：
+    # 首跑写成 `dd4.get("fields")` 得到空列表，报成"页面没产出这一行"——
+    # 那是**断言写错**，不是页面缺陷（`detail.status` 与 `completedAt` 同一次读数里都对）。
+    labels = [str((f or {}).get("label")) for f in (d4.get("fields") or [])]
+    w.rep.rec(
+        "53 ⑧-d 「保留历史」可查验：详情页多出「结案时间」一行"
+        "（第 12 步 inspect retained history 的界面形态）",
+        "结案时间" in labels,
+        "字段行=" + ",".join(labels),
+    )
+    w.shot("53-结案后（留痕）")
 
 
 SECTIONS = {
