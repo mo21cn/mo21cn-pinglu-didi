@@ -222,6 +222,14 @@
         <view wx:if="{{!legOpen && legHint}}" class="slot-note slot-warn">{{legHint}}</view>
 
         <view class="plan-task-head">必需任务与前置</view>
+        <!-- 截断提示（O-9）：任务被读模型的上限截住时**必须**说一句。
+             不说的话，"某条任务的前置指向没读回来的那一行"就显示成
+             「前置：任务 #7」—— 与"这张单真的没有前置"长得一模一样。 -->
+        <view
+          wx:if="{{plan.tasksTruncated}}"
+          class="slot-note slot-warn"
+          data-plan-truncated="1"
+        >{{plan.tasksTruncatedText}}</view>
         <block wx:if="{{plan.hasTasks}}">
           <view
             wx:for="{{plan.tasks}}"
