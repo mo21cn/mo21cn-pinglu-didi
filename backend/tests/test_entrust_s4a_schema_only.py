@@ -233,17 +233,26 @@ def test_only_complete_is_open_in_the_assignment_layer():
     readonly_companions = {
         f"{sm.API_PREFIX}/assignments/{{assignment_id}}/closure-readiness",
     }
+    #: **本切片（S4-c）正式落地**的重开命令。它出现在这张名单里不是"放行"，而是登记：
+    #: S4-c 就是"带理由、授权与历史留痕"的那一片。⚠️ 下面逐条核对它必须是 `POST`，
+    #: 所以名单**不可能**被用来夹带一个"只读名字"的写命令。
+    allowed_writes = {f"{sm.API_PREFIX}/assignments/{{assignment_id}}/reopen"}
     write_routes = {p for p, ms in assignment.items() if ms & {"post", "put", "patch", "delete"}}
     still_closed = sorted(
         p
         for p in write_routes
         if any(k in p.lower() for k in ("close", "closure", "reopen"))
         and not p.endswith("/complete")
+        and p not in allowed_writes
     )
     assert not still_closed, (
         f"委托层出现了本切片之外的结案类**写**端点 {still_closed} —— 重开是 S4-c，"
         "且必须带理由、授权与历史留痕；`close` 不在计划内（案件层才有 close_case）"
     )
+    for path in allowed_writes:
+        assert assignment.get(path, set()) >= {"post"}, (
+            f"{path} 必须以 POST 落地（写命令），实际方法：{sorted(assignment.get(path, set()))}"
+        )
     for path in readonly_companions:
         assert path in assignment, f"只读配套路径不存在：{path}"
         assert assignment[path] == {"get"}, (

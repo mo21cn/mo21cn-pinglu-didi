@@ -1572,3 +1572,76 @@ def test_close_versus_new_blocking_case_is_serialized(mysql):
                 assert row["status"] == "claimed", "案件赢了就该保持已受理"
         finally:
             verify.close()
+
+
+def test_reopen_race_exactly_one_winner(mysql):
+    """S4-c 在真实 MySQL 上：同一 `expected_revision` 并发重开，恰好一个成功。
+
+    与结案（`test_complete_race_exactly_one_winner`）**同构、方向相反**：
+    结案是 `claimed → completed`，重开是 `completed → claimed`。裁决点同样是条件 UPDATE 的
+    `status` ＋ `revision`，而且两者共用**同一把行锁** ⇒ 结案与重开并发时也只有一个能赢。
+
+    ⚠️ 额外核一条**留痕的数量**：输家不该写第二条 `ent_assignment_reopen` ——
+    留痕是审计链，多一条就等于"重开过两次"。
+    """
+    from app.modules.entrust import closure as closure_svc
+
+    for round_no in range(_ROUNDS):
+        db = mysql()
+        owner_id = 970 + round_no
+        manager_id = 1070 + round_no
+        aid = _seed_closure_ready(db, owner_id=owner_id, manager_id=manager_id)
+        rev = int(svc.get_assignment(db, aid)["revision"])
+        closure_svc.complete_assignment(
+            db, assignment_id=aid, actor_id=manager_id, expected_revision=rev
+        )
+        rev2 = int(svc.get_assignment(db, aid)["revision"])
+        db.close()
+
+        start = threading.Barrier(2)
+        outcomes: list[str] = []
+
+        def reopen(*, start=start, aid=aid, rev=rev2, outcomes=outcomes, manager_id=manager_id):
+            session = mysql()
+            try:
+                start.wait(timeout=10)
+                try:
+                    closure_svc.reopen_assignment(
+                        session,
+                        assignment_id=aid,
+                        actor_id=manager_id,
+                        expected_revision=rev,
+                        reason="并发重开（用例）",
+                    )
+                    outcomes.append("won")
+                except svc.AssignmentError as exc:
+                    outcomes.append(f"lost:{exc}")
+            finally:
+                session.close()
+
+        threads = [threading.Thread(target=reopen) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        assert len(outcomes) == 2, f"第 {round_no} 轮有线程未完成: {outcomes}"
+        assert outcomes.count("won") == 1, f"第 {round_no} 轮赢家数错误: {outcomes}"
+
+        verify = mysql()
+        try:
+            row = svc.get_assignment(verify, aid)
+            assert row is not None
+            assert row["status"] == "claimed", "重开之后必须回到 claimed"
+            assert not row["completed_at"], "重开必须清空完成时间"
+            assert int(row["revision"]) == rev2 + 1, (
+                f"第 {round_no} 轮 revision 涨了 {int(row['revision']) - rev2} 次 —— "
+                "说明两个写者都改到了同一张委托"
+            )
+            cnt = verify.execute(
+                text("SELECT COUNT(*) FROM ent_assignment_reopen WHERE assignment_id = :a"),
+                {"a": aid},
+            ).scalar()
+            assert int(cnt or 0) == 1, f"第 {round_no} 轮留痕 {cnt} 条 —— 输家也写了留痕"
+        finally:
+            verify.close()

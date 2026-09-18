@@ -36,7 +36,7 @@ _TS = "2026-09-18 00:00:00"
 #: 不挂到 `claim` 上：认领是接单，结案是对客户宣告"这件事做完了"，两件事不同。
 MGR_PERMS = (
     '["entrust:view","entrust:task:dispatch","entrust:settlement:create",'
-    '"entrust:quote:create","entrust:assignment:complete"]'
+    '"entrust:quote:create","entrust:assignment:complete","entrust:assignment:reopen"]'
 )
 VIEWER_PERMS = '["entrust:view"]'
 
@@ -998,3 +998,187 @@ def test_readiness_stays_true_after_complete_while_the_command_conflicts(env):
     assert after.status_code == 200, after.text
     assert after.json()["ready"] is True, "前置事实没变，ready 不该因为状态而翻转"
     assert _complete(env, seeded["manager"], seeded["aid"], rev).status_code == 409
+
+
+# ───────────────────── 6. 受控重开（S4-c；设计 §5.5 Q2 已裁）
+
+
+def _reopen(
+    env, user, aid: int, revision: int, reason: str = "费用口径填错，需要纠正", *, key=None
+):
+    return _post(
+        env,
+        user,
+        f"/api/v1/entrust/assignments/{aid}/reopen",
+        {"expected_revision": revision, "reason": reason},
+        key=key,
+    )
+
+
+def _completed(env, seeded) -> None:
+    """把五维齐备的委托结案（重开用例的前置）。"""
+    rev = _fully_ready(env, seeded)
+    resp = _complete(env, seeded["manager"], seeded["aid"], rev)
+    assert resp.status_code == 200, resp.text
+
+
+def test_reopen_needs_a_reason_and_only_from_completed(env):
+    """两条硬闸：**只有已结案能重开**（409）与**理由必填**（422）。
+
+    理由不是装饰：没有理由的重开，在审计上等于"结论可以随时改" —— 设计 §5.5 Q2 的
+    "带理由"就是这个意思。而"只有 `completed` 能重开"把 reopen 与"通用回退"分开：
+    否则它会长成一条"任何状态都能往回走"的后门。
+    """
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+    finally:
+        db.close()
+    rev = _fully_ready(env, seeded)
+
+    # 未结案（claimed）⇒ 409 —— 状态先拦，理由给了也没用
+    r1 = _reopen(env, seeded["manager"], seeded["aid"], rev, "随便试试")
+    assert r1.status_code == 409, r1.text
+
+    assert _complete(env, seeded["manager"], seeded["aid"], rev).status_code == 200
+    rev2 = _rev(env, seeded["manager"], seeded["aid"])
+    # 已结案但理由为空 ⇒ 422（schema 的 min_length=1）
+    r2 = _reopen(env, seeded["manager"], seeded["aid"], rev2, "")
+    assert r2.status_code == 422, r2.text
+
+
+def test_reopen_clears_completed_at_and_writes_history(env):
+    """成功重开：`completed → claimed`、`completed_at` **清空**、**留痕一条**。
+
+    ⭐ 留痕是这条切片的重点：`completed_at` 被清空之后，"**曾经结过案**"就只剩
+    `ent_assignment_reopen` 这一处能回答 —— 所以它必须记下**被撤销的那次结案时间**
+    与理由，否则历史被抹平（合同要求 `retain the complete history`）。
+    """
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+    finally:
+        db.close()
+    _completed(env, seeded)
+    before = _rev(env, seeded["manager"], seeded["aid"])
+    completed_at = None
+    session0 = env.make_session()
+    try:
+        row0 = session0.execute(
+            text("SELECT completed_at FROM ent_assignment WHERE id = :a"), {"a": seeded["aid"]}
+        ).first()
+        completed_at = row0[0] if row0 else None
+    finally:
+        session0.close()
+
+    resp = _reopen(env, seeded["manager"], seeded["aid"], before)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "claimed"
+    assert body["completed_at"] is None, "重开之后 completed_at 必须清空（否则状态与事实矛盾）"
+
+    session = env.make_session()
+    try:
+        row = session.execute(
+            text(
+                "SELECT actor_user_id, reason, previous_completed_at "
+                "FROM ent_assignment_reopen WHERE assignment_id = :a"
+            ),
+            {"a": seeded["aid"]},
+        ).first()
+    finally:
+        session.close()
+    assert row is not None, "重开必须留痕（append-only）"
+    assert int(row[0]) == int(seeded["manager"]["user_id"])
+    assert row[1] == "费用口径填错，需要纠正"
+    assert str(row[2]) == str(completed_at), "被撤销的那次结案时间必须原样记下"
+
+
+def test_reopen_never_restores_cancel(env):
+    """⭐ Q2 的边界：重开之后**仍然不能取消**（`cancel` 只对 `submitted` 生效）。
+
+    这条最容易在实现时"顺手放开" —— 而它正是"重开是**纠错**，不是回到可以随便取消的
+    状态"这句话的可执行形态。断言取 `!= 200`（不锁死具体码：403/404/409 都算拒绝，
+    而**成功**是唯一不能出现的形态）。
+    """
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+    finally:
+        db.close()
+    _completed(env, seeded)
+    rev = _rev(env, seeded["manager"], seeded["aid"])
+    assert _reopen(env, seeded["manager"], seeded["aid"], rev).status_code == 200
+
+    rev2 = _rev(env, seeded["manager"], seeded["aid"])
+    resp = _post(
+        env,
+        seeded["owner"],
+        f"/api/v1/entrust/assignments/{seeded['aid']}/cancel",
+        {"expected_revision": rev2},
+    )
+    assert resp.status_code != 200, (
+        f"重开之后取消**不该**成功（Q2）：{resp.status_code} {resp.text}"
+    )
+
+
+def test_reopen_permissions_and_stale_revision_and_replay(env):
+    """权限四档 ＋ 版本过期 409 ＋ 同键重放（幂等不是静默成功）。
+
+    权限与结案**共用一份实现**（`_assert_can_operate`），但传入**不同的权限码** ——
+    所以这里同时钉住"只读成员 403"与"货主本人 404"两条，避免哪天有人把两个码并成一个。
+    构造 403 仍必须**换一个货主**（权限按 (组织, 货主) 对解析，同一对上加只读授权是并集）。
+    """
+    db = env.make_session()
+    try:
+        seeded = _seed(env, db)
+        other = _login(env.client, "shipper2")
+        db.execute(
+            text(
+                "INSERT INTO ent_entrustment "
+                "(org_id, entrust_user_id, permissions, status, created_at) "
+                "VALUES (:o, :u, :p, 'active', :c)"
+            ),
+            {"o": seeded["org_id"], "u": other["user_id"], "p": VIEWER_PERMS, "c": _TS},
+        )
+        res = db.execute(
+            text(
+                "INSERT INTO ent_assignment "
+                "(owner_user_id, org_id, title, status, revision, created_at, updated_at) "
+                "VALUES (:o, :g, 'S4-c 只读授权', 'completed', 1, :c, :c)"
+            ),
+            {"o": other["user_id"], "g": seeded["org_id"], "c": _TS},
+        )
+        aid2 = int(res.lastrowid or 0)
+        db.commit()
+    finally:
+        db.close()
+
+    assert _reopen(env, seeded["viewer"], aid2, 1).status_code == 403
+    assert _reopen(env, seeded["outsider"], aid2, 1).status_code == 404
+    assert _reopen(env, seeded["owner"], aid2, 1).status_code == 404
+
+    _completed(env, seeded)
+    rev = _rev(env, seeded["manager"], seeded["aid"])
+    # 版本过期 ⇒ 409（条件 UPDATE 的裁决点）
+    assert _reopen(env, seeded["manager"], seeded["aid"], rev + 5).status_code == 409
+
+    key = f"k-reopen-{uuid.uuid4().hex}"
+    first = _reopen(env, seeded["manager"], seeded["aid"], rev, key=key)
+    assert first.status_code == 200, first.text
+    replay = _reopen(env, seeded["manager"], seeded["aid"], rev, key=key)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["status"] == "claimed"
+    # 换了新键再重开一次 ⇒ 已经不是 completed ⇒ 409（不产生第二条留痕）
+    again = _reopen(env, seeded["manager"], seeded["aid"], rev)
+    assert again.status_code == 409, again.text
+
+    session = env.make_session()
+    try:
+        cnt = session.execute(
+            text("SELECT COUNT(*) FROM ent_assignment_reopen WHERE assignment_id = :a"),
+            {"a": seeded["aid"]},
+        ).scalar()
+    finally:
+        session.close()
+    assert int(cnt or 0) == 1, "同键重放与二次拒绝都不该多写留痕"
