@@ -10,11 +10,13 @@ R1 最小接口集（计划 §3.3「任务」组）：创建/编辑/列表/状�
 - POST   /api/v1/entrust/tasks/{tid}/precondition           设置/清除固定前置条件
 - POST   /api/v1/entrust/tasks/{tid}/start                  开始（前置未完成则 409）
 - POST   /api/v1/entrust/tasks/{tid}/wait                   缺件等待（业务状态，非报错）
+- POST   /api/v1/entrust/tasks/{tid}/evidence               补录证据（缺件的补救入口，幂等）
 - POST   /api/v1/entrust/tasks/{tid}/complete               完成（所需证据未齐则 409）
 - POST   /api/v1/entrust/tasks/{tid}/reopen                 重开（原因必填，历史保留）
 - POST   /api/v1/entrust/tasks/{tid}/assign                 改派（推进执行代次）
 - POST   /api/v1/entrust/tasks/{tid}/takeover               人工接管（推进执行代次）
 - POST   /api/v1/entrust/tasks/{tid}/cancel                 撤回任务
+- GET    /api/v1/entrust/assignments/{aid}/evidence-gaps    这张委托还缺什么证据（派生）
 
 横切约束（与受理/成果两组一致，经 `_http.py` 统一口径）：
 * `ENTRUST_ENABLED=false` → 整组 404（开关 ≠ 访问控制）；
@@ -43,8 +45,11 @@ from app.modules.entrust._http import (
     run_write,
 )
 from app.modules.entrust.schemas import (
+    EvidenceGapsOut,
+    EvidenceRecordOut,
     TaskCompleteIn,
     TaskCreate,
+    TaskEvidenceIn,
     TaskListOut,
     TaskOut,
     TaskPreconditionIn,
@@ -53,6 +58,7 @@ from app.modules.entrust.schemas import (
     TaskStartIn,
     TaskUpdate,
     TaskWaitIn,
+    evidence_record_out,
     task_out,
 )
 
@@ -61,6 +67,7 @@ router = APIRouter()
 _SCOPE_CREATE = "entrust:task:create"
 _SCOPE_START = "entrust:task:start"
 _SCOPE_WAIT = "entrust:task:wait"
+_SCOPE_EVIDENCE = "entrust:task:evidence"
 _SCOPE_COMPLETE = "entrust:task:complete"
 _SCOPE_REOPEN = "entrust:task:reopen"
 _SCOPE_ASSIGN = "entrust:task:assign"
@@ -337,6 +344,48 @@ def wait_task(
 
 
 @router.post(
+    "/tasks/{task_id}/evidence",
+    response_model=EvidenceRecordOut,
+    summary="在原任务上补录一条证据（缺件的补救入口，幂等）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def record_task_evidence(
+    task_id: int,
+    data: TaskEvidenceIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    idempotency_key: Annotated[str | None, Header()] = None,
+) -> Any:
+    """在**原任务**上补录一条证据（S4 段 §8 的"可执行补救"）。
+
+    ⛔ **不另造工作流**：缺件条件就是任务自己的 `waiting` ＋ `wait_reason`，
+    补救出口就是在本任务上把证据补齐；不新建任务、不新建等待实体。
+    返回**重算后**的齐备度 —— 补录的唯一目的就是让缺件清单变短。
+    """
+    payload = {"task_id": task_id, **data.model_dump(mode="json")}
+    return run_write(
+        db,
+        scope=_SCOPE_EVIDENCE,
+        key=guard_or_400(idempotency_key),
+        actor_user_id=int(user.id),
+        payload=payload,
+        business=lambda: evidence_record_out(
+            svc.record_task_evidence(
+                db,
+                task_id=task_id,
+                actor_id=int(user.id),
+                kind=data.kind,
+                ref=data.ref,
+                occurred_at=data.occurred_at,
+                source=data.source,
+                expected_revision=data.expected_revision,
+            )
+        ).model_dump(mode="json"),
+        map_domain_error=_map_task_error,
+    )
+
+
+@router.post(
     "/tasks/{task_id}/complete",
     response_model=TaskOut,
     summary="完成任务（证据未齐、或存在未终结的阻断案件则拒绝，幂等）",
@@ -464,3 +513,32 @@ def cancel_task(
         payload=payload,
         business=lambda: svc.cancel_task(db, task_id=task_id, actor_id=int(user.id)),
     )
+
+
+@router.get(
+    "/assignments/{assignment_id}/evidence-gaps",
+    response_model=EvidenceGapsOut,
+    summary="这张委托还缺什么证据（派生；交接＝任务，不另造实体）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def list_evidence_gaps(
+    assignment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """S4 段 §8 的读模型：缺什么、谁在等、交接类任务齐了没有。
+
+    **派生**读数 —— 不落库、不新建实体；缺件条件就是任务自己的
+    `waiting` ＋ `wait_reason`，本端点只把"缺什么"算出来。
+    交接没有独立成果实体（合同 S4 段明写不得发明），
+    它就是 `task_type = handover` 的那些任务。
+    """
+    try:
+        return EvidenceGapsOut.model_validate(
+            svc.list_evidence_gaps(db, user_id=int(user.id), assignment_id=assignment_id)
+        )
+    except Exception as exc:
+        mapped = _map_task_error(exc)
+        if mapped is None:
+            raise
+        raise mapped from exc
