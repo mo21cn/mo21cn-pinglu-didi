@@ -512,6 +512,21 @@ def closure_readiness(session: Session, *, assignment_id: int, user_id: int) -> 
     }
 
 
+def read_closure_readiness(session: Session, *, assignment_id: int, user_id: int) -> dict[str, Any]:
+    """读端点用的包装：先 404（不存在／非参与方**同一口径**），再过权限。
+
+    ⚠️ 判据取的是**结案那一把锁**（`entrust:assignment:complete`），**不是**
+    "能看财务"（`assert_can_view_org`）—— 这份清单里带着结算版本、余额与案件处置，
+    是**运营侧口径**；而"能看到缺项的人就该是能执行的人"这条等式一旦打破，界面就会长出
+    "看得见缺什么、按钮点下去 403"的形态（`charges_api` 那一族刻意相反，理由见彼处）。
+    """
+    assignment = assignment_svc.get_assignment(session, assignment_id)
+    if assignment is None:
+        raise assignment_svc.AssignmentNotFoundError(f"委托单 {assignment_id} 不存在")
+    _assert_can_complete(session, assignment=assignment, user_id=user_id)
+    return closure_readiness(session, assignment_id=assignment_id, user_id=user_id)
+
+
 # ── 写：结案命令 ─────────────────────────────────────────────────────────────
 
 

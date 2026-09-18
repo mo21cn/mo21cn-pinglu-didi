@@ -26,7 +26,13 @@ from app.modules.entrust._http import (
     require_entrust_enabled,
     run_write,
 )
-from app.modules.entrust.schemas import AssignmentCompleteIn, AssignmentOut, assignment_out
+from app.modules.entrust.schemas import (
+    AssignmentCompleteIn,
+    AssignmentOut,
+    ClosureReadinessOut,
+    assignment_out,
+    closure_readiness_out,
+)
 
 router = APIRouter()
 
@@ -80,3 +86,41 @@ def complete_assignment(
         ).model_dump(mode="json"),
         map_domain_error=map_closure_error,
     )
+
+
+@router.get(
+    "/assignments/{assignment_id}/closure-readiness",
+    response_model=ClosureReadinessOut,
+    summary="结案齐备度：五维度逐条报缺（与结案命令同一把锁）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def get_closure_readiness(
+    assignment_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """`ready` ＋ `missing[]` ＋ 逐维度计数 —— `complete` 的**只读前置**。
+
+    为什么要有它（而不是让界面直接试着结案）：`complete` 的 409 只在**点下去之后**
+    才说缺什么，而结案是**不可逆**动作 ⇒ 界面应当先让人看见清单、再执行。
+    它与命令**同一把锁**（`entrust:assignment:complete`）—— 看得到缺项的人，就是
+    能结案的人；否则会出现"看得见、点下去 403"的形态。
+
+    ⚠️ `ready=True` **不等于**现在能结：命令还要求委托处于 `claimed`（已结案 ⇒ 409，
+    未受理 ⇒ 409）。按钮态请按**委托自身**的 `status` 判断，别把这个字段读成"能结"。
+    ⛔ 不做任何写入、不落库（纯派生）。
+
+    | 码 | 含义 |
+    | --- | --- |
+    | **200** | 齐备度（`missing=[]` 即五条前置成立） |
+    | **403** | 无 `entrust:assignment:complete` |
+    | **404** | 非参与方／不存在（不区分） |
+    """
+    try:
+        data = cl.read_closure_readiness(db, assignment_id=assignment_id, user_id=int(user.id))
+    except Exception as exc:  # 领域异常 → HTTP：与写端点复用**同一条**映射
+        mapped = map_closure_error(exc)
+        if mapped is None:
+            raise
+        raise mapped from exc
+    return closure_readiness_out(data).model_dump(mode="json")

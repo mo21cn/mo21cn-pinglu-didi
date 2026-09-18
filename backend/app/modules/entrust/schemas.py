@@ -2213,3 +2213,45 @@ def settlement_list_out(data: dict[str, Any]) -> SettlementListOut:
 
 def settlement_payment_out(data: dict[str, Any]) -> SettlementPaymentOut:
     return SettlementPaymentOut.model_validate(data)
+
+
+class ClosureMissingItem(BaseModel):
+    """一条缺项：维度 ＋ 机器可读的 `code` ＋ 给人看的一句话 ＋ 结构化 `detail`。
+
+    ⚠️ `detail` **必须**声明 —— pydantic 对未声明字段是**静默丢弃**（不报错）：
+    漏掉它，"缺 3 个任务、分别是哪几个"会在这一层被吃掉，界面只剩一句概述，
+    而调用方无从自助。2026-09-18 正是靠"读端点 vs 派生逐字段比对"抓到的。
+    `detail` 的形状按维度而异（`{"count", "tasks"}` / `{"count", "cases"}` /
+    `{"financial_status"}`）⇒ 取 `dict | None`，不为五个维度各建一个模型
+    （那会让"派生新增一类缺项"必须先改契约，契约反而变成负担）。
+    """
+
+    dimension: str
+    code: str
+    message: str
+    detail: dict[str, Any] | None = None
+
+
+class ClosureReadinessOut(BaseModel):
+    """结案齐备度（合同 §6.4 的五个维度；纯派生、不落库）。
+
+    ⚠️ 与 `complete` 命令是**两条判据**，别混：`ready=True` 只说"五条前置成立"，
+    命令**还**要求委托处于 `claimed` ⇒ 已结案的委托 `ready` 仍可能为 `True`。
+    调用方要**先看 `status`（能不能结）再看 `ready`（可以结吗）**。
+    """
+
+    assignment_id: int
+    ready: bool
+    missing: list[ClosureMissingItem] = Field(default_factory=list)
+    #: 逐维度计数（键取 `tasks` / `evidence` / `exceptions` / `settlement` / `balance`）；
+    #: 五个键恒在、无缺项时为 0 —— 界面据此画"五格"，不必自己补空。
+    missing_by_dimension: dict[str, int] = Field(default_factory=dict)
+    tasks_total: int = 0
+    handover: dict[str, Any] | None = None
+    financial_status: str = ""
+    applicable_settlement: dict[str, Any] | None = None
+    balances: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def closure_readiness_out(data: dict[str, Any]) -> ClosureReadinessOut:
+    return ClosureReadinessOut.model_validate(data)
