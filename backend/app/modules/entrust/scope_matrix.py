@@ -363,6 +363,14 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         note="同任务列表",
     ),
     _r(
+        "GET",
+        "/assignments/{assignment_id}/evidence-gaps",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="缺件与交接证据的派生读数；同任务列表（读不加严）",
+    ),
+    _r(
         "PATCH",
         "/tasks/{task_id}",
         GUARD_ORG_MEMBER,
@@ -394,6 +402,15 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         owner_scope=True,
         idempotent=True,
         note="缺件等待；同 start",
+    ),
+    _r(
+        "POST",
+        "/tasks/{task_id}/evidence",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        idempotent=True,
+        note="补录证据（缺件的补救入口）；同 start —— 执行是本职，"
+        "被指派人本人可做，管理动作另需 dispatch",
     ),
     _r(
         "POST",

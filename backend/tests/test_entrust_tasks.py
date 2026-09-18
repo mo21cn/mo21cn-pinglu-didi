@@ -336,7 +336,11 @@ def test_reopen_preserves_history(session):
     assert reopened["reopen_count"] == 1
     assert reopened["last_reopen_reason"] == "单据金额与合同不一致"
     assert reopened["completed_at"] is None
-    assert reopened["evidence_refs"] == [{"kind": "document", "ref": "att-001"}], "历史证据不删除"
+    # 历史证据不删除。判据落在**身份**上（kind + ref）：S7-2 起每条证据还带
+    # 服务端写的 recorded_at / recorded_by，整条 `==` 会把"多了记账字段"误判成"证据变了"。
+    assert [(item["kind"], item["ref"]) for item in reopened["evidence_refs"]] == [
+        ("document", "att-001")
+    ], "历史证据不删除"
 
 
 def test_reopen_requires_reason(session):
