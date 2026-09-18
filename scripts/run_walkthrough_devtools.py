@@ -284,6 +284,18 @@ def start_ide(env: Env, wait_s: int = 60, kill_all: bool = False):
         others = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
         if others:
             log(f"    机器上已有 {len(others)} 个非本轮 IDE 进程 {others}（**不清理**，见 HO D2）")
+            # ⚠️ 只说"不清理"是不够的 —— 实测（2026-09-18/19 各一次）残留实例会让
+            #    `automation_runtime_info` 恒超时、`pageStack` 恒空，而**报错长相是
+            #    "页面打不开"**（看着像产品坏了）。⇒ 把"下一步该做什么"直接印出来，
+            #    并把清理命令写全（本机不能指望别人记住 PowerShell 语法）。
+            log("    ⚠️ 若随后「② 就绪闸门」连续命中同一签名（pageStack 恒空 / ")
+            log("       automation_runtime_info TIMEOUT），**优先怀疑上面这些残留实例**：")
+            log("       先 Ctrl-C，然后在 PowerShell 里执行（只清 IDE，不动你的其它窗口）：")
+            log(
+                "         Get-CimInstance Win32_Process -Filter \"name='微信开发者工具.exe'\" "
+                "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+            )
+            log("       然后重跑本命令（本轮自报的实例数才是判定干净与否的依据）。")
 
     before = {int(p) for p in ide_procs()}
     try:
@@ -352,6 +364,94 @@ AUTOMATION_DEAD_MAX = 4
 AUTOMATION_DEAD_MIN_ELAPSED_S = 360
 
 
+def _machine_pressure() -> str:
+    """一句话的**机器资源读数**（给"闸门起不来"提供证据，而不是猜）。
+
+    ⭐ 2026-09-19 加：同一晚三次闸门失败，前两次被我读成「IDE 残留实例累积」，
+    第三次才发现真因是 `CreateProcess` 系统性被拒（`WinError 1450 系统资源不足`）——
+    **那一刻 IDE 进程数为 0**。⇒ 失败时缺的不是"再猜一遍"，而是**读数**：
+    内存占用率、可用物理内存、IDE 进程数。有这三项，"残留实例"与"机器资源到限"
+    一眼可分（前者的特征是 IDE 进程数高，后者可以内存充足但桌面堆/句柄配额已满）。
+
+    ⛔ 读数**不参与**通过判定，只进日志（走查的绿红仍由 `pageStack` 决定）。
+    """
+    try:
+        import ctypes  # noqa: PLC0415
+
+        class _MemStatus(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = _MemStatus()
+        status.dwLength = ctypes.sizeof(_MemStatus)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))  # type: ignore[attr-defined]
+        gib = 1024**3
+        return (
+            f"内存占用 {status.dwMemoryLoad}%"
+            f"（可用 {status.ullAvailPhys / gib:.1f}G / 物理 {status.ullTotalPhys / gib:.1f}G）"
+            f"／进程 {_process_count()} 个／IDE {len(ide_procs())} 个"
+        )
+    except Exception:  # noqa: BLE001
+        return f"（资源读数不可用；IDE {len(ide_procs())} 个）"
+
+
+def _process_count() -> int:
+    """当前系统进程数（走查失败时用来区分"自己的残留"与"整机负载"）。"""
+    try:
+        out = subprocess.run(
+            ["tasklist", "/fo", "csv", "/nh"],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        ).stdout
+    except Exception:  # noqa: BLE001
+        return -1
+    return len([line for line in out.splitlines() if line.strip()])
+
+
+#: `CreateProcess` 在系统层被拒时 Windows 返回的错误码 ⇒ 这一档**不是**产品问题，
+#: 也不是"IDE 坏了"，而是**会话级资源到限**（交互桌面堆 / 句柄配额）。
+WINERROR_NO_SYSTEM_RESOURCES = 1450
+
+
+def _report_spawn_blocked(exc: OSError, elapsed_s: float) -> bool:
+    """闸门连"起子进程"都做不到时的诊断（恒返回 `False` ⇒ 闸门不通）。
+
+    ⚠️ 这一条存在的理由：该故障的**长相**是"页面打不开"，而真因在系统层，
+    2026-09-19 一晚我据此误判了两次（先记成"网络抖动"，再记成"IDE 残留实例累积"）。
+    ⇒ 把"哪一档"直接印出来，别让下一个人再猜一遍。
+    """
+    winerr = getattr(exc, "winerror", None)
+    log(f"    ✗ 闸门在 {elapsed_s:.0f}s 处**无法创建子进程**：{str(exc)[:160]}")
+    if winerr == WINERROR_NO_SYSTEM_RESOURCES:
+        log(f"      读数：{_machine_pressure()}")
+        log(
+            "      ⇒ 这一档＝**会话级资源到限**（交互桌面堆 / 句柄配额），"
+            "⛔ 不是产品问题、⛔ 也不是 IDE 残留："
+        )
+        log(
+            "        本机实测（2026-09-19）：IDE 进程 **0** 个、可用内存 6.4G，"
+            "照样失败 ⇒ 清 IDE 进程**没用**。"
+        )
+        log(
+            "      ⇒ 处置：**注销或重启**这台机器再跑走查（桌面堆随会话回收）；"
+            "并避免在一次登录会话里反复拉起 GUI 应用。"
+        )
+        log("      ⛔ 不要靠重跑或加等待刷绿灯 —— 系统层拒绝，重跑必然同样失败。")
+    else:
+        log(f"      ⇒ 处置：按上面 OSError 原文排查；当前读数：{_machine_pressure()}。")
+    return False
+
+
 def _brief(obj: object) -> str:
     """把回执压成一行关键信息（`ok` / `errorType` / 截断原文），供日志打印原因。"""
     if not isinstance(obj, dict):
@@ -391,9 +491,12 @@ def wait_ready(
     dead = 0
     while time.time() - t0 < budget_s:
         t1 = time.time()
-        win = client.open_window(timeout=probe_s)
-        t2 = time.time()
-        stack, receipt = client.page_stack_probe(timeout=probe_s)
+        try:
+            win = client.open_window(timeout=probe_s)
+            t2 = time.time()
+            stack, receipt = client.page_stack_probe(timeout=probe_s)
+        except OSError as exc:  # 子进程都起不来 ⇒ 不是页面问题（见 _report_spawn_blocked）
+            return _report_spawn_blocked(exc, time.time() - t0)
         t3 = time.time()
         last = receipt or {}
         hit = receipt if not receipt.get("ok") else win
@@ -418,7 +521,22 @@ def wait_ready(
                     f" ⇒ 早退，不再等满 {budget_s}s 预算。"
                 )
                 log("      ⇒ 处置：① 只读探测**已在运行**的 IDE，能用就 `--skip-ide` 复用它；")
-                log("              ② 不能用再看 IDE 窗口是否有弹层/网络提示，然后清场重起。")
+                log("              ② 不能用再看 IDE 窗口是否有弹层/网络提示，然后清场重起；")
+                # ⭐ 2026-09-18/19 两次实测：这个签名的头号成因是**残留实例**
+                #    （上一次被中断的走查留下的，提示在「起 IDE」那一段）——
+                #    它们在时闸门恒不通，而报错长相是"页面打不开"。⇒ 这里点名列出。
+                leftovers = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+                log(
+                    f"              ③ **先怀疑残留实例**：当前有 {len(leftovers)} 个非本轮 "
+                    f"IDE 进程 {leftovers[:8]}{'…' if len(leftovers) > 8 else ''}"
+                )
+                log(
+                    "                 清理（PowerShell，只清 IDE）："
+                    "Get-CimInstance Win32_Process -Filter \"name='微信开发者工具.exe'\" "
+                    "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+                )
+                if not leftovers:
+                    log("                 （当前为 0 ⇒ 不是残留实例，按 ①/② 排查）")
                 return False
             if dead >= AUTOMATION_DEAD_MAX:
                 log(
@@ -430,6 +548,15 @@ def wait_ready(
             dead = 0
         time.sleep(3)
     log(f"    ✗ 闸门预算 {budget_s}s 用尽，页面栈仍为空。最后回执：{_brief(last)}")
+    leftovers = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+    log(
+        f"      诊断：非本轮 IDE 残留实例 {len(leftovers)} 个"
+        + (
+            "（**先清它们**再重跑；命令见上）"
+            if leftovers
+            else "（为 0 ⇒ 看 IDE 窗口是否有弹层/提示）"
+        )
+    )
     return False
 
 
