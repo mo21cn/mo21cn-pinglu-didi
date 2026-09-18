@@ -1099,6 +1099,36 @@ class Walker:
         val = self.c.evaluate("function(){return wx.getWindowInfo().windowHeight;}")
         return float(val) if isinstance(val, (int, float)) else 0.0
 
+    def wait_mine_ready(
+        self, tries: int = 40, gap: float = 0.5
+    ) -> tuple[str, dict, list[str], bool]:
+        """等「我的」页**就绪**：返回 `(path, page_data, 键名集合, 是否读到过 showEntrust)`。
+
+        为什么返回值这么啰嗦：这条前置在 O-8 那一族里**反复以 `showEntrust=None`
+        出现在读数里**，而 `None` 同时对应两种完全不同的情形 ——
+
+        1. 我们**根本还没停在「我的」页**（`switchTab` 没落地、页面没建出来）；
+        2. 页面在了、数据也取回来了，但它**没有产出 `showEntrust` 这个键**
+           （那是产品问题，不是"没等到"）。
+
+        只报一个 `None` 会把二者糊成一句，于是每次都要重新猜一遍。所以这里把
+        `path` 与**页面数据的键名集合**一起带出来 —— 读到哪个集合，一眼能分辨。
+        ⛔ 判据不放松：调用方仍按 `is True` 判定"入口可见"，`None` 与 `False` 都算不通过
+        （差别只在于读数说清了是哪一种）。
+        """
+        path = ""
+        data: dict = {}
+        saw_key = False
+        for _ in range(tries):
+            path = self.c.current_path()
+            data = self.c.page_data() or {}
+            if "showEntrust" in data:
+                saw_key = True
+                if data.get("showEntrust") is not None:
+                    break
+            time.sleep(gap)
+        return path, data, sorted(data.keys()), saw_key
+
     def open_workbench(self, code: str, tag: str = "⑯") -> bool:
         """登录指定身份 → 「我的」页委托入口 → 经理工作台（⑯ 章前置）。
 
@@ -1126,22 +1156,49 @@ class Walker:
         #    ⚠️ 轮询只让读数可靠，**不放松判据**：下面照样断言 `is True`，
         #    `None` 与 `False` 都会失败（差别只是"没读到"与"读到了但没有"）。
         mine: dict = {}
-        for _ in range(40):
-            mine = self.c.page_data()
-            if mine.get("showEntrust") is not None:
-                break
-            time.sleep(0.5)
+        path_mine, mine, keys_mine, saw_key = self.wait_mine_ready()
         # 入口是否可见由服务端决定 —— 这也是在验「我的」页的权限投影
         if not self.rep.rec(
             f"{tag} [{code}] 「我的」页委托入口可见（服务端放行）",
             mine.get("showEntrust") is True,
-            f"showEntrust={mine.get('showEntrust')}",
+            f"showEntrust={mine.get('showEntrust')!r} path={path_mine} "
+            f"页面数据键 {len(keys_mine)} 个{keys_mine[:12]}"
+            + (
+                ""
+                if saw_key
+                else "（**超时前一次都没读到 showEntrust 这个键** ⇒ 先查是不是没停在「我的」页、"
+                "页面有没有取到数，别把它读成「这个身份没有入口」）"
+            ),
         ):
             return False
         self.c.tap(".entrust-entry")
-        time.sleep(5)
-        path2 = self.c.current_path()
-        return self.rep.rec(f"{tag} [{code}] 点击入口进入经理工作台", path2 == WORKBENCH, path2)
+        # ⚠️ 不 `sleep(N)` 之后读数一次：实测这条路会在**单次读数**里拿到**空串**
+        #    （自动化层还没把新页面栈报回来），于是"点了但还没跳完"被记成
+        #    "没进工作台"，并把整节推成 `NOT_RUN` —— O-8 那一族里最贵的一类假红。
+        #    改成轮询到 path 有值再判，并把两种情形分开写在读数里：
+        #    `path` 为空 ⇒ 读不到页面栈（自动化层的读数问题）；
+        #    `path` 是别的页 ⇒ 真的没跳过去（那才是产品/入口问题）。
+        paths: list[str] = []
+        path2 = ""
+        for _ in range(30):
+            path2 = self.c.current_path()
+            if path2:
+                if not paths or paths[-1] != path2:
+                    paths.append(path2)
+                if path2 == WORKBENCH:
+                    break
+            time.sleep(0.5)
+        return self.rep.rec(
+            f"{tag} [{code}] 点击入口进入经理工作台",
+            path2 == WORKBENCH,
+            f"path={path2!r} 读到过={paths[-4:]}"
+            + (
+                ""
+                if path2
+                else "（**整整一轮都没读到页面栈** ⇒ 先按自动化层读数问题查，"
+                "别读成「入口点了没反应」）"
+            ),
+        )
 
     def reenter_workbench(self) -> str:
         """不重新登录，直接再进工作台 —— 验「上次选择是否被沿用」。"""
@@ -4008,14 +4065,19 @@ def sec_33(w: Walker) -> None:
 
     # switchTab 到「我的」只是**前置**（tabBar 页无深链入口），真正的入口是被点击的 `.entrust-entry`
     w.c.nav("switchTab", "/" + MINE, MINE)
-    time.sleep(2.2)
-    mine = w.c.page_data()
+    path_mine, mine, keys_mine, saw_key = w.wait_mine_ready()
     n_entry = w.c.count(".entrust-entry")
     if mine.get("showEntrust") is not True or n_entry != 1:
         w.rep.not_run(
             "㉝ 第三节前置 · 「我的」页委托入口不可见 ⇒ 真实入口链走不下去",
-            f"showEntrust={mine.get('showEntrust')} n_entry={n_entry}"
-            "（该身份没有委托入口；本节五类路径都要靠它）",
+            f"showEntrust={mine.get('showEntrust')!r} n_entry={n_entry} path={path_mine} "
+            f"页面数据键 {len(keys_mine)} 个{keys_mine[:12]}"
+            + (
+                ""
+                if saw_key
+                else "（**超时前一次都没读到 showEntrust 这个键** ⇒ 先查是否停在「我的」页、"
+                "页面有没有取到数，再谈「这个身份没有委托入口」）"
+            ),
         )
         return
     before = len(w.c.page_stack())
@@ -9780,24 +9842,47 @@ def sec_49(w: Walker) -> None:
     n_before = len(items)
     tap_landed = False
     probe = ""
+    d: dict = {}
+    open_tries = 0
+    opened = False
     if w.c.count('[data-act-sig-open="1"]'):
-        w.c.scroll_into('[data-act-sig-open="1"]')
-        w.c.tap('[data-act-sig-open="1"]')
-        w.wait_data(lambda x: x.get("sigOpen") is True, tries=20, gap=0.3)
-        w.c.scroll_into('[data-act-sig-kind="sample_scan"]')
-        w.c.tap('[data-act-sig-kind="sample_scan"]')
-        d: dict = {}
-        for _attempt in range(2):
-            has_btn = w.c.count('[data-act-sig-submit="1"]') > 0
-            if not has_btn:
-                time.sleep(0.6)
-                continue
-            tap_landed = True
-            w.c.scroll_into('[data-act-sig-submit="1"]')
-            w.c.tap('[data-act-sig-submit="1"]')
-            d = w.wait_data(lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4)
-            if "已经记过" in str(d.get("sigHint") or ""):
+        # ⚠️ 这个锚点是**开关**，不是"展开键"：`detail.js` 的 `onToggleSig` 是
+        #    `sigOpen: !this.data.sigOpen`，同一个锚点在展开时显示「取消」。
+        #    ⇒ **盲点一下在已经展开时会把它收起来**，接下来 `[data-act-sig-kind]`
+        #    与 `[data-act-sig-submit]` 全都不在树上，读数表现为
+        #    `sigOpen=False / 提交键没落点` —— 看起来像"页面没给提示"。
+        #    正确做法是**先读状态再点**（人也是先看标签），并把"点了几次才展开"记进读数：
+        #    需要多于 1 次 ⇒ 说明点击有落空，那是走查侧的问题；一次都展开不了 ⇒ 才查页面。
+        for _ in range(3):
+            if (w.c.page_data() or {}).get("sigOpen") is True:
+                opened = True
                 break
+            open_tries += 1
+            w.c.scroll_into('[data-act-sig-open="1"]')
+            w.c.tap('[data-act-sig-open="1"]')
+            for _ in range(16):
+                if (w.c.page_data() or {}).get("sigOpen") is True:
+                    opened = True
+                    break
+                time.sleep(0.3)
+            if opened:
+                break
+        if opened:
+            w.c.scroll_into('[data-act-sig-kind="sample_scan"]')
+            w.c.tap('[data-act-sig-kind="sample_scan"]')
+            for _attempt in range(2):
+                has_btn = w.c.count('[data-act-sig-submit="1"]') > 0
+                if not has_btn:
+                    time.sleep(0.6)
+                    continue
+                tap_landed = True
+                w.c.scroll_into('[data-act-sig-submit="1"]')
+                w.c.tap('[data-act-sig-submit="1"]')
+                d = w.wait_data(
+                    lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4
+                )
+                if "已经记过" in str(d.get("sigHint") or ""):
+                    break
     if not tap_landed:
         # ⚠️ 找不到提交键时**把"为什么"直接打出来**，不要只报"没落点"：
         #    提交键的渲染条件是 `canDeriveContract && contract && sigOpen`
@@ -9807,7 +9892,8 @@ def sec_49(w: Walker) -> None:
         snap = w.c.page_data()
         sig = snap.get("sig") or {}
         probe = (
-            f"｜探针 sigOpen={snap.get('sigOpen')} contract={bool(snap.get('contract'))} "
+            f"｜探针 sigOpen={snap.get('sigOpen')} 表单展开={opened}（点了 {open_tries} 次）"
+            f" contract={bool(snap.get('contract'))} "
             f"canDeriveContract={snap.get('canDeriveContract')} sig.hasItems={sig.get('hasItems')}"
             f"；卡片原文={w.c.outer_wxml('.contract-card')[:220]!r}"
         )
@@ -9822,8 +9908,13 @@ def sec_49(w: Walker) -> None:
         "不是静默失败，也没有记成两条互相打架的证据）",
         "已经记过" in str(d.get("sigHint") or "") and n_after == n_before,
         f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after} "
-        f"提交键有落点={tap_landed}"
-        + ("" if tap_landed else '（**提交键没进渲染树 ⇒ 先看下面的探针，不是"页面没提示"**）')
+        f"表单展开={opened}（点了 {open_tries} 次）提交键有落点={tap_landed}"
+        + (
+            ""
+            if tap_landed
+            else "（**提交键没进渲染树 ⇒ 先看下面的探针：是「表单没展开」还是"
+            "「展开键点了不生效」，两者修法不同；⛔ 不是「页面没提示」**）"
+        )
         + probe,
     )
 
@@ -10794,26 +10885,35 @@ def sec_52(w: Walker) -> None:
 
     # ---- ⑫ 客户侧：换**货主本人**的身份进来确认这一版 ----
     w.login_as(CODE_SHIPPER)
-    # ⚠️ `login_as` 只写 storage ＋ reLaunch，**应用侧的登录是页面 onLoad 里异步做的**
-    #    ⇒ 紧接着 navigateTo 会赶在拿到 token 之前，详情页按"未登录"处理（读不到数据、
-    #    也就没有入口）。必须**等 token 真的落到 storage** 再走 —— 这与 O-8 那条
-    #    「章前就绪没有可断言的判据」是同一类问题（首跑就是这么得到 NOT_RUN 的）。
-    tok_ready = False
-    for _ in range(40):
-        if str(w.c.get_storage("access_token") or ""):
-            tok_ready = True
-            break
-        time.sleep(0.5)
-    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
-        w.rep.not_run("52 ⑫ 客户确认", f"货主侧打不开委托详情页（token 就绪={tok_ready}）")
+    # ⚠️ `login_as` 只写 storage ＋ reLaunch，**应用的登录是页面 onLoad 里异步做的**
+    #    ⇒ 紧接着 `navigateTo` 会赶在拿到 token 之前，详情页按"未登录"处理
+    #    （读不到数据、也就没有入口）。
+    #    ⛔ 曾用"轮询 `wx.getStorageSync('access_token')` 非空"当就绪判据 —— 实测
+    #    该读数**恒为空**（本轨读不到这个键），于是它对"登录到底成没成"什么都没说，
+    #    只是把 20 秒等掉。改用本仓既有的就绪配方（见 ① / ② / ⑭ 章）：
+    #    `login_as` → **`enter_role` 点身份卡落到货主首页** → 再导航。
+    #    点身份卡本身就要求登录已经完成（首页没登录就没卡片可点），
+    #    所以它比读那个键更接近"真的就绪"。
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.not_run(
+            "52 ⑫ 客户确认",
+            f"货主身份切不过去（点身份卡没落到货主首页，path={w.c.current_path()}）",
+        )
         return
-    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("52 ⑫ 客户确认", "货主侧打不开这张委托的详情页")
+        return
+    # 就绪：等到详情页**真的取到数**。读数里带 `view` ＋ 入口判据的中间量，
+    # 让"页面没取到数"与"取到了数但入口条件不成立"在读数上就分开 ——
+    # 两者都表现为"入口是 0 个"，但指向完全不同的修法。
+    shd = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
     has_entry_shi = w.c.count('[data-act-open-finance="1"]') > 0
     if not has_entry_shi:
         w.rep.not_run(
             "52 ⑫ 客户确认",
             f"货主侧详情页**没有**「财务与结算」入口"
-            f"（token 就绪={tok_ready}，path={w.c.current_path()}）",
+            f"（view={shd.get('view')!r} 入口判据 canCreateCase={shd.get('canCreateCase')!r} "
+            f"槽位={len(shd.get('slots') or [])} path={w.c.current_path()}）",
         )
         return
     w.c.scroll_into('[data-act-open-finance="1"]')
@@ -10849,14 +10949,33 @@ def sec_52(w: Walker) -> None:
         )
 
     # ---- ⑬ 回经理侧：四条判据全过 ⇒ 已结清 ----
-    w.login_as(CODE_OWNER)
-    if w.c.nav("navigateTo", f"/{finance_path}?assignment_id={aid}", finance_path):
+    # ⚠️ 同样不能 `login_as` 完就导航：应用侧登录是页面 onLoad 异步做的，
+    #    而页面的 onLoad **只跑一次** —— 赶在 token 之前进财务页，它会按"未登录"
+    #    取数失败并**停在错误态**（不会因为 token 后来到位而重取）⇒ 读到的是
+    #    `financialStatusText=None`，看起来像"财务状态没算出来"。
+    #    本仓既有就绪配方是 `open_workbench`（登录 → 身份卡 → 「我的」 → 轮询
+    #    `showEntrust` 有值为止，㉟ 章也在复用），这里照用。
+    if not w.open_workbench(CODE_OWNER, tag="52"):
+        w.rep.not_run("52 ⑬ 财务状态复看", "回不到经理侧就绪态（登录/入口未就绪）")
+    elif w.c.nav("navigateTo", f"/{finance_path}?assignment_id={aid}", finance_path):
         fpd = w.wait_data(lambda x: x.get("canViewInternal") is True, tries=40, gap=0.4)
+        page_texts = [str((b or {}).get("text") or "") for b in (fpd.get("blockers") or [])]
+        # 同时问一次**派生端点**：页面与派生两处必须同结论（页面自己算一份 blocker
+        # 就是第二份判据，迟早与服务端漂移）。两条读的是**同一批事实**。
+        api_state = api_get(f"/entrust/assignments/{aid}/financial-status", tok_mgr) or {}
+        codes = [str((b or {}).get("code") or "") for b in (api_state.get("blockers") or [])]
+        # ⚠️ 判据**只说我做过的这件事**：⑫-b 的客户确认是否真的让
+        #    「客户尚未确认适用结算版本」这条未结成因消失。
+        #    ⛔ 不断言"已结清" —— 本章夹具上还有未关闭的案件与未结余额
+        #    （⑩ 的 blockers 就列着），把它们清掉属于**结案**那一步的演示（S4-b），
+        #    在这里断言"已结清"会是外推，而且会逼着本章去补两个与第 10–11 步无关的动作。
         w.rep.rec(
-            "52 ⑬ 客户确认 ＋ 收付依据齐备之后，财务状态转为**已结清**（§5.3.2 四条判据全不成立）",
-            str(fpd.get("financialStatusText") or "") == "已结清",
-            f"状态={fpd.get('financialStatusText')!r} blockers="
-            + str([b.get("text") for b in (fpd.get("blockers") or [])])[:200],
+            "52 ⑬ 客户确认之后，「客户尚未确认适用结算版本」这条未结成因**消失**；"
+            "其余未结成因页面与派生端点两处同结论（不假装已结清）",
+            "customer_not_confirmed" not in codes
+            and not any("客户尚未确认" in t for t in page_texts),
+            f"页面状态={fpd.get('financialStatusText')!r} 页面未结成因={page_texts} "
+            f"／派生 status={api_state.get('financial_status')!r} codes={codes}",
         )
     else:
         w.rep.not_run("52 ⑬ 财务状态复看", "回不到财务页")
