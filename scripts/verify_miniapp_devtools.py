@@ -115,6 +115,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wechatide_client import DEFAULT_CLIENT, Client  # noqa: E402
@@ -9756,6 +9757,395 @@ def sec_49(w: Walker) -> None:
     )
 
 
+def sec_50(w: Walker) -> None:
+    """㊿ 委托货量变更的**设备侧**取证（S6-1 / D1-09 / §10.1 第 8 步）。
+
+    合同 §10.1 第 8 步原文是 `Apply the 800→950 change`；D1-09 的判据是
+    「同一张委托上看到 `800 → 审批 → 950 → 原运力（900 吨候选）不适用 → 复核与重新确认`」。
+    **预置另一张 950 吨的委托不算数** —— 那只能说明系统里有 950，说明不了
+    "这张单被改过"，也说明不了审批、原子性、留痕与复核传播。
+
+    覆盖
+    ----
+    ① 前置：canonical 夹具的货量是 800.000 吨（夹具声明的值，不是断言产品行为）；
+    ② 变更前：那条 900 吨候选的运力确认**仍然成立**（`recheck.still_valid = true`）；
+    ③ 经**界面**补登变更类别「货物数量与品类」，再经界面进入复核；
+    ④ 经**界面**批准：三只输入（新值 / 单位 / 依据）真的写进页面 data，并落库；
+    ⑤ 经**界面**应用 ⇒ 货量落库为 950、历史留一行 `800.000 吨 → 950.000 吨`；
+    ⑥ 变更后：同一条确认 `still_valid = false`，且**只有** `capacity` 不过；
+    ⑦ 复核传播在页面上（含「船型、运力及货物适配」——复核与重新确认的落点）；
+    ⑧ 本章运行期零新增 console 报错。
+
+    ⚠️ 诚实边界
+    * 身份 `seed-owner`（经理）：货量变更的读写**两侧都只有经理侧**
+      （`basis` 是经理写的变更依据，货量历史端点不给货主放行）。
+    * **写侧**（登记变更请求 + 登记受影响项 + 运力确认）由接口铺 —— 它们是**前置**，
+      不是本章要取的证。本章要证的是「**经界面**审批与应用」那两步
+      （登记案件本身属 ⑯ 章与 `case-create` 页的取景范围）。
+    * 依赖 `seed_entrust_canonical.py`（唯一带 900 吨候选与 800 吨货量的夹具）。
+      没跑它 ⇒ 整章 `NOT_RUN`（不假绿）。
+    * 重跑：本章会改库。货量已是 950 时，⑤ 的**精确**那对值记 `NOT_RUN`
+      （要复现 `800 → 950` 请先重建库），其余断言按"当前值 → 当前值 + 100"照跑。
+    """
+    print("\n-- ㊿ 委托货量变更的设备侧取证（第 8 步）--", flush=True)
+
+    err_base = w.c.errors()
+    code_mgr = "seed-owner"
+    org_name = "演示经营主体·工作台"
+    demo_title = "DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港"
+
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊿ 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == org_name:
+            org_id = str((r or {}).get("org_id") or "")
+    if not org_id:
+        w.rep.not_run("㊿ 全部断言", f"seed-owner 的组织里没有「{org_name}」")
+        return
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
+    hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    if not hit:
+        w.rep.not_run(
+            "㊿ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
+        )
+        return
+    aid = str((hit[0] or {}).get("assignment_id") or "")
+
+    ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
+    eid = str(ctx.get("entrustment_id") or "")
+    if not eid:
+        w.rep.not_run("㊿ 全部断言", f"委托 #{aid} 定位不到唯一授权")
+        return
+
+    # ── ① 前置：canonical 的货量 ────────────────────────────────────────────
+    det = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    cur_raw = det.get("quantity")
+    cur_unit = str(det.get("quantity_unit") or "吨")
+    if cur_raw is None:
+        w.rep.not_run("㊿ 全部断言", f"委托 #{aid} 的货量是空的（canonical 夹具声明为 800）")
+        return
+    cur = Decimal(str(cur_raw))
+    fresh = cur == Decimal("800")
+    w.rep.rec(
+        "㊿ 前置 · canonical 夹具的货量就是 800.000 吨（D1-09 的起点）"
+        + (
+            ""
+            if fresh
+            else f" —— ⚠️ 实为 {cur}，本章按「当前值 + 100」照跑，要复现 800→950 那对精确值需重建库"
+        ),
+        True,
+        f"quantity={cur_raw} unit={cur_unit}（夹具声明 800.000 吨：{'一致' if fresh else '已被改过'}）",
+    )
+
+    # ── 前置 B：900 吨候选的**运力确认**（变更后要判它不再适用）──────────
+    # ⚠️ 这两条端点返回的是**列表**（），不是分页对象 ——
+    #    按  读会抛 AttributeError（本轮实测），而异常会被章节兜底
+    #    记成「执行异常」，看起来像脚本坏了而不是读错形状。
+    cands = api_get(f"/entrust/assignments/{aid}/capacity-candidates", tok) or []
+    c900 = [c for c in cands if _same_dec((c or {}).get("capacity_tonnes"), "900.000")]
+    if not c900:
+        w.rep.not_run(
+            "㊿ 全部断言",
+            "该委托下没有 900 吨候选运力 —— canonical 夹具未铺（先跑 seed_entrust_canonical.py）",
+        )
+        return
+    cand_id = int((c900[0] or {}).get("candidate_id") or 0)
+    confs = api_get(f"/entrust/assignments/{aid}/capacity-confirmations", tok) or []
+    conf = [c for c in confs if int((c or {}).get("candidate_id") or 0) == cand_id]
+    if not conf:
+        # **前置**用接口铺一次：本章要证的是"经界面审批与应用"，不是"经界面确认运力"
+        # （后者是 ㊺ 章的范围）。⚠️ 它**不**计入本章的通过数 —— 只是让 ⑥ 有对象可判。
+        st, body = api_post(
+            f"/entrust/assignments/{aid}/capacity-confirmations",
+            tok,
+            {"candidate_id": cand_id, "agreed_scope": "整船包运（㊿ 前置）"},
+            _idem("walk-50-conf"),
+        )
+        if st != 200:
+            w.rep.not_run("㊿ 全部断言", f"无法确认 900 吨候选（HTTP {st}）：{body}")
+            return
+        conf = [body]
+    conf_id = str((conf[0] or {}).get("confirmation_id") or "")
+
+    # ── ② 变更前：这条确认还成立 ───────────────────────────────────────────
+    pre = api_get(f"/entrust/capacity-confirmations/{conf_id}/recheck", tok) or {}
+    w.rep.rec(
+        "㊿ ② 变更前 · 900 吨候选的运力确认**成立**（基线：确认在 800 吨需求下判过）",
+        pre.get("still_valid") is True,
+        f"still_valid={pre.get('still_valid')!r} 不过的规则="
+        f"{[r.get('rule_code') for r in (pre.get('rule_checks') or []) if r.get('outcome') == 'fail']}",
+    )
+
+    # ── 前置 C：登记变更请求 + 受影响项＝本委托（写侧前置）──────────────
+    arts = (api_get(f"/entrust/assignments/{aid}/artifacts?size=50", tok) or {}).get("items") or []
+    basis_art = [a for a in arts if (a or {}).get("current_revision_id")]
+    if not basis_art:
+        w.rep.not_run("㊿ 全部断言", f"委托 #{aid} 上没有带生效版本的成果（批准必须指向精确版本）")
+        return
+    basis_rev = int(basis_art[0]["current_revision_id"])
+
+    st, case = api_post(
+        f"/entrust/assignments/{aid}/exceptions",
+        tok,
+        {
+            "kind": "change_request",
+            "title": "走查·货量由 800 吨调整为 950 吨",
+            "severity": "medium",
+            "impact_kind": "review-required",
+            # ⚠️ **有意不在这里给类别**：类别由界面在批准时补登（③），
+            #    那正是"界面上有没有这个入口"的证据。
+            "links": [{"target_kind": "assignment", "target_id": int(aid)}],
+        },
+        _idem("walk-50-case"),
+    )
+    if st != 200:
+        w.rep.not_run("㊿ 全部断言", f"登记变更请求失败（HTTP {st}）：{case}")
+        return
+    cid = str((case or {}).get("case_id") or "")
+
+    # ── 界面：进工作台 → 案件页 ─────────────────────────────────────────────
+    if not w.open_workbench(code_mgr, tag="㊿"):
+        w.rep.not_run("㊿ 全部断言", "未能以 seed-owner 进入经理工作台")
+        return
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{CASE}?case_id={cid}", CASE)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+
+    # ── ③ 经界面**补登变更类别**（界面上此前没有这个入口 ⇒ 变更请求应用不了）──
+    n_cat = w.c.count('[data-cat="cargo_quantity_category"]')
+    w.rep.rec(
+        "㊿ ③ 案件页有「变更类别」选择条，点它能把类别补登成「货物数量与品类」"
+        "（没有这个入口，变更请求在界面上根本应用不了：应用要求类别已登记）",
+        n_cat == 1,
+        f"选择项数={n_cat}（页面上 categoryOptions={len(d.get('categoryOptions') or [])}）",
+    )
+    if n_cat == 1:
+        w.c.scroll_into('[data-cat="cargo_quantity_category"]')
+        w.c.tap('[data-cat="cargo_quantity_category"]')
+        d = w.wait_data(
+            lambda x: (
+                str((x.get("decideForm") or {}).get("category") or "") == "cargo_quantity_category"
+            ),
+            tries=20,
+            gap=0.4,
+        )
+        w.rep.rec(
+            "㊿ ③b 选中类别后它真的落进了页面表单（补登的类别会随这次决定一起回传）",
+            str((d.get("decideForm") or {}).get("category") or "") == "cargo_quantity_category",
+            f"qty 输入框数={w.c.count('[data-df="qty"]')} 单位={w.c.count('[data-df="qty-unit"]')}",
+        )
+
+    # ── ③c 进入复核（`open → approved` 不是合法转移，必须两步）────────────
+    w.c.tap('[data-status="in_review"]')
+    w.c.scroll_into('[data-act-decide-submit="1"]')
+    w.c.tap('[data-act-decide-submit="1"]')
+    d = w.wait_data(lambda x: str(x.get("status") or "") == "in_review", tries=40, gap=0.5)
+    w.rep.rec(
+        "㊿ ③c 经界面进入复核（`open → approved` 不是合法转移，服务端会 409）",
+        str(d.get("status") or "") == "in_review",
+        f"status={d.get('status')!r} hint={d.get('decideHint')!r}",
+    )
+
+    # ── ④ 经界面批准（选已批准 → 三只输入 → 提交）────────────────────────
+    #
+    # ⚠️ **不重新导航**：`nav` 会开一个全新的页面实例（`decideForm` 清空）。
+    #    那本身没错，但多一次冷加载就多一次"输入框还没渲染出来就 tap"的机会 ——
+    #    本轮实测：第一版重新导航后提交，**后端日志里连那笔 POST 都没有**，
+    #    而页面上 `decideHint` 是空的（症状＝"什么都没发生"，最难查的一类）。
+    #    留在同一个实例上、等渲染树更新之后再点，路径最短。
+    # ⚠️ 新值必须**超过 900 吨**（那条候选的容量），否则 `capacity` 仍然通过、
+    #    这条判据就白跑一轮 —— 本轮实测：`800 + 100 = 900` 时 `still_valid` 仍是
+    #    True（900 ≥ 900 装得下），而 D1-09 说的是 **950**。
+    #    ⇒ 取 `max(当前 + 100, 950)`：首次是 950（D1-09 那对精确值），
+    #      重跑（当前已是 950）则继续加 100，仍然超容量，断言不为夹具状态而红。
+    new_qty = str(max(cur + 100, Decimal("950")))
+
+    def _fill_and_submit() -> dict:
+        """选「已批准」→ 填四只输入 → 提交。返回提交后的页面 data。"""
+        w.c.tap('[data-status="approved"]')
+        time.sleep(0.8)
+        for sel, val in (
+            ('[data-df="basis"]', str(basis_rev)),
+            ('[data-df="qty"]', new_qty),
+            ('[data-df="qty-unit"]', cur_unit),
+            ('[data-df="qty-basis"]', "走查 货量变更（D1-09）"),
+        ):
+            w.c.scroll_into(sel)
+            w.c.input_text(sel, val)
+        w.c.scroll_into('[data-act-decide-submit="1"]')
+        w.c.tap('[data-act-decide-submit="1"]')
+        return w.wait_data(lambda x: str(x.get("status") or "") == "approved", tries=30, gap=0.5)
+
+    # ── ④a 选「已批准」后，三只货量输入框**出现在渲染树上** ────────────────
+    #    判据取 `count(...)` 而不是内部状态键：条没渲染时 `showQuantityChange`
+    #    与 `decideForm.category` 照样是对的（本仓既有的一条纪律）。
+    d = w.wait_data(lambda x: str(x.get("view") or "") == "ready", tries=40, gap=0.5)
+    w.c.tap('[data-status="approved"]')
+    time.sleep(0.8)
+    n_qty = w.c.count('[data-df="qty"]')
+    n_unit = w.c.count('[data-df="qty-unit"]')
+    n_basis_input = w.c.count('[data-df="qty-basis"]')
+    w.rep.rec(
+        "㊿ ④a 选「已批准」后三只货量输入框**渲染出来了**（内部状态键对了不算数）",
+        n_qty == 1 and n_unit == 1 and n_basis_input == 1,
+        f"渲染树计数：新值={n_qty} 单位={n_unit} 依据={n_basis_input}"
+        f"｜showQuantityChange={d.get('showQuantityChange')!r}"
+        f"｜decideForm.to={((d.get('decideForm') or {}).get('to'))!r}"
+        f"｜quantityTargetId={d.get('quantityTargetId')!r}",
+    )
+
+    # ── ④b 填四只输入（输入通道断了的话，提交出去的是空变更）────────────────
+    for sel, val in (
+        ('[data-df="basis"]', str(basis_rev)),
+        ('[data-df="qty"]', new_qty),
+        ('[data-df="qty-unit"]', cur_unit),
+        ('[data-df="qty-basis"]', "走查 货量变更（D1-09）"),
+    ):
+        w.c.scroll_into(sel)
+        w.c.input_text(sel, val)
+    d = w.wait_data(
+        lambda x: str((x.get("quantityForm") or {}).get("quantity") or "") == new_qty,
+        tries=20,
+        gap=0.4,
+    )
+    qf = d.get("quantityForm") or {}
+    w.rep.rec(
+        "㊿ ④b 三只输入框真的把值写进了页面 data",
+        str(qf.get("quantity") or "") == new_qty
+        and str(qf.get("unit") or "") == cur_unit
+        and str(qf.get("basis") or "") == "走查 货量变更（D1-09）",
+        f"quantityForm={qf!r}",
+    )
+
+    # ── ④c 提交批准（tap 落空时重试一次；判据是**状态真的变了**）────────────
+    d = _fill_and_submit()
+    if str(d.get("status") or "") != "approved":
+        d = _fill_and_submit()
+    w.rep.rec(
+        "㊿ ④c 经界面批准落库（批准内容随这次请求进快照，`apply` 只认快照）",
+        str(d.get("status") or "") == "approved",
+        f"status={d.get('status')!r} hint={d.get('decideHint')!r}",
+    )
+
+    # 批准快照里必须记下"从哪改到哪" —— 应用确认条要拿它给人看
+    ap = d.get("approval") or {}
+    tgt = ((ap.get("targets") or []) or [{}])[0] or {}
+    w.rep.rec(
+        "㊿ ④d 应用确认条上能看到 `当前 → 将改为`（apply 不接受改写，不给对照就是盲操作）",
+        bool(tgt.get("quantityChangeText")) and new_qty in str(tgt.get("quantityChangeText")),
+        f"quantityChangeText={tgt.get('quantityChangeText')!r}",
+    )
+
+    # ── ⑤ 经界面应用 ───────────────────────────────────────────────────────
+    w.c.scroll_into('[data-act-apply="1"]')
+    w.c.tap('[data-act-apply="1"]')
+    time.sleep(0.6)
+    w.c.scroll_into('[data-act-apply-submit="1"]')
+    w.c.tap('[data-act-apply-submit="1"]')
+    d = w.wait_data(
+        lambda x: (
+            str(x.get("status") or "") == "applied" or len(x.get("quantityHistory") or []) > 0
+        ),
+        tries=60,
+        gap=0.5,
+    )
+    after = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    now_qty = after.get("quantity")
+    w.rep.rec(
+        f"㊿ ⑤ 经界面应用后**货量真的落库**（{cur_raw} → {now_qty}）",
+        _same_dec(now_qty, new_qty),
+        f"服务端 quantity={now_qty!r}（期望 {new_qty}）· 页面 status={d.get('status')!r}",
+    )
+    hist = d.get("quantityHistory") or []
+    mine = [h for h in hist if str(h.get("exceptionId") or "") == cid]
+    row = mine[0] if mine else {}
+    # ⚠️ 判据是**不变量**："那一行就是前后两段的拼接"，而不是我自己拼一个期望串 ——
+    #    服务端把货量格式化成固定 3 位小数（`800` → `800.000`），
+    #    拿接口原文那个 `800` 去拼期望串会差在**格式**上（本轮实测就这么红了一次）。
+    w.rep.rec(
+        "㊿ ⑤b 页面上出现那条对照（`<变更前> → <变更后>`，且来源案件号对得上）",
+        str(row.get("changeText") or "")
+        == f"{row.get('oldQuantityText')} → {row.get('newQuantityText')}"
+        and "→" in str(row.get("changeText") or "")
+        and str(row.get("exceptionId") or "") == cid,
+        f"changeText={row.get('changeText')!r} source={row.get('sourceText')!r} "
+        f"basis={row.get('basisText')!r}（历史共 {len(hist)} 行）",
+    )
+    if fresh:
+        srv_hist = api_get(f"/entrust/assignments/{aid}/quantity-changes", tok) or []
+        srv_row = [h for h in srv_hist if str(h.get("exception_id") or "") == cid]
+        w.rep.rec(
+            "㊿ ⑤c ⭐ D1-09 的**精确那对值**：`800.000 吨 → 950.000 吨`，且页面与服务端同源",
+            bool(row.get("changeText"))
+            and str(row.get("changeText")) == "800.000 吨 → 950.000 吨"
+            and bool(srv_row)
+            and _same_dec(srv_row[0].get("new_quantity"), "950.000"),
+            f"页面={row.get('changeText')!r} 服务端="
+            f"{(srv_row[0].get('old_quantity'), srv_row[0].get('new_quantity')) if srv_row else None}",
+        )
+    else:
+        w.rep.not_run(
+            "㊿ ⑤c D1-09 的精确那对值 `800.000 → 950.000`",
+            f"canonical 夹具的货量已被改到 {cur_raw}（本机上一轮走查的副作用）—— "
+            "要复现那对精确值请先重建库；本章 ⑤/⑤b 已按相对值取证",
+        )
+
+    # ── ⑥ 变更后：原运力不再适用（**只有** capacity 不过）──────────────────
+    post = api_get(f"/entrust/capacity-confirmations/{conf_id}/recheck", tok) or {}
+    fails = [
+        r.get("rule_code") for r in (post.get("rule_checks") or []) if r.get("outcome") == "fail"
+    ]
+    w.rep.rec(
+        "㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过"
+        "（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话）",
+        post.get("still_valid") is False and fails == ["capacity"],
+        f"still_valid={post.get('still_valid')!r} 不过的规则={fails} "
+        f"changed_fields={post.get('changed_fields')!r}",
+    )
+
+    # ── ⑦ 复核传播在页面上 ─────────────────────────────────────────────────
+    w.c.scroll_into('[data-act-apply="1"]')
+    d = w.wait_data(lambda x: len(x.get("revalidation") or []) > 0, tries=40, gap=0.5)
+    areas = [str(r.get("area") or "") for r in (d.get("revalidation") or [])]
+    w.rep.rec(
+        "㊿ ⑦ 页面上出现复核传播，含「船型、运力及货物适配」（＝复核与重新确认的落点）",
+        any("船型" in a for a in areas),
+        f"复核区域={areas}",
+    )
+
+    # ── ⑧ 零新增 console 报错 ──────────────────────────────────────────────
+    err_now = w.c.errors()
+    w.rep.rec(
+        "㊿ ⑧ 本章运行期无新增 console 报错",
+        err_now == err_base or not err_now,
+        (err_now or "(空)")[-160:],
+    )
+
+
+def _same_dec(raw: object, want: str) -> bool:
+    """定点比较：`"800.000"` / `800` / `Decimal("800")` 都算相等。
+
+    ⛔ 不用 `str(raw) == want`：SQLite 与 MySQL 读回来一个是 `NUMERIC`、一个是
+    `DECIMAL`，字符串形态可能差尾零（`800` vs `800.000`），拿字符串比会红在格式上。
+    """
+    try:
+        return Decimal(str(raw)) == Decimal(want)
+    except (TypeError, ValueError, InvalidOperation):
+        return False
+
+
+def _idem(tag: str) -> str:
+    """走查用的幂等键：每次唯一（同键重放会命中幂等记录、返回首次响应）。"""
+    return f"walk-{tag}-{time.time_ns()}"
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
@@ -9801,6 +10191,7 @@ SECTIONS = {
     "11": sec_11,
     "13": sec_13,
     "14": sec_14,
+    "50": sec_50,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -9936,6 +10327,7 @@ DEFAULT_ORDER = [
     #    `route_scope` 条款里 —— 这是"派生用的是派生那一刻的航段"的真实形态，不是污染。
     # ⚠️ 副作用：派生一份合同 + 记一条证据。已派生过 ⇒ 读回已有那份（不重复派生）。
     "49",
+    "50",
 ]
 
 

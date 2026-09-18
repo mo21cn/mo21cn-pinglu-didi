@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Final, cast
 
 from sqlalchemy import CursorResult, text
@@ -107,6 +108,31 @@ class ExceptionCaseConflictError(Exception):
 
 class ExceptionCaseNotFoundError(Exception):
     """对象不存在 → HTTP 404。"""
+
+
+class AssignmentQuantityStaleError(ExceptionCaseConflictError):
+    """**值级**过期：批准时记的货量与库里现在的不一致（→ 409）。
+
+    与版本级过期（`stale_basis`）分开成一类，是因为它们要人做的事不同：
+    版本变了通常意味着"下游有别的变更"，值变了则意味着"有人绕过了本命令直接改了数"。
+    合成一句话会让人去查错方向。
+
+    `audit_reason` 会落进 `applied_rejected` 事件的 `reason` —— 审计链上
+    "为什么没应用成功"必须能一眼看出来，而不是只有一句"应用失败"。
+    """
+
+    audit_reason = "stale_quantity"
+
+
+class AssignmentQuantityConflictError(ExceptionCaseConflictError):
+    """**并发**冲突：条件更新的受影响行数为 0，说明该委托的版本在本次事务内被别人推进了（→ 409）。
+
+    条件更新（`WHERE id=… AND revision=:base`）是这条命令的**唯一**并发闸门：
+    先读后判再写在这里不安全 —— 两个应用同时读到同一个 `revision`，
+    两边都会"检查通过"，而只有一个能改成功。
+    """
+
+    audit_reason = "concurrent_quantity_change"
 
 
 # ── 两套状态机（DR-0013 §3.4）────────────────────────────────────────────────
@@ -418,7 +444,16 @@ ASSIGNMENT_ACTIVE_STATUS: Final = "claimed"
 
 TARGET_TASK: Final = "task"
 TARGET_ARTIFACT: Final = "artifact"
-TARGET_KINDS: Final = frozenset({TARGET_TASK, TARGET_ARTIFACT})
+#: **委托单本身**也可以是被影响项（2026-09-18 新增）。
+#:
+#: 为什么必须有这一种：货量（`ent_assignment.quantity`）是容量判定的**需求量唯一出处**
+#: （`capacity._assignment_demand` 就指着这一列），而它此前**没有任何命令可以改** ——
+#: 已受理（`claimed`）的委托走 `PATCH /assignments/{id}` 会被 `update_draft` 的
+#: draft-only 检查挡成 409，变更应用的 `TARGET_KINDS` 又只认成果与任务。
+#: ⇒ D1-09 的「800 → 950」只能靠**直接改库**驱动，而手改出来的与用户点出来的
+#: **不是同一条路**：前者证明不了审批、原子性、留痕与复核传播。
+TARGET_ASSIGNMENT: Final = "assignment"
+TARGET_KINDS: Final = frozenset({TARGET_TASK, TARGET_ARTIFACT, TARGET_ASSIGNMENT})
 
 #: 事件类型（§3.1.3）。`applied` / `applied_rejected` 由 **A2 五之一**产生（ENT-033）。
 EVENT_CREATED: Final = "created"
@@ -487,6 +522,169 @@ def _task_current_revision(session: Session, task_id: int) -> int | None:
     return None if row is None or row[0] is None else int(row[0])
 
 
+def _assignment_current_revision(session: Session, assignment_id: int) -> int | None:
+    """委托单的**当前**乐观锁值（`ent_assignment.revision`）。
+
+    它与「货量变更」是同一个版本号：应用走
+    `UPDATE ... SET quantity=…, revision=revision+1 WHERE id=… AND revision=:expected`，
+    因此"版本变了"与"货量变了"在委托上是**同一件事**，不需要第三个字段来同步。
+    """
+    row = session.execute(
+        text("SELECT revision FROM ent_assignment WHERE id = :aid"), {"aid": assignment_id}
+    ).first()
+    return None if row is None or row[0] is None else int(row[0])
+
+
+def _target_basis_revision(session: Session, *, target_kind: str, target_id: int) -> int | None:
+    """某个受影响项的**当前**版本依据 —— 唯一出处，构造快照与应用共用同一份。
+
+    三者"版本"的语义不同，但都必须指向**能证明它没变**的那个值：
+    成果取 `current_revision_id`；任务取任务自己的 `revision`（P4-A5：不为字段要求虚构成果版本）；
+    委托单取 `ent_assignment.revision`。
+
+    ⚠️ 共用同一个函数是硬要求：批准时认的版本与应用时认的版本若各写一份，
+    「依据版本已变化」这条判定在两侧就可能给出**不同结论** —— 那是裁决分歧，
+    症状是"能批准的用不了 / 用得了的没批准"，而不是一个会报错的 bug。
+    """
+    if target_kind == TARGET_ARTIFACT:
+        return _artifact_current_revision(session, target_id)
+    if target_kind == TARGET_TASK:
+        return _task_current_revision(session, target_id)
+    if target_kind == TARGET_ASSIGNMENT:
+        return _assignment_current_revision(session, target_id)
+    raise ExceptionCaseError(f"未知受影响项类型：{target_kind!r}（取值域：{sorted(TARGET_KINDS)}）")
+
+
+# ── 委托货量变更：解析与校验（批准时就要拦住，不能等到应用）──────────────────
+
+#: 变更内容里**必须**出现的三个键（`changes["assignment#<id>"]`）。
+#: 旧值**不在其中** —— 旧值由 `build_approval_snapshot` 自己从库里读。
+#: 让调用方给旧值，它就能声称"我是从 700 改到 950"，而库里其实是 800；
+#: 而那条记录看起来完全正常（三个键齐、格式对），审计时才炸。
+ASSIGNMENT_CHANGE_FIELDS: Final = ("quantity", "quantity_unit", "basis")
+
+QUANTITY_PLACES: Final = 3
+
+
+def _quantity_decimal(value: Any) -> Decimal | None:
+    """把入参读成定点数；读不出来返回 `None`。
+
+    口径与 `capacity._decimal` **刻意保持一致**（金额/吨位一律定点，绝不用浮点走一遍）：
+    `bool` 是 `int` 的子类（`True` 会变成吨位 1）、`NaN`/`inf` 写进 DECIMAL 列会在
+    MySQL 上炸而在 Python 里只会得到"比较恒假"。两侧口径漂移由
+    `tests/test_entrust_cargo_quantity_change.py` 用同一张输入表钉住。
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value if value.is_finite() else None
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        try:
+            return Decimal(str(value))
+        except InvalidOperation:
+            return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            got = Decimal(raw)
+        except InvalidOperation:
+            return None
+        return got if got.is_finite() else None
+    return None
+
+
+def _quantity_text(value: Any) -> str | None:
+    """定点数 → **固定小数位**文本（与 `capacity._dec_text` 同口径）。
+
+    固定位数是为了让 SQLite 与 MySQL 读回来是**同一个字符串**；
+    否则逐字段核对要先解释格式差异，而那种差异会掩盖真实差异。
+    """
+    got = _quantity_decimal(value)
+    return None if got is None else f"{got:.{QUANTITY_PLACES}f}"
+
+
+def _assignment_quantity(session: Session, assignment_id: int) -> tuple[Any, Any]:
+    """委托当前的 `(quantity, quantity_unit)` —— 未知就是 `None`，不补 0。"""
+    row = (
+        session.execute(
+            text("SELECT quantity, quantity_unit FROM ent_assignment WHERE id = :aid"),
+            {"aid": assignment_id},
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None, None
+    return row["quantity"], row["quantity_unit"]
+
+
+def _validate_assignment_change(
+    change: Any, *, target_id: int, before_quantity: Any, before_unit: Any
+) -> dict[str, Any]:
+    """校验并**归一**一条货量变更内容（批准时调用）。
+
+    五条，每条都对应一种"批准了一份没人能执行的东西"：
+
+    1. 形状必须是对象、三个键齐 —— 缺 `basis` 的变更事后无法回答"凭什么改"；
+    2. 新值必须是**正数**（定点）；0 或负数不是货量；
+    3. 新单位非空 —— `"950"` 没有单位就没有口径，容量规则连"是不是吨"都判不了；
+    4. 新值与旧值**必须不同**：一样的数不是变更，批了它只会白跑一轮复核；
+    5. `basis` 非空且 ≤255（列宽）—— 依据是这条记录里唯一解释"为什么"的字段。
+
+    ⚠️ 校验放在**批准**而不是只放在应用：`apply` 只认快照、不接受入参（P4-A4），
+    所以坏内容一旦被批，就没有"应用时再拦"的机会 —— 只能在应用时 409 整批拒绝，
+    而那时用户已经把整条链路走完一遍了。
+    """
+    if not isinstance(change, dict):
+        raise ExceptionCaseError(
+            f"受影响项 assignment#{target_id} 的变更内容必须是对象（当前 {type(change).__name__}）"
+        )
+    missing = [k for k in ASSIGNMENT_CHANGE_FIELDS if change.get(k) in (None, "")]
+    if missing:
+        raise ExceptionCaseError(
+            f"受影响项 assignment#{target_id} 的变更内容缺字段：{missing}"
+            f"（必填：{list(ASSIGNMENT_CHANGE_FIELDS)}）"
+        )
+    new_qty = _quantity_decimal(change.get("quantity"))
+    if new_qty is None or new_qty <= 0:
+        raise ExceptionCaseError(
+            f"受影响项 assignment#{target_id} 的变更后货量必须是正数（当前 {change.get('quantity')!r}）"
+        )
+    new_unit = str(change.get("quantity_unit") or "").strip()
+    if not new_unit:
+        raise ExceptionCaseError(f"受影响项 assignment#{target_id} 的变更后单位不能为空")
+    if len(new_unit) > 24:
+        raise ExceptionCaseError(
+            f"受影响项 assignment#{target_id} 的单位过长（≤24 字符，当前 {len(new_unit)}）"
+        )
+    basis = str(change.get("basis") or "").strip()
+    if not basis:
+        raise ExceptionCaseError(f"受影响项 assignment#{target_id} 的变更依据不能为空")
+    if len(basis) > 255:
+        raise ExceptionCaseError(
+            f"受影响项 assignment#{target_id} 的变更依据过长（≤255 字符，当前 {len(basis)}）"
+        )
+    if _quantity_text(new_qty) == _quantity_text(before_quantity) and new_unit == str(
+        before_unit or ""
+    ):
+        raise ExceptionCaseError(
+            f"受影响项 assignment#{target_id} 的变更后货量与当前一致"
+            f"（{_quantity_text(before_quantity)} {before_unit or ''}）——"
+            "这不是一次变更；批准它只会白跑一轮复核"
+        )
+    return {
+        "quantity": _quantity_text(new_qty),
+        "quantity_unit": new_unit,
+        "basis": basis,
+    }
+
+
 def build_approval_snapshot(
     session: Session,
     *,
@@ -498,39 +696,63 @@ def build_approval_snapshot(
     """构造批准瞬间的应用目标清单（P4-A1/A2/A5）。
 
     每个目标记录三件事：`target_kind`、`target_id`、以及**它自己的基础版本**
-    （成果取 `current_revision_id`，任务取 `revision`）。
+    （成果取 `current_revision_id`，任务取 `revision`，委托取 `revision`）。
     `approved_changes` 是**经过批准的结构化修改内容**，按 `_change_key` 索引；
     应用时**只认它** —— 请求方不得在 apply 时临时替换（P4-A4）。
 
     `change_category`（五之二）也进快照：复核范围由它决定，若批准后被改动、
     应用却按新类别算范围，就会得到一份**没人批准过的复核清单**。
+
+    **委托货量变更（2026-09-18 新增）**：`assignment` 目标的快照里额外记
+    `quantity_before`（批准那一刻库里的货量与单位）—— 它是应用时的**值级**新鲜度依据。
+    只比 `revision` 是不够的：`revision` 相同而值不同虽不该发生，但一旦发生，
+    记录会声称"从 800 改到 950"而库里其实是别的数 —— 那种记录看起来完全正常。
+    变更内容在这里就**校验并归一**（`_validate_assignment_change`），
+    因为 `apply` 只认快照、没有第二次机会。
     """
     targets: list[dict[str, Any]] = []
+    normalized: dict[str, dict[str, Any]] = {}
     for link in list_links(session, exception_id):
         target_kind = str(link["target_kind"])
         target_id = int(link["target_id"])
-        basis = (
-            _artifact_current_revision(session, target_id)
-            if target_kind == TARGET_ARTIFACT
-            else _task_current_revision(session, target_id)
-        )
-        targets.append(
-            {
-                "target_kind": target_kind,
-                "target_id": target_id,
-                "basis_revision_id": basis,
-                "has_changes": bool(
-                    approved_changes and _change_key(target_kind, target_id) in approved_changes
-                ),
+        key = _change_key(target_kind, target_id)
+        raw_change = (approved_changes or {}).get(key)
+        entry: dict[str, Any] = {
+            "target_kind": target_kind,
+            "target_id": target_id,
+            "basis_revision_id": _target_basis_revision(
+                session, target_kind=target_kind, target_id=target_id
+            ),
+            "has_changes": raw_change is not None,
+        }
+        if target_kind == TARGET_ASSIGNMENT:
+            before_qty, before_unit = _assignment_quantity(session, target_id)
+            # 旧值**总是**记：即使这次没批变更内容，它也是"批准时是什么样"的一部分。
+            entry["quantity_before"] = {
+                "quantity": _quantity_text(before_qty),
+                "quantity_unit": None if before_unit is None else str(before_unit),
             }
-        )
+            if raw_change is not None:
+                normalized[key] = _validate_assignment_change(
+                    raw_change,
+                    target_id=target_id,
+                    before_quantity=before_qty,
+                    before_unit=before_unit,
+                )
+        elif raw_change is not None:
+            normalized[key] = raw_change
+        targets.append(entry)
     return {
         "kind": APPROVAL_SNAPSHOT_KIND,
         "version": APPROVAL_SNAPSHOT_VERSION,
         "case_basis_revision_id": basis_revision_id,
         "change_category": change_category,
         "targets": targets,
-        "changes": approved_changes or {},
+        # ⚠️ 必须是**归一后**的 `normalized` 而不是入参：货量变更的 `quantity` 在
+        # `_validate_assignment_change` 里被格式化成固定小数位（`950` → `"950.000"`）。
+        # 直接存原文的话，应用时写进 DECIMAL 列的是调用方给的那个字面量，
+        # 而快照里记的是另一个 —— 事后核对"批准了什么"就要先解释格式差异。
+        "changes": normalized,
     }
 
 
@@ -557,6 +779,26 @@ def _load_approval_snapshot(session: Session, exception_id: int) -> dict[str, An
     return None
 
 
+def _quantity_side(quantity: Any, unit: Any) -> dict[str, Any]:
+    """货量的一侧（`before` 或 `after`）→ 原值 + 文案。
+
+    **原值与文案一起给**，且都在服务端算：界面显示文案、程序比对用原值。
+    让界面自己拼 `数值 + 单位`，同一句"800.000 吨"就会有两处实现，
+    而漂移的表现是"历史里写的是 800 吨、批准摘要里写的是 800.000吨" ——
+    看的人会以为是两次不同的变更。
+
+    未知保持 `"未知"`（**不是 0**）：从 NULL 改成确定值是合法变更，
+    把旧值显示成 0 会让它看起来像"从 0 涨到 950"。
+    """
+    text = _quantity_text(quantity)
+    unit_text = "" if unit is None else str(unit)
+    return {
+        "quantity": text,
+        "quantity_unit": None if unit is None else unit_text,
+        "quantity_text": "未知" if text is None else f"{text} {unit_text}".strip(),
+    }
+
+
 def approval_summary(session: Session, exception_id: int) -> dict[str, Any] | None:
     """批准快照的**界面摘要**（`None` = 没有快照，即"没批准过 / 批准时没给内容"）。
 
@@ -568,6 +810,11 @@ def approval_summary(session: Session, exception_id: int) -> dict[str, Any] | No
     只投影"将动哪些目标、各自改哪些字段"，**不投影字段值**：
     值的形状随成果类型而变（金额、日期、枚举），塞进界面要么排版崩、要么误导；
     要看精确值应当去成果页的版本历史（那里有完整的 `payload` 与来源）。
+
+    **唯一的例外是委托货量变更**：它给 `quantity_change`（`before` / `after` / `basis`）。
+    理由不是"这类重要一些"，而是**值的形状差异**：成果载荷是不定形的，
+    而货量变更恰好是两个标量 + 一个依据 —— 不把它显示出来，「应用变更」就退化成
+    盲操作（点下去才知道是从 800 改到 950）。列字段名在这里毫无信息量。
 
     ⚠️ 这不是权限边界：能读案件详情的人本来就能读事件链里的原始快照。
     """
@@ -585,14 +832,20 @@ def approval_summary(session: Session, exception_id: int) -> dict[str, Any] | No
         # `append_revision(payload=...)`），不是 `{"payload": {...}}` 的包裹 ——
         # 按包裹读会拿到空字段列表，界面上表现为"这次应用什么都不改"。
         fields = sorted(str(k) for k in change) if isinstance(change, dict) else []
-        targets.append(
-            {
-                "target_kind": target_kind,
-                "target_id": target_id,
-                "basis_revision_id": item.get("basis_revision_id"),
-                "change_fields": fields,
+        entry: dict[str, Any] = {
+            "target_kind": target_kind,
+            "target_id": target_id,
+            "basis_revision_id": item.get("basis_revision_id"),
+            "change_fields": fields,
+        }
+        if target_kind == TARGET_ASSIGNMENT and isinstance(change, dict):
+            before = item.get("quantity_before") or {}
+            entry["quantity_change"] = {
+                "before": _quantity_side(before.get("quantity"), before.get("quantity_unit")),
+                "after": _quantity_side(change.get("quantity"), change.get("quantity_unit")),
+                "basis": change.get("basis"),
             }
-        )
+        targets.append(entry)
     return {
         "snapshot_version": int(snapshot.get("version", 0)),
         "change_category": snapshot.get("change_category"),
@@ -677,8 +930,23 @@ _EVENT_COLS = (
     "evidence_ref, basis_revision_id, payload_json, created_at"
 )
 
-#: 受影响项的取值域 → 表名。只有这两张表，**不放任任意 target**。
-_TARGET_TABLE: Final = {TARGET_TASK: "ent_workflow_task", TARGET_ARTIFACT: "ent_artifact"}
+#: 受影响项的取值域 → 表名。只有这三张表，**不放任任意 target**。
+_TARGET_TABLE: Final = {
+    TARGET_TASK: "ent_workflow_task",
+    TARGET_ARTIFACT: "ent_artifact",
+    TARGET_ASSIGNMENT: "ent_assignment",
+}
+
+#: 受影响项的**归属列**：任务与成果挂在委托上（该列存的必须是本委托的 id）；
+#: 委托单自己就是归属对象（列就是它自己的主键）。
+#:
+#: 写成映射而不是 `if` 分支，是为了让「新增一种受影响项」**必须同时回答"它属于谁"** ——
+#: 落进一个默认分支的话，新类型会静默地按错误的列校验归属，而那种错看起来完全正常。
+_TARGET_ASSIGNMENT_COL: Final = {
+    TARGET_TASK: "assignment_id",
+    TARGET_ARTIFACT: "assignment_id",
+    TARGET_ASSIGNMENT: "id",
+}
 
 
 # ── 时间与行转换（方言归一） ─────────────────────────────────────────────────
@@ -1179,8 +1447,9 @@ def _assert_link_target(
             f"未知受影响项类型：{target_kind!r}（取值域：{sorted(TARGET_KINDS)}）"
         )
     table = _TARGET_TABLE[target_kind]
+    owner_col = _TARGET_ASSIGNMENT_COL[target_kind]
     row = session.execute(
-        text(f"SELECT assignment_id FROM {table} WHERE id = :tid"), {"tid": target_id}
+        text(f"SELECT {owner_col} FROM {table} WHERE id = :tid"), {"tid": target_id}
     ).first()
     if row is None:
         raise ExceptionCaseNotFoundError(f"{target_kind} {target_id} 不存在")
@@ -1710,6 +1979,170 @@ def decide(
     return _case_with_links(session, exception_id)
 
 
+def list_quantity_changes(session: Session, *, assignment_id: int) -> list[dict[str, Any]]:
+    """某张委托的**货量变更历史**（append-only，按应用时间升序）。
+
+    为什么读侧必须存在：`ent_assignment_quantity_change` 只写不读的话，
+    「原来是 800」就只能靠案件反查 —— 而 D1-09 要的是**在这张委托上**看到
+    `800 → 950` 这条对照。一张没有读路径的历史表，等于把审计留痕藏在审计链深处。
+
+    `basis` 是**经理写的变更依据**（可能含内部口径），因此读端点的可见性
+    与运力那一组同口径（组织成员 + `entrust:view`），**不给货主本人放行** ——
+    货量本身客户当然看得见（在委托详情里），但"为什么改"是谁写的话是关键。
+    """
+    rows = (
+        session.execute(
+            text(
+                "SELECT id, assignment_id, exception_id, base_revision, old_quantity, "
+                "old_quantity_unit, new_quantity, new_quantity_unit, basis, applied_by, "
+                "applied_at FROM ent_assignment_quantity_change "
+                "WHERE assignment_id = :aid ORDER BY applied_at ASC, id ASC"
+            ),
+            {"aid": assignment_id},
+        )
+        .mappings()
+        .all()
+    )
+    return [project_quantity_change(r) for r in rows]
+
+
+def project_quantity_change(row: Any) -> dict[str, Any]:
+    """一行货量变更 → 响应形状。
+
+    同时给**原值**与**文案**（`quantity_text`）：界面显示文案、程序比对用原值 ——
+    两者都从同一处产出，界面就不会自己拼字符串（各拼一份必然漂移）。
+    旧值**未知保持 `None`**，不补 0：从"未知"改成确定值是合法变更，
+    把它显示成 0 会让历史看起来像"从 0 涨到 950"。
+    """
+    old_qty = _quantity_text(row["old_quantity"])
+    old_unit = None if row["old_quantity_unit"] is None else str(row["old_quantity_unit"])
+    new_qty = _quantity_text(row["new_quantity"])
+    new_unit = str(row["new_quantity_unit"])
+    return {
+        "change_id": int(row["id"]),
+        "assignment_id": int(row["assignment_id"]),
+        "exception_id": int(row["exception_id"]),
+        "base_revision": int(row["base_revision"]),
+        "old_quantity": old_qty,
+        "old_quantity_unit": old_unit,
+        "new_quantity": new_qty,
+        "new_quantity_unit": new_unit,
+        # 文案与 `approval_summary` 的 `quantity_change` 走**同一个** `_quantity_side`：
+        # 同一句"800.000 吨"若有两处实现，漂移的表现是"历史里一次写法、
+        # 批准摘要里另一次写法"，看的人会以为是两次不同的变更。
+        "old_quantity_text": _quantity_side(row["old_quantity"], row["old_quantity_unit"])[
+            "quantity_text"
+        ],
+        "new_quantity_text": _quantity_side(row["new_quantity"], row["new_quantity_unit"])[
+            "quantity_text"
+        ],
+        "basis": str(row["basis"]),
+        "applied_by": None if row["applied_by"] is None else int(row["applied_by"]),
+        "applied_at": _text_ts(row["applied_at"]),
+    }
+
+
+def _apply_assignment_quantity_change(
+    session: Session,
+    *,
+    exception_id: int,
+    target_id: int,
+    snapshot_item: dict[str, Any],
+    change: dict[str, Any],
+    actor_id: int,
+    now: datetime,
+) -> dict[str, Any]:
+    """把一条**已批准**的货量变更应用到委托单（2026-09-18 / D1-09）。
+
+    四条顺序不能颠倒：
+
+    1. **先做值级核对**（库里现在是不是还是批准时那个数）；
+    2. **再条件更新**（`WHERE id=… AND revision=:base`）—— 这是唯一的并发闸门；
+    3. **写历史行**（append-only，旧值在这里才真正"留下来"）；
+    4. **交给调用方统一提交** —— 本函数**不 commit**：货量更新必须与"案件转 applied、
+       写事件、生成复核任务"在**同一个事务**里。分开提交就会留下
+       "货量改了但复核没生成"的中间态，而那正是 HO 明确否掉的那种状态
+       （`capacity` 会照新货量判，下游却没人知道要复核）。
+
+    ⚠️ 第 2 步的 `revision = revision + 1` 不是可选项：不推进版本，客户端手里那份
+    委托快照就永远不会失效，下一次变更会拿着同一个 `base_revision` 再来一遍 ——
+    而那时的"批准依据"已经指错版本了。
+
+    ⚠️ 第 3 步的旧值取自**快照**（`snapshot_item["quantity_before"]`）而不是重新读库：
+    重新读会在并发下把"批准时的 800"记成"现在的 950"，历史行就此错位。
+
+    Returns:
+        应用记录（进 `applied` 事件 payload 与 `applied_rejected` 的对照）。
+    """
+    before = snapshot_item.get("quantity_before") or {}
+    before_qty_text = before.get("quantity")
+    before_unit_text = before.get("quantity_unit")
+
+    cur_qty, cur_unit = _assignment_quantity(session, target_id)
+    cur_unit_text = None if cur_unit is None else str(cur_unit)
+    if _quantity_text(cur_qty) != before_qty_text or cur_unit_text != before_unit_text:
+        raise AssignmentQuantityStaleError(
+            f"委托 {target_id} 的当前货量（{_quantity_text(cur_qty) or '未知'}"
+            f" {cur_unit_text or ''}）与批准时记下的（{before_qty_text or '未知'}"
+            f" {before_unit_text or ''}）不一致 —— 有人在本变更之外改过它，"
+            "旧批准不能直接应用；请重新读取后再次批准"
+        )
+
+    result = cast(
+        CursorResult[Any],
+        session.execute(
+            text(
+                "UPDATE ent_assignment SET quantity = :new_qty, quantity_unit = :new_unit, "
+                "revision = revision + 1, updated_at = :ts "
+                "WHERE id = :aid AND revision = :base"
+            ),
+            {
+                "new_qty": change["quantity"],
+                "new_unit": change["quantity_unit"],
+                "ts": _fmt(now),
+                "aid": target_id,
+                "base": snapshot_item.get("basis_revision_id"),
+            },
+        ),
+    )
+    if result.rowcount == 0:
+        raise AssignmentQuantityConflictError(
+            f"委托 {target_id} 的版本在本次应用期间已被他人推进"
+            f"（本次以 revision={snapshot_item.get('basis_revision_id')} 为条件）—— "
+            "货量未被改动，请重新读取后再试"
+        )
+
+    session.execute(
+        text(
+            "INSERT INTO ent_assignment_quantity_change "
+            "(assignment_id, exception_id, base_revision, old_quantity, old_quantity_unit, "
+            " new_quantity, new_quantity_unit, basis, applied_by, applied_at) "
+            "VALUES (:aid, :cid, :base, :old_qty, :old_unit, :new_qty, :new_unit, "
+            " :basis, :actor, :ts)"
+        ),
+        {
+            "aid": target_id,
+            "cid": exception_id,
+            "base": int(snapshot_item.get("basis_revision_id") or 0),
+            "old_qty": before_qty_text,
+            "old_unit": before_unit_text,
+            "new_qty": change["quantity"],
+            "new_unit": change["quantity_unit"],
+            "basis": change["basis"],
+            "actor": actor_id,
+            "ts": _fmt(now),
+        },
+    )
+    return {
+        "target": _change_key(TARGET_ASSIGNMENT, target_id),
+        "old_quantity": before_qty_text,
+        "old_quantity_unit": before_unit_text,
+        "new_quantity": change["quantity"],
+        "new_quantity_unit": change["quantity_unit"],
+        "basis": change["basis"],
+    }
+
+
 def apply_case(
     session: Session,
     *,
@@ -1826,10 +2259,8 @@ def apply_case(
         target_kind = str(item["target_kind"])
         target_id = int(item["target_id"])
         expected_basis = item["basis_revision_id"]
-        current_basis = (
-            _artifact_current_revision(session, target_id)
-            if target_kind == TARGET_ARTIFACT
-            else _task_current_revision(session, target_id)
+        current_basis = _target_basis_revision(
+            session, target_kind=target_kind, target_id=target_id
         )
         if current_basis != expected_basis:
             stale.append(
@@ -1857,7 +2288,7 @@ def apply_case(
         for item in snapshot.get("targets", []):
             target_kind = str(item["target_kind"])
             target_id = int(item["target_id"])
-            if target_kind != TARGET_ARTIFACT:
+            if target_kind == TARGET_TASK:
                 # 任务没有成果版本；它的"已处置"由任务状态机承担（P4-A5）。
                 continue
             key = _change_key(target_kind, target_id)
@@ -1866,6 +2297,21 @@ def apply_case(
                     f"受影响项 {key} 没有经过批准的修改内容，不能应用"
                     "（应用只认批准快照，不接受临时替换）"
                 )
+            if target_kind == TARGET_ASSIGNMENT:
+                # 同一事务内改 `ent_assignment.quantity` 并留一行历史（不 commit：
+                # 由本函数末尾统一提交，与案件转 applied、写事件、传播绑在一起）。
+                applied.append(
+                    _apply_assignment_quantity_change(
+                        session,
+                        exception_id=exception_id,
+                        target_id=target_id,
+                        snapshot_item=item,
+                        change=changes[key],
+                        actor_id=actor_id,
+                        now=current,
+                    )
+                )
+                continue
             appended = artifacts_svc.append_revision(
                 session,
                 artifact_id=target_id,
@@ -1964,9 +2410,17 @@ def apply_case(
                 payload={"category": category, **revalidation},
             )
         session.commit()
-    except Exception:
+    except Exception as exc:
         session.rollback()
-        _reject("apply_failed", "应用失败，已整笔回滚（未产生任何业务更新）")
+        # 原因码取自异常自己（`audit_reason`），而不是一律写 `apply_failed`：
+        # 「值级过期」与「并发冲突」要人做的事完全不同（前者要重新批准、后者只要重试），
+        # 审计链上把它们压成一句话，等于把定位工作留给了下一个人。
+        # ⚠️ 用 `getattr` 兜底：绝大多数失败（`IntegrityError`、写库异常）没有这个属性，
+        # 它们仍然记 `apply_failed` —— 不因为新加了两类就改变原有语义。
+        _reject(
+            str(getattr(exc, "audit_reason", "apply_failed")),
+            "应用失败，已整笔回滚（未产生任何业务更新）",
+        )
         raise
     return _case_with_links(session, exception_id)
 
@@ -2312,6 +2766,7 @@ def project_case_for_customer(
 
 __all__ = [
     "ASSIGNMENT_ACTIVE_STATUS",
+    "ASSIGNMENT_CHANGE_FIELDS",
     "CUSTOMER_EXCLUDED_FIELDS",
     "DISPOSITIONS",
     "DISPOSITION_ACCEPTED_RESIDUAL",
@@ -2347,8 +2802,11 @@ __all__ = [
     "STATUS_OPEN",
     "STATUS_REJECTED",
     "TARGET_ARTIFACT",
+    "TARGET_ASSIGNMENT",
     "TARGET_KINDS",
     "TARGET_TASK",
+    "AssignmentQuantityConflictError",
+    "AssignmentQuantityStaleError",
     "ExceptionCaseConflictError",
     "ExceptionCaseError",
     "ExceptionCaseNotFoundError",
@@ -2373,6 +2831,8 @@ __all__ = [
     "list_blocking_cases",
     "list_cases",
     "list_cases_for_org",
+    "list_quantity_changes",
+    "project_quantity_change",
     "list_events",
     "list_links",
     "list_links_for_cases",

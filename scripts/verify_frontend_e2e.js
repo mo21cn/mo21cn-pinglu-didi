@@ -1082,6 +1082,11 @@ function loadPage(file, ctx) {
           fetchVia('/entrust/tasks', { assignment_id: id, page: 1, size: size || 50 }),
         fetchArtifactCandidates: (id, size) =>
           fetchVia('/entrust/assignments/' + id + '/artifacts', { page: 1, size: size || 50 }),
+        // 委托货量变更历史（S6-1 / D1-09）。**新增取数必须登记** —— 且这里必须走
+        // `live()`（真接口）而不是 `route()` 回放表：回放表是按 bootstrap 拉过的路径
+        // 静态搭起来的，**新端点不在里面**，走回放会落成"网络异常"，
+        // 与"这单真的没改过货量"在页面上长得一样（本轮实测踩到）。
+        fetchQuantityChanges: (id) => live('GET', '/entrust/assignments/' + id + '/quantity-changes'),
         // 成果页（ENT-023）三条取数：与其它页同口径 —— 载荷来自 bootstrap 的真接口，
         // 只是经 route() 回放（写之后由 refreshArtifactReplay() 换成真事实）。
         fetchArtifactTypes: () => fetchVia('/entrust/artifact-types'),
@@ -3226,7 +3231,170 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
       }
     }
 
-    // ⑯-a 登记案件页：非法入参被守卫拦下（且**不发起取数**）
+    // ── ⑯-e 委托货量变更的**页面呈现**（S6-1 / D1-09 / §10.1 第 8 步）──────
+    //
+    // 这一段证明的是：**页面把服务端的"从哪改到哪"如实摆出来**。
+    //
+    // 为什么写侧走 `api` 而不是驱动页面表单：
+    //   · 页面表单那一条链（两次 decide + 三只输入 + 渲染树）一旦哪一环不对，
+    //     红的是**走查脚本**而不是产品，而定位成本极高（本轮实测：回放表里没有
+    //     新建的案件 ⇒ 页面落成"无法连接后端"，看起来像页面缺陷）；
+    //   · 「页面能写」这件事由**设备走查**（㊿ 章）在真模拟器上点出来 ——
+    //     那才是这条纪律要求的"经界面操作走通"（真机点 vs 脚本驱动，证据档位不同）。
+    //   · 而这里必须做的，是让 `quantityHistory` **真的有数据**：模板字段核对按页取并集，
+    //     历史为空时 `changeText` / `sourceText` / `appliedAt` / `appliedBy`
+    //     永远不会进入数据域，核对会报"模板读取但数据未产出"。
+    //     ⇒ 正确的修法是**让夹具真的有数据**，不是给页面 `.js` 补键（那是造假落点）。
+    {
+      // ⚠️ 这里**不能**用上面那个块里的 `caseRows`：它的作用域在上一节就结束了。
+      //
+      // 目标委托取**带航段的那张**（＝ canonical 夹具），与 ①c/⑰ 用的是同一张 ——
+      // 这一条不是随手挑的，是踩出来的：起初用的是「案件队列里的第一张」，
+      // 结果**模板字段核对**在委托详情页翻红（`item.taskIdText/titleText/statusText/preText`
+      // 四个「必需任务与固定前置」的行字段不再被产出）。那张委托上本来就堆着
+      // ⑯-d 生成的复核任务，再往上加 5 条就把它推过了 `tasks.list_tasks` 的**分页上限**，
+      // 带前置的那几条被截出首页 ⇒ `plan.task_prerequisites` 变空 ⇒ 那一块一行都渲染不出来。
+      // ⇒ 换到任务数为 0 的 canonical 上做这次变更：两边都有数据，谁也不挤谁。
+      //   （`list_tasks` 的分页上限本身"调用方从响应里看不出被截过"，是另一个独立问题，
+      //     不属本切片；这里只保证本片段不去踩它。）
+      let qtyAid = 0
+      for (const c of D.entrustCases || []) {
+        const pr = await api('GET', '/entrust/assignments/' + c[0] + '/plan',
+          { token: ownerToken })
+        if (pr.status === 200 && (((pr.data || {}).legs) || []).length > 0) {
+          qtyAid = Number(c[0])
+          break
+        }
+      }
+      if (!qtyAid) {
+        const q5Rows = (((D || {}).entrustCaseQueue || {}).items) || []
+        qtyAid = Number(q5Rows.length ? q5Rows[0].assignment_id : 0)
+      }
+      const P5 = '⑯-e 货量变更'
+      if (!qtyAid) {
+        note(P5 + ' · 没有可用的委托编号，本块跳过')
+      } else {
+        const ar = await api('GET', '/entrust/assignments/' + qtyAid, { token: ownerToken })
+        const artList = await api('GET',
+          '/entrust/assignments/' + qtyAid + '/artifacts?size=50', { token: ownerToken })
+        const basisArt = (((artList || {}).data || {}).items || [])
+          .filter(function (x) { return x.current_revision_id })[0]
+        if (ar.status !== 200 || !basisArt) {
+          note(P5 + ' · 该委托缺少可读货量或带生效版本的成果，本块跳过（'
+            + '批准必须指向精确的成果版本，§3.1.1）')
+        } else {
+          const nk5 = () => 'e2e-qty-' + Date.now() + '-' + Math.floor(Math.random() * 1e6)
+          const curQty = ar.data.quantity === null || ar.data.quantity === undefined
+            ? 0
+            : Number(ar.data.quantity)
+          // 新旧值**从服务端现读**（当前 + 100），不写死 `800 → 950`：
+          // e2e 的库是 bootstrap 拉回来的真实状态，写死一对数会让本块在"夹具变了"时红。
+          // `800 → 950` 那对**精确值**由设备走查在 canonical 夹具上钉（㊿ 章）。
+          const newQty = String(curQty + 100)
+          const curUnit = ar.data.quantity_unit || '吨'
+          let cid5 = 0
+          let applied5 = false
+          try {
+            WRITE_ENABLED = true
+            const r1 = await pageWrite('POST', '/entrust/assignments/' + qtyAid + '/exceptions', {
+              kind: 'change_request',
+              title: 'e2e 货量变更',
+              severity: 'medium',
+              impact_kind: 'review-required',
+              change_category: 'cargo_quantity_category',
+              // ⭐ 受影响项是**委托单本身**（新目标类型 `assignment`）——
+              //    货量不属于任何一份成果，硬塞成 artifact 目标只会改错东西。
+              links: [{ target_kind: 'assignment', target_id: qtyAid }]
+            }, nk5())
+            if (r1.status !== 200) {
+              throw new Error('登记 ' + r1.status + ' ' + JSON.stringify(r1.data).slice(0, 160))
+            }
+            cid5 = Number(r1.data.case_id)
+            let rev5 = Number(r1.data.revision_no)
+            const r2 = await pageWrite('POST', '/entrust/exceptions/' + cid5 + '/decision',
+              { expected_revision: rev5, to_status: 'in_review' }, nk5())
+            if (r2.status !== 200) {
+              throw new Error('进入复核 ' + r2.status + ' ' + JSON.stringify(r2.data).slice(0, 160))
+            }
+            rev5 = Number(r2.data.revision_no)
+            const changes5 = {}
+            changes5['assignment#' + qtyAid] = {
+              quantity: newQty, quantity_unit: curUnit, basis: 'e2e 货量变更'
+            }
+            const r3 = await pageWrite('POST', '/entrust/exceptions/' + cid5 + '/decision', {
+              expected_revision: rev5,
+              to_status: 'approved',
+              decision_note: 'e2e 批准',
+              basis_revision_id: Number(basisArt.current_revision_id),
+              approved_changes: changes5
+            }, nk5())
+            if (r3.status !== 200) {
+              throw new Error('批准 ' + r3.status + ' ' + JSON.stringify(r3.data).slice(0, 160))
+            }
+            rev5 = Number(r3.data.revision_no)
+            const r4 = await pageWrite('POST', '/entrust/exceptions/' + cid5 + '/apply',
+              { expected_revision: rev5 }, nk5())
+            applied5 = r4.status === 200
+            if (!applied5) {
+              fail(P5 + ' · 应用被拒 ' + r4.status + '：'
+                + JSON.stringify(r4.data).slice(0, 160))
+            }
+          } catch (e) {
+            fail(P5 + ' · 服务端链路失败（页面呈现断言无意义）', e.message)
+          } finally {
+            WRITE_ENABLED = false
+          }
+
+          if (applied5) {
+            // 让页面能取到这个**新**案件：回放表是按 bootstrap 拉过的路径静态搭的，
+            // 不把真载荷放进去，页面会落成"无法连接后端"（看起来像页面缺陷）。
+            const sv = await api('GET', '/entrust/exceptions/' + cid5, { token: ownerToken })
+            if (sv.status === 200) entrustCaseDetails[String(cid5)] = sv.data
+
+            const s5 = await walk(P5 + ' · 页面呈现 #' + cid5, 'pages/entrust/case/case', null,
+              { role: 'owner', arg: { case_id: String(cid5) } }, ['onLoad'])
+            if (!s5) {
+              fail(P5 + ' · 案件页未装载（显式失败，不静默跳过）')
+            } else {
+              const d = s5._final()
+              const hist = d.quantityHistory || []
+              const mine = hist.filter(function (x) {
+                return String(x.exceptionId) === String(cid5)
+              })[0]
+              const srvHist = await api('GET',
+                '/entrust/assignments/' + qtyAid + '/quantity-changes', { token: ownerToken })
+              const srvMine = (((srvHist || {}).data) || []).filter(function (x) {
+                return String(x.exception_id) === String(cid5)
+              })[0]
+              if (d.view !== 'ready') {
+                fail(P5 + ' · 未落 ready', String(d.view) + ' / ' + String(d.viewHint))
+              } else if (!mine) {
+                fail(P5 + ' · 页面上没有这条货量变更', 'rows=' + hist.length
+                  + ' hint=' + JSON.stringify(d.quantityHistoryHint))
+              } else if (!srvMine) {
+                fail(P5 + ' · 页面上有这条历史而服务端没有（页面编了数据）')
+              } else if (String(mine.oldQuantity) !== String(srvMine.old_quantity) ||
+                String(mine.newQuantity) !== String(srvMine.new_quantity)) {
+                fail(P5 + ' · 页面上的货量变更与服务端不同源',
+                  JSON.stringify([mine.oldQuantity, mine.newQuantity]) + ' vs '
+                  + JSON.stringify([srvMine.old_quantity, srvMine.new_quantity]))
+              } else if (mine.changeText.indexOf(mine.oldQuantityText) !== 0 ||
+                mine.changeText.indexOf(mine.newQuantityText) < 0) {
+                fail(P5 + ' · 页面那一行不是 `从 → 到` 的对照',
+                  JSON.stringify(mine.changeText))
+              } else {
+                ok()
+              }
+              // ⚠️ 这一行 `collect` 是**必须**的：模板字段核对按页取并集，
+              //    只有在这里（历史非空）它才能看到那几个字段真的被产出。
+              collect('pages/entrust/case/case',
+                path.join(ROOT, 'miniapp/pages/entrust/case/case.js'), d)
+            }
+          }
+        }
+      }
+    }
+
     for (const [tag, arg] of [['缺参', {}], ['非法编号', { assignment_id: '../../x' }]]) {
       const s = await walk('⑯ 登记案件 · ' + tag, 'pages/entrust/case-create/case-create', null,
         { role: 'owner', arg }, ['onLoad'])

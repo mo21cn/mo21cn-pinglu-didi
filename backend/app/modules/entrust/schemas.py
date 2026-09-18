@@ -1773,3 +1773,41 @@ def leg_revision_out(data: dict[str, Any]) -> LegRevisionOut:
             "changed_at": str(data["created_at"]),
         }
     )
+
+
+class AssignmentQuantityChangeOut(BaseModel):
+    """一条**已应用的**委托货量变更（`ent_assignment_quantity_change` 一行）。
+
+    同时给原值与文案：`old_quantity` / `new_quantity` 是机器比对的定点数值
+    （固定 3 位小数，SQLite 与 MySQL 读回来是同一个字符串），
+    `*_text` 是给界面直接显示的那一句（`"800.000 吨"` / `"未知"`）。
+
+    为什么两个都给：让界面自己拼 `字符串 + 单位`，就必然出现"这里拼了、那里没拼"
+    的漂移；而让程序去解析显示文案更是本末倒置。**值只有一份来源**是这道纪律的核心。
+
+    `old_quantity` 为 `None` = **变更前是未知**（不是 0）：从"未知"改成确定值是
+    一次合法变更，把它显示成 0 会让历史看起来像"从 0 涨到 950"。
+    """
+
+    change_id: int
+    assignment_id: int
+    #: 来源变更案件（`ent_exception.id`）。有了它才能回答"这一改是谁批的"，
+    #: 顺着案件号能回到批准快照与决定人。
+    exception_id: int
+    #: 变更前委托的乐观锁值 —— "这一改从第几版出发"
+    base_revision: int
+    old_quantity: str | None = None
+    old_quantity_unit: str | None = None
+    new_quantity: str
+    new_quantity_unit: str
+    #: 显示用文案（`"800.000 吨"` / `"未知"`）
+    old_quantity_text: str
+    new_quantity_text: str
+    #: 变更依据（经理写的话；**可能含内部口径**，因此本组端点不给货主放行）
+    basis: str
+    applied_by: int | None = None
+    applied_at: str
+
+
+def assignment_quantity_change_out(data: dict[str, Any]) -> AssignmentQuantityChangeOut:
+    return AssignmentQuantityChangeOut.model_validate(data)
