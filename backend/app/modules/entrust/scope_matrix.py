@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（102 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（103 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -159,6 +159,20 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "entrust:assignment:claim",
         idempotent=True,
         note="组织成员 + entrust:assignment:claim；单条条件 UPDATE 保证原子认领（双认领后者 409）",
+    ),
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/complete",
+        GUARD_ORG_MEMBER,
+        "entrust:assignment:complete",
+        owner_scope=True,
+        idempotent=True,
+        note="**结案**（合同 §6.4 / S4-b）：必须同时过五个维度（任务处置 / 交付证据 / "
+        "异常与重评 / 结算含客户对适用版本的确认 / 余额与争议）；缺项即 409 且 `detail` "
+        "是**对象**（`{message, missing[]}`）不是字符串。"
+        "⛔ 无「跳过前置」入参（PRD：hard checks cannot be bypassed）。"
+        "并发靠 `expected_revision` ＋ 条件 UPDATE（两个结案者其一 409）。"
+        "货主本人**不能**结案（这是运营方对客户的宣告）⇒ 不带货主旁路。",
     ),
     _r(
         "POST",

@@ -44,6 +44,10 @@ from sqlalchemy.orm import Session
 
 PERM_VIEW = "entrust:view"
 PERM_ASSIGN_CLAIM = "entrust:assignment:claim"
+# 结案（合同 §6.4 的 `complete`）。与"认领"分开：认领是接单，
+# 结案是**对客户宣告这件事做完了**（要过五个维度前置），把它并进 `claim`
+# 会让"谁能接单"隐式等于"谁能让委托结案"。
+PERM_ASSIGN_COMPLETE = "entrust:assignment:complete"
 PERM_QUOTE_CREATE = "entrust:quote:create"
 PERM_QUOTE_PUBLISH = "entrust:quote:publish"
 PERM_TASK_DISPATCH = "entrust:task:dispatch"
@@ -58,6 +62,7 @@ ALL_PERMISSIONS = frozenset(
     {
         PERM_VIEW,
         PERM_ASSIGN_CLAIM,
+        PERM_ASSIGN_COMPLETE,
         PERM_QUOTE_CREATE,
         PERM_QUOTE_PUBLISH,
         PERM_TASK_DISPATCH,
@@ -73,11 +78,13 @@ ORG_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "owner": ALL_PERMISSIONS,
     # 管理员：可管理成员与授权，但不能发布报价/派单/结算（业务动作需经理人角色）
     "admin": frozenset({PERM_VIEW, PERM_MEMBER_MANAGE, PERM_ENTRUSTMENT_MANAGE}),
-    # 经理人：一线执行，可认领委托、制作并发布报价、派单、生成结算、发起 Agent 作业
+    # 经理人：一线执行，可认领委托、制作并发布报价、派单、生成结算、发起 Agent 作业、
+    # **结案**（合同 §6.4 的 `complete` —— 它是运营方对客户的宣告，属于一线执行）
     "manager": frozenset(
         {
             PERM_VIEW,
             PERM_ASSIGN_CLAIM,
+            PERM_ASSIGN_COMPLETE,
             PERM_QUOTE_CREATE,
             PERM_QUOTE_PUBLISH,
             PERM_TASK_DISPATCH,

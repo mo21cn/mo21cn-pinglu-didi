@@ -111,17 +111,23 @@ const STATUS_META = {
   draft: { label: '草稿', tone: 'muted' },
   submitted: { label: '待受理', tone: 'warn' },
   claimed: { label: '已受理', tone: 'primary' },
+  completed: { label: '已结案', tone: 'success' },
   cancelled: { label: '已取消', tone: 'muted' }
 }
 
-/** 与后端取值域完全一致的顺序（断言用，勿随意增删） */
-const STATUS_ORDER = ['draft', 'submitted', 'claimed', 'cancelled']
+/** 与后端取值域完全一致的顺序（断言用，勿随意增删）
+ *
+ * `completed` 排在 `cancelled` 之前：这一列的顺序就是**工作台筛选条的顺序**，
+ * 而筛选条读起来应当像生命周期（草稿 → 待受理 → 已受理 → 已结案 / 已取消）。
+ */
+const STATUS_ORDER = ['draft', 'submitted', 'claimed', 'completed', 'cancelled']
 
 /** 每个状态对**经理**的下一步动作提示（未知状态不给提示，不编） */
 const STATUS_HINT = {
   draft: '货主还在填写，草稿对经理不可见',
   submitted: '等待经理受理（受理是显式动作，不会自动发生）',
   claimed: '已受理，可继续安排任务与物料',
+  completed: '已结案：运营与财务前置都已满足（结案是命令，不是把状态改上去）',
   cancelled: '已取消，不再推进'
 }
 
@@ -158,6 +164,7 @@ const ORG_ROLE_LABELS = {
 const ORG_PERMISSION_LABELS = {
   'entrust:view': '查看委托',
   'entrust:assignment:claim': '受理委托',
+  'entrust:assignment:complete': '结案',
   'entrust:quote:create': '制作报价',
   'entrust:quote:publish': '发布报价',
   'entrust:task:dispatch': '派发任务',
@@ -221,6 +228,9 @@ function statusClass(status) {
   if (!meta) return 'chip chip-muted'
   if (meta.tone === 'warn') return 'chip chip-warn'
   if (meta.tone === 'primary') return 'chip chip-purple'
+  // `success`：终态里"做完了"与"取消了"必须**看起来不一样** ——
+  // 两者都走 `muted` 时，界面上只剩小字能分辨，而这两个状态的后续动作完全不同。
+  if (meta.tone === 'success') return 'chip chip-success'
   return 'chip chip-muted'
 }
 

@@ -13,15 +13,21 @@ S4-a 是一次"只落结构"的切片（口径见 `docs/entrust/S4-委托结案�
 所以本文件把 HO 指定的边界写成**可执行断言**：
 
 1. 迁移**确实**落地了结构与默认值，且**不推测历史**（无 DML、既有行原样保留）；
-2. 代码取值域与可取消集**未变**（`completed` 不在代码域里，`_CANCELLABLE` 原样）；
-3. 没有结案端点、`financial_status` 不出现在服务层投影里（派生未接通 ⇒ 不展示）；
+2. **代码取值域与命令成对**（`completed` 在域里 ⇔ 委托层有 `complete` 端点；
+   `_CANCELLABLE` 仍原样 —— Q1 裁定）；
+3. 委托层**只**开着 `complete`（`close` / `reopen` 仍未开放）；
+   `financial_status` 不进委托投影（它是派生，走自己的端点），
+   `completed_at` 进投影且未结案时为 `None`；
 4. 迁移模块**排在建表模块之后**（执行器按模块名字典序应用，没有声明式依赖）。
 
 ## 本文件**不**做什么
 
-不测结案业务（前置检查、客户确认、幂等、并发）—— 那属于 S4-b，**现在还不存在**。
-⚠️ S4-b 落地时，第 2/3 组断言应当被**替换**成对应的正向用例（"少了前置就 409"等），
-**不是删掉** —— 那时它们保护的边界变了，但"边界必须被断言"这件事不变。
+不测结案业务本身（五维度前置、逐条报缺、客户确认、幂等、并发）—— 那些在
+`test_entrust_closure.py`。本文件只守**边界**：哪些口子开着、哪些还关着。
+
+⚠️ 本文件最初写于 S4-a（"只落结构、不开能力"）。S4-b 落地时，按本文档原定的处置，
+第 2/3 组断言被**替换**成了现在这些（`completed` 进域 ＋ `complete` 端点存在 ＋
+`completed_at` 进投影），**不是删掉** —— 它们保护的边界变了，但"边界必须被断言"不变。
 """
 
 from __future__ import annotations
@@ -124,35 +130,48 @@ def test_migration_module_applies_after_the_module_that_creates_the_table():
     )
 
 
-# ── 2. 代码取值域与可取消集未变（能力未开放） ─────────────────────────────
+# ── 2. 代码取值域与命令**成对**演进（S4-b 已落地第五个取值）─────────────────
 
 
-def test_status_domain_and_cancellable_set_are_unchanged():
-    """S4-a **不**把 `completed` 加进代码取值域，`_CANCELLABLE` 也一字未改。
+def test_status_domain_follows_the_completion_command():
+    """S4-b 把第五个取值 `completed` 落进代码域 —— 且与 `complete` 命令**同一个提交**。
 
-    这看起来"少做了一步"，其实是 HO 指定的边界：`verify_entrust_ui.js` 会强制
-    前端状态镜像与后端 `STATUS_*` **逐格一致**，一旦这里加了常量，界面上就必须出现
-    一个「已完成」筛选片 —— 而此刻没有任何数据能处于该状态，那是在暗示一条不存在的路径。
-    代码取值域与前端镜像留到 S4-b 与 `complete` 命令**同一个提交**里一起改。
+    S4-a 刻意**没**加它，理由写在当时的边界说明里：`verify_entrust_ui.js` 强制前端
+    状态镜像与后端 `STATUS_*` 逐格一致，加了常量界面上就会多出一个「已完成」筛选片
+    ——而那时没有任何数据能处于该状态，那是在暗示一条不存在的路径。S4-a 的 §7.1 写的是
+    "留到 S4-b 与 `complete` 命令同一个提交里一起改"，本用例就是那句话的可核对形态：
+    ⭐ **取值域里有 `completed` ⇔ 委托层有产出它的端点**，两件事一起断言 ——
+    这样"加了取值域但没命令"或"有命令但取值域没跟上"都会被拦下。
     """
     domain = {
         name: value
         for name, value in vars(svc).items()
         if name.startswith("STATUS_") and isinstance(value, str)
     }
-    assert set(domain.values()) == {"draft", "submitted", "claimed", "cancelled"}, (
-        f"代码取值域被改动了：{sorted(domain.values())}；S4-a 只落结构，不动取值域"
-    )
+    assert set(domain.values()) == {
+        "draft",
+        "submitted",
+        "claimed",
+        "completed",
+        "cancelled",
+    }, f"取值域与 S4-b 不符：{sorted(domain.values())}"
 
+    # `active` 集是"非终态"的语义 ⇒ 多一个**终态**不该改变它（S4-a 的断言继续成立）
     assert svc.ACTIVE_STATUSES == (svc.STATUS_DRAFT, svc.STATUS_SUBMITTED, svc.STATUS_CLAIMED), (
-        "active 集不得因为新增列而变化"
+        "active 集不得因为新增一个终态而变化"
     )
     assert svc._CANCELLABLE == (svc.STATUS_DRAFT, svc.STATUS_SUBMITTED), (
         "Q1 裁定：DEMO-1 不新增通用取消 ⇒ _CANCELLABLE 保持 (draft, submitted)"
     )
 
+    # ⭐ 取值域与命令成对
+    paths = _openapi_entrust_routes()
+    assert any(p.endswith("/complete") for p in paths), (
+        "代码取值域里有 completed，却没有产出它的端点 —— 那是一个到不了的状态"
+    )
 
-# ── 3. 没有结案入口、财务维度不出现在投影里 ───────────────────────────────
+
+# ── 3. 委托层只开着 `complete`；重开仍未开放 ───────────────────────────────
 
 
 def _openapi_entrust_routes() -> set[str]:
@@ -169,43 +188,56 @@ def _openapi_entrust_routes() -> set[str]:
     return {p for p in app.openapi()["paths"] if p.startswith(prefix)}
 
 
-def test_no_closure_or_completion_endpoint_exists_yet():
-    """**委托层**不得有结案/重开端点：正确表现是「这个能力还没有入口」。
+def test_only_complete_is_open_in_the_assignment_layer():
+    """**委托层**的结案类端点只有 `complete`；**重开（S4-c）与"关闭"仍未开放**。
 
-    ⚠️ 判据必须限定在 `/assignments/` 前缀上：`/tasks/{id}/complete`、
-    `/exceptions/{id}/close` 是**任务层与案件层**的既有能力，它们一直都在，
-    且**不得**被拿来顶替委托结案（口径设计 §5.7："`close_case`（案件结案）与
-    委托 `complete` 是**两个层级**，不得互相替代"）。把三层混在一个正则里查，
-    要么永远红、要么把"委托层没做"这件事悄悄放过。
+    S4-a 的原断言是"一个都没有"（正确表现是「这个能力还没有入口」）。S4-b 落地了
+    `complete`，于是本用例改成**边界仍然清晰**：`complete` 在，
+    `close` / `closure` / `reopen` 不在。⛔ 判据必须限定在 `/assignments/` 前缀上：
+    `/tasks/{id}/complete`、`/exceptions/{id}/close` 是**任务层与案件层**的既有能力，
+    它们一直都在，且不得被拿来顶替委托结案（口径设计 §5.7："`close_case`（案件结案）与
+    委托 `complete` 是两个层级，不得互相替代"）。
     """
     paths = _openapi_entrust_routes()
     assignment_paths = sorted(p for p in paths if "/assignments/" in p)
     assert assignment_paths, "用例前提：委托层本就有端点，否则本断言是空的"
 
-    suspicious = sorted(
-        p
-        for p in assignment_paths
-        if any(k in p.lower() for k in ("complete", "closure", "close", "reopen"))
+    assert any(p.endswith("/complete") for p in assignment_paths), (
+        "S4-b 要求委托层有 complete 端点（取值域里的 completed 靠它产出）"
     )
-    assert not suspicious, (
-        f"委托层出现了结案类端点 {suspicious} —— S4-b 才允许有，且必须同时带五类前置、"
-        "客户确认、幂等与并发保护；S4-a 只落结构"
+    still_closed = sorted(
+        p for p in assignment_paths if any(k in p.lower() for k in ("close", "closure", "reopen"))
+    )
+    assert not still_closed, (
+        f"委托层出现了本切片之外的结案类端点 {still_closed} —— 重开是 S4-c，"
+        "且必须带理由、授权与历史留痕；`close` 不在计划内（案件层才有 close_case）"
     )
 
 
-def test_financial_status_and_completed_at_are_not_projected():
-    """新列**不得**进入服务层投影（派生未接通 ⇒ 不展示，避免默认值被读成结论）。"""
+def test_financial_status_is_not_projected_but_completed_at_is():
+    """投影的分工：`financial_status` **不进**委托投影；`completed_at` 进，且未结案时为 `None`。
+
+    两者的差别不是"哪个字段安全"，而是**语义**：
+
+    * `financial_status` 是**派生**（由费用/结算/收付/处置事实算出来），它有自己那条
+      端点（`/assignments/{id}/financial-status`，带 `blockers`）。把它塞进委托投影等于
+      给同一个概念开第二处真相；S4-a 更具体的担心是"派生没接通时列默认值会被读成结论"。
+    * `completed_at` 是**事实**：它由 `complete` 命令写入，未结案时就是 `NULL`
+      —— 那是"还没有"，不是"某个占位时间"。合同 §6.4 还要求接口能把**运营完成**与
+      **财务结案**分开说，所以这个字段必须在。
+    """
     engine = _engine()
     _insert_claimed(engine)
     with Session(engine) as session:
         row = svc.get_assignment(session, 1)
 
     assert row is not None, "用例前提：刚插入的那一行应当可读"
-    for leaked in ("financial_status", "completed_at"):
-        assert leaked not in row, (
-            f"投影里出现了 {leaked} —— 它的值来自「列默认值 / 未接通的派生」，"
-            "被展示出去等于把「还不知道」渲染成一个结论（规范 3.3 未知保持未知）"
-        )
+    assert "financial_status" not in row, (
+        "委托投影里出现了 financial_status —— 它是派生，走自己的端点；"
+        "塞进来就是给同一个概念开第二处真相"
+    )
+    assert "completed_at" in row, "completed_at 是运营完成的**事实**，界面要靠它区分两个维度"
+    assert row["completed_at"] is None, "未结案的委托必须是 None（未知保持未知）—— ⛔ 不编占位时间"
 
 
 def test_rerun_of_migrations_is_a_no_op():
