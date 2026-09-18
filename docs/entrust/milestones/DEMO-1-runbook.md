@@ -722,6 +722,7 @@ python scripts/run_walkthrough_devtools.py --section 50
 | 章 | 覆盖 | 前置 | 结论（2026-09-18） |
 | --- | --- | --- | --- |
 | **㊿** | ① 夹具货量 = 800.000 吨；② 变更前那条 900 吨候选的运力确认**成立**；③ 经**界面**把变更类别**补登**成「货物数量与品类」（此前界面上没有这个入口）；③c 经界面进入复核（`open → approved` 不是合法转移）；④a–④c 经界面填齐「新值/单位/依据」并提交批准（**三只输入框出现在渲染树上**，判据取 `count()`）；④d 确认条显示 `将改为 950.000 吨（当前 800.000 吨）`；⑤ 经界面应用 ⇒ 货量落库 **800 → 950**；⑤b/⑤c 页面上出现那条对照 `800.000 吨 → 950.000 吨` 且与服务端同源；⑥ 同一条确认**不再成立且只有 `capacity` 不过**（`changed_fields=['demand_tonnes']`）；⑦ 复核传播含「船型、运力及货物适配」；⑧ 零新增 console 报错 | `seed_demo` ＋ `seed_entrust_demo` ＋ **`seed_entrust_canonical.py`** | `PASS=17 / FAIL=0 / NOT_RUN=0 / LIMITATION=0` ⇒ **`RESULT: PASS`**（截图 `miniapp-device-artifacts/walk-20260918-105114/`） |
+| **51** | 第 6 步**来源门槛的「被拒」剧本**（S6-3）：① 组织队列里有委托；② 带 `amount` 的 AG-02 作业 ⇒ 提案含 `customer_quote`；③ 采纳 ⇒ 服务端写下待核验声明（`declared=2 / pending=2 / ok=False`）；④ 经**界面**点发布 ⇒ **被拒**且页面把**待核验清单显示出来**；⑤ ⭐ 界面上**没有**「登记来源核验」的入口（**O-1b 的答案**，核验入口锚点 0 个）；⑥ 经接口逐条核验 ⇒ 门槛转为通过；⑦ 回界面**重新点发布** ⇒ 同版本发布成功且与服务端同源；⑧ 零新增 console 报错 | `seed_demo` ＋ `seed_entrust_demo`（**不绑 canonical**：载体由本章自造） | `PASS=15 / FAIL=0 / NOT_RUN=0 / LIMITATION=0` ⇒ **`RESULT: PASS`**（截图 `miniapp-device-artifacts/walk-20260918-120048/`）。⚠️ 作业输入的 `amount` **只能经接口给**（界面无此入参），如实登记 |
 
 * ⚠️ **身份的诚实边界**：只有 `seed-owner`（经理）。货量变更的**读写两侧都只有经理侧** ——
   `basis` 是经理写的变更依据，`GET /assignments/{id}/quantity-changes` 与运力那组同口径
