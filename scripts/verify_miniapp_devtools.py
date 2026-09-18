@@ -10794,16 +10794,32 @@ def sec_52(w: Walker) -> None:
 
     # ---- ⑫ 客户侧：换**货主本人**的身份进来确认这一版 ----
     w.login_as(CODE_SHIPPER)
+    # ⚠️ `login_as` 只写 storage ＋ reLaunch，**应用侧的登录是页面 onLoad 里异步做的**
+    #    ⇒ 紧接着 navigateTo 会赶在拿到 token 之前，详情页按"未登录"处理（读不到数据、
+    #    也就没有入口）。必须**等 token 真的落到 storage** 再走 —— 这与 O-8 那条
+    #    「章前就绪没有可断言的判据」是同一类问题（首跑就是这么得到 NOT_RUN 的）。
+    tok_ready = False
+    for _ in range(40):
+        if str(w.c.get_storage("access_token") or ""):
+            tok_ready = True
+            break
+        time.sleep(0.5)
     if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
-        w.rep.not_run("52 ⑫ 客户确认", "以货主身份打不开这张委托的详情页")
+        w.rep.not_run("52 ⑫ 客户确认", f"货主侧打不开委托详情页（token 就绪={tok_ready}）")
         return
     w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
     has_entry_shi = w.c.count('[data-act-open-finance="1"]') > 0
+    if not has_entry_shi:
+        w.rep.not_run(
+            "52 ⑫ 客户确认",
+            f"货主侧详情页**没有**「财务与结算」入口"
+            f"（token 就绪={tok_ready}，path={w.c.current_path()}）",
+        )
+        return
     w.c.scroll_into('[data-act-open-finance="1"]')
     w.c.tap('[data-act-open-finance="1"]')
-    landed_shi = w.c.wait_path(finance_path, 30)
-    if not (has_entry_shi and landed_shi):
-        w.rep.not_run("52 ⑫ 客户确认", "货主侧进不了财务页（本项未验成）")
+    if not w.c.wait_path(finance_path, 30):
+        w.rep.not_run("52 ⑫ 客户确认", f"点了入口但没到财务页（path={w.c.current_path()}）")
         return
     cpd = w.wait_data(lambda x: x.get("customerMode") is True, tries=40, gap=0.4)
     w.rep.rec(
