@@ -409,6 +409,27 @@ def _counts(row: dict[str, Any]) -> tuple[bool, Decimal | None]:
     return False, None
 
 
+def money_text(value: Decimal | None) -> str | None:
+    """金额 → 字符串（按列定点位数 `quantize`，**不经 float**；`None` 原样回）。"""
+    return _dec_text(value, scale=_MONEY_SCALE)
+
+
+def counted_charges(
+    session: Session, *, assignment_id: int
+) -> list[tuple[dict[str, Any], Decimal]]:
+    """**计入合计**的费用行及其**计入金额**（`resolved` 行取处置后的最终金额）。
+
+    给结算快照用。判据复用本模块唯一那一处 `_counts` —— ⛔ 结算绝不能自带一套
+    "哪些行算数"：费用页说 100、结算页说 80，两边都"对"，加起来对不上却没人能说清。
+    """
+    out: list[tuple[dict[str, Any], Decimal]] = []
+    for row in list_charges(session, assignment_id=assignment_id):
+        include, amount = _counts(row)
+        if include and amount is not None:
+            out.append((row, amount))
+    return out
+
+
 def summarize_charges(session: Session, *, assignment_id: int) -> dict[str, Any]:
     """按 `(币种, 收付方向)` 分组合计 —— ⛔ **不跨币种相加**（裁定 Q1=C）。
 
@@ -473,9 +494,11 @@ __all__ = [
     "STATUS_REJECTED",
     "STATUS_RESOLVED",
     "confirm_charge",
+    "counted_charges",
     "dispute_charge",
     "get_charge",
     "list_charges",
+    "money_text",
     "record_charge",
     "resolve_charge",
     "summarize_charges",

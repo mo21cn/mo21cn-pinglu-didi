@@ -1938,3 +1938,151 @@ def charge_out(data: dict[str, Any]) -> ChargeOut:
 
 def charge_list_out(data: dict[str, Any]) -> ChargeListOut:
     return ChargeListOut.model_validate(data)
+
+
+# ── 结算与收付依据（§10.1 第 11 步 / 合同 S4 段第 11 条；裁定 Q5）────────────
+# ⭐ 核心语义在**版本**上：客户确认挂在一个具体版本的行上，因此"旧确认替不了新版本
+#    过关"是**结构**保证的，不是靠一条 if 判断维持的（详见 `settlement.py` 模块文档）。
+
+
+class SettlementApproveIn(BaseModel):
+    """内部确认（`draft → approved`）：只带乐观锁。"""
+
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class SettlementConfirmIn(BaseModel):
+    """**客户确认该精确版本**。
+
+    ⛔ `decision` 取值域由服务层校验（`accepted` / `rejected`）：
+    客户决定是**业务事实**，未知取值原样进库会让"客户当时接受了什么"失去答案。
+    """
+
+    decision: str = Field(min_length=1, max_length=16)
+    note: str | None = Field(default=None, max_length=255)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class SettlementPaymentIn(BaseModel):
+    """记一条收付依据。
+
+    ⛔ **没有 `mode` 字段** —— 它就是恒定的 `labeled_sample`（合成样本，已标注）。
+    让调用方能传 `mode=live` 等于让系统自称"资金已真实到账"，与裁定 Q5 第 5 条冲突；
+    "不接受这个字段"比"接受但忽略"更诚实（后者会让调用方以为自己传对了）。
+    """
+
+    direction: str = Field(min_length=1, max_length=16)
+    amount: Decimal
+    ref: str = Field(min_length=1, max_length=255)
+    currency: str | None = Field(default=None, max_length=8)
+    occurred_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+
+class SettlementOut(BaseModel):
+    """一个结算版本（**内部**视图：含内部成本合计与快照行）。
+
+    `lines` 是**快照**：每条带 `charge_id` 与当时的 `revision`／计入金额，
+    因此费用行后来被改也不影响"这一版当时算的是什么"。
+    """
+
+    settlement_id: int
+    assignment_id: int
+    version_no: int
+    status: str
+    currency: str
+    customer_total: str | None
+    internal_total: str | None
+    line_count: int = 0
+    lines: list[dict[str, Any]] = Field(default_factory=list)
+    approved_by: int | None
+    approved_at: str | None
+    customer_confirmed_by: int | None
+    customer_confirmed_at: str | None
+    customer_decision: str | None
+    customer_note: str | None
+    revision: int
+    created_by: int | None
+    created_at: str
+    updated_at: str
+
+
+class SettlementListOut(BaseModel):
+    """版本链（升序）。`applicable_settlement_id` ＝ **最大版本号**那一行。
+
+    ⚠️ 「适用版本」是**推导**出来的、不是存下来的：存一个字段就会出现
+    "字段说有、链上没有"的分叉。这里把它作为结论直接给出去，省得每个调用方各推一次。
+    """
+
+    total: int
+    applicable_settlement_id: int | None
+    items: list[SettlementOut] = Field(default_factory=list)
+
+
+class SettlementPaymentOut(BaseModel):
+    """一条收付依据（`mode` 恒为 `labeled_sample`）。"""
+
+    payment_id: int
+    settlement_id: int
+    assignment_id: int
+    direction: str
+    amount: str | None
+    currency: str
+    occurred_at: str | None
+    mode: str
+    ref: str
+    note: str | None
+    recorded_by: int
+    recorded_at: str
+
+
+class CustomerSettlementOut(BaseModel):
+    """**客户侧投影**（裁定 Q5 第 2 条）：只出对客费用与白名单字段。
+
+    ⛔ 刻意**没有** `internal_total`、没有 `direction`、没有 `revision` ——
+    投影是**新建字典**，不是"从内部投影里删几个键"（后者在加列时会默认漏出去）。
+    """
+
+    settlement_id: int
+    assignment_id: int
+    version_no: int
+    is_applicable: bool
+    status: str
+    currency: str
+    total: str | None
+    line_count: int
+    lines: list[dict[str, Any]] = Field(default_factory=list)
+    customer_confirmed_at: str | None
+    customer_decision: str | None
+
+
+class FinancialStatusOut(BaseModel):
+    """`financial_status` 派生（§5.3.2）。
+
+    ⚠️ `not_started` **只能**表示"确实还没有任何费用/结算/收付事实" ——
+    ⛔ 不是"派生还没接好"的遮羞布。本切片接通后该字段才允许展示。
+    `blockers` 逐条给出未结的成因，好让"为什么还没结"能被自助读懂。
+    """
+
+    assignment_id: int
+    financial_status: str
+    blockers: list[dict[str, Any]] = Field(default_factory=list)
+    applicable_settlement: dict[str, Any] | None = None
+    balances: list[dict[str, Any]] = Field(default_factory=list)
+    settlement_versions: int
+    charge_count: int
+    payment_count: int
+
+
+def settlement_out(data: dict[str, Any]) -> SettlementOut:
+    payload = dict(data)
+    payload["line_count"] = len(data.get("lines") or [])
+    return SettlementOut.model_validate(payload)
+
+
+def settlement_list_out(data: dict[str, Any]) -> SettlementListOut:
+    return SettlementListOut.model_validate(data)
+
+
+def settlement_payment_out(data: dict[str, Any]) -> SettlementPaymentOut:
+    return SettlementPaymentOut.model_validate(data)

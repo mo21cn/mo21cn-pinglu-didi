@@ -34,6 +34,7 @@ from app.modules.entrust.offers_api import router as offers_api_router
 from app.modules.entrust.plan_api import router as plan_api_router
 from app.modules.entrust.quantity_api import router as quantity_api_router
 from app.modules.entrust.router import router
+from app.modules.entrust.settlement_api import router as settlement_api_router
 from app.modules.entrust.tasks_api import router as tasks_api_router
 
 router.include_router(agent_api_router)
@@ -48,6 +49,7 @@ router.include_router(offers_api_router)
 router.include_router(plan_api_router)
 router.include_router(charges_api_router)
 router.include_router(quantity_api_router)
+router.include_router(settlement_api_router)
 router.include_router(tasks_api_router)
 
 __all__ = ["router"]
