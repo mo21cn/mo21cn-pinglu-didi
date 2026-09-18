@@ -544,6 +544,56 @@
         </view>
       </view>
 
+      <!-- 结案（合同 §6.4 / §10.1 第 12 步）。入口只在「已受理 ∧ 有结案权限」时出现
+           （判据见 detail.js 的 data.canComplete）。
+           ⭐ 先给清单、再给按钮：结案**不可逆**，而它的 409 只在点下去之后才说缺什么
+           —— 让人在动手前看见"还差什么"，正是这个入口存在的理由。
+           ⚠️ 确认走**页内**确认条（不是 wx.showModal）：弹层不在渲染树里，走查点不到
+           它的确认键（静态防线 ⑪ 章断言本页整页不出现 showModal）。
+           五格恒出五格（后端 missing_by_dimension 的键恒在）⇒ 缺项为 0 的格子也在，
+           否则看起来像"这一维度没人管"。 -->
+      <view wx:if="{{canComplete}}" class="card slot-card">
+        <view class="slot-note">结案要求五个维度同时成立，逐条依据由服务端给出</view>
+        <view wx:if="{{closureHint}}" class="slot-note">{{closureHint}}</view>
+        <view wx:if="{{closure}}">
+          <view class="slot-note">{{closure.summary}}</view>
+          <view wx:for="{{closure.dimensions}}" wx:key="key" class="row-between">
+            <text class="slot-note">{{item.label}}</text>
+            <text class="slot-note">{{item.ok ? '已满足' : '缺 ' + item.count + ' 项'}}</text>
+          </view>
+          <!-- 缺项逐条：标题取本地短标签，正文**原样**取服务端 message（界面不自己编结论）。 -->
+          <block wx:for="{{closure.dimensions}}" wx:key="key">
+            <block wx:for="{{item.rows}}" wx:for-item="row" wx:key="code">
+              <view class="slot-note">{{row.title}}：{{row.message}}</view>
+            </block>
+          </block>
+        </view>
+        <view class="slot-actions">
+          <view
+            wx:if="{{!completeOpen}}"
+            class="slot-btn"
+            data-act-complete-open="1"
+            bindtap="onCompleteOpen"
+            hover-class="hover-dim"
+          >结案</view>
+          <view
+            wx:if="{{completeOpen}}"
+            class="slot-btn"
+            data-act-complete-submit="1"
+            bindtap="onCompleteSubmit"
+            hover-class="hover-dim"
+          >确认结案（不可逆）</view>
+          <view
+            wx:if="{{completeOpen}}"
+            class="slot-btn"
+            data-act-complete-cancel="1"
+            bindtap="onCompleteCancel"
+            hover-class="hover-dim"
+          >取消</view>
+        </view>
+        <view wx:if="{{completeHint}}" class="slot-note">{{completeHint}}</view>
+      </view>
+
       <!-- 归属机制上线前的历史成果：如实报数，不静默藏起来 -->
       <view wx:if="{{unassignedHint}}" class="card slot-card">
         <view class="slot-note">{{unassignedHint}}</view>

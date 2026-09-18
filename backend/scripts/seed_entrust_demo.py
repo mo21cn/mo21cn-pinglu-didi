@@ -106,8 +106,9 @@ MANAGER_CODE = "seed-owner"
 ASSIGNMENT_MAIN = "演示委托·工作台样本"
 ASSIGNMENT_OPEN = "演示委托·工作台样本（待受理）"
 
-#: 演示组织被授予的权限范围（货主 → 组织）。七槽位的人工落点都要用到它：
-#: 认领（`claim`）、派单（`task:dispatch`）缺一个，种子里对应的动作就会 403。
+#: 演示组织被授予的权限范围（货主 → 组织）。七槽位的人工落点都要用到它，
+#: 第 12 步的**结案**另需一项（列表末那条，S4-b）：认领（`claim`）、派单（`task:dispatch`）
+#: 缺一个，种子里对应的动作就会 403。
 ORG_PERMISSIONS = [
     "entrust:view",
     "entrust:assignment:claim",
@@ -120,6 +121,11 @@ ORG_PERMISSIONS = [
     # 直接 403，表现为"页面能打开但建不了会话"。只读成员不该有这一项，
     # 而演示组织的经理正是要让 Agent 干活的那个人。
     "entrust:agent:job",
+    # S4-b（合同 §6.4 / §10.1 第 12 步）：结案是**第 8 项**能力 —— 缺了它，
+    # 演示里的经理在详情页看不到「结案」入口（权限投影为其空 ⇒ 一次请求都不发），
+    # 于是第 12 步在界面上根本走不到。⚠️ 它比 `entrust:view` **窄**：
+    # 齐备度清单里带着结算版本、余额与案件处置（运营口径）。
+    "entrust:assignment:complete",
 ]
 
 #: 任务清单：`(task_type, title, 是否指派给经理)`。

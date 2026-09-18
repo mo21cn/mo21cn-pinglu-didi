@@ -10987,6 +10987,119 @@ def sec_52(w: Walker) -> None:
     )
 
 
+def sec_53(w: Walker) -> None:
+    """结案（合同 §6.4 / §10.1 第 12 步）：入口 → 五维清单 → 被拦 → 缺项可读。
+
+    ⭐ 为什么值得单独一章：结案是**不可逆**动作，而 `complete` 的 409 只在
+    **点下去之后**才说缺什么 ⇒ 必须证明"界面**先**把清单给出来"，而不是让人靠试。
+    本章取三段证据：① 入口按状态与权限出现；② 清单与服务端**同结论**；
+    ③ 点下去确实被拦、且拦的理由**逐条可读**。
+
+    ⚠️ 诚实边界（都是被测事实，不是辩解）
+    * **「齐备 ⇒ 结案成功」这一段本轮没有夹具**：它需要一张五维度都成立的委托
+      （任务全部处置 ＋ 必需证据齐 ＋ 案件全部关闭 ＋ 结算已批准且**客户已确认** ＋
+      余额结清），现成种子都停在前置不齐那一步 ⇒ 如实记 `NOT_RUN` 并说清缺什么。
+      ⛔ 不用接口伪造一个"已齐备"的读数 —— 那等于把"结案能成功"写成"我以为能成功"。
+    * 前置只用 `seed_entrust_demo` 那张 `claimed` 委托（**不绑**按需夹具，
+      否则标准配方下本章直接变 `FAIL`，看起来像产品坏了）。
+    * 本章**不改库**：点结案必然被服务端拒绝（前置不齐）⇒ 唯一的写入是幂等键，
+      而被拒的请求会释放它。
+    """
+    print("\n-- 53 结案：第 12 步的入口与五维清单（S4-b 界面侧）--", flush=True)
+
+    tok_mgr = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    if not tok_mgr:
+        w.rep.not_run("53 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+
+    rows = (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
+    claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
+    claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0))
+    aid = str((claimed[0] or {}).get("assignment_id") or "") if claimed else ""
+    w.rep.rec(
+        "53 前置 · 队列里有一张已受理（claimed）委托 —— 本章自选一张，不绑按需夹具",
+        bool(aid),
+        f"aid={aid!r} claimed {len(claimed)} 张 / 队列共 {len(rows)} 张",
+    )
+    if not aid:
+        w.rep.not_run("53 结案剧本", "队列里没有 claimed 委托 ⇒ 先铺 seed_entrust_demo")
+        return
+
+    srv = api_get(f"/entrust/assignments/{aid}/closure-readiness", tok_mgr) or {}
+    srv_codes = [str((m or {}).get("code")) for m in (srv.get("missing") or [])]
+    w.rep.rec(
+        "53 ① 后端读端点可用：能结案的人拿到 missing[]（与结案命令**同一把锁**）",
+        isinstance(srv.get("ready"), bool) and bool(srv_codes),
+        f"ready={srv.get('ready')!r} missing={len(srv_codes)} codes={srv_codes[:6]}",
+    )
+
+    if not w.open_workbench(CODE_OWNER, tag="53"):
+        w.rep.not_run("53 结案剧本", "未能以 seed-owner 进入经理工作台")
+        return
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("53 结案剧本", f"打不开委托详情页（aid={aid}）")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+
+    has_entry = w.c.count('[data-act-complete-open="1"]') > 0
+    mdd = w.c.page_data()
+    closure = mdd.get("closure") or {}
+    dims = closure.get("dimensions") or []
+    w.rep.rec(
+        "53 ② 详情页出现「结案」入口，且缺项清单**先于**点按钮就给出（不可逆动作要先看得见清单）",
+        has_entry and bool(closure.get("summary")),
+        f"入口={has_entry} canComplete={mdd.get('canComplete')!r} "
+        f"summary={str(closure.get('summary'))[:70]!r}",
+    )
+    w.rep.rec(
+        "53 ③ 五格恒出五格：界面按「五个维度」画，缺项为 0 的维度也在（否则像没人管）",
+        len(dims) == 5 and all({"key", "label", "ok", "count"} <= set(d) for d in dims),
+        "dimensions=" + ",".join(f"{d.get('label')}={d.get('count')}" for d in dims),
+    )
+    ui_codes = sorted({str((r or {}).get("code")) for d in dims for r in (d.get("rows") or [])})
+    w.rep.rec(
+        "53 ④ **两处同结论**：界面列出的缺项 code 与服务端读端点逐条一致（界面不自己编）",
+        ui_codes == sorted(set(srv_codes)),
+        f"界面={ui_codes[:6]} 服务端={sorted(set(srv_codes))[:6]}",
+    )
+    # 截图留证：「结案前先看得见清单」这一判据的**视觉**证据（与其它章节同一口径：
+    # 读数之外要有一张能被人眼复核的图）。
+    w.shot("53-结案五维清单")
+
+    w.c.scroll_into('[data-act-complete-open="1"]')
+    w.c.tap('[data-act-complete-open="1"]')
+    time.sleep(0.5)
+    opened = w.c.count('[data-act-complete-submit="1"]') > 0
+    w.rep.rec(
+        "53 ⑤ 「结案」是**页内确认条**（不是原生弹层 —— 弹层不在渲染树里，走查点不到它的确认键）",
+        opened,
+        f"确认条出现={opened}",
+    )
+    if opened:
+        w.c.scroll_into('[data-act-complete-submit="1"]')
+        w.c.tap('[data-act-complete-submit="1"]')
+        time.sleep(2.5)
+    mdd2 = w.c.page_data()
+    hint = str(mdd2.get("completeHint") or "")
+    w.rep.rec(
+        "53 ⑥ 前置不齐时点结案 ⇒ 被服务端拦，且页面把**缺项**摆出来（不是一句「失败」）",
+        ("还不能结案" in hint) and ("项" in hint),
+        f"completeHint={hint[:130]!r}",
+    )
+    w.rep.rec(
+        "53 ⑦ 被拦之后委托**没有**被改状态（不可逆动作不能半途生效）",
+        str((mdd2.get("detail") or {}).get("status") or "") == "claimed",
+        f"页面 detail.status={str((mdd2.get('detail') or {}).get('status'))!r}",
+    )
+
+    w.rep.not_run(
+        "53 ⑧ 「齐备 ⇒ 结案成功」这段",
+        "需要一张五维度齐备的委托（任务全处置 ＋ 必需证据齐 ＋ 案件全关闭 ＋ "
+        "结算已批准且客户已确认 ＋ 余额结清）；现成种子都停在前置不齐那一步 ⇒ "
+        "缺一个「五维齐备」夹具，本轮如实记 NOT_RUN（⛔ 不用接口伪造）",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
@@ -11035,6 +11148,7 @@ SECTIONS = {
     "50": sec_50,
     "51": sec_51,
     "52": sec_52,
+    "53": sec_53,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章

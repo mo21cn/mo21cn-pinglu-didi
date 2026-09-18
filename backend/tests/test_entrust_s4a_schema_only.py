@@ -188,8 +188,25 @@ def _openapi_entrust_routes() -> set[str]:
     return {p for p in app.openapi()["paths"] if p.startswith(prefix)}
 
 
+def _openapi_entrust_routes_with_methods() -> dict[str, set[str]]:
+    """委托支线的 `路径 → 该路径上开放的 HTTP 方法（小写）`。
+
+    为什么需要方法：`closure-readiness` 这种**只读配套**与 `reopen` 这种**命令**
+    在路径关键词上长得一样，靠名字区分必然误伤或漏放。
+    """
+    from app.main import app
+    from app.modules.entrust import scope_matrix as sm
+
+    prefix = sm.API_PREFIX
+    return {
+        path: {m.lower() for m in ops}
+        for path, ops in app.openapi()["paths"].items()
+        if path.startswith(prefix)
+    }
+
+
 def test_only_complete_is_open_in_the_assignment_layer():
-    """**委托层**的结案类端点只有 `complete`；**重开（S4-c）与"关闭"仍未开放**。
+    """**委托层**的结案类**写端点**只有 `complete`；重开（S4-c）与"关闭"仍未开放。
 
     S4-a 的原断言是"一个都没有"（正确表现是「这个能力还没有入口」）。S4-b 落地了
     `complete`，于是本用例改成**边界仍然清晰**：`complete` 在，
@@ -197,21 +214,42 @@ def test_only_complete_is_open_in_the_assignment_layer():
     `/tasks/{id}/complete`、`/exceptions/{id}/close` 是**任务层与案件层**的既有能力，
     它们一直都在，且不得被拿来顶替委托结案（口径设计 §5.7："`close_case`（案件结案）与
     委托 `complete` 是两个层级，不得互相替代"）。
-    """
-    paths = _openapi_entrust_routes()
-    assignment_paths = sorted(p for p in paths if "/assignments/" in p)
-    assert assignment_paths, "用例前提：委托层本就有端点，否则本断言是空的"
 
-    assert any(p.endswith("/complete") for p in assignment_paths), (
-        "S4-b 要求委托层有 complete 端点（取值域里的 completed 靠它产出）"
+    ⭐ S4-b 的读侧配套：`GET …/closure-readiness` 含 `closure` 字样，但它是**只读**的
+    （不改变任何状态）。⇒ 判据按 **method** 收口 —— 从"任何端点"收窄到"**写**端点"，
+    因为"重开/关闭"必然是命令；同时**反向核对**白名单里那一条**必须真的是 GET**，
+    否则这个名单就变成"往只读的名字里塞写命令"的后门（那样判据反而变弱）。
+    """
+    routes = _openapi_entrust_routes_with_methods()
+    assignment = {p: ms for p, ms in routes.items() if "/assignments/" in p}
+    assert assignment, "用例前提：委托层本就有端点，否则本断言是空的"
+
+    assert any(p.endswith("/complete") and "post" in ms for p, ms in assignment.items()), (
+        "S4-b 要求委托层有 complete 的**写**端点（取值域里的 completed 靠它产出）"
     )
+
+    from app.modules.entrust import scope_matrix as sm
+
+    readonly_companions = {
+        f"{sm.API_PREFIX}/assignments/{{assignment_id}}/closure-readiness",
+    }
+    write_routes = {p for p, ms in assignment.items() if ms & {"post", "put", "patch", "delete"}}
     still_closed = sorted(
-        p for p in assignment_paths if any(k in p.lower() for k in ("close", "closure", "reopen"))
+        p
+        for p in write_routes
+        if any(k in p.lower() for k in ("close", "closure", "reopen"))
+        and not p.endswith("/complete")
     )
     assert not still_closed, (
-        f"委托层出现了本切片之外的结案类端点 {still_closed} —— 重开是 S4-c，"
+        f"委托层出现了本切片之外的结案类**写**端点 {still_closed} —— 重开是 S4-c，"
         "且必须带理由、授权与历史留痕；`close` 不在计划内（案件层才有 close_case）"
     )
+    for path in readonly_companions:
+        assert path in assignment, f"只读配套路径不存在：{path}"
+        assert assignment[path] == {"get"}, (
+            f"{path} 必须是**只读**端点，实际开放的方法：{sorted(assignment[path])} —— "
+            "只读配套一旦能写，这个白名单就成了塞写命令的后门"
+        )
 
 
 def test_financial_status_is_not_projected_but_completed_at_is():

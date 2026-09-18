@@ -167,7 +167,7 @@
 | 应收应付行 + 争议费用（Decimal/单位/币种/依据/状态） | **缺连接** | `registry.py:settlement_draft` 的 `receivable_lines`/`payable_lines`/`disputed` 均为自由 `FIELD_LIST` |
 | 争议排除在确认总额外 + 显式解决动作 | **缺失** | 未找到 |
 | 结算草稿 + 内部/客户确认 + 标注样本的外部付款证据 | **缺失** | 确认语义未找到 |
-| **委托级真实结案命令 + 前置判定 + 原子性** | **缺失** | 只有**案件级** `exceptions.py:close_case`；`exceptions.py:448` 自述 S3 结案校验未上线；无委托结案端点 |
+| **委托级真实结案命令 + 前置判定 + 原子性** | **已实现（后端 ＋ 界面入口）** | S4-b 落地：`POST /assignments/{id}/complete`（五维度前置逐条报缺、幂等、`expected_revision` 乐观并发、MySQL 行锁）＋ 只读前置 `GET /assignments/{id}/closure-readiness`；界面入口在**委托详情页**的结案卡（五格清单先于按钮、页内确认条）。⚠️「齐备 ⇒ 结案成功」的设备侧证据仍缺一个**五维齐备夹具**（如实记 `NOT_RUN`） |
 | 重新打开语义 | 已有（task/case 级） | `tasks.py:reopen_task`、`exceptions.py:reopen_case`（同事务审计） |
 
 ### 3.5 BP-05 演示环境、复位与验收证据包

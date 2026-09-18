@@ -49,6 +49,7 @@ const {
   CAPACITY_EVIDENCE_ORDER,
   LEG_MODE_CHOICES,
   ORG_PERM_CLAIM,
+  ORG_PERM_COMPLETE,
   ORG_PERM_QUOTE_CREATE,
   ORG_PERM_VIEW,
   TASK_TYPE_LABELS,
@@ -58,6 +59,7 @@ const {
   canClaimAssignment,
   capacityRuleRows,
   claimAssignment,
+  completeAssignment,
   confirmCapacity,
   createArtifact,
   createLeg,
@@ -66,6 +68,7 @@ const {
   decorateCapacityCandidate,
   decorateCapacityConfirmation,
   decorateCapacityRecheck,
+  decorateClosureReadiness,
   decorateContractDerivation,
   decorateCustomerOffer,
   decorateDetail,
@@ -78,6 +81,7 @@ const {
   fetchAssignmentPlan,
   fetchCapacityCandidates,
   fetchCapacityConfirmations,
+  fetchClosureReadiness,
   fetchContractDerivation,
   fetchEntrustmentOfferReleases,
   fetchLegRevisions,
@@ -211,6 +215,29 @@ Page({
      * 就会把与它无关的财务入口一起悄悄藏掉。
      */
     canOpenFinance: false,
+    /**
+     * 「结案」入口（合同 §6.4 / §10.1 第 12 步）。
+     *
+     * 判据 = 委托处于 `claimed` ∧ **我在该组织内有 `entrust:assignment:complete`**。
+     * 两条都要：
+     * * 只看状态 ⇒ 只读成员也看到按钮，点下去 403（界面在替服务端许一个它不兑现的诺）；
+     * * 只看权限 ⇒ 已结案的单仍然显示"可以结案"，而命令必然 409。
+     * ⚠️ 这条判据比 `canOpenFinance`（`entrust:view`）**窄一档**：齐备度清单里带着
+     * 结算版本、余额与案件处置 ⇒ 看得见缺项的人就是能结案的人（与后端同一取舍）。
+     * ⛔ 隐藏不等于放行：服务端独立判定（同既有每一个入口的写法）。
+     */
+    canComplete: false,
+    /** 结案齐备度（装饰后的五格视图）；`null` = 还没取到（不发请求时恒为 null）。 */
+    closure: null,
+    closureHint: '',
+    /**
+     * 页内确认条（**不是** `wx.showModal`）：结案不可逆，值得一次显式确认，
+     * 而弹层不在渲染树里 ⇒ 走查点不到它的确认键 ⇒ 关键路径拿不到设备证据。
+     * 与「受理委托」「记录任务」同型（静态防线 ⑪ 章断言本页整页不出现 `showModal`）。
+     */
+    completeOpen: false,
+    completing: false,
+    completeHint: '',
     /**
      * 「组装对客报价」入口（S3：合同 §10.1 第 6 步 `Release the offer` 的前置动作）。
      *
@@ -495,6 +522,7 @@ Page({
     this.permittedOrgIds = {}
     this.permittedQuoteOrgs = {}
     this.permittedViewOrgs = {}
+    this.permittedCompleteOrgs = {}
     // 重取时把两处页内交互面**复位**：整页刷新之后，展开着的确认条 / 输入条都已经
     // 失去了它当初的判据（权限与委托状态都可能变了）⇒ 让它们回到"未展开"，
     // 而不是留一个点了必然失败的按钮。复位只放在这里一处，页面别处不再各收一次。
@@ -504,6 +532,10 @@ Page({
       viewHint: '',
       claimOpen: false,
       claiming: false,
+      // 结案确认条同样复位（整页刷新后判据可能已经变了，留着展开会让人以为还能直接提交）。
+      completeOpen: false,
+      completing: false,
+      completeHint: '',
       pickKey: '',
       taskOpenKey: '',
       taskHint: '',
@@ -588,6 +620,9 @@ Page({
         // 运力块只读的那道判据（`entrust:view`）。与上面两个各管一段：
         // 认领 / 组装报价 / 看运力成本口径，是**三种**不同的组织侧能力。
         self.permittedViewOrgs = permittedOrgIds(orgItems, ORG_PERM_VIEW)
+        // 结案：比上面三个都**窄**一档（清单带结算版本、余额与案件处置
+        // ⇒ 看得见缺项的人就是能结案的人）。第四个投影，不与上面任何一个复用。
+        self.permittedCompleteOrgs = permittedOrgIds(orgItems, ORG_PERM_COMPLETE)
         const detail = decorateDetail(res[0], self.permittedOrgIds)
         const board = decorateWorkbench(res[1])
         // 只挑**本单**的那条：`/my-offer-releases` 是"我收到的全部发布"，
@@ -606,7 +641,14 @@ Page({
         // （`canDeriveContract` 要等 `session-context` 回来才定得下来），
         // 与运力同一条理由：不该发的请求一次都不发。
         // 三块**互不依赖** ⇒ 并行，失败各消化各的。
-        return Promise.all([self.loadCapacity(), self.loadPlan(), self.loadContract()])
+        return Promise.all([
+          self.loadCapacity(),
+          self.loadPlan(),
+          self.loadContract(),
+          // 结案齐备度（§10.1 第 12 步）：同样**要先有权限投影才发**，
+          // 失败各消化各的（读不到清单不该把整页打成错误态）。
+          self.loadClosure()
+        ])
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -651,6 +693,17 @@ Page({
       // 「财务与结算」入口：同一阶段判据（费用/结算命令只在已受理上成立），
       // 但**自成一格**（见 data 上的说明）—— 货主本人也要能进来做「确认这一版」。
       canOpenFinance: !!(board && board.status === 'claimed'),
+      // 「结案」入口（§10.1 第 12 步）：状态 ∧ 该组织内 `entrust:assignment:complete`。
+      // ⛔ 两个判据一个都不能少 —— 只看状态会让只读成员看到一个必然 403 的按钮，
+      // 只看权限会让已结案的单仍然显示"可以结案"（而命令必然 409）。
+      canComplete:
+        !!(board && board.status === 'claimed') &&
+        isPermittedOrg(this.permittedCompleteOrgs, detail && detail.orgId),
+      // 齐备度整页刷新就重取：它的语义是"**现在**缺什么"，缓存它等于让界面说旧话。
+      closure: null,
+      closureHint: '',
+      completeHint: '',
+      completing: false,
       unassignedHint: board ? board.unassignedHint : '',
       offer: offer ? decorateCustomerOffer(offer) : null,
       offerForm: '',
@@ -1221,6 +1274,94 @@ Page({
    * 不把 `plan` 置成一个空计划对象 —— 那会让"本单没有结构化计划"与"计划读取失败"
    * 在界面上长得一样，而前者是**要落方案**、后者**要查为什么读不到**。
    */
+  /**
+   * 取**结案齐备度**（合同 §6.4 的五个维度；§10.1 第 12 步）。
+   *
+   * 为什么要在能点之前先取：`complete` 的 409 只在**点下去之后**才说缺什么，
+   * 而结案**不可逆** ⇒ 界面应当先让人看见清单、再执行。
+   *
+   * 三条边界：
+   * ① 没有 `entrust:assignment:complete` ⇒ **一次请求都不发**（与运力块同一条纪律）；
+   * ② 读失败 ⇒ 说清"读不到"（带状态码），**不**说成"没有缺项"；
+   * ③ 载荷里的 `ready` **不**决定按钮能否点 —— 按钮态看委托 `status`。
+   */
+  loadClosure() {
+    const self = this
+    const id = this.data.assignmentId
+    if (!id || !this.data.canComplete) return Promise.resolve()
+    return fetchClosureReadiness(id)
+      .then(function (payload) {
+        self.setData({ closure: decorateClosureReadiness(payload), closureHint: '' })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          closure: null,
+          closureHint: status
+            ? '结案前置清单未能读取（服务端返回 ' + status + '）'
+            : '结案前置清单未能读取：网络异常'
+        })
+      })
+  },
+
+  onCompleteOpen() {
+    this.setData({ completeOpen: true, completeHint: '' })
+  },
+
+  onCompleteCancel() {
+    this.setData({ completeOpen: false, completeHint: '', completing: false })
+  },
+
+  /**
+   * 结案（`claimed → completed`）。**不可逆** ⇒ 走页内确认条，不走原生弹层
+   * （弹层不在渲染树里 ⇒ 走查点不到它的确认键，静防 ⑪ 章断言本页整页不出现 `showModal`）。
+   *
+   * 缺项时服务端回 **409 ＋ `detail.missing[]`** —— 页面把它**原样**显示出来
+   * （与"点之前先看清单"同一条口径：缺什么由服务端说，不由界面猜）。
+   * ⚠️ `expected_revision` 取本页 `detail.revision`：两个经理同时结案时，
+   * 条件 UPDATE 靠它让其中一个拿到 409，而不是两个都"成功"。
+   */
+  onCompleteSubmit() {
+    const self = this
+    const id = this.data.assignmentId
+    if (!id || this.data.completing) return Promise.resolve()
+    const revision = Number((this.data.detail && this.data.detail.revision) || 1)
+    this.setData({ completing: true, completeHint: '' })
+    return completeAssignment(id, { expected_revision: revision }, newIdempotencyKey('complete'))
+      .then(function () {
+        self.setData({ completing: false, completeOpen: false })
+        wx.showToast({ title: '已结案', icon: 'success' })
+        // 结案改的是"后续还能做什么"的全部前置 ⇒ 整页重取，不在页内拼状态。
+        return self.load()
+      })
+      .catch(function (err) {
+        const detail = err && err.detail
+        const missing = detail && detail.missing
+        const status = (err && err.httpStatus) || 0
+        let hint
+        if (missing && missing.length) {
+          // 服务端逐条说了缺什么 ⇒ 照实列出来，并**同时刷新清单**（页面那份可能已过期）。
+          hint = '还不能结案（缺 ' + missing.length + ' 项）：' +
+            missing
+              .map(function (item) {
+                return item.message
+              })
+              .join('；')
+          self.loadClosure()
+        } else if (status === 409) {
+          // 已结案 / 版本过期（幂等重放走的是 200）：提示按服务端原文，并整页重取 ——
+          // 换个状态继续点下去只会一直拿到 409。
+          hint = '结案未生效：' + ((detail && detail.message) || '状态已变化，请刷新后再看')
+          self.load()
+        } else if (status) {
+          hint = '结案失败（服务端返回 ' + status + '）'
+        } else {
+          hint = '结案失败：网络异常'
+        }
+        self.setData({ completing: false, completeHint: hint })
+      })
+  },
+
   loadPlan() {
     const self = this
     const id = this.data.assignmentId

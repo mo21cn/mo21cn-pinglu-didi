@@ -268,6 +268,16 @@ const WALK_ANCHORS = [
     value: '{{item.candidateId}}', handler: 'onCancelCapConfirm' },
   { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-cap-recheck',
     value: '{{item.confirmationId}}', handler: 'onCapRecheck' },
+  // 结案（合同 §6.4 / §10.1 第 12 步；S4-b 的界面入口）：入口 → 页内确认条 → 提交。
+  // ⭐ 为什么是"入口 + 确认条"两段：结案**不可逆**，而它的 409 只在点下去之后才说缺什么
+  //    ⇒ 先让人看见五维清单再确认；确认**不用** `wx.showModal`（弹层不在渲染树里，
+  //    走查点不到它的确认键 —— 与受理/记录任务同一条理由）。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-complete-open',
+    value: '1', handler: 'onCompleteOpen' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-complete-submit',
+    value: '1', handler: 'onCompleteSubmit' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-complete-cancel',
+    value: '1', handler: 'onCompleteCancel' },
   // 运输计划（三段航段）与必需任务前置（合同 §10.1 第 4 步；BP-03 第 1 条）。
   // 三个**行**锚点，判据都是"渲染树里数得出来的事实"：
   //   * 段数 = 段的行数（模板**不拼**"三段" —— 段数是数据的属性）；

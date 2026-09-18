@@ -211,6 +211,18 @@ const ORG_PERM_QUOTE_CREATE = 'entrust:quote:create'
  */
 const ORG_PERM_VIEW = 'entrust:view'
 
+/**
+ * 「结案」权限码（= 后端 `access.PERM_ASSIGN_COMPLETE`）。
+ *
+ * 详情页拿它去本地组织权限投影里查「我能不能结案」，**只决定发不发那两次请求**
+ * （读齐备度 + 提交结案）——与 `ORG_PERM_VIEW` 同一条理由：不该发的请求一次都不发。
+ *
+ * ⚠️ 这条判据比 `ORG_PERM_VIEW` **窄**：清单里带着结算版本、余额与案件处置
+ * （运营口径），所以"能看到缺项的人就是能结案的人"。
+ * ⚠️ 隐藏不等于放行：服务端仍按授权独立判定（同既有三个投影的用法）。
+ */
+const ORG_PERM_COMPLETE = 'entrust:assignment:complete'
+
 function statusLabel(status) {
   const meta = STATUS_META[status]
   return meta ? meta.label : '未知状态'
@@ -4955,6 +4967,104 @@ function fetchFinancialStatus(assignmentId) {
 }
 
 /**
+ * 结案齐备度（合同 §6.4 的五个维度；派生、不落库）。
+ *
+ * ⚠️ 它与 `completeAssignment` 走**同一个权限通道**（`entrust:assignment:complete`）
+ * ⇒ 调用方应当"能看到清单的人才发这次请求"（详情页先用权限投影判，见 `ORG_PERM_COMPLETE`）。
+ * ⚠️ `ready=true` **不等于**现在能结：命令还要求委托处于 `claimed`
+ * ⇒ 按钮态看委托自身的 `status`，别把这个字段读成"能结"。
+ */
+function fetchClosureReadiness(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/closure-readiness' })
+}
+
+/**
+ * 结案（`claimed → completed`）。缺项时服务端回 **409 ＋ `detail.missing[]`**，
+ * 页面把它**原样**显示出来，不自己编文案。
+ *
+ * `body` 必须是 `{ expected_revision }`：结案的裁决点是五个维度的一堆事实，
+ * 两个经理同时结案时，条件 UPDATE 靠这个版本号让其中一个拿到 409。
+ */
+function completeAssignment(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/complete',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 五个维度 → 中文名（键与后端 `closure.DIMENSIONS` 逐字一致）。 */
+const CLOSURE_DIMENSION_LABELS = {
+  tasks: '任务处置',
+  evidence: '交付证据',
+  exceptions: '异常与重评',
+  settlement: '结算',
+  balance: '余额与争议'
+}
+
+/**
+ * 缺项 `code` → 短标题（**只覆盖界面上要单独成句的那几个**；正文一律照服务端 `message`）。
+ *
+ * ⚠️ 为什么不逐条翻译：服务端每条 `missing[].message` 已经写清"缺什么、为什么要它"，
+ * 前端再造一份就是第二个口径来源；这里只给标题级的短标签。
+ */
+const CLOSURE_CODE_LABELS = {
+  tasks_not_disposed: '还有任务没有处置完',
+  required_evidence_missing: '必需证据还缺',
+  blocking_cases_open: '有未解决的阻断案件',
+  revalidation_open: '有未完成的复核项',
+  cases_not_closed: '有未关闭的案件',
+  financial_not_started: '还没有任何财务事实'
+}
+
+/**
+ * 装饰齐备度载荷：`missing[]` 按五个维度分组，每格给中文名与计数。
+ *
+ * ⭐ 五个维度**恒出五格**（后端 `missing_by_dimension` 的键恒在）——界面据此画
+ * "五格全绿才算齐"；缺项为 0 的格子也要在，否则看起来像"这一维度没人管"。
+ * `detailCount` 从 `detail.count` 提出来：模板不做深层取值（`{{row.detail.count}}`
+ * 在 `detail` 为 null 时会渲染成空白，而"缺 3 项"与"没有明细"在界面上应当是两句不同的话）。
+ */
+function decorateClosureReadiness(data) {
+  const raw = data || {}
+  const byDimension = raw.missing_by_dimension || {}
+  const items = raw.missing || []
+  const dimensions = Object.keys(CLOSURE_DIMENSION_LABELS).map(function (key) {
+    const rows = items.filter(function (item) {
+      return item.dimension === key
+    })
+    return {
+      key: key,
+      label: CLOSURE_DIMENSION_LABELS[key],
+      count: byDimension[key] || 0,
+      ok: (byDimension[key] || 0) === 0,
+      rows: rows.map(function (item) {
+        return {
+          code: item.code,
+          title: CLOSURE_CODE_LABELS[item.code] || item.message,
+          message: item.message,
+          detailCount: item.detail && item.detail.count ? item.detail.count : 0
+        }
+      })
+    }
+  })
+  const openCodes = items.map(function (item) {
+    return item.code
+  })
+  return {
+    ready: !!raw.ready,
+    missingTotal: items.length,
+    dimensions: dimensions,
+    openCodes: openCodes,
+    summary: raw.ready
+      ? '五个维度都已满足 —— 可以结案'
+      : '还差 ' + items.length + ' 项：' + openCodes.join('、'),
+    financialStatus: raw.financial_status || ''
+  }
+}
+
+/**
  * 从**工作台载荷**里取「对客结算版本提示」（货主可见；白名单）。
  *
  * 为什么读工作台而不是结算端点：版本清单（`GET /assignments/{id}/settlements`）
@@ -5401,5 +5511,12 @@ module.exports = {
   recordCharge,
   recordSettlementPayment,
   recordTaskEvidence,
-  resolveCharge
+  resolveCharge,
+  // ── 结案（合同 §6.4；S4-b 的界面入口）──────────────────────────────────
+  CLOSURE_CODE_LABELS,
+  CLOSURE_DIMENSION_LABELS,
+  ORG_PERM_COMPLETE,
+  completeAssignment,
+  decorateClosureReadiness,
+  fetchClosureReadiness
 }

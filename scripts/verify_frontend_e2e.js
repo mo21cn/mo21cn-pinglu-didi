@@ -1235,6 +1235,20 @@ function loadPage(file, ctx) {
           pageWrite('POST', '/entrust/assignments/' + id + '/tasks', body, key).then(rejectIfNotOk),
         claimAssignment: (id, key) =>
           pageWrite('POST', '/entrust/assignments/' + id + '/claim', {}, key).then(rejectIfNotOk),
+        // 结案（合同 §6.4 / §10.1 第 12 步；S4-b 的界面入口）。两件事分两条：
+        //   · 齐备度**取数**走真 HTTP —— 本块要证的是"页面显示的就是服务端逐条给的
+        //     缺项"，回放表只会把我自己写进去的清单再读回来（那是自证）；
+        //   · 结案**写**走 `pageWrite`（只在 `WRITE_ENABLED` 的段里才真的发出去）——
+        //     它会把委托推进 `completed`，在"读"的段里发生会让后续断言拿到一个
+        //     被自己污染的世界（与 `claimAssignment` 同一条理由）。
+        // ⚠️ 两条都属于"新增取数/写通道必须登记"：漏登记的后果是**静默** ——
+        //    落到真实 `utils/request.js` ⇒ Node 里没有 `wx.request` ⇒ 页面 `.catch`
+        //    把它吞成"读不到" ⇒ 结案卡整块不渲染，而脚本毫不知情。
+        fetchClosureReadiness: (id) =>
+          live('GET', '/entrust/assignments/' + id + '/closure-readiness'),
+        completeAssignment: (id, body, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/complete', body, key)
+            .then(rejectIfNotOk),
         // 案件六个写命令（切片四之六）。与上面三条同一条通道：**只在 WRITE_ENABLED
         // 的段里**才真的发出去，取数阶段一律被拒 —— 登记案件会改库（新案件会进
         // 组织队列），在"读"的段里发生它会让后续断言拿到一个被自己污染的世界。

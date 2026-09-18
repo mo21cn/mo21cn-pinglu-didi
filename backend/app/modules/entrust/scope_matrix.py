@@ -175,6 +175,19 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "货主本人**不能**结案（这是运营方对客户的宣告）⇒ 不带货主旁路。",
     ),
     _r(
+        "GET",
+        "/assignments/{assignment_id}/closure-readiness",
+        GUARD_ORG_MEMBER,
+        "entrust:assignment:complete",
+        owner_scope=True,
+        note="**结案齐备度**（只读、纯派生、不落库）：`ready` ＋ `missing[]` ＋ 逐维度计数。"
+        "判据＝与 `complete` **同一把权限锁** —— 看得到缺项的人就是能结案的人"
+        "（清单里带结算版本、余额与案件处置，属运营口径；`charges` 那一族刻意更宽，"
+        "因为那里回答的是「这单花了多少」，这里回答的是「能不能宣布完成」）。"
+        "⚠️ `ready=True` **不等于**现在能结（命令另要求 `claimed`）⇒ 按钮态看 `status`。"
+        "⛔ 无货主旁路（与 `complete` 同因）。",
+    ),
+    _r(
         "POST",
         "/assignments/{assignment_id}/cancel",
         GUARD_OWNER_SELF,
