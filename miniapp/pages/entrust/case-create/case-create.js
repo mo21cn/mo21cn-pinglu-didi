@@ -213,10 +213,31 @@ Page({
       fetchArtifactCandidates(id),
       fetchArtifactTypes().catch(function () {
         return []
+      }),
+      // 委托自身一行（「本委托货量」）：货量变更的落点是**这张委托**，
+      // 而它不是任何一份成果。失败不让整个候选面板失败 ——
+      // 少了它仍能登记任务/成果，只是这次选不中委托自身。
+      fetchAssignment(id).catch(function () {
+        return null
       })
     ])
       .then(function (res) {
-        const rows = decorateCaseLinkTargets(res[0], res[1], res[2])
+        const selfAssignment = res[3] || null
+        const rows = decorateCaseLinkTargets(
+          res[0],
+          res[1],
+          res[2],
+          selfAssignment
+            ? {
+                assignment_id: selfAssignment.assignment_id,
+                quantityText:
+                  selfAssignment.quantity === null || selfAssignment.quantity === undefined
+                    ? '未知'
+                    : String(selfAssignment.quantity) +
+                      (selfAssignment.quantity_unit ? ' ' + selfAssignment.quantity_unit : '')
+              }
+            : null
+        )
         self.setData({
           candLoaded: true,
           candidates: rows,

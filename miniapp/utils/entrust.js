@@ -1572,7 +1572,11 @@ const CASE_SOURCE_LABELS = {
 }
 
 /** 受影响项目标类型（后端 `exceptions.TARGET_KINDS`）—— 只有这两类，不放任任意目标 */
-const CASE_TARGET_LABELS = { task: '任务', artifact: '成果' }
+//: 受影响项类型 → 中文名。
+//: `assignment` ＝ **本委托单本身**（2026-09-18 新增）：货量变更的落点是
+//: `ent_assignment.quantity`，它不属于任何一份成果，所以必须有自己的名字 ——
+//: 叫它"成果"会让人以为改的是某一版报价（而货量是委托的属性）。
+const CASE_TARGET_LABELS = { task: '任务', artifact: '成果', assignment: '本委托货量' }
 
 /**
  * 变更类别（后端 `revalidation.CHANGE_CATEGORIES`，DR-0016 的五行）。
@@ -1838,6 +1842,16 @@ function decorateCase(payload, typeLabels) {
             // `linkId` 是**移除受影响项**要的参数（`DELETE .../links/{link_id}`）。
             // 不放进 `text` 里让页面去截字符串 —— 那会把"显示什么"与"提交什么"绑死。
             linkId: item.link_id,
+            // ⚠️ `target_kind` / `target_id` 必须**原样带出来**：`change_key` 是
+            // `"{target_kind}#{target_id}"`，批准时的 `approved_changes` 要用它拼键。
+            // 只给 `text`（`任务 #3`）不给原值，页面就只能去解析那行中文 ——
+            // 而"解析显示文案"是本仓明确禁止的（显示改一次，提交就静默失效）。
+            // 症状是"货量变更填了却提交不出去"，页面上看起来什么都正常。
+            target_kind: item.target_kind || '',
+            target_id:
+              item.target_id === null || item.target_id === undefined
+                ? ''
+                : String(item.target_id),
             text:
               (CASE_TARGET_LABELS[item.target_kind] || item.target_kind || '目标') +
               ' #' +
@@ -1944,6 +1958,13 @@ function decorateCase(payload, typeLabels) {
     orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id),
     kind: data.kind || '',
     kindLabel: CASE_KIND_LABELS[data.kind] || data.kind || '',
+    // 变更类别（A2 五之二）：决定**复核范围**。页面要它来回答两个问题 ——
+    // ① 这批复核凭什么生成的（展示）；② 本次决定要不要连带给「变更内容」
+    //    （只有货量类变更在界面上有可填的变更内容，见 case.js 的 `showQuantityChange`）。
+    // 取值域镜像缺项时**退回原值**，不编一个看起来对的中文名。
+    changeCategory: data.change_category || '',
+    changeCategoryLabel:
+      CHANGE_CATEGORY_LABELS[data.change_category] || data.change_category || '未登记',
     title: data.title || '未命名案件',
     status: data.status || '',
     statusLabel: CASE_STATUS_LABELS[data.status] || data.status || '',
@@ -2031,7 +2052,23 @@ function decorateCase(payload, typeLabels) {
               basisText:
                 t.basis_revision_id === null || t.basis_revision_id === undefined
                   ? '无基础版本'
-                  : '版本 id ' + t.basis_revision_id
+                  : '版本 id ' + t.basis_revision_id,
+              // 委托货量变更**必须**把 `before → after` 摆出来：其余目标的载荷是不定形的
+              // （只列字段名合理），而这一类的值就是两个标量 ——
+              // 不显示它，「确认应用」就退化成盲操作。
+              // ⚠️ 文案取**服务端**给的 `quantity_text`，前端不拼 `数值 + 单位`：
+              // 各拼一份必然漂移，而漂移的表现是"历史里写 800 吨、这里写 800.000吨"。
+              quantityChangeText: t.quantity_change
+                ? '将改为 ' +
+                  ((t.quantity_change.after || {}).quantity_text || '') +
+                  '（当前 ' +
+                  ((t.quantity_change.before || {}).quantity_text || '未知') +
+                  '）'
+                : '',
+              quantityBasisText:
+                t.quantity_change && t.quantity_change.basis
+                  ? '变更依据：' + t.quantity_change.basis
+                  : ''
             }
           })
         }
@@ -2298,6 +2335,24 @@ function isDispositionWithoutApplication(disposition) {
 }
 
 /**
+ * **变更类别**的可选项（A2 五之二 / DR-0016 五行）。
+ *
+ * 只有变更请求有类别 —— 异常案件带它会 400（`_require_known_change_category`），
+ * 所以这里按 `kind` 收窄，返回值直接可以拿去渲染选择条。
+ *
+ * 为什么页面上必须有这个入口：应用变更**要求**类别已登记（没有类别就无从确定复核
+ * 范围，而"先应用、后补范围"会让下游照着失效事实干活）。而登记时未必知道该归哪一类 ——
+ * 服务端把"批准"当作补登记的**最后合理时机**（那时决定人正看着这份变更的内容）。
+ * 界面此前没有这个入口 ⇒ 类别只能靠种子/接口写进去，**变更请求在界面上根本应用不了**。
+ */
+function caseCategoryOptions(kind) {
+  if (String(kind) !== 'change_request') return []
+  return Object.keys(CHANGE_CATEGORY_LABELS).map(function (key) {
+    return { key: key, label: CHANGE_CATEGORY_LABELS[key] }
+  })
+}
+
+/**
  * 登记案件表单 → 请求体（`ExceptionCaseCreate`）。**只做前置检查，不替代服务端规则。**
  *
  * 三条纪律：
@@ -2554,13 +2609,30 @@ function fetchArtifactCandidates(assignmentId, size) {
  * @param {object} artifacts `GET /entrust/assignments/{id}/artifacts` 的响应
  * @param {Array}  [types]   成果类型注册表 `[{code, label}]`；缺省则不翻译类型名
  */
-function decorateCaseLinkTargets(tasks, artifacts, types) {
+function decorateCaseLinkTargets(tasks, artifacts, types, selfTarget) {
   const specs = types || []
   const typeLabel = function (code) {
     for (let i = 0; i < specs.length; i++) {
       if (specs[i] && specs[i].code === code) return specs[i].label || code
     }
     return code
+  }
+  // 「本委托货量」排在**最前**：它是这张单自己的属性，与"这单上有什么任务/成果"
+  // 是两类东西。混在成果堆里，选错的人会以为自己在改某一版报价。
+  //
+  // `selfTarget` 缺省时不产出这一行（不是产出空行）：调用方还没拿到委托详情时，
+  // 给一个点不动的候选比不给更糟。`quantityText` 也由调用方给 ——
+  // 本层不自己去查货量，那是**另一条通道**（`GET /assignments/{id}`）。
+  const selfRows = []
+  if (selfTarget && selfTarget.assignment_id) {
+    const sid = String(selfTarget.assignment_id)
+    selfRows.push({
+      key: 'assignment-' + sid,
+      target_kind: 'assignment',
+      target_id: sid,
+      text: '本委托货量（委托 #' + sid + '）',
+      sub: '受影响项是这张委托单本身：当前货量 ' + (selfTarget.quantityText || '未知')
+    })
   }
   const taskRows = ((tasks && tasks.items) || []).map(function (t) {
     const id = t.task_id === null || t.task_id === undefined ? '' : String(t.task_id)
@@ -2582,7 +2654,7 @@ function decorateCaseLinkTargets(tasks, artifacts, types) {
       sub: typeLabel(a.artifact_type || '') || '未命名成果'
     }
   })
-  return taskRows.concat(artRows)
+  return selfRows.concat(taskRows, artRows)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4377,6 +4449,68 @@ function decorateSignatureEvidence(payload) {
   }
 }
 
+// ── 委托货量变更（S6-1 / D1-09 / 合同 §10.1 第 8 步）────────────────────────
+//
+// 这一节只有**一个读函数 + 一个投影**，但它是 D1-09 那句
+// `Apply the 800→950 change` 在界面上的落点：**在这张委托上**看到
+// 「原来是 800、现在是 950、依据是什么、由哪个案件批的」。
+//
+// 写侧不在这里：货量变更是一条**经审批**的变更，走的是案件那三件已有的命令
+// （登记受影响项 → 决定（带变更内容）→ 应用）。前端不新增"直接改货量"的命令 ——
+// 那种入口会让"改货量"与"经审批"分离，而 D1-09 要的恰恰是后者。
+//
+// ⚠️ 为什么读的是**独立的**历史端点而不是委托详情里的 `quantity`：
+// 详情里只有**当前值**。把 800 改成 950 之后，"原来是 800"这句话
+// 在界面上就没有出处了 —— 而"从哪改到哪"正是这条判据要看的。
+
+/** 该委托的货量变更历史（append-only，服务端已按应用时间升序）。 */
+function fetchQuantityChanges(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/quantity-changes' })
+}
+
+/**
+ * 投影一行货量变更。
+ *
+ * `oldQuantityText` / `newQuantityText` / `changeText` 都用**服务端给的那份文案**
+ * （`old_quantity_text` / `new_quantity_text`），前端不自己拼 `数值 + 单位`：
+ * 各拼一份必然漂移，而漂移的表现是"历史里写的是 800 吨、详情里写的是 800.000吨"。
+ *
+ * 旧值**未知保持未知**（服务端给 `"未知"`）：从 NULL 改成确定值是合法变更，
+ * 把它显示成 0 会让历史看起来像"从 0 涨到 950"。
+ */
+function decorateQuantityChange(row) {
+  const d = row || {}
+  const oldText = d.old_quantity_text || '未知'
+  const newText = d.new_quantity_text || ''
+  return {
+    key: String(d.change_id == null ? '' : d.change_id),
+    changeId: _sid(d.change_id),
+    assignmentId: _sid(d.assignment_id),
+    exceptionId: _sid(d.exception_id),
+    baseRevision: d.base_revision === null || d.base_revision === undefined
+      ? 0
+      : Number(d.base_revision),
+    // 原值（机器比对用）与文案（界面显示用）**都给**：界面显示文案、程序比对用原值。
+    oldQuantity: d.old_quantity === null || d.old_quantity === undefined ? '' : String(d.old_quantity),
+    newQuantity: d.new_quantity === null || d.new_quantity === undefined ? '' : String(d.new_quantity),
+    oldQuantityText: oldText,
+    newQuantityText: newText,
+    // 一行就是那条对照（`800.000 吨 → 950.000 吨`）—— 判据要看的正是这一句，
+    // 让它由**同一个函数**产出，页面模板就不必各自拼箭头。
+    changeText: oldText + ' → ' + newText,
+    basis: d.basis || '',
+    basisText: d.basis || '未写依据',
+    appliedBy: _caseUser(d.applied_by),
+    appliedAt: _caseTime(d.applied_at),
+    sourceText: '来源变更案件 #' + _sid(d.exception_id)
+  }
+}
+
+/** 该委托的货量变更历史（空数组 = 从没改过，**不是**错误）。 */
+function decorateQuantityChangeList(rows) {
+  return (rows || []).map(decorateQuantityChange)
+}
+
 // ── 组装成果（人工定版；UI-06 / 计划 §5.2 S3）──────────────────────────────
 
 /**
@@ -4724,6 +4858,7 @@ module.exports = {
   capacityRuleLabel,
   capacityRuleRows,
   caseClosureOptions,
+  caseCategoryOptions,
   caseCreateBody,
   caseDecideAvailable,
   caseDecisionOptions,
@@ -4760,6 +4895,8 @@ module.exports = {
   decorateCapacityConfirmation,
   decorateCapacityRecheck,
   decorateContractDerivation,
+  decorateQuantityChange,
+  decorateQuantityChangeList,
   decorateDetail,
   decorateEntrustment,
   decorateEntrustments,
@@ -4787,6 +4924,7 @@ module.exports = {
   fetchCase,
   fetchCaseOrgList,
   fetchContractDerivation,
+  fetchQuantityChanges,
   fetchEntrustmentAttachments,
   fetchJob,
   fetchJobs,
