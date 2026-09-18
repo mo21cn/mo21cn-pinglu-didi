@@ -4811,6 +4811,292 @@ function releasedRevisionFor(releases, artifactId, revisionNo) {
   return releasedRevisionOf(mine, revisionNo)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 财务与结算（S7-1 / S7-2 / S7-3 的界面入口 · §10.1 第 10–11 步）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 三片后端此前**都没有界面入口**：费用行的读与写、缺件清单与补录、结算版本与客户确认，
+// 都只能在接口层演示 —— 而裁定 Q4=A 明确要求第 10–12 步**经现有产品界面演示**。
+//
+// 三条通道的可见性**不同**，本层不做二次判断，只把服务端的结论照实投影：
+//   · 费用与结算的**内部**读数（版本链 / 财务状态）**没有货主面** —— 行上带对手方与内部成本，
+//     页面按本地组织权限判一次再取数（与运力那一组同口径）；
+//   · **对客投影**（`customer-view`）走委托授权链，**货主本人可见**；
+//   · **客户确认**只有货主本人能做，经理侧调用会拿到 403（界面据此给出可读文案）。
+
+/** 该委托的费用行与合计（经理视角；合计按「币种 × 收付方向」分开）。 */
+function fetchCharges(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/charges' })
+}
+
+/** 登记一条费用行（登记后是 `draft`，**草稿不进合计**）。 */
+function recordCharge(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/charges',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 确认费用行（`draft → confirmed`；确认后才进合计）。 */
+function confirmCharge(chargeId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/charges/' + chargeId + '/confirm',
+    method: 'POST',
+    data: body || {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 对已确认的费用提争议（`confirmed → disputed`；**争议行不进合计**）。 */
+function disputeCharge(chargeId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/charges/' + chargeId + '/dispute',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 处置争议：**必须显式给出** `counts_in_total`（裁定 Q2=B，不由状态推导）。 */
+function resolveCharge(chargeId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/charges/' + chargeId + '/resolve',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 缺什么证据（派生：`required_evidence` − 已登记类别；含交接类任务的汇总）。 */
+function fetchEvidenceGaps(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/evidence-gaps' })
+}
+
+/** 在**原任务**上补录一条证据（缺件的补救入口；`occurred_at` 是**业务发生时间**）。 */
+function recordTaskEvidence(taskId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/tasks/' + taskId + '/evidence',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 按当前费用事实生成一个**新**结算版本（旧版本一字不改）。 */
+function createSettlement(assignmentId, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/settlements',
+    method: 'POST',
+    data: {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 结算版本链（升序）＋ 适用版本 id（＝最大版本号那一行）。 */
+function fetchSettlements(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/settlements' })
+}
+
+/** 内部确认（`draft → approved`；只能确认适用版本）。 */
+function approveSettlement(settlementId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/settlements/' + settlementId + '/approve',
+    method: 'POST',
+    data: body || {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * **客户确认该精确版本**（只有货主本人能做；一版只确认一次）。
+ *
+ * 经理侧调用会拿到 403 —— 那句文案是服务端给的，界面**不自己编**
+ * （"客户确认只能由客户本人做"这条口径的正文在后端）。
+ */
+function confirmSettlement(settlementId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/settlements/' + settlementId + '/customer-confirm',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 记一条收付依据（只能挂在已确认的版本上；`mode` 不由客户端给）。 */
+function recordSettlementPayment(settlementId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/settlements/' + settlementId + '/payments',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** **对客投影**：只出对客（应收）费用与白名单字段，不暴露内部供应商成本。 */
+function fetchCustomerSettlement(settlementId) {
+  return request({ url: BASE + '/settlements/' + settlementId + '/customer-view' })
+}
+
+/** 财务结案状态（派生；`blockers` 逐条给出未结成因）。 */
+function fetchFinancialStatus(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/financial-status' })
+}
+
+//: 费用状态 → 界面文案。**未登记的取值原样显示**（未知不假装知道）。
+const CHARGE_STATUS_LABELS = {
+  draft: '草稿',
+  confirmed: '已确认',
+  disputed: '有争议',
+  resolved: '已解决',
+  rejected: '已拒绝'
+}
+
+//: 处置结果 → 文案。
+const CHARGE_OUTCOME_LABELS = {
+  accepted: '认可',
+  adjusted: '调减',
+  rejected: '拒绝'
+}
+
+//: 结算版本状态 → 文案。
+const SETTLEMENT_STATUS_LABELS = { draft: '待内部确认', approved: '已内部确认' }
+
+//: 客户决定 → 文案。`accepted` / `rejected` 之外一律"未确认"
+//: （**未知保持未知**：把未登记的决定显示成"已接受"会让结案依据凭空成立）。
+const SETTLEMENT_DECISION_LABELS = { accepted: '客户已接受', rejected: '客户不接受' }
+
+//: 财务状态 → 文案。
+const FINANCIAL_STATUS_LABELS = {
+  not_started: '未开始',
+  open: '未结清',
+  settled: '已结清'
+}
+
+//: 未结成因 → 界面短文案（`blockers[].code`）。**未知码原样显示**，不吞。
+const FINANCIAL_BLOCKER_LABELS = {
+  unsettled_charges: '有费用行还没有结论',
+  settlement_missing: '还没有结算版本',
+  settlement_not_approved: '适用结算版本尚未内部确认',
+  customer_not_confirmed: '客户尚未确认适用结算版本',
+  settlement_stale: '适用结算版本已过期（费用事实变了）',
+  open_cases: '有未关闭的案件',
+  balance_unsettled: '未结余额非零'
+}
+
+/**
+ * 投影一条费用行。
+ *
+ * ⭐ **金额一律用服务端给的字符串**（不经 `Number`）：跨语言消费者不会因 IEEE754
+ * 丢精度，而界面这一侧"显示 12000 还是 12000.0000"必须与服务端同一个口径 ——
+ * 前端自己 `toFixed` 就是第二套口径，迟早与合计对不上。
+ */
+function decorateCharge(row) {
+  const d = row || {}
+  return {
+    key: String(d.charge_id == null ? '' : d.charge_id),
+    chargeId: _sid(d.charge_id),
+    direction: d.direction || '',
+    directionText: d.direction === 'receivable' ? '应收' : d.direction === 'payable' ? '应付' : (d.direction || '未知'),
+    chargeKind: d.charge_kind || '',
+    quantityText: d.quantity ? String(d.quantity) + (d.unit ? ' ' + d.unit : '') : '',
+    amountText: d.amount === null || d.amount === undefined ? '未知' : String(d.amount),
+    currency: d.currency || '',
+    counterparty: d.counterparty || '',
+    basis: d.basis || '',
+    status: d.status || '',
+    statusText: CHARGE_STATUS_LABELS[d.status] || d.status || '未知',
+    // ⚠️ `counts_in_total` **未知是 `null`，不是 `false`** —— 未处置的行本来就没有这个结论
+    countsInTotal: d.counts_in_total === true,
+    countsKnown: d.counts_in_total === true || d.counts_in_total === false,
+    countsText: d.counts_in_total === true ? '计入合计' : d.counts_in_total === false ? '不计入合计' : '计入未定',
+    disputedReason: d.disputed_reason || '',
+    outcomeText: CHARGE_OUTCOME_LABELS[d.resolution_outcome] || d.resolution_outcome || '',
+    resolutionAmountText: d.resolution_amount ? String(d.resolution_amount) : '',
+    resolutionMethod: d.resolution_method || '',
+    revision: Number(d.revision || 0),
+    canConfirm: d.status === 'draft',
+    canDispute: d.status === 'confirmed',
+    canResolve: d.status === 'disputed'
+  }
+}
+
+/** 投影一个合计分组（按「币种 × 收付方向」分开，**不跨币种相加**）。 */
+function decorateChargeTotal(row) {
+  const d = row || {}
+  return {
+    key: String(d.currency || '') + '#' + String(d.direction || ''),
+    currency: d.currency || '',
+    direction: d.direction || '',
+    directionText: d.direction === 'receivable' ? '应收' : d.direction === 'payable' ? '应付' : (d.direction || '未知'),
+    totalText: d.total === null || d.total === undefined ? '未知' : String(d.total),
+    countedLines: Number(d.counted_lines || 0),
+    excludedLines: Number(d.excluded_lines || 0)
+  }
+}
+
+/** 投影任务的一个证据缺项。 */
+function decorateEvidenceGap(row) {
+  const d = row || {}
+  return {
+    key: String(d.task_id == null ? '' : d.task_id),
+    taskId: _sid(d.task_id),
+    taskType: d.task_type || '',
+    taskTypeText: TASK_TYPE_LABELS[d.task_type] || d.task_type || '未知',
+    title: d.title || '',
+    status: d.status || '',
+    isHandover: d.is_handover === true,
+    required: (d.required || []).slice(),
+    registered: (d.registered || []).slice(),
+    missing: (d.missing || []).slice(),
+    missingText: (d.missing || []).join('、'),
+    registeredText: (d.registered || []).length ? (d.registered || []).join('、') : '（暂无）',
+    satisfied: d.satisfied === true,
+    waitReason: d.wait_reason || '',
+    waitingOnEvidence: d.waiting_on_evidence === true,
+    canRecord: (d.missing || []).length > 0
+  }
+}
+
+/** 投影一个结算版本。 */
+function decorateSettlement(row) {
+  const d = row || {}
+  const lines = (d.lines || []).map(function (line) {
+    const l = line || {}
+    return {
+      key: String(l.charge_id == null ? '' : l.charge_id),
+      directionText: l.direction === 'receivable' ? '应收' : l.direction === 'payable' ? '应付' : (l.direction || '未知'),
+      chargeKind: l.charge_kind || '',
+      amountText: l.amount === null || l.amount === undefined ? '未知' : String(l.amount),
+      currency: l.currency || '',
+      basis: l.basis || ''
+    }
+  })
+  return {
+    key: String(d.settlement_id == null ? '' : d.settlement_id),
+    settlementId: _sid(d.settlement_id),
+    versionNo: Number(d.version_no || 0),
+    versionText: 'v' + String(d.version_no == null ? '' : d.version_no),
+    status: d.status || '',
+    statusText: SETTLEMENT_STATUS_LABELS[d.status] || d.status || '未知',
+    currency: d.currency || '',
+    customerTotalText: d.customer_total === null || d.customer_total === undefined ? '未知' : String(d.customer_total),
+    internalTotalText: d.internal_total === null || d.internal_total === undefined ? '未知' : String(d.internal_total),
+    lineCount: Number(d.line_count || 0),
+    lines: lines,
+    approvedAt: d.approved_at || '',
+    customerConfirmedAt: d.customer_confirmed_at || '',
+    customerDecision: d.customer_decision || '',
+    decisionText: SETTLEMENT_DECISION_LABELS[d.customer_decision] || '客户未确认',
+    customerNote: d.customer_note || '',
+    canApprove: d.status === 'draft',
+    // 客户确认要求：已内部确认，且这一版还没有客户决定
+    canConfirm: d.status === 'approved' && !d.customer_confirmed_at,
+    revision: Number(d.revision || 0)
+  }
+}
+
 module.exports = {
   BASE,
   SAMPLE_QUOTE_FILENAME,
@@ -5050,5 +5336,30 @@ module.exports = {
   respondOffer,
   signatureModeHint,
   signatureModeLabel,
-  withdrawOffer
+  withdrawOffer,
+  // ── 财务与结算（§10.1 第 10–11 步的界面入口）──────────────────────────
+  CHARGE_OUTCOME_LABELS,
+  CHARGE_STATUS_LABELS,
+  FINANCIAL_BLOCKER_LABELS,
+  FINANCIAL_STATUS_LABELS,
+  SETTLEMENT_DECISION_LABELS,
+  SETTLEMENT_STATUS_LABELS,
+  approveSettlement,
+  confirmCharge,
+  confirmSettlement,
+  createSettlement,
+  decorateCharge,
+  decorateChargeTotal,
+  decorateEvidenceGap,
+  decorateSettlement,
+  disputeCharge,
+  fetchCharges,
+  fetchCustomerSettlement,
+  fetchEvidenceGaps,
+  fetchFinancialStatus,
+  fetchSettlements,
+  recordCharge,
+  recordSettlementPayment,
+  recordTaskEvidence,
+  resolveCharge
 }

@@ -22,7 +22,8 @@
     "pages/entrust/case-create/case-create",
     "pages/entrust/session/session",
     "pages/entrust/intake/intake",
-    "pages/entrust/assignments/assignments"
+    "pages/entrust/assignments/assignments",
+    "pages/entrust/finance/finance"
   ],
   "window": {
     "navigationBarTitleText": "船好多",

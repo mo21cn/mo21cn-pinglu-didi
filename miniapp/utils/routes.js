@@ -263,6 +263,18 @@ const NAV_EDGES = [
     strategy: 'push',
     reason: '从「我的委托」列表进入某张委托的详情'
   },
+  {
+    // §10.1 第 10–11 步（S7-1 / S7-2 / S7-3 的界面入口）：从委托详情进入财务与结算。
+    // **push 而不是 replace**：看完财务还要回详情看别的槽位
+    // （与 `detail --push--> artifact` 同口径）。
+    // ⚠️ 本边**只在已受理（`claimed`）的委托上出现** —— 受理前没有责任主体，
+    //    后端的费用 / 结算命令也只在 `claimed` 上成立；照实不显示入口，
+    //    而不是给一个点进去必然 409 的按钮。
+    from: 'pages/entrust/detail/detail',
+    to: 'pages/entrust/finance/finance',
+    strategy: 'push',
+    reason: '从委托详情进入「财务与结算」（费用行 / 缺件补录 / 结算版本与收付依据）'
+  },
 
   // ── 重置栈（回首页重走身份链路）────────────────────────────────────
   { from: 'pages/mine/mine', to: 'pages/index/index', strategy: 'reset' },
@@ -273,6 +285,7 @@ const NAV_EDGES = [
   { from: 'pages/entrust/case-create/case-create', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/intake/intake', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/assignments/assignments', to: 'pages/index/index', strategy: 'reset' },
+  { from: 'pages/entrust/finance/finance', to: 'pages/index/index', strategy: 'reset' },
 
   // ── 工作台 ↔ 会话：产品要求「经理人可在会话/工作台/成果之间反复切换」────
   //    HO 明确指出：有循环的业务导航不一定无限压栈，不能把所有循环判成错误。
@@ -473,8 +486,7 @@ const ROUTES = {
     // 而"读当前那张委托"是一种**会漂移**的推断（与 `case_id` / `artifact_id` 同理）。
     // `artifact_id` 可选：带它只是把某一份成果**高亮/定位**，不是页面存在的前提。
     paramSchema: {
-      assignment_id: { type: 'id', required: true },
-      artifact_id: { type: 'id', required: false, note: '外部深链定位到某一份成果' }
+      assignment_id: { type: 'id', required: true },      artifact_id: { type: 'id', required: false, note: '外部深链定位到某一份成果' }
     },
     // ⚠️ 与案件页同理，**不**声明 `keyContext: ['org']`：会话所属组织由
     //    `assignment_id` 唯一决定，算进复用键会让同一会话在不同组织上下文下
@@ -546,6 +558,16 @@ const ROUTES = {
     //    （货主可以不属于任何组织）。把组织算进复用键只会让同一页在不同组织上下文
     //    下被当成两个页面，白压一层栈。
     note: '我的委托（S1 工作项 5；从「我的」进入，列真实状态与承接组织）'
+  },
+  'pages/entrust/finance/finance': {
+    kind: 'detail', deepLink: 'require-params', domain: 'entrust',
+    // `assignment_id` 必需：费用、缺件、结算版本全部挂在一张委托下，
+    // 而"读当前那张委托"是一种**会漂移**的推断（与 `case_id` / `artifact_id` 同理）。
+    paramSchema: { assignment_id: { type: 'id', required: true } },
+    // ⚠️ 与其余委托页同理，**不**声明 `keyContext: ['org']`：本页的"当前组织"由
+    //    `assignment_id` 唯一决定，它不是"选中的组织"；算进复用键会让同一张委托
+    //    在不同组织上下文下被当成两个页面，白压一层栈。
+    note: '财务与结算（§10.1 第 10–11 步；费用行 / 缺件补录 / 结算版本与收付依据）'
   }
 }
 
@@ -601,7 +623,13 @@ const MIGRATED_PAGES = [
   // 返回 → 再点下一张"，一次脱离 `go()` 的裸 navigateTo 就会让同一个页面在栈里
   // 叠出多份，而预算（`STACK_BUDGET`）与复用（同一张委托只该有一页）正是
   // 这条来回走的核心体验。
-  'pages/entrust/assignments/assignments'
+  'pages/entrust/assignments/assignments',
+  // §10.1 第 10–11 步（S7-1 / S7-2 / S7-3 的界面入口）从落地起接入：本页是
+  // **带表单的关键路径页**（登记费用、补录证据、生成与确认结算版本），
+  // 而且它有**三条通道可见性不同**的取数（内部 / 对客 / 仅客户本人）——
+  // 脱离 `go()` 直接 navigateTo 会让"同一张委托只该有一页"与栈预算一起失效，
+  // 而这类页正是最容易绕过预算的一类（与 case / session 同理）。
+  'pages/entrust/finance/finance'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */
