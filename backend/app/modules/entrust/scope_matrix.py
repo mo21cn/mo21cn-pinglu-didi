@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（86 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（87 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -828,6 +828,19 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "并把当前值与冻结值的差异列出来（changed_fields）。**不写任何行** —— "
         "正式重做属 S4 变更流程；这里只是让 D1-09 的「900 吨候选变更后不再适用」"
         "可被看到，而不是只存在于模型意见里",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/quantity-changes",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="委托货量变更历史（append-only，D1-09 第 8 步）。写侧在 `exceptions.apply_case`"
+        "—— 经审批的变更应用到 `ent_assignment.quantity` 时同步留一行。"
+        "⚠️ 读侧与运力那一组同口径**不给货主本人放行**：`basis` 是经理写的变更依据，"
+        "可能带内部口径（货量本身客户在委托详情里看得到）。"
+        "空列表是正常答复（这单没改过货量），**不是** 404 —— 与 "
+        "`GET /capacity-confirmations/{id}` 的「不回空壳」口径相反，判据是资源本身："
+        "集合可以为空，单条记录不存在就是不存在",
     ),
     # ── 运输计划与必需任务前置（plan_api.py）─────────────────────────────
     _r(
