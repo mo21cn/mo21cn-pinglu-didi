@@ -39,6 +39,21 @@ class AssignmentSubmit(BaseModel):
     org_id: int = Field(ge=1)
 
 
+class AssignmentCompleteIn(BaseModel):
+    """结案（`claimed → completed`）：**只带乐观锁**。
+
+    ⚠️ `expected_revision` 在这里是**必填**（`claim` / `cancel` 不收它，因为它们的
+    裁决点就是状态本身）。结案要同时评估五个维度的一堆事实，两个经理同时结案必须
+    有一个拿到 409（HO 0917 第 3 条）—— 条件 UPDATE 里带上 `revision` 才是那条裁决。
+
+    ⛔ 没有"跳过前置"/"强制结案"参数，也不接受管理员标记：PRD 的结案硬检查
+    `cannot be bypassed by chat, generic "complete", or administrator UI`。
+    缺什么由 409 的 `missing[]` 逐条给出。
+    """
+
+    expected_revision: int = Field(ge=1)
+
+
 class AssignmentOut(BaseModel):
     """委托单投影。
 
@@ -69,6 +84,11 @@ class AssignmentOut(BaseModel):
     claimed_at: str | None
     submitted_at: str | None
     cancelled_at: str | None
+    #: 运营完成时间（S4-b 的 `complete` 写入）。⚠️ 与 `financial_status`（财务维度）
+    #: **是两个维度**：合同 §6.4 要求接口能把"运营完成"与"财务结案"分开说，
+    #: `financial_status` 走它自己的派生端点（`/assignments/{id}/financial-status`），
+    #: 不塞进这里 —— 一个字段同时表达两件事就是把 §5.3 的两个维度又合回去。
+    completed_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -139,10 +159,22 @@ class MyEntrustmentListOut(BaseModel):
 
 
 class EvidenceRef(BaseModel):
-    """一条证据：类别 + 来源（`ref` 是附件键 / 文件说明 / 外部凭据编号）。"""
+    """一条证据：类别 + 来源（`ref` 是附件键 / 文件说明 / 外部凭据编号）。
+
+    ⭐ `occurred_at`（**业务发生时间**）与 `source`（来源）对应 S4 段 §2：
+    「业务发生时间与记录时间**分开**，带 actor 与 source」。
+    **记录时间与记录人不在本契约里** —— 它们由服务端在写入时补
+    （`recorded_at` / `recorded_by`），提交方自称的记录时间一律不采纳。
+
+    两个新字段都是**可选**的，因此本契约对既有调用方**无行为变更**：
+    不传就是"未登记"，**不会**被默认成"现在"（把业务时间悄悄等同于记录时间，
+    正是 §2 要防的那件事）。
+    """
 
     kind: str = Field(min_length=1, max_length=32)
     ref: str = Field(min_length=1, max_length=512)
+    occurred_at: datetime | None = None
+    source: str | None = Field(default=None, max_length=64)
 
 
 class TaskCreate(BaseModel):
@@ -205,6 +237,65 @@ class TaskReassignIn(BaseModel):
     assignee_user_id: int = Field(ge=1)
 
 
+class TaskEvidenceIn(BaseModel):
+    """在**原任务**上补录一条证据（缺件的补救入口，S4 段 §8）。
+
+    为什么 `occurred_at` 在**这里**必填、而在 `EvidenceRef` 里可选：
+    补录的语义就是"事后登记一件**已经发生**的事"，说不出它何时发生的登记
+    没有把事情说清；而 `complete` 附带的 refs 是既有契约，保持原样不动。
+    两处都用同一个存储形状，只是一处严、一处宽。
+    """
+
+    kind: str = Field(min_length=1, max_length=32)
+    ref: str = Field(min_length=1, max_length=512)
+    occurred_at: datetime
+    source: str | None = Field(default=None, max_length=64)
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class EvidenceGapItem(BaseModel):
+    """**一个任务的证据齐备度** —— 派生读数，不落库、不是实体。"""
+
+    task_id: int
+    task_type: str
+    title: str
+    status: str
+    is_handover: bool
+    required: list[str]
+    registered: list[str]
+    missing: list[str]
+    satisfied: bool
+    wait_reason: str | None
+    waiting_on_evidence: bool
+
+
+class HandoverEvidenceOut(BaseModel):
+    """交接类任务的证据汇总（**交接＝任务**，不发明"交接成果"）。
+
+    `satisfied` 为 `None` 表示**这张委托上没有交接任务** —— 不是"已满足"。
+    把"没有对象"报成"通过"是真空通过，这一格必须能被区分出来。
+    """
+
+    present: bool
+    task_ids: list[int]
+    required: list[str]
+    registered: list[str]
+    missing: list[str]
+    satisfied: bool | None
+
+
+class EvidenceGapsOut(BaseModel):
+    """一张委托上"还缺什么证据"（S4 段 §8）的派生读模型。"""
+
+    assignment_id: int
+    tasks_total: int
+    tasks_with_requirement: int
+    tasks_waiting_on_evidence: int
+    missing_total: int
+    handover: HandoverEvidenceOut
+    items: list[EvidenceGapItem]
+
+
 class TaskOut(BaseModel):
     """任务投影。"""
 
@@ -234,15 +325,41 @@ class TaskOut(BaseModel):
 
 
 class TaskListOut(BaseModel):
+    """任务列表的一页。
+
+    ⭐ `has_more`（开放项 O-9，2026-09-18 裁定）：只给 `total` / `page` / `size`
+    的时候，"被截了没有"要**调用方自己算**（`page * size < total`）—— 少算一次就静默，
+    而"这张委托的任务超过上限"正是"不报错、只是少了几行"的那类缺陷
+    （2026-09-18 的 e2e 被它咬过一次：带前置的任务被截出首页，页面于是渲染不出前置）。
+    加一个布尔，把**结论**直接给出去；`total` 继续留着，需要精确数的调用方照样拿得到。
+    """
+
     total: int
     page: int
     size: int
+    has_more: bool
     items: list[TaskOut]
+
+
+class EvidenceRecordOut(BaseModel):
+    """补录一条证据的结果：更新后的任务 ＋ **重算后**的齐备度。
+
+    带上重算结果，是因为补录的**唯一目的**就是让缺件清单变短；
+    只回一个任务对象，调用方还得自己再推一遍。
+    """
+
+    task: TaskOut
+    gap: EvidenceGapItem
 
 
 def task_out(data: dict[str, Any]) -> TaskOut:
     """服务层 dict → 响应模型。"""
     return TaskOut.model_validate(data)
+
+
+def evidence_record_out(data: dict[str, Any]) -> EvidenceRecordOut:
+    """补录结果 dict → 响应模型（任务投影 ＋ 重算后的齐备度）。"""
+    return EvidenceRecordOut.model_validate({"task": data["task"], "gap": data["gap"]})
 
 
 # ── 附件（ENT-009） ──────────────────────────────────────────────────────────
@@ -722,6 +839,24 @@ class WorkbenchSlotOut(BaseModel):
     counts: WorkbenchCountsOut
 
 
+class CustomerSettlementHintOut(BaseModel):
+    """**对客**的结算版本提示（货主可见；白名单，⛔ 不含任何金额与内部成本）。
+
+    补它的原因（2026-09-18）：`customer-view` / `customer-confirm` 都按**版本 id** 取，
+    而版本清单没有货主面 ⇒ 没有这一格，客户**不知道"我该确认哪一版"**，
+    裁定 Q5 的「客户确认」在界面上没有可走的路。这里只补**发现路径**：
+    明细走 `GET /settlements/{id}/customer-view`、决定走 `.../customer-confirm`。
+    """
+
+    settlement_id: int
+    version_no: int
+    status: str
+    customer_decision: str | None = None
+    customer_confirmed_at: str | None = None
+    #: 客户此刻要不要动作（推导：内部已确认 且 自己还没表态）
+    awaiting_customer: bool
+
+
 class WorkbenchOut(BaseModel):
     """单委托工作台聚合投影（UI-05 的取数入口）。
 
@@ -735,6 +870,8 @@ class WorkbenchOut(BaseModel):
     status: str
     slots: list[WorkbenchSlotOut]
     unassigned_artifact_total: int
+    #: 无适用结算版本时为 `None`（未知保持未知，不是空对象）
+    customer_settlement: CustomerSettlementHintOut | None = None
 
 
 # ── 异常与变更案件（ENT-030 / DR-0013）────────────────────────────────────────
@@ -1648,11 +1785,19 @@ class AssignmentPlanOut(BaseModel):
 
     ⚠️ 本模型**不含**"三段"/"公路—内河—公路"这类**结论性文案**：段数是 `legs` 的
     属性，由界面按行渲染。在服务端把它拼成一句话，就多了一个会与数据脱节的落点。
+
+    ⭐ 两个"截断事实"字段（O-9，2026-09-18 裁定）：读模型**不分页**（分页是"列表"的语义，
+    计划只有一份），但"这份计划的任务部分是不是被截过"必须是**响应里的一条事实**，
+    而不是一个只有服务端知道的内部状态。`task_prerequisites_truncated` 为真时，
+    `task_prerequisites` 只是前 `plan.TASK_LIMIT` 条 —— 下游据此可以拒绝把
+    "没有前置"与"前置还没读回来"渲染成同一件事。
     """
 
     assignment_id: int
     legs: list[PlanLegOut] = Field(default_factory=list)
     task_prerequisites: list[PlanTaskOut] = Field(default_factory=list)
+    task_prerequisites_total: int = 0
+    task_prerequisites_truncated: bool = False
 
 
 def assignment_plan_out(data: dict[str, Any]) -> AssignmentPlanOut:
@@ -1773,3 +1918,298 @@ def leg_revision_out(data: dict[str, Any]) -> LegRevisionOut:
             "changed_at": str(data["created_at"]),
         }
     )
+
+
+class AssignmentQuantityChangeOut(BaseModel):
+    """一条**已应用的**委托货量变更（`ent_assignment_quantity_change` 一行）。
+
+    同时给原值与文案：`old_quantity` / `new_quantity` 是机器比对的定点数值
+    （固定 3 位小数，SQLite 与 MySQL 读回来是同一个字符串），
+    `*_text` 是给界面直接显示的那一句（`"800.000 吨"` / `"未知"`）。
+
+    为什么两个都给：让界面自己拼 `字符串 + 单位`，就必然出现"这里拼了、那里没拼"
+    的漂移；而让程序去解析显示文案更是本末倒置。**值只有一份来源**是这道纪律的核心。
+
+    `old_quantity` 为 `None` = **变更前是未知**（不是 0）：从"未知"改成确定值是
+    一次合法变更，把它显示成 0 会让历史看起来像"从 0 涨到 950"。
+    """
+
+    change_id: int
+    assignment_id: int
+    #: 来源变更案件（`ent_exception.id`）。有了它才能回答"这一改是谁批的"，
+    #: 顺着案件号能回到批准快照与决定人。
+    exception_id: int
+    #: 变更前委托的乐观锁值 —— "这一改从第几版出发"
+    base_revision: int
+    old_quantity: str | None = None
+    old_quantity_unit: str | None = None
+    new_quantity: str
+    new_quantity_unit: str
+    #: 显示用文案（`"800.000 吨"` / `"未知"`）
+    old_quantity_text: str
+    new_quantity_text: str
+    #: 变更依据（经理写的话；**可能含内部口径**，因此本组端点不给货主放行）
+    basis: str
+    applied_by: int | None = None
+    applied_at: str
+
+
+def assignment_quantity_change_out(data: dict[str, Any]) -> AssignmentQuantityChangeOut:
+    return AssignmentQuantityChangeOut.model_validate(data)
+
+
+# ── 费用行（§10.1 第 10 步 / 合同 S4 段第 9–10 条）──────────────────────────
+# 金额与数量一律 `Decimal`（开发规范：金额/数量定点精度），**不经 float**。
+# ⛔ `amount` 与 `resolution_amount` **不设 `ge=0`**：负数的语义（冲销？红字？）
+#    **没有裁定过**，本切片不自造这条约束 —— 留到 S7-3 的口径里定。
+
+
+class ChargeCreateIn(BaseModel):
+    """登记一条费用行。
+
+    `charge_kind` 是**自由字符串**（裁定 Q3=A：`waiting_time` 只是其中一个取值，
+    不另建实体、不建计费引擎）；`direction` 由服务层校验取值域。
+    """
+
+    direction: str = Field(min_length=1, max_length=16)
+    charge_kind: str = Field(min_length=1, max_length=32)
+    amount: Decimal
+    currency: str | None = Field(default=None, max_length=8)
+    #: 计费依据**必填**：没有依据的费用行不可核对，合计也就失去意义。
+    basis: str = Field(min_length=1, max_length=255)
+    quantity: Decimal | None = None
+    unit: str | None = Field(default=None, max_length=24)
+    counterparty: str | None = Field(default=None, max_length=128)
+
+
+class ChargeTransitionIn(BaseModel):
+    """状态迁移的通用入参：只带乐观锁（并发的判据是它，不是"先查后写"）。"""
+
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ChargeDisputeIn(BaseModel):
+    """提争议：`reason` 必填（只标"有争议"而不说为什么，合计的差异无从复核）。"""
+
+    reason: str = Field(min_length=1, max_length=255)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ChargeResolveIn(BaseModel):
+    """处置争议。
+
+    ⛔ `counts_in_total` **必填**（裁定 Q2=B）：`resolved` 一词决定不了这笔算不算数。
+    `final_amount` 在 `counts_in_total=True` 时由服务层要求必填；为假时允许留空
+    （不进合计的金额写出来只会误导）。
+    """
+
+    outcome: str = Field(min_length=1, max_length=16)
+    method: str = Field(min_length=1, max_length=255)
+    counts_in_total: bool
+    final_amount: Decimal | None = None
+    evidence_ref: str | None = Field(default=None, max_length=128)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ChargeOut(BaseModel):
+    """一条费用行。金额/数量回**字符串**（跨语言消费者不会因 IEEE754 丢精度）。"""
+
+    charge_id: int
+    assignment_id: int
+    direction: str
+    charge_kind: str
+    quantity: str | None = None
+    unit: str | None = None
+    amount: str
+    currency: str
+    counterparty: str | None = None
+    basis: str
+    status: str
+    disputed_reason: str | None = None
+    resolution_outcome: str | None = None
+    resolution_amount: str | None = None
+    #: 是否计入合计。**未知保持 `None`**（不是 False）—— 未处置的行本来就没这个结论。
+    counts_in_total: bool | None = None
+    resolution_method: str | None = None
+    resolution_evidence_ref: str | None = None
+    resolved_by: int | None = None
+    resolved_at: str | None = None
+    revision: int
+    created_by: int | None = None
+    created_at: str
+    updated_at: str
+
+
+class ChargeTotalOut(BaseModel):
+    """一个 `(币种, 收付方向)` 分组的合计（⛔ 不跨币种相加 —— 裁定 Q1=C）。"""
+
+    currency: str
+    direction: str
+    total: str
+    counted_lines: int
+    excluded_lines: int
+
+
+class ChargeListOut(BaseModel):
+    """费用行 + 合计。`counted_lines` / `excluded_lines` 让"这个合计怎么来的"可被复核。"""
+
+    items: list[ChargeOut] = Field(default_factory=list)
+    groups: list[ChargeTotalOut] = Field(default_factory=list)
+    counted_lines: int = 0
+    excluded_lines: int = 0
+
+
+def charge_out(data: dict[str, Any]) -> ChargeOut:
+    return ChargeOut.model_validate(data)
+
+
+def charge_list_out(data: dict[str, Any]) -> ChargeListOut:
+    return ChargeListOut.model_validate(data)
+
+
+# ── 结算与收付依据（§10.1 第 11 步 / 合同 S4 段第 11 条；裁定 Q5）────────────
+# ⭐ 核心语义在**版本**上：客户确认挂在一个具体版本的行上，因此"旧确认替不了新版本
+#    过关"是**结构**保证的，不是靠一条 if 判断维持的（详见 `settlement.py` 模块文档）。
+
+
+class SettlementApproveIn(BaseModel):
+    """内部确认（`draft → approved`）：只带乐观锁。"""
+
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class SettlementConfirmIn(BaseModel):
+    """**客户确认该精确版本**。
+
+    ⛔ `decision` 取值域由服务层校验（`accepted` / `rejected`）：
+    客户决定是**业务事实**，未知取值原样进库会让"客户当时接受了什么"失去答案。
+    """
+
+    decision: str = Field(min_length=1, max_length=16)
+    note: str | None = Field(default=None, max_length=255)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class SettlementPaymentIn(BaseModel):
+    """记一条收付依据。
+
+    ⛔ **没有 `mode` 字段** —— 它就是恒定的 `labeled_sample`（合成样本，已标注）。
+    让调用方能传 `mode=live` 等于让系统自称"资金已真实到账"，与裁定 Q5 第 5 条冲突；
+    "不接受这个字段"比"接受但忽略"更诚实（后者会让调用方以为自己传对了）。
+    """
+
+    direction: str = Field(min_length=1, max_length=16)
+    amount: Decimal
+    ref: str = Field(min_length=1, max_length=255)
+    currency: str | None = Field(default=None, max_length=8)
+    occurred_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+
+class SettlementOut(BaseModel):
+    """一个结算版本（**内部**视图：含内部成本合计与快照行）。
+
+    `lines` 是**快照**：每条带 `charge_id` 与当时的 `revision`／计入金额，
+    因此费用行后来被改也不影响"这一版当时算的是什么"。
+    """
+
+    settlement_id: int
+    assignment_id: int
+    version_no: int
+    status: str
+    currency: str
+    customer_total: str | None
+    internal_total: str | None
+    line_count: int = 0
+    lines: list[dict[str, Any]] = Field(default_factory=list)
+    approved_by: int | None
+    approved_at: str | None
+    customer_confirmed_by: int | None
+    customer_confirmed_at: str | None
+    customer_decision: str | None
+    customer_note: str | None
+    revision: int
+    created_by: int | None
+    created_at: str
+    updated_at: str
+
+
+class SettlementListOut(BaseModel):
+    """版本链（升序）。`applicable_settlement_id` ＝ **最大版本号**那一行。
+
+    ⚠️ 「适用版本」是**推导**出来的、不是存下来的：存一个字段就会出现
+    "字段说有、链上没有"的分叉。这里把它作为结论直接给出去，省得每个调用方各推一次。
+    """
+
+    total: int
+    applicable_settlement_id: int | None
+    items: list[SettlementOut] = Field(default_factory=list)
+
+
+class SettlementPaymentOut(BaseModel):
+    """一条收付依据（`mode` 恒为 `labeled_sample`）。"""
+
+    payment_id: int
+    settlement_id: int
+    assignment_id: int
+    direction: str
+    amount: str | None
+    currency: str
+    occurred_at: str | None
+    mode: str
+    ref: str
+    note: str | None
+    recorded_by: int
+    recorded_at: str
+
+
+class CustomerSettlementOut(BaseModel):
+    """**客户侧投影**（裁定 Q5 第 2 条）：只出对客费用与白名单字段。
+
+    ⛔ 刻意**没有** `internal_total`、没有 `direction`、没有 `revision` ——
+    投影是**新建字典**，不是"从内部投影里删几个键"（后者在加列时会默认漏出去）。
+    """
+
+    settlement_id: int
+    assignment_id: int
+    version_no: int
+    is_applicable: bool
+    status: str
+    currency: str
+    total: str | None
+    line_count: int
+    lines: list[dict[str, Any]] = Field(default_factory=list)
+    customer_confirmed_at: str | None
+    customer_decision: str | None
+
+
+class FinancialStatusOut(BaseModel):
+    """`financial_status` 派生（§5.3.2）。
+
+    ⚠️ `not_started` **只能**表示"确实还没有任何费用/结算/收付事实" ——
+    ⛔ 不是"派生还没接好"的遮羞布。本切片接通后该字段才允许展示。
+    `blockers` 逐条给出未结的成因，好让"为什么还没结"能被自助读懂。
+    """
+
+    assignment_id: int
+    financial_status: str
+    blockers: list[dict[str, Any]] = Field(default_factory=list)
+    applicable_settlement: dict[str, Any] | None = None
+    balances: list[dict[str, Any]] = Field(default_factory=list)
+    settlement_versions: int
+    charge_count: int
+    payment_count: int
+
+
+def settlement_out(data: dict[str, Any]) -> SettlementOut:
+    payload = dict(data)
+    payload["line_count"] = len(data.get("lines") or [])
+    return SettlementOut.model_validate(payload)
+
+
+def settlement_list_out(data: dict[str, Any]) -> SettlementListOut:
+    return SettlementListOut.model_validate(data)
+
+
+def settlement_payment_out(data: dict[str, Any]) -> SettlementPaymentOut:
+    return SettlementPaymentOut.model_validate(data)

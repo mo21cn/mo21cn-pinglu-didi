@@ -12,6 +12,8 @@
 `contracts_api.py` 是合同派生（S3 / BP-03 第 8 条），
 `capacity_api.py` 是运力确认与有效期（S3 / BP-03 第 3 条），
 `plan_api.py` 是运输计划（三段航段）与必需任务前置的读模型（S3 / BP-03 第 1 条），
+`quantity_api.py` 是**委托货量变更历史**的读端点（S6 / D1-09 第 8 步；写侧在
+`exceptions.apply_case`），
 它们挂到同一个 `router` 下，`main.py` 只注册一次 `/api/v1/entrust`。
 
 挂载顺序：`extraction_api` 必须排在 `attachments_api` **之后** ——
@@ -23,13 +25,17 @@ from app.modules.entrust.agent_api import router as agent_api_router
 from app.modules.entrust.artifacts_api import router as artifacts_api_router
 from app.modules.entrust.attachments_api import router as attachments_api_router
 from app.modules.entrust.capacity_api import router as capacity_api_router
+from app.modules.entrust.charges_api import router as charges_api_router
+from app.modules.entrust.closure_api import router as closure_api_router
 from app.modules.entrust.contracts_api import router as contracts_api_router
 from app.modules.entrust.exceptions_api import router as exceptions_api_router
 from app.modules.entrust.extraction_api import router as extraction_api_router
 from app.modules.entrust.legs_api import router as legs_api_router
 from app.modules.entrust.offers_api import router as offers_api_router
 from app.modules.entrust.plan_api import router as plan_api_router
+from app.modules.entrust.quantity_api import router as quantity_api_router
 from app.modules.entrust.router import router
+from app.modules.entrust.settlement_api import router as settlement_api_router
 from app.modules.entrust.tasks_api import router as tasks_api_router
 
 router.include_router(agent_api_router)
@@ -42,6 +48,10 @@ router.include_router(extraction_api_router)
 router.include_router(legs_api_router)
 router.include_router(offers_api_router)
 router.include_router(plan_api_router)
+router.include_router(charges_api_router)
+router.include_router(closure_api_router)
+router.include_router(quantity_api_router)
+router.include_router(settlement_api_router)
 router.include_router(tasks_api_router)
 
 __all__ = ["router"]

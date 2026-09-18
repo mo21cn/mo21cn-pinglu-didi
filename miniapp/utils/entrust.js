@@ -111,17 +111,23 @@ const STATUS_META = {
   draft: { label: '草稿', tone: 'muted' },
   submitted: { label: '待受理', tone: 'warn' },
   claimed: { label: '已受理', tone: 'primary' },
+  completed: { label: '已结案', tone: 'success' },
   cancelled: { label: '已取消', tone: 'muted' }
 }
 
-/** 与后端取值域完全一致的顺序（断言用，勿随意增删） */
-const STATUS_ORDER = ['draft', 'submitted', 'claimed', 'cancelled']
+/** 与后端取值域完全一致的顺序（断言用，勿随意增删）
+ *
+ * `completed` 排在 `cancelled` 之前：这一列的顺序就是**工作台筛选条的顺序**，
+ * 而筛选条读起来应当像生命周期（草稿 → 待受理 → 已受理 → 已结案 / 已取消）。
+ */
+const STATUS_ORDER = ['draft', 'submitted', 'claimed', 'completed', 'cancelled']
 
 /** 每个状态对**经理**的下一步动作提示（未知状态不给提示，不编） */
 const STATUS_HINT = {
   draft: '货主还在填写，草稿对经理不可见',
   submitted: '等待经理受理（受理是显式动作，不会自动发生）',
   claimed: '已受理，可继续安排任务与物料',
+  completed: '已结案：运营与财务前置都已满足（结案是命令，不是把状态改上去）',
   cancelled: '已取消，不再推进'
 }
 
@@ -158,6 +164,7 @@ const ORG_ROLE_LABELS = {
 const ORG_PERMISSION_LABELS = {
   'entrust:view': '查看委托',
   'entrust:assignment:claim': '受理委托',
+  'entrust:assignment:complete': '结案',
   'entrust:quote:create': '制作报价',
   'entrust:quote:publish': '发布报价',
   'entrust:task:dispatch': '派发任务',
@@ -221,6 +228,9 @@ function statusClass(status) {
   if (!meta) return 'chip chip-muted'
   if (meta.tone === 'warn') return 'chip chip-warn'
   if (meta.tone === 'primary') return 'chip chip-purple'
+  // `success`：终态里"做完了"与"取消了"必须**看起来不一样** ——
+  // 两者都走 `muted` 时，界面上只剩小字能分辨，而这两个状态的后续动作完全不同。
+  if (meta.tone === 'success') return 'chip chip-success'
   return 'chip chip-muted'
 }
 
@@ -1572,7 +1582,11 @@ const CASE_SOURCE_LABELS = {
 }
 
 /** 受影响项目标类型（后端 `exceptions.TARGET_KINDS`）—— 只有这两类，不放任任意目标 */
-const CASE_TARGET_LABELS = { task: '任务', artifact: '成果' }
+//: 受影响项类型 → 中文名。
+//: `assignment` ＝ **本委托单本身**（2026-09-18 新增）：货量变更的落点是
+//: `ent_assignment.quantity`，它不属于任何一份成果，所以必须有自己的名字 ——
+//: 叫它"成果"会让人以为改的是某一版报价（而货量是委托的属性）。
+const CASE_TARGET_LABELS = { task: '任务', artifact: '成果', assignment: '本委托货量' }
 
 /**
  * 变更类别（后端 `revalidation.CHANGE_CATEGORIES`，DR-0016 的五行）。
@@ -1838,6 +1852,16 @@ function decorateCase(payload, typeLabels) {
             // `linkId` 是**移除受影响项**要的参数（`DELETE .../links/{link_id}`）。
             // 不放进 `text` 里让页面去截字符串 —— 那会把"显示什么"与"提交什么"绑死。
             linkId: item.link_id,
+            // ⚠️ `target_kind` / `target_id` 必须**原样带出来**：`change_key` 是
+            // `"{target_kind}#{target_id}"`，批准时的 `approved_changes` 要用它拼键。
+            // 只给 `text`（`任务 #3`）不给原值，页面就只能去解析那行中文 ——
+            // 而"解析显示文案"是本仓明确禁止的（显示改一次，提交就静默失效）。
+            // 症状是"货量变更填了却提交不出去"，页面上看起来什么都正常。
+            target_kind: item.target_kind || '',
+            target_id:
+              item.target_id === null || item.target_id === undefined
+                ? ''
+                : String(item.target_id),
             text:
               (CASE_TARGET_LABELS[item.target_kind] || item.target_kind || '目标') +
               ' #' +
@@ -1944,6 +1968,13 @@ function decorateCase(payload, typeLabels) {
     orgId: data.org_id === null || data.org_id === undefined ? '' : String(data.org_id),
     kind: data.kind || '',
     kindLabel: CASE_KIND_LABELS[data.kind] || data.kind || '',
+    // 变更类别（A2 五之二）：决定**复核范围**。页面要它来回答两个问题 ——
+    // ① 这批复核凭什么生成的（展示）；② 本次决定要不要连带给「变更内容」
+    //    （只有货量类变更在界面上有可填的变更内容，见 case.js 的 `showQuantityChange`）。
+    // 取值域镜像缺项时**退回原值**，不编一个看起来对的中文名。
+    changeCategory: data.change_category || '',
+    changeCategoryLabel:
+      CHANGE_CATEGORY_LABELS[data.change_category] || data.change_category || '未登记',
     title: data.title || '未命名案件',
     status: data.status || '',
     statusLabel: CASE_STATUS_LABELS[data.status] || data.status || '',
@@ -2031,7 +2062,23 @@ function decorateCase(payload, typeLabels) {
               basisText:
                 t.basis_revision_id === null || t.basis_revision_id === undefined
                   ? '无基础版本'
-                  : '版本 id ' + t.basis_revision_id
+                  : '版本 id ' + t.basis_revision_id,
+              // 委托货量变更**必须**把 `before → after` 摆出来：其余目标的载荷是不定形的
+              // （只列字段名合理），而这一类的值就是两个标量 ——
+              // 不显示它，「确认应用」就退化成盲操作。
+              // ⚠️ 文案取**服务端**给的 `quantity_text`，前端不拼 `数值 + 单位`：
+              // 各拼一份必然漂移，而漂移的表现是"历史里写 800 吨、这里写 800.000吨"。
+              quantityChangeText: t.quantity_change
+                ? '将改为 ' +
+                  ((t.quantity_change.after || {}).quantity_text || '') +
+                  '（当前 ' +
+                  ((t.quantity_change.before || {}).quantity_text || '未知') +
+                  '）'
+                : '',
+              quantityBasisText:
+                t.quantity_change && t.quantity_change.basis
+                  ? '变更依据：' + t.quantity_change.basis
+                  : ''
             }
           })
         }
@@ -2298,6 +2345,24 @@ function isDispositionWithoutApplication(disposition) {
 }
 
 /**
+ * **变更类别**的可选项（A2 五之二 / DR-0016 五行）。
+ *
+ * 只有变更请求有类别 —— 异常案件带它会 400（`_require_known_change_category`），
+ * 所以这里按 `kind` 收窄，返回值直接可以拿去渲染选择条。
+ *
+ * 为什么页面上必须有这个入口：应用变更**要求**类别已登记（没有类别就无从确定复核
+ * 范围，而"先应用、后补范围"会让下游照着失效事实干活）。而登记时未必知道该归哪一类 ——
+ * 服务端把"批准"当作补登记的**最后合理时机**（那时决定人正看着这份变更的内容）。
+ * 界面此前没有这个入口 ⇒ 类别只能靠种子/接口写进去，**变更请求在界面上根本应用不了**。
+ */
+function caseCategoryOptions(kind) {
+  if (String(kind) !== 'change_request') return []
+  return Object.keys(CHANGE_CATEGORY_LABELS).map(function (key) {
+    return { key: key, label: CHANGE_CATEGORY_LABELS[key] }
+  })
+}
+
+/**
  * 登记案件表单 → 请求体（`ExceptionCaseCreate`）。**只做前置检查，不替代服务端规则。**
  *
  * 三条纪律：
@@ -2519,15 +2584,37 @@ function applyCase(caseId, body, idempotencyKey) {
  * 是一句 403 —— 他会以为是权限问题，而不是"这个编号不属于本单"。
  *
  * 两个取数各自复用既有端点，不为本页新开一个"候选清单"接口：
- *   · 任务 → `GET /entrust/tasks?assignment_id=`；
+ *   · 任务 → `GET /entrust/tasks?assignment_id=`（**翻页取全**：这份候选要的是
+ *     "这张单的任务全集"，不是"第一页" —— 缘由写在 `fetchTaskCandidates` 里）；
  *   · 成果 → `GET /entrust/assignments/{id}/artifacts`。
  * 两者都是**该委托的可见性**，与案件一致；不需要额外授权。
  */
 function fetchTaskCandidates(assignmentId, size) {
-  return request({
-    url: BASE + '/tasks',
-    method: 'GET',
-    data: { assignment_id: assignmentId, page: 1, size: size || 50 }
+  const pageSize = size || 100
+  // 3 页护栏：任务数是"个位数"量级，正常情况下第 1 页就取完（端点的 `size` 上限是 100）。
+  // 留着上限是为了**不无限翻**，而不是"允许截断" —— 真到 300 条以上，响应里的
+  // `has_more` 仍为 true（事实留在数据里，不再是静默），只是这份候选不再是全集。
+  const MAX_PAGES = 3
+  const page = function (n) {
+    return request({
+      url: BASE + '/tasks',
+      method: 'GET',
+      data: { assignment_id: assignmentId, page: n, size: pageSize }
+    })
+  }
+  const collect = function (resp, n, acc) {
+    const items = acc.concat((resp && resp.items) || [])
+    // ⚠️ 严格判 `=== true`：老后端没有这个字段时**不翻页**，也不臆断"还有更多"
+    //    （与 `decorateAssignmentPlan` 对 `task_prerequisites_truncated` 的处置同口径）。
+    if (!resp || resp.has_more !== true || n >= MAX_PAGES) {
+      return Object.assign({}, resp || {}, { items: items })
+    }
+    return page(n + 1).then(function (next) {
+      return collect(next, n + 1, items)
+    })
+  }
+  return page(1).then(function (first) {
+    return collect(first, 1, [])
   })
 }
 
@@ -2554,13 +2641,30 @@ function fetchArtifactCandidates(assignmentId, size) {
  * @param {object} artifacts `GET /entrust/assignments/{id}/artifacts` 的响应
  * @param {Array}  [types]   成果类型注册表 `[{code, label}]`；缺省则不翻译类型名
  */
-function decorateCaseLinkTargets(tasks, artifacts, types) {
+function decorateCaseLinkTargets(tasks, artifacts, types, selfTarget) {
   const specs = types || []
   const typeLabel = function (code) {
     for (let i = 0; i < specs.length; i++) {
       if (specs[i] && specs[i].code === code) return specs[i].label || code
     }
     return code
+  }
+  // 「本委托货量」排在**最前**：它是这张单自己的属性，与"这单上有什么任务/成果"
+  // 是两类东西。混在成果堆里，选错的人会以为自己在改某一版报价。
+  //
+  // `selfTarget` 缺省时不产出这一行（不是产出空行）：调用方还没拿到委托详情时，
+  // 给一个点不动的候选比不给更糟。`quantityText` 也由调用方给 ——
+  // 本层不自己去查货量，那是**另一条通道**（`GET /assignments/{id}`）。
+  const selfRows = []
+  if (selfTarget && selfTarget.assignment_id) {
+    const sid = String(selfTarget.assignment_id)
+    selfRows.push({
+      key: 'assignment-' + sid,
+      target_kind: 'assignment',
+      target_id: sid,
+      text: '本委托货量（委托 #' + sid + '）',
+      sub: '受影响项是这张委托单本身：当前货量 ' + (selfTarget.quantityText || '未知')
+    })
   }
   const taskRows = ((tasks && tasks.items) || []).map(function (t) {
     const id = t.task_id === null || t.task_id === undefined ? '' : String(t.task_id)
@@ -2582,7 +2686,7 @@ function decorateCaseLinkTargets(tasks, artifacts, types) {
       sub: typeLabel(a.artifact_type || '') || '未命名成果'
     }
   })
-  return taskRows.concat(artRows)
+  return selfRows.concat(taskRows, artRows)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4074,6 +4178,12 @@ function decorateAssignmentPlan(payload) {
     }
   })
   const rawTasks = data.task_prerequisites || []
+  // 截断事实（O-9）：服务端给 total 与 truncated；字段缺失时退回"行数即总数"，
+  // 而不是默认"没被截" —— 后者会在老后端上把截断重新变回静默。
+  const tasksTotal = data.task_prerequisites_total == null
+    ? rawTasks.length
+    : Number(data.task_prerequisites_total)
+  const tasksTruncated = data.task_prerequisites_truncated === true
   // 前置**在本单清单内**解析：解析不到就不编标题（见上第 3 条）
   const titleById = {}
   rawTasks.forEach(function (t) {
@@ -4094,7 +4204,15 @@ function decorateAssignmentPlan(payload) {
     legs: legs,
     tasks: tasks,
     hasLegs: legs.length > 0,
-    hasTasks: tasks.length > 0
+    hasTasks: tasks.length > 0,
+    // ⚠️ 截断**必须**在界面上说出来（O-9）：任务被截时，某条任务的
+    //    `precondition_task_id` 可能正好指向没读回来的那一行 ⇒ 它显示成
+    //    「前置：任务 #7」（id 是事实、标题没有），与"这张单真的没有前置"长得一样。
+    //    这一行就是两者的分界；`hasTasks` 为真时也可能截断，所以不能只在空态里说。
+    tasksTruncated: tasksTruncated,
+    tasksTruncatedText: tasksTruncated
+      ? '只显示前 ' + tasks.length + ' 条（本单共 ' + tasksTotal + ' 条），未显示的任务也带前置关系'
+      : ''
   }
 }
 
@@ -4377,6 +4495,68 @@ function decorateSignatureEvidence(payload) {
   }
 }
 
+// ── 委托货量变更（S6-1 / D1-09 / 合同 §10.1 第 8 步）────────────────────────
+//
+// 这一节只有**一个读函数 + 一个投影**，但它是 D1-09 那句
+// `Apply the 800→950 change` 在界面上的落点：**在这张委托上**看到
+// 「原来是 800、现在是 950、依据是什么、由哪个案件批的」。
+//
+// 写侧不在这里：货量变更是一条**经审批**的变更，走的是案件那三件已有的命令
+// （登记受影响项 → 决定（带变更内容）→ 应用）。前端不新增"直接改货量"的命令 ——
+// 那种入口会让"改货量"与"经审批"分离，而 D1-09 要的恰恰是后者。
+//
+// ⚠️ 为什么读的是**独立的**历史端点而不是委托详情里的 `quantity`：
+// 详情里只有**当前值**。把 800 改成 950 之后，"原来是 800"这句话
+// 在界面上就没有出处了 —— 而"从哪改到哪"正是这条判据要看的。
+
+/** 该委托的货量变更历史（append-only，服务端已按应用时间升序）。 */
+function fetchQuantityChanges(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/quantity-changes' })
+}
+
+/**
+ * 投影一行货量变更。
+ *
+ * `oldQuantityText` / `newQuantityText` / `changeText` 都用**服务端给的那份文案**
+ * （`old_quantity_text` / `new_quantity_text`），前端不自己拼 `数值 + 单位`：
+ * 各拼一份必然漂移，而漂移的表现是"历史里写的是 800 吨、详情里写的是 800.000吨"。
+ *
+ * 旧值**未知保持未知**（服务端给 `"未知"`）：从 NULL 改成确定值是合法变更，
+ * 把它显示成 0 会让历史看起来像"从 0 涨到 950"。
+ */
+function decorateQuantityChange(row) {
+  const d = row || {}
+  const oldText = d.old_quantity_text || '未知'
+  const newText = d.new_quantity_text || ''
+  return {
+    key: String(d.change_id == null ? '' : d.change_id),
+    changeId: _sid(d.change_id),
+    assignmentId: _sid(d.assignment_id),
+    exceptionId: _sid(d.exception_id),
+    baseRevision: d.base_revision === null || d.base_revision === undefined
+      ? 0
+      : Number(d.base_revision),
+    // 原值（机器比对用）与文案（界面显示用）**都给**：界面显示文案、程序比对用原值。
+    oldQuantity: d.old_quantity === null || d.old_quantity === undefined ? '' : String(d.old_quantity),
+    newQuantity: d.new_quantity === null || d.new_quantity === undefined ? '' : String(d.new_quantity),
+    oldQuantityText: oldText,
+    newQuantityText: newText,
+    // 一行就是那条对照（`800.000 吨 → 950.000 吨`）—— 判据要看的正是这一句，
+    // 让它由**同一个函数**产出，页面模板就不必各自拼箭头。
+    changeText: oldText + ' → ' + newText,
+    basis: d.basis || '',
+    basisText: d.basis || '未写依据',
+    appliedBy: _caseUser(d.applied_by),
+    appliedAt: _caseTime(d.applied_at),
+    sourceText: '来源变更案件 #' + _sid(d.exception_id)
+  }
+}
+
+/** 该委托的货量变更历史（空数组 = 从没改过，**不是**错误）。 */
+function decorateQuantityChangeList(rows) {
+  return (rows || []).map(decorateQuantityChange)
+}
+
 // ── 组装成果（人工定版；UI-06 / 计划 §5.2 S3）──────────────────────────────
 
 /**
@@ -4641,6 +4821,321 @@ function releasedRevisionFor(releases, artifactId, revisionNo) {
   return releasedRevisionOf(mine, revisionNo)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 财务与结算（S7-1 / S7-2 / S7-3 的界面入口 · §10.1 第 10–11 步）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 三片后端此前**都没有界面入口**：费用行的读与写、缺件清单与补录、结算版本与客户确认，
+// 都只能在接口层演示 —— 而裁定 Q4=A 明确要求第 10–12 步**经现有产品界面演示**。
+//
+// 三条通道的可见性**不同**，本层不做二次判断，只把服务端的结论照实投影：
+//   · 费用与结算的**内部**读数（版本链 / 财务状态）**没有货主面** —— 行上带对手方与内部成本，
+//     页面按本地组织权限判一次再取数（与运力那一组同口径）；
+//   · **对客投影**（`customer-view`）走委托授权链，**货主本人可见**；
+//   · **客户确认**只有货主本人能做，经理侧调用会拿到 403（界面据此给出可读文案）。
+
+/** 该委托的费用行与合计（经理视角；合计按「币种 × 收付方向」分开）。 */
+function fetchCharges(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/charges' })
+}
+
+/** 登记一条费用行（登记后是 `draft`，**草稿不进合计**）。 */
+function recordCharge(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/charges',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 确认费用行（`draft → confirmed`；确认后才进合计）。 */
+function confirmCharge(chargeId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/charges/' + chargeId + '/confirm',
+    method: 'POST',
+    data: body || {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 对已确认的费用提争议（`confirmed → disputed`；**争议行不进合计**）。 */
+function disputeCharge(chargeId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/charges/' + chargeId + '/dispute',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 处置争议：**必须显式给出** `counts_in_total`（裁定 Q2=B，不由状态推导）。 */
+function resolveCharge(chargeId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/charges/' + chargeId + '/resolve',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 缺什么证据（派生：`required_evidence` − 已登记类别；含交接类任务的汇总）。 */
+function fetchEvidenceGaps(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/evidence-gaps' })
+}
+
+/** 在**原任务**上补录一条证据（缺件的补救入口；`occurred_at` 是**业务发生时间**）。 */
+function recordTaskEvidence(taskId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/tasks/' + taskId + '/evidence',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 按当前费用事实生成一个**新**结算版本（旧版本一字不改）。 */
+function createSettlement(assignmentId, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/settlements',
+    method: 'POST',
+    data: {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 结算版本链（升序）＋ 适用版本 id（＝最大版本号那一行）。 */
+function fetchSettlements(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/settlements' })
+}
+
+/** 内部确认（`draft → approved`；只能确认适用版本）。 */
+function approveSettlement(settlementId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/settlements/' + settlementId + '/approve',
+    method: 'POST',
+    data: body || {},
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/**
+ * **客户确认该精确版本**（只有货主本人能做；一版只确认一次）。
+ *
+ * 经理侧调用会拿到 403 —— 那句文案是服务端给的，界面**不自己编**
+ * （"客户确认只能由客户本人做"这条口径的正文在后端）。
+ */
+function confirmSettlement(settlementId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/settlements/' + settlementId + '/customer-confirm',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** 记一条收付依据（只能挂在已确认的版本上；`mode` 不由客户端给）。 */
+function recordSettlementPayment(settlementId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/settlements/' + settlementId + '/payments',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+/** **对客投影**：只出对客（应收）费用与白名单字段，不暴露内部供应商成本。 */
+function fetchCustomerSettlement(settlementId) {
+  return request({ url: BASE + '/settlements/' + settlementId + '/customer-view' })
+}
+
+/** 财务结案状态（派生；`blockers` 逐条给出未结成因）。 */
+function fetchFinancialStatus(assignmentId) {
+  return request({ url: BASE + '/assignments/' + assignmentId + '/financial-status' })
+}
+
+/**
+ * 从**工作台载荷**里取「对客结算版本提示」（货主可见；白名单）。
+ *
+ * 为什么读工作台而不是结算端点：版本清单（`GET /assignments/{id}/settlements`）
+ * **没有货主面**（版本带 `internal_total` ＝ 我们付给供应商的成本），而
+ * `customer-view` 与 `customer-confirm` 都按**版本 id** 取 ⇒ 没有这一格，
+ * 客户就**不知道"我该确认哪一版"**，客户确认在界面上没有可走的路。
+ *
+ * ⛔ 这里只转交 **id 与状态**：金额与费用明细走 `fetchCustomerSettlement`，
+ *    内部成本**不在这一格**里（服务端那条投影是白名单，前端不二次加工）。
+ *    没有适用版本时回 `null` —— **未知保持未知**，不编一个空对象出来。
+ */
+function customerSettlementHint(payload) {
+  const d = payload || {}
+  const h = d.customer_settlement || null
+  if (!h) return null
+  return {
+    settlementId: _sid(h.settlement_id),
+    versionNo: Number(h.version_no || 0),
+    versionText: 'v' + String(h.version_no == null ? '' : h.version_no),
+    status: h.status || '',
+    statusText: SETTLEMENT_STATUS_LABELS[h.status] || h.status || '未知',
+    customerDecision: h.customer_decision || '',
+    customerConfirmedAt: h.customer_confirmed_at || '',
+    // 客户此刻要不要动作（服务端推导：内部已确认 且 自己还没表态）
+    awaitingCustomer: h.awaiting_customer === true
+  }
+}
+
+//: 费用状态 → 界面文案。**未登记的取值原样显示**（未知不假装知道）。
+const CHARGE_STATUS_LABELS = {
+  draft: '草稿',
+  confirmed: '已确认',
+  disputed: '有争议',
+  resolved: '已解决',
+  rejected: '已拒绝'
+}
+
+//: 处置结果 → 文案。
+const CHARGE_OUTCOME_LABELS = {
+  accepted: '认可',
+  adjusted: '调减',
+  rejected: '拒绝'
+}
+
+//: 结算版本状态 → 文案。
+const SETTLEMENT_STATUS_LABELS = { draft: '待内部确认', approved: '已内部确认' }
+
+//: 客户决定 → 文案。`accepted` / `rejected` 之外一律"未确认"
+//: （**未知保持未知**：把未登记的决定显示成"已接受"会让结案依据凭空成立）。
+const SETTLEMENT_DECISION_LABELS = { accepted: '客户已接受', rejected: '客户不接受' }
+
+//: 财务状态 → 文案。
+const FINANCIAL_STATUS_LABELS = {
+  not_started: '未开始',
+  open: '未结清',
+  settled: '已结清'
+}
+
+//: 未结成因 → 界面短文案（`blockers[].code`）。**未知码原样显示**，不吞。
+const FINANCIAL_BLOCKER_LABELS = {
+  unsettled_charges: '有费用行还没有结论',
+  settlement_missing: '还没有结算版本',
+  settlement_not_approved: '适用结算版本尚未内部确认',
+  customer_not_confirmed: '客户尚未确认适用结算版本',
+  settlement_stale: '适用结算版本已过期（费用事实变了）',
+  open_cases: '有未关闭的案件',
+  balance_unsettled: '未结余额非零'
+}
+
+/**
+ * 投影一条费用行。
+ *
+ * ⭐ **金额一律用服务端给的字符串**（不经 `Number`）：跨语言消费者不会因 IEEE754
+ * 丢精度，而界面这一侧"显示 12000 还是 12000.0000"必须与服务端同一个口径 ——
+ * 前端自己 `toFixed` 就是第二套口径，迟早与合计对不上。
+ */
+function decorateCharge(row) {
+  const d = row || {}
+  return {
+    key: String(d.charge_id == null ? '' : d.charge_id),
+    chargeId: _sid(d.charge_id),
+    direction: d.direction || '',
+    directionText: d.direction === 'receivable' ? '应收' : d.direction === 'payable' ? '应付' : (d.direction || '未知'),
+    chargeKind: d.charge_kind || '',
+    quantityText: d.quantity ? String(d.quantity) + (d.unit ? ' ' + d.unit : '') : '',
+    amountText: d.amount === null || d.amount === undefined ? '未知' : String(d.amount),
+    currency: d.currency || '',
+    counterparty: d.counterparty || '',
+    basis: d.basis || '',
+    status: d.status || '',
+    statusText: CHARGE_STATUS_LABELS[d.status] || d.status || '未知',
+    // ⚠️ `counts_in_total` **未知是 `null`，不是 `false`** —— 未处置的行本来就没有这个结论
+    countsInTotal: d.counts_in_total === true,
+    countsKnown: d.counts_in_total === true || d.counts_in_total === false,
+    countsText: d.counts_in_total === true ? '计入合计' : d.counts_in_total === false ? '不计入合计' : '计入未定',
+    disputedReason: d.disputed_reason || '',
+    outcomeText: CHARGE_OUTCOME_LABELS[d.resolution_outcome] || d.resolution_outcome || '',
+    resolutionAmountText: d.resolution_amount ? String(d.resolution_amount) : '',
+    resolutionMethod: d.resolution_method || '',
+    revision: Number(d.revision || 0),
+    canConfirm: d.status === 'draft',
+    canDispute: d.status === 'confirmed',
+    canResolve: d.status === 'disputed'
+  }
+}
+
+/** 投影一个合计分组（按「币种 × 收付方向」分开，**不跨币种相加**）。 */
+function decorateChargeTotal(row) {
+  const d = row || {}
+  return {
+    key: String(d.currency || '') + '#' + String(d.direction || ''),
+    currency: d.currency || '',
+    direction: d.direction || '',
+    directionText: d.direction === 'receivable' ? '应收' : d.direction === 'payable' ? '应付' : (d.direction || '未知'),
+    totalText: d.total === null || d.total === undefined ? '未知' : String(d.total),
+    countedLines: Number(d.counted_lines || 0),
+    excludedLines: Number(d.excluded_lines || 0)
+  }
+}
+
+/** 投影任务的一个证据缺项。 */
+function decorateEvidenceGap(row) {
+  const d = row || {}
+  return {
+    key: String(d.task_id == null ? '' : d.task_id),
+    taskId: _sid(d.task_id),
+    taskType: d.task_type || '',
+    taskTypeText: TASK_TYPE_LABELS[d.task_type] || d.task_type || '未知',
+    title: d.title || '',
+    status: d.status || '',
+    isHandover: d.is_handover === true,
+    required: (d.required || []).slice(),
+    registered: (d.registered || []).slice(),
+    missing: (d.missing || []).slice(),
+    missingText: (d.missing || []).join('、'),
+    registeredText: (d.registered || []).length ? (d.registered || []).join('、') : '（暂无）',
+    satisfied: d.satisfied === true,
+    waitReason: d.wait_reason || '',
+    waitingOnEvidence: d.waiting_on_evidence === true,
+    canRecord: (d.missing || []).length > 0
+  }
+}
+
+/** 投影一个结算版本。 */
+function decorateSettlement(row) {
+  const d = row || {}
+  const lines = (d.lines || []).map(function (line) {
+    const l = line || {}
+    return {
+      key: String(l.charge_id == null ? '' : l.charge_id),
+      directionText: l.direction === 'receivable' ? '应收' : l.direction === 'payable' ? '应付' : (l.direction || '未知'),
+      chargeKind: l.charge_kind || '',
+      amountText: l.amount === null || l.amount === undefined ? '未知' : String(l.amount),
+      currency: l.currency || '',
+      basis: l.basis || ''
+    }
+  })
+  return {
+    key: String(d.settlement_id == null ? '' : d.settlement_id),
+    settlementId: _sid(d.settlement_id),
+    versionNo: Number(d.version_no || 0),
+    versionText: 'v' + String(d.version_no == null ? '' : d.version_no),
+    status: d.status || '',
+    statusText: SETTLEMENT_STATUS_LABELS[d.status] || d.status || '未知',
+    currency: d.currency || '',
+    customerTotalText: d.customer_total === null || d.customer_total === undefined ? '未知' : String(d.customer_total),
+    internalTotalText: d.internal_total === null || d.internal_total === undefined ? '未知' : String(d.internal_total),
+    lineCount: Number(d.line_count || 0),
+    lines: lines,
+    approvedAt: d.approved_at || '',
+    customerConfirmedAt: d.customer_confirmed_at || '',
+    customerDecision: d.customer_decision || '',
+    decisionText: SETTLEMENT_DECISION_LABELS[d.customer_decision] || '客户未确认',
+    customerNote: d.customer_note || '',
+    canApprove: d.status === 'draft',
+    // 客户确认要求：已内部确认，且这一版还没有客户决定
+    canConfirm: d.status === 'approved' && !d.customer_confirmed_at,
+    revision: Number(d.revision || 0)
+  }
+}
+
 module.exports = {
   BASE,
   SAMPLE_QUOTE_FILENAME,
@@ -4724,6 +5219,7 @@ module.exports = {
   capacityRuleLabel,
   capacityRuleRows,
   caseClosureOptions,
+  caseCategoryOptions,
   caseCreateBody,
   caseDecideAvailable,
   caseDecisionOptions,
@@ -4760,6 +5256,8 @@ module.exports = {
   decorateCapacityConfirmation,
   decorateCapacityRecheck,
   decorateContractDerivation,
+  decorateQuantityChange,
+  decorateQuantityChangeList,
   decorateDetail,
   decorateEntrustment,
   decorateEntrustments,
@@ -4787,6 +5285,7 @@ module.exports = {
   fetchCase,
   fetchCaseOrgList,
   fetchContractDerivation,
+  fetchQuantityChanges,
   fetchEntrustmentAttachments,
   fetchJob,
   fetchJobs,
@@ -4876,5 +5375,31 @@ module.exports = {
   respondOffer,
   signatureModeHint,
   signatureModeLabel,
-  withdrawOffer
+  withdrawOffer,
+  // ── 财务与结算（§10.1 第 10–11 步的界面入口）──────────────────────────
+  CHARGE_OUTCOME_LABELS,
+  CHARGE_STATUS_LABELS,
+  FINANCIAL_BLOCKER_LABELS,
+  FINANCIAL_STATUS_LABELS,
+  SETTLEMENT_DECISION_LABELS,
+  SETTLEMENT_STATUS_LABELS,
+  approveSettlement,
+  confirmCharge,
+  confirmSettlement,
+  createSettlement,
+  customerSettlementHint,
+  decorateCharge,
+  decorateChargeTotal,
+  decorateEvidenceGap,
+  decorateSettlement,
+  disputeCharge,
+  fetchCharges,
+  fetchCustomerSettlement,
+  fetchEvidenceGaps,
+  fetchFinancialStatus,
+  fetchSettlements,
+  recordCharge,
+  recordSettlementPayment,
+  recordTaskEvidence,
+  resolveCharge
 }

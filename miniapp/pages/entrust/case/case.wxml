@@ -161,7 +161,7 @@
               >✕</view>
             </view>
           </view>
-          <view wx:else class="act-hint">尚未登记受影响的任务或成果</view>
+          <view wx:else class="act-hint">尚未登记受影响的任务、成果或本委托货量</view>
 
           <block wx:if="{{canAddLink}}">
             <view
@@ -205,6 +205,24 @@
              改成页内展开条（见 detail.js 的 TASK_TYPE_OPTIONS 注释）。 -->
         <block wx:if="{{canDecide}}">
           <view class="act-label">记录决定</view>
+          <!-- 变更类别（A2 五之二）。应用变更**要求**类别已登记 —— 没有类别就无从
+               确定复核范围，而"先应用、后补范围"会让下游照着失效事实干活。
+               服务端把"批准"当作补登记的**最后合理时机**（那时决定人正看着这份变更），
+               所以入口放在这里；本页此前没有它 ⇒ 变更请求在界面上**根本应用不了**。 -->
+          <block wx:if="{{categoryOptions.length}}">
+            <view class="act-label">变更类别</view>
+            <view class="pick-row">
+              <view
+                wx:for="{{categoryOptions}}"
+                wx:key="key"
+                class="act-btn {{decideForm.category === item.key ? 'act-btn-on' : ''}}"
+                data-cat="{{item.key}}"
+                bindtap="onPickCategory"
+                hover-class="hover-dim"
+              >{{item.label}}</view>
+            </view>
+            <view class="act-hint">当前：{{changeCategoryLabel}}。应用变更前必须已登记类别（它决定复核范围）。</view>
+          </block>
           <view class="pick-row">
             <view
               wx:for="{{decisionOptions}}"
@@ -236,6 +254,48 @@
               placeholder="依据成果版本 id（批准必填，数字）"
               placeholder-class="input-ph"
             />
+            <!-- 委托货量变更的**变更内容**（S6-1 / D1-09）。
+                 它只能在**批准时**填：`apply` 只认批准快照、不接受临时入参（P4-A4）。
+                 所以这三只输入框挂在「已批准」分支里 —— 换个目标状态它们就不该出现，
+                 否则会给人一种"驳回也能改货量"的错觉。
+                 三只输入共用 `onDecideInput`（靠 `data-df` 区分），与本页既有的
+                 决定说明 / 依据版本同形：都是页内表单，不是原生弹层
+                 （原生弹层的确认键不在渲染树里，真机走查点不到 —— 见 onPickDecision 上方注释）。
+                 ⚠️ 上面这段注释里**不要**写出「data-df 加等号加引号」那种字面量：
+                 锚点扫描器按文本找，注释里的那一份会被当成真实的输入框，
+                 于是真框反而被判成"没有 bindinput"（本轮实测踩到）。 -->
+            <block wx:if="{{showQuantityChange && decideForm.to === 'approved'}}">
+              <view class="act-label">本委托货量变更（受影响项：委托 #{{quantityTargetId}}）</view>
+              <input
+                class="act-input"
+                data-df="qty"
+                value="{{quantityForm.quantity}}"
+                bindinput="onDecideInput"
+                maxlength="16"
+                type="digit"
+                placeholder="变更后货量（正数，如 950）"
+                placeholder-class="input-ph"
+              />
+              <input
+                class="act-input"
+                data-df="qty-unit"
+                value="{{quantityForm.unit}}"
+                bindinput="onDecideInput"
+                maxlength="24"
+                placeholder="变更后单位（如 吨）"
+                placeholder-class="input-ph"
+              />
+              <input
+                class="act-input"
+                data-df="qty-basis"
+                value="{{quantityForm.basis}}"
+                bindinput="onDecideInput"
+                maxlength="255"
+                placeholder="变更依据（为什么改，必填）"
+                placeholder-class="input-ph"
+              />
+              <view class="act-hint">批准后，这次变更会记进批准快照：旧值由服务端读、新值以这里填的为准。应用时逐项目核对版本与旧值，任一处不符整批拒绝。</view>
+            </block>
             <view
               class="act-btn-wide"
               data-act-decide-submit="1"
@@ -346,6 +406,11 @@
               <view wx:for="{{approval.targets}}" wx:key="key" class="apply-target">
                 <view class="apply-key">{{item.targetText}}</view>
                 <view class="apply-val">将改字段：{{item.fieldsText}}</view>
+                <!-- 委托货量变更：把 `当前 → 将改为` 摆出来。
+                     其余目标的载荷是不定形的（列字段名合理），而这一类的值就是两个标量 ——
+                     不显示它，「确认应用」就退化成盲操作，而应用之后历史已经写进去了。 -->
+                <view wx:if="{{item.quantityChangeText}}" class="apply-val apply-qty">{{item.quantityChangeText}}</view>
+                <view wx:if="{{item.quantityBasisText}}" class="apply-val apply-sub">{{item.quantityBasisText}}</view>
                 <view class="apply-val apply-sub">{{item.basisText}}</view>
               </view>
             </view>
@@ -364,6 +429,26 @@
             <view wx:if="{{applyHint}}" class="act-hint act-hint-warn">{{applyHint}}</view>
           </block>
         </block>
+      </view>
+
+      <!-- 本委托的货量变更历史（S6-1 / D1-09）。
+           **跨案件**：同一张委托被改过几次都在这里，因为"从哪改到哪"只在**委托**上有答案
+           （案件只记自己那一次）。读端点是经理侧，只在有写权限时取数 ——
+           `quantityHistoryHint` 有值时说明**读失败**，与"空列表（真没改过）"必须分开说。 -->
+      <view wx:if="{{canAnyAction}}" class="card element-card">
+        <view class="element-head">
+          <text class="element-title">本委托货量变更</text>
+          <text class="element-count">共 {{quantityHistory.length}} 次</text>
+        </view>
+        <view wx:if="{{quantityHistoryHint}}" class="act-hint act-hint-warn">{{quantityHistoryHint}}</view>
+        <view wx:if="{{quantityHistory.length}}" class="qty-list">
+          <view wx:for="{{quantityHistory}}" wx:key="key" class="qty-item">
+            <view class="qty-main">{{item.changeText}}</view>
+            <view class="qty-sub">{{item.sourceText}} · {{item.appliedAt}} · 操作人 {{item.appliedBy}}</view>
+            <view class="qty-sub">变更依据：{{item.basisText}}</view>
+          </view>
+        </view>
+        <view wx:elif="{{!quantityHistoryHint}}" class="act-hint">这张委托还没有改过货量。</view>
       </view>
 
       <!-- 复核传播（A2 五之二生成、五之四展示）：回答"这批复核凭什么生成、做完没有"。

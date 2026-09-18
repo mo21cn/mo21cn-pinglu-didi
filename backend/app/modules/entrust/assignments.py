@@ -44,6 +44,10 @@ from app.modules.entrust.access import (
 STATUS_DRAFT = "draft"
 STATUS_SUBMITTED = "submitted"
 STATUS_CLAIMED = "claimed"
+#: 结案（S4-b / 合同 §6.4 的 `complete`）。**只有 `complete_assignment` 能产出它** ——
+#: 迁移（S4-a）只加了列与列注释，不动代码取值域；第五个取值随命令同一提交落地
+#: （见 `test_entrust_s4a_schema_only.py` 的边界说明）。
+STATUS_COMPLETED = "completed"
 STATUS_CANCELLED = "cancelled"
 
 ACTIVE_STATUSES = (STATUS_DRAFT, STATUS_SUBMITTED, STATUS_CLAIMED)
@@ -121,6 +125,12 @@ def _row_to_assignment(row: Any) -> dict[str, Any]:
         "claimed_at": _text_ts(row["claimed_at"]),
         "submitted_at": _text_ts(row["submitted_at"]),
         "cancelled_at": _text_ts(row["cancelled_at"]),
+        # 运营完成时间（S4-b）。**未知保持未知**：NULL 表示"还没结案"，
+        # ⛔ 不是"结案于某个占位时间"。界面上它与 `financial_status`（另一个维度）
+        # 一起构成"运营 vs 财务"的可区分（合同 §6.4 明写接口必须区分两者）。
+        # 手工构造的行（单测 `_row()`）没有这一列 ⇒ 取 None，不让只关心其它字段的
+        # 用例一起 KeyError（与上面 `org_name` 同一处理）。
+        "completed_at": _text_ts(row.get("completed_at") if hasattr(row, "get") else None),
         "created_at": _text_ts(row["created_at"]),
         "updated_at": _text_ts(row["updated_at"]),
     }
@@ -132,7 +142,7 @@ def _row_to_assignment(row: Any) -> dict[str, Any]:
 _ASSIGNMENT_COLS = (
     "a.id, a.owner_user_id, a.org_id, a.title, a.cargo_summary, a.quantity, a.quantity_unit, "
     "a.status, a.revision, a.claimed_by, a.claimed_at, a.submitted_at, a.cancelled_at, "
-    "a.created_at, a.updated_at, o.name AS org_name"
+    "a.completed_at, a.created_at, a.updated_at, o.name AS org_name"
 )
 
 # LEFT JOIN（而不是 INNER JOIN）：草稿态 `org_id` 为 NULL、组织被停用/删除都不能

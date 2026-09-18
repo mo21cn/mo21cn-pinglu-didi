@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（86 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（103 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -159,6 +159,20 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "entrust:assignment:claim",
         idempotent=True,
         note="组织成员 + entrust:assignment:claim；单条条件 UPDATE 保证原子认领（双认领后者 409）",
+    ),
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/complete",
+        GUARD_ORG_MEMBER,
+        "entrust:assignment:complete",
+        owner_scope=True,
+        idempotent=True,
+        note="**结案**（合同 §6.4 / S4-b）：必须同时过五个维度（任务处置 / 交付证据 / "
+        "异常与重评 / 结算含客户对适用版本的确认 / 余额与争议）；缺项即 409 且 `detail` "
+        "是**对象**（`{message, missing[]}`）不是字符串。"
+        "⛔ 无「跳过前置」入参（PRD：hard checks cannot be bypassed）。"
+        "并发靠 `expected_revision` ＋ 条件 UPDATE（两个结案者其一 409）。"
+        "货主本人**不能**结案（这是运营方对客户的宣告）⇒ 不带货主旁路。",
     ),
     _r(
         "POST",
@@ -363,6 +377,14 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         note="同任务列表",
     ),
     _r(
+        "GET",
+        "/assignments/{assignment_id}/evidence-gaps",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="缺件与交接证据的派生读数；同任务列表（读不加严）",
+    ),
+    _r(
         "PATCH",
         "/tasks/{task_id}",
         GUARD_ORG_MEMBER,
@@ -394,6 +416,15 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         owner_scope=True,
         idempotent=True,
         note="缺件等待；同 start",
+    ),
+    _r(
+        "POST",
+        "/tasks/{task_id}/evidence",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        idempotent=True,
+        note="补录证据（缺件的补救入口）；同 start —— 执行是本职，"
+        "被指派人本人可做，管理动作另需 dispatch",
     ),
     _r(
         "POST",
@@ -829,6 +860,19 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "正式重做属 S4 变更流程；这里只是让 D1-09 的「900 吨候选变更后不再适用」"
         "可被看到，而不是只存在于模型意见里",
     ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/quantity-changes",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="委托货量变更历史（append-only，D1-09 第 8 步）。写侧在 `exceptions.apply_case`"
+        "—— 经审批的变更应用到 `ent_assignment.quantity` 时同步留一行。"
+        "⚠️ 读侧与运力那一组同口径**不给货主本人放行**：`basis` 是经理写的变更依据，"
+        "可能带内部口径（货量本身客户在委托详情里看得到）。"
+        "空列表是正常答复（这单没改过货量），**不是** 404 —— 与 "
+        "`GET /capacity-confirmations/{id}` 的「不回空壳」口径相反，判据是资源本身："
+        "集合可以为空，单条记录不存在就是不存在",
+    ),
     # ── 运输计划与必需任务前置（plan_api.py）─────────────────────────────
     _r(
         "GET",
@@ -864,6 +908,161 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "报价/确认不同类）。**不是遗漏**：看到它别顺手补一个 PERM_* 上去。"
         "⚠️ 不校验 mode 取值组合与段数（裁定：不强制 公–水–公）；只做结构完整性 —— "
         "mode 非空、起终点非空、seq ≥1 且委托内唯一（唯一键在 DB 上，撞号 409）。",
+    ),
+    # ── 费用行：登记 / 确认 / 争议 / 处置 / 读合计（charges_api.py）────────────
+    # HO 0918-2 裁定：Q1=C（合计按**币种 × 收付方向**分开，不跨币种相加）、
+    # Q2=B（争议必须**显式处置 ＋ 证据**，并给出「最终金额 ＋ 是否计入」——
+    # `resolved` 一词决定不了是否计入）、Q3=A（`waiting_time` 用**普通费用行**，
+    # 不另建实体、不建计费引擎）。
+    # 判据取「这条通道上有没有内部信息」：费用行带 `counterparty` 与 `basis`
+    # —— 谁付谁、按什么算，是**内部成本口径** ⇒ **一条都不给货主本人放行**
+    # （与紧邻上面的运力那一组同型；而计划那一组相反，理由写在那条 note 里）。
+    # ⚠️ 客户侧投影（"只看对客费用与证据白名单"，裁定 Q5 第 2 条）**本切片没有**
+    # —— 它需要"哪些费用是对客的"这个口径，落在 S7-3；这里不假装已支持。
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/charges",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="费用行清单 ＋ 合计（按币种 × 收付方向分组）。"
+        "判据＝有组织边界、**不给货主本人放行**：行上带对手方与计费依据，是内部成本口径。"
+        "空列表是正常答复（这单还没记过费用），**不是** 404。"
+        "每组回 `counted_lines` / `excluded_lines`，让合计数可被复核。",
+    ),
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/charges",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="登记一条费用行（状态 draft ⇒ **草稿不进合计**）。"
+        "权限沿用本仓已有的 `entrust:settlement:create`，不新造权限码。"
+        "`basis` 必填（没有依据的费用行不可核对）；`quantity` 与 `unit` 必须成对。"
+        "⚠️ **不校验金额正负**：负数的语义没有裁定过，本切片不自造这条约束。",
+    ),
+    _r(
+        "POST",
+        "/charges/{charge_id}/confirm",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="`draft → confirmed`（确认之后才进合计）。"
+        "状态机与 `revision` 乐观锁都在服务层的**唯一一处** `_transition` 里："
+        "`rowcount == 0` ⇒ 409（要么状态不对、要么版本过期），不静默覆盖。",
+    ),
+    _r(
+        "POST",
+        "/charges/{charge_id}/dispute",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="`confirmed → disputed`（**争议行不进合计** —— 合同 S4 段第 10 条原文）。"
+        "只能对**已确认**的费用提争议（草稿本就不计入）。`reason` 必填："
+        "只标「有争议」而不写为什么，合计的差异无从复核。",
+    ),
+    _r(
+        "POST",
+        "/charges/{charge_id}/resolve",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="`disputed → resolved|rejected`：**显式处置 ＋ 依据**（裁定 Q2=B）。"
+        "⛔ `counts_in_total` 必填且**不从 `outcome` 推导** —— 认可可能是「全额计入」、"
+        "也可能是「认可但不计入」，调减是「按新金额计入」，拒绝是「不计入」；"
+        "把这三件事压成一条规则正是裁定要消除的歧义。"
+        "`counts_in_total=True` 时 `final_amount` 必填；为假时允许留空。",
+    ),
+    # ── 结算与收付依据（settlement_api.py）──────────────────────────────────
+    # ⚠️ 这 8 条**分成三条通道**，判据刻意不同（详见 settlement_api.py 模块文档）：
+    #    内部（版本清单/详情/派生）＝ 组织成员、**货主也 404**（含内部成本）；
+    #    对客（customer-view）＝ **有货主旁路**（这条通道的意义就是"客户能看"）；
+    #    仅客户本人（customer-confirm）＝ 只有 `owner_user_id` 能做。
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/settlements",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        owner_scope=True,
+        idempotent=True,
+        note="按**当前计入合计**的费用行生成一个**新**结算版本（快照）。"
+        "⚠️ 费用变了就再调一次 ⇒ v2；**旧版本一个字不改**，旧确认因此保留、"
+        "但结构上替不了新版本过关。没有可结算的费用行 ⇒ 400（空版本不该存在）；"
+        "计入行跨多币种 ⇒ 400（本期只支持 CNY，跨币种相加是明确不做的）。",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/settlements",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        note="版本链（升序）＋ `applicable_settlement_id`（＝**最大版本号**那一行）。"
+        "⚠️ 货主本人也 404：版本带 `internal_total`（我们付给供应商的成本）。"
+        "「适用版本」是**推导**出来的、不存字段 —— 存一个就会出现"
+        "「字段说有、链上没有」的分叉。",
+    ),
+    _r(
+        "GET",
+        "/settlements/{settlement_id}",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        note="内部详情（含内部成本合计与**快照行**：每条带 charge_id ＋ 当时 revision ＋"
+        " 计入金额，所以费用行后来被改也不影响「这一版当时算的是什么」）。",
+    ),
+    _r(
+        "POST",
+        "/settlements/{settlement_id}/approve",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        owner_scope=True,
+        idempotent=True,
+        note="内部确认（`draft → approved`）。⛔ 只能确认**适用版本**（最大版本号）："
+        "批准一个已被取代的版本在业务上没有意义，只会让「适用版本批准了吗」多出一个答案。",
+    ),
+    _r(
+        "GET",
+        "/settlements/{settlement_id}/customer-view",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="**对客投影**（裁定 Q5 第 2 条）：只出 `direction=receivable` 的行、"
+        "且字段按**白名单**裁剪 —— ⛔ 投影是**新建字典**而不是「从内部投影里删几个键」，"
+        "后者在加列时会默认把新列漏给客户，而漏出去的内部成本收不回来。"
+        "⚠️ 组织成员也放行：让经理能**预览客户看到的东西**（这个投影里本就没有内部字段）。",
+    ),
+    _r(
+        "POST",
+        "/settlements/{settlement_id}/customer-confirm",
+        GUARD_OWNER_SELF,
+        owner_scope=True,
+        idempotent=True,
+        note="**客户确认该精确版本**（裁定 Q5 第 1、4 条）—— 确认挂在**这一行**上，"
+        "不在委托上、也不在「最新版本」这个概念上。⛔ 一版只确认一次（要改口径请出**新版本**）；"
+        "⛔ 必须先内部确认（`draft` 上的客户确认没有意义）。"
+        "⚠️ 组织成员（看得见这个版本）来做 ⇒ **403**（看得见但这不是你能做的动作）；"
+        "看不见的第三方 ⇒ 404。",
+    ),
+    _r(
+        "POST",
+        "/settlements/{settlement_id}/payments",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        owner_scope=True,
+        idempotent=True,
+        note="记一条收付依据。⛔ `mode` **不是入参**（恒 `labeled_sample`）："
+        "能传 `live` 就等于让系统自称「资金已真实到账」（裁定 Q5 第 5 条）。"
+        "只能挂在**已确认**的版本上（要说清依据哪一版）；`ref` 必填（没凭据的收付不可核对）；"
+        "累计收付**不得超过该方向合计** —— 超出会让余额变负，而负数余额没有业务含义。",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/financial-status",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        note="`financial_status` 派生（§5.3.2 四条判据逐条落成 `blockers`）："
+        "① 有草稿/有争议的费用行；② 结算待批准（含**客户未确认该精确版本**与"
+        "**适用版本已过期**两种子情形）；③ 有未关闭的案件；④ 余额未结清。"
+        "四个都不成立才 `settled`。⚠️ `not_started` **只能**表示「确实没有任何"
+        "费用/结算/收付事实」，⛔ 不是「派生还没接好」的遮羞布；"
+        "含内部成本余额 ⇒ **货主本人也 404**。",
     ),
     _r(
         "PATCH",

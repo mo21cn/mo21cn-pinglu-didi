@@ -336,7 +336,11 @@ def test_reopen_preserves_history(session):
     assert reopened["reopen_count"] == 1
     assert reopened["last_reopen_reason"] == "单据金额与合同不一致"
     assert reopened["completed_at"] is None
-    assert reopened["evidence_refs"] == [{"kind": "document", "ref": "att-001"}], "历史证据不删除"
+    # 历史证据不删除。判据落在**身份**上（kind + ref）：S7-2 起每条证据还带
+    # 服务端写的 recorded_at / recorded_by，整条 `==` 会把"多了记账字段"误判成"证据变了"。
+    assert [(item["kind"], item["ref"]) for item in reopened["evidence_refs"]] == [
+        ("document", "att-001")
+    ], "历史证据不删除"
 
 
 def test_reopen_requires_reason(session):
@@ -882,3 +886,65 @@ def test_api_takeover_fences_old_generation(env):
     )
     assert stale.status_code == 409
     assert "代次" in stale.json()["detail"]
+
+
+# ───────────────────────── 列表：截断可观测（开放项 O-9，2026-09-18 裁定）
+
+
+def test_api_list_reports_has_more_at_page_boundaries(env):
+    """`has_more` 在四种页号下都给出正确结论（O-9 的判据）。
+
+    只回 `total` 时，"被截了没有"要调用方自己算（`page * size < total`）——
+    漏算一次就静默。四种情况各钉一次：
+
+    - 整页且还有下一页 ⇒ `True`；
+    - 末页不满 ⇒ `False`；
+    - 恰好整页取完 ⇒ `False`（边界：没有它，"只要有下一页就 True"这类
+      恒真写法也能过前两条）；
+    - **越过末页**（`items` 为空）⇒ `False`。这条最关键：按 `page * size < total`
+      算会得到 `True`，于是"你什么都没取到"被报成"还有更多"，
+      正是"被截"信号本身在撒谎。
+    """
+    ctx = _api_setup(env)
+    aid = ctx.assignment["assignment_id"]
+    url = f"/api/v1/entrust/assignments/{aid}/tasks"
+    for i in range(3):
+        created = env.client.post(
+            url,
+            json={"task_type": "collect_documents", "title": f"单证 {i}"},
+            headers={**_headers(ctx.manager), "Idempotency-Key": uuid.uuid4().hex},
+        )
+        assert created.status_code == 200, created.text
+
+    def listed(**params):
+        return env.client.get(
+            "/api/v1/entrust/tasks",
+            params={"assignment_id": aid, **params},
+            headers=_headers(ctx.manager),
+        )
+
+    page1 = listed(page=1, size=2)
+    assert page1.status_code == 200, page1.text
+    body1 = page1.json()
+    assert body1["total"] == 3
+    assert len(body1["items"]) == 2
+    assert body1["has_more"] is True
+
+    page2 = listed(page=2, size=2)
+    assert page2.status_code == 200, page2.text
+    body2 = page2.json()
+    assert len(body2["items"]) == 1
+    assert body2["has_more"] is False
+
+    exact = listed(page=1, size=3)
+    assert exact.status_code == 200, exact.text
+    body3 = exact.json()
+    assert len(body3["items"]) == 3
+    assert body3["has_more"] is False
+
+    beyond = listed(page=9, size=2)
+    assert beyond.status_code == 200, beyond.text
+    body4 = beyond.json()
+    assert body4["items"] == []
+    assert body4["total"] == 3
+    assert body4["has_more"] is False

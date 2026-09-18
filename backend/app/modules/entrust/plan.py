@@ -92,7 +92,9 @@ def list_legs(session: Session, assignment_id: int) -> list[dict[str, Any]]:
     ]
 
 
-def list_task_prerequisites(session: Session, assignment_id: int) -> list[dict[str, Any]]:
+def list_task_prerequisites(
+    session: Session, assignment_id: int
+) -> tuple[list[dict[str, Any]], int]:
     """该委托的必需任务与其**固定前置**。
 
     复用 `tasks.list_tasks` —— 任务是任务模块的事实，本模块**不重写那份 SQL**：
@@ -104,11 +106,18 @@ def list_task_prerequisites(session: Session, assignment_id: int) -> list[dict[s
     多带的每一个字段都会在界面之外多一个"会与任务页各自演化"的落点，
     而本读模型只回答 §10.1 第 4 步问的那件事 —— 计划**与前置**。
     任务页要"这个任务要求交什么"，走它自己的端点。
+
+    ⚠️ **`total` 必须原样回传**（开放项 O-9，2026-09-18 裁定）：本函数此前写成
+    `_total, items = …`，把 `list_tasks` 已经算出来的总数**丢掉**了 —— 于是
+    "这张委托的任务超过 `TASK_LIMIT`"这件事在响应里**没有任何痕迹**，
+    下游看到的是"前置解析不出来"，看起来像界面缺陷（2026-09-18 的 ⑯-e 就是这么被
+    咬了一口的）。`TASK_LIMIT` 的注释早就写着"显式给上限是为了让截断可被看见"，
+    但真正让它可被看见的是**这个回传的总数**，不是那个上限本身。
     """
-    _total, items = task_svc.list_tasks(
+    total, items = task_svc.list_tasks(
         session, assignment_id=assignment_id, page=1, size=TASK_LIMIT
     )
-    return [
+    rows = [
         {
             "task_id": int(item["task_id"]),
             "task_type": str(item["task_type"]),
@@ -118,18 +127,32 @@ def list_task_prerequisites(session: Session, assignment_id: int) -> list[dict[s
         }
         for item in items
     ]
+    return rows, total
 
 
 def build_plan(session: Session, *, assignment: dict[str, Any]) -> dict[str, Any]:
     """§10.1 第 4 步的读模型：三段计划 + 必需任务前置。
 
     调用方负责可见性判定（端点层 `assert_can_view_assignment`）；本函数只组装。
+
+    ⭐ 两个"截断事实"字段（O-9）：`task_prerequisites_total` 与
+    `task_prerequisites_truncated`。**不把本读模型改成分页的** —— 分页是"列表"的语义，
+    这里问的是"这张委托的必需任务与固定前置有哪些"，没有人会翻到第 2 页去读计划；
+    给它分页只是把"我这个消费者有没有取全"的责任推给每一个下游。
+    反过来，把"被截了"当**事实**由服务端给出（六机制：事实有来源），
+    下游无论怎么消费都能据此判断，不必各自猜。
+    `truncated` 由"读到的行数 < 总数"推导，**不引入第二个阈值** ——
+    再多一个阈值就会与 `TASK_LIMIT` 各自演化（本模块 `MODE_LABELS` 的注释里
+    记着"两处各存一份口径"的代价）。
     """
     assignment_id = int(assignment["id"])
+    tasks, tasks_total = list_task_prerequisites(session, assignment_id)
     return {
         "assignment_id": assignment_id,
         "legs": list_legs(session, assignment_id),
-        "task_prerequisites": list_task_prerequisites(session, assignment_id),
+        "task_prerequisites": tasks,
+        "task_prerequisites_total": tasks_total,
+        "task_prerequisites_truncated": len(tasks) < tasks_total,
     }
 
 

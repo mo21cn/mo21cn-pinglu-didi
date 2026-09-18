@@ -1,0 +1,213 @@
+<!-- 委托发货 · 财务与结算（§10.1 第 10–11 步；裁定 Q4=A 要求经现有界面演示）
+     ⚠️ 模板里不写表达式（拼接 / 比较 / 兜底都在 `finance.js` 投影好）——
+     模板一旦开始判空，页面与后端就会各有一套判据。 -->
+<view class="fin-page" style="padding-top: {{statusBarHeight}}px">
+  <view class="nav">
+    <view class="nav-back" data-act="back" bindtap="onBack">返回</view>
+    <view class="nav-title">财务与结算</view>
+    <view class="nav-right"></view>
+  </view>
+
+  <!-- 错误 / 无权限 -->
+  <view wx:if="{{errorTitle}}" class="card">
+    <view class="empty-title">{{errorTitle}}</view>
+    <view class="empty-hint">{{errorHint}}</view>
+    <view wx:if="{{denied}}" class="btn btn-ghost" data-act="relogin" bindtap="onRelogin">返回入口</view>
+  </view>
+
+  <view wx:elif="{{loading}}" class="card">
+    <view class="empty-title">加载中</view>
+  </view>
+
+  <block wx:elif="{{customerMode}}">
+    <!-- ── 对客通道（货主侧）：只看对客费用，并且只在这里做「客户确认」 ──
+         ⛔ 内部读数（费用行 / 版本链 / 财务状态）对货主一律 404 ⇒ 本分支里一个都不渲染，
+         而不是渲染成空区块（那会把"你没有这个视角"伪装成"这里本来就是空的"）。 -->
+    <view class="card">
+      <view class="card-title">结算确认</view>
+      <view class="hint">客户确认绑定「精确版本」：确认后若费用有变，会出新版本并需要重新确认。</view>
+
+      <block wx:if="{{customerSettlementId}}">
+        <view class="row">
+          <text class="row-k">{{customerVersionText}}</text>
+          <text class="row-sub">{{awaitingCustomer ? '等你确认这一版' : '你已表态过（如需改口径请让经理出新版本）'}}</text>
+        </view>
+        <view class="row" wx:for="{{customerLines}}" wx:key="key">
+          <text class="row-k">{{item.chargeKind}}</text>
+          <text class="row-v">{{item.amountText}} {{item.currency}}</text>
+          <text class="row-sub">依据：{{item.basis}}</text>
+        </view>
+        <view wx:if="{{awaitingCustomer}}" class="btn" data-act="customer-confirm" data-id="{{customerSettlementId}}" bindtap="onConfirmSettlement">确认这一版</view>
+      </block>
+      <view wx:else class="hint">{{customerHint}}</view>
+      <view wx:if="{{settlementHint}}" class="hint">{{settlementHint}}</view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <!-- ── 财务结案状态（派生）────────────────────────────────────── -->
+    <view class="card">
+      <view class="card-title">财务结案状态</view>
+      <view class="row">
+        <text class="row-k">当前</text>
+        <text class="row-v strong">{{financialStatusText}}</text>
+      </view>
+      <view class="bal" wx:for="{{balances}}" wx:key="key">
+        <text class="row-k">{{item.directionText}} · {{item.currency}}</text>
+        <text class="row-v">合计 {{item.totalText}} ｜ 已收付 {{item.settledText}} ｜ 未结 {{item.outstandingText}}</text>
+      </view>
+      <block wx:if="{{blockers.length}}">
+        <view class="hint">还差这些（逐条说清，不合并成一句「不可结案」）：</view>
+        <view class="blocker" wx:for="{{blockers}}" wx:key="key">· {{item.text}}</view>
+      </block>
+      <view wx:else class="hint">四项判据都不成立 —— 已结清</view>
+    </view>
+
+    <!-- ── 费用行 ─────────────────────────────────────────────────── -->
+    <view class="card">
+      <view class="card-title">费用行</view>
+      <view class="totals" wx:for="{{chargeTotals}}" wx:key="key">
+        <text class="row-k">{{item.currency}} · {{item.directionText}}</text>
+        <text class="row-v strong">{{item.totalText}}</text>
+        <text class="row-sub">计入 {{item.countedLines}} 条 ／ 排除 {{item.excludedLines}} 条</text>
+      </view>
+      <view wx:if="{{!chargeTotals.length}}" class="hint">还没有计入合计的费用行</view>
+
+      <view class="row" wx:for="{{charges}}" wx:key="key">
+        <text class="row-k">{{item.directionText}} · {{item.chargeKind}}</text>
+        <text class="row-v">{{item.amountText}} {{item.currency}}</text>
+        <text class="row-sub">{{item.statusText}} ｜ {{item.countsText}} ｜ 依据：{{item.basis}}</text>
+        <text wx:if="{{item.quantityText}}" class="row-sub">数量 {{item.quantityText}}</text>
+        <text wx:if="{{item.counterparty}}" class="row-sub">对手方 {{item.counterparty}}</text>
+        <text wx:if="{{item.disputedReason}}" class="row-sub">争议理由：{{item.disputedReason}}</text>
+        <text wx:if="{{item.outcomeText}}" class="row-sub">处置：{{item.outcomeText}} ｜ 最终金额 {{item.resolutionAmountText}}</text>
+        <view class="acts">
+          <view wx:if="{{item.canConfirm}}" class="btn btn-mini" data-act="confirm-charge" data-id="{{item.chargeId}}" bindtap="onConfirmCharge">确认</view>
+          <view wx:if="{{item.canDispute}}" class="btn btn-mini" data-act="open-dispute" data-id="{{item.chargeId}}" bindtap="onOpenDispute">提争议</view>
+          <view wx:if="{{item.canResolve}}" class="btn btn-mini" data-act="open-resolve" data-id="{{item.chargeId}}" bindtap="onOpenResolve">处置</view>
+        </view>
+
+        <!-- 提争议（页内表单，不用原生弹层） -->
+        <block wx:if="{{disputeOpenKey}}">
+          <view wx:if="{{disputeOpenKey === item.chargeId}}" class="form">
+            <input class="input" placeholder="争议理由（必填）" value="{{disputeForm.reason}}" data-key="reason" bindinput="onDisputeInput" />
+            <view class="btn btn-mini" data-act="submit-dispute" data-id="{{item.chargeId}}" bindtap="onSubmitDispute">提交争议</view>
+          </view>
+        </block>
+
+        <!-- 处置（`counts_in_total` **必须显式选**，裁定 Q2=B） -->
+        <block wx:if="{{resolveOpenKey === item.chargeId}}" class="form">
+          <view class="form">
+            <view class="chips">
+              <view wx:for="{{outcomeChoices}}" wx:key="code" class="chip {{resolveForm.outcome === item.code ? 'chip-on' : ''}}" data-act="pick-outcome" data-code="{{item.code}}" bindtap="onPickOutcome">{{item.label}}</view>
+            </view>
+            <input class="input" placeholder="处置依据（必填）" value="{{resolveForm.method}}" data-key="method" bindinput="onResolveInput" />
+            <view class="hint">是否计入合计（不由「已解决」推导，必须显式选）：</view>
+            <view class="chips">
+              <view class="chip {{resolveForm.countsInTotal === 'yes' ? 'chip-on' : ''}}" data-act="pick-counts" data-code="yes" bindtap="onPickCounts">计入</view>
+              <view class="chip {{resolveForm.countsInTotal === 'no' ? 'chip-on' : ''}}" data-act="pick-counts" data-code="no" bindtap="onPickCounts">不计入</view>
+            </view>
+            <input class="input" placeholder="最终金额（选「计入」时必填）" value="{{resolveForm.finalAmount}}" data-key="finalAmount" bindinput="onResolveInput" />
+            <view class="btn btn-mini" data-act="submit-resolve" data-id="{{item.chargeId}}" bindtap="onSubmitResolve">提交处置</view>
+          </view>
+        </block>
+      </view>
+
+      <view wx:if="{{chargeHint}}" class="hint">{{chargeHint}}</view>
+      <view class="btn" data-act="toggle-charge" bindtap="onToggleChargeForm">登记一条费用</view>
+      <block wx:if="{{chargeOpen}}">
+        <view class="form">
+          <view class="chips">
+            <view wx:for="{{directionChoices}}" wx:key="code" class="chip {{chargeForm.direction === item.code ? 'chip-on' : ''}}" data-act="pick-direction" data-code="{{item.code}}" bindtap="onPickChargeDirection">{{item.label}}</view>
+          </view>
+          <input class="input" placeholder="费用类别（如 freight / waiting_time）" value="{{chargeForm.chargeKind}}" data-key="chargeKind" bindinput="onChargeInput" />
+          <input class="input" placeholder="金额（元）" value="{{chargeForm.amount}}" data-key="amount" bindinput="onChargeInput" />
+          <input class="input" placeholder="计费依据（必填）" value="{{chargeForm.basis}}" data-key="basis" bindinput="onChargeInput" />
+          <input class="input" placeholder="对手方（可选）" value="{{chargeForm.counterparty}}" data-key="counterparty" bindinput="onChargeInput" />
+          <view class="btn btn-mini" data-act="submit-charge" bindtap="onSubmitCharge">登记</view>
+        </view>
+      </block>
+    </view>
+
+    <!-- ── 缺件与交接（证据挂在**任务**上，交接不发明独立成果）───────── -->
+    <view class="card">
+      <view class="card-title">缺件与交接证据</view>
+      <view class="hint">共 {{gapTaskCount}} 个任务，合计缺 {{gapMissingTotal}} 项</view>
+      <view wx:if="{{handoverPresent}}" class="hint">交接类任务{{handoverMissingText ? '还缺：' + handoverMissingText : '证据齐备'}}</view>
+      <view wx:else class="hint">这张委托上没有交接类任务</view>
+
+      <view class="row" wx:for="{{gaps}}" wx:key="key">
+        <text class="row-k">{{item.taskTypeText}} · {{item.title}}</text>
+        <text class="row-sub">要求：{{item.required}}</text>
+        <text class="row-sub">已登记：{{item.registeredText}}</text>
+        <text wx:if="{{item.missingText}}" class="row-sub strong">还缺：{{item.missingText}}</text>
+        <text wx:if="{{item.waitingOnEvidence}}" class="row-sub">正在等待（{{item.waitReason}}）</text>
+        <view wx:if="{{item.canRecord}}" class="btn btn-mini" data-act="open-evidence" data-id="{{item.taskId}}" bindtap="onOpenEvidence">补录证据</view>
+
+        <block wx:if="{{evidenceOpenKey === item.taskId}}">
+          <view class="form">
+            <view class="chips">
+              <view wx:for="{{evidenceKindChoices}}" wx:key="code" class="chip {{evidenceForm.kind === item.code ? 'chip-on' : ''}}" data-act="pick-evidence-kind" data-code="{{item.code}}" bindtap="onPickEvidenceKind">{{item.label}}</view>
+            </view>
+            <input class="input" placeholder="证据来源（附件键 / 说明 / 凭据编号）" value="{{evidenceForm.ref}}" data-key="ref" bindinput="onEvidenceInput" />
+            <input class="input" placeholder="业务发生时间（如 2026-09-17T08:30:00）" value="{{evidenceForm.occurredAt}}" data-key="occurredAt" bindinput="onEvidenceInput" />
+            <view class="hint">业务发生时间 ≠ 记录时间：前者是「这件事什么时候真的发生了」。</view>
+            <view class="btn btn-mini" data-act="submit-evidence" data-id="{{item.taskId}}" bindtap="onSubmitEvidence">补录</view>
+          </view>
+        </block>
+      </view>
+      <view wx:if="{{evidenceHint}}" class="hint">{{evidenceHint}}</view>
+    </view>
+
+    <!-- ── 结算版本与收付依据 ─────────────────────────────────────── -->
+    <view class="card">
+      <view class="card-title">结算版本</view>
+      <view class="hint">客户确认绑定「精确版本」；确认后改费用必须出新版本，旧确认保留但替不了新版本过关。</view>
+      <view class="row" wx:for="{{settlements}}" wx:key="key">
+        <text class="row-k">{{item.versionText}} ｜ {{item.statusText}}{{item.key === applicableId ? ' ｜ 适用版本' : ''}}</text>
+        <text class="row-v">对客 {{item.customerTotalText}} {{item.currency}} ｜ 内部成本 {{item.internalTotalText}}</text>
+        <text class="row-sub">{{item.decisionText}} ｜ 快照 {{item.lineCount}} 条费用行</text>
+        <view class="acts">
+          <view wx:if="{{item.canApprove}}" class="btn btn-mini" data-act="approve-settlement" data-id="{{item.settlementId}}" bindtap="onApproveSettlement">内部确认</view>
+          <view wx:if="{{item.canConfirm}}" class="btn btn-mini" data-act="confirm-settlement" data-id="{{item.settlementId}}" bindtap="onConfirmSettlement">客户确认</view>
+          <view class="btn btn-mini" data-act="open-payment" data-id="{{item.settlementId}}" bindtap="onOpenPayment">记收付</view>
+          <view class="btn btn-mini" data-act="preview-customer" data-id="{{item.settlementId}}" bindtap="onPreviewCustomerView">看客户视图</view>
+        </view>
+
+        <block wx:if="{{paymentOpenKey === item.settlementId}}">
+          <view class="form">
+            <view class="chips">
+              <view wx:for="{{directionChoices}}" wx:key="code" class="chip {{paymentForm.direction === item.code ? 'chip-on' : ''}}" data-act="pick-payment-direction" data-code="{{item.code}}" bindtap="onPickPaymentDirection">{{item.label}}</view>
+            </view>
+            <input class="input" placeholder="金额" value="{{paymentForm.amount}}" data-key="amount" bindinput="onPaymentInput" />
+            <input class="input" placeholder="凭据引用（必填）" value="{{paymentForm.ref}}" data-key="ref" bindinput="onPaymentInput" />
+            <view class="hint">记下的证据一律是「合成样本」标注 —— 不接真实支付、不宣称资金到账。</view>
+            <view class="btn btn-mini" data-act="submit-payment" data-id="{{item.settlementId}}" bindtap="onSubmitPayment">记录</view>
+          </view>
+        </block>
+      </view>
+      <view wx:if="{{!settlements.length}}" class="hint">还没有结算版本</view>
+      <view wx:if="{{settlementHint}}" class="hint">{{settlementHint}}</view>
+      <view class="btn" data-act="create-settlement" bindtap="onCreateSettlement">生成结算版本</view>
+    </view>
+
+    <!-- ── 对客投影预览 ───────────────────────────────────────────── -->
+    <view wx:if="{{customerView}}" class="card">
+      <view class="card-title">客户视图（{{customerView.versionText}}）</view>
+      <view class="hint">{{customerViewHint}}</view>
+      <view class="row">
+        <text class="row-k">对客合计</text>
+        <text class="row-v strong">{{customerView.totalText}} {{customerView.currency}}</text>
+        <text class="row-sub">{{customerView.decisionText}}</text>
+      </view>
+      <view class="row" wx:for="{{customerView.lines}}" wx:key="key">
+        <text class="row-k">{{item.chargeKind}}</text>
+        <text class="row-v">{{item.amountText}} {{item.currency}}</text>
+        <text class="row-sub">依据：{{item.basis}}</text>
+      </view>
+    </view>
+    <view wx:elif="{{customerViewHint}}" class="card">
+      <view class="hint">{{customerViewHint}}</view>
+    </view>
+  </block>
+</view>

@@ -273,7 +273,12 @@ const ENTRUST_PAGES = [
   // S1 工作项 5：「我的委托」（货主侧状态屏）。它从 utils/entrust 解构导入 5 个成员，
   // 列进来才会被下面那三项现成检查扫到：解构的每个成员都被导出、已在 app.json 注册、
   // 模板里的类名都有定义 —— 这三件漏掉都不报错，只是静默不生效。
-  'pages/entrust/assignments/assignments'
+  'pages/entrust/assignments/assignments',
+  // §10.1 第 10–11 步（S7-1 / S7-2 / S7-3 的界面入口）—— 裁定 Q4=A 要求这三步
+  // **经现有产品界面演示**。本页从 utils/entrust 解构导入 20 余个成员，
+  // 列进来才会被下面那三项现成检查扫到：解构的每个成员都被导出、已在 app.json 注册、
+  // 模板里的类名都有定义 —— 这三件漏掉都不报错，只是静默不生效。
+  'pages/entrust/finance/finance'
 ]
 
 /**
@@ -294,6 +299,7 @@ const PAGE_CSS_CHECKS = [
   { path: 'pages/entrust/session/session', knownEmpty: [] },
   { path: 'pages/entrust/intake/intake', knownEmpty: [] },
   { path: 'pages/entrust/assignments/assignments', knownEmpty: [] },
+  { path: 'pages/entrust/finance/finance', knownEmpty: [] },
   { path: 'pages/mine/mine', knownEmpty: ['nav', 'bell-icon', 'role-chip-label'] }
 ]
 
@@ -3019,6 +3025,46 @@ const detailTpl = read(path.join(MINI, 'pages/entrust/detail/detail.wxml'))
   check(`[计划] 模板 detail.wxml 里有行锚点 ${attr}`, detailTpl.indexOf(attr) !== -1)
 })
 
+// ── 截断可观测（开放项 O-9，2026-09-18 裁定）────────────────────
+//
+// `plan.task_prerequisites` 是**有界**读（`plan.TASK_LIMIT`）。被截时若响应里不留痕迹，
+// "某条任务的前置指向没读回来的那一行"就显示成「前置：任务 #99」——
+// 而上面刚好证明过：这句话与"本单真的没有前置"在投影里本来就长得不一样、
+// 但在**没有 total 的响应**里它们无法被区分。所以这里钉的是：
+// "被截"必须作为**上游给出的事实**进入投影，并且**能显示出来**。
+const planTrunc = E.decorateAssignmentPlan({
+  assignment_id: 8,
+  legs: [],
+  task_prerequisites: [
+    { task_id: 21, task_type: 'quote', title: '报价', status: 'pending',
+      precondition_task_id: null },
+  ],
+  task_prerequisites_total: 137,
+  task_prerequisites_truncated: true,
+})
+
+check('[计划·O-9] 被截 ⇒ 投影里带截断事实与一句可显示的话（含"共多少条"）',
+  planTrunc.tasksTruncated === true && /137/.test(planTrunc.tasksTruncatedText),
+  '实际 ' + JSON.stringify([planTrunc.tasksTruncated, planTrunc.tasksTruncatedText]))
+
+check('[计划·O-9] 没被截 ⇒ **不**说废话（文案是空串，不显示"共 N 条"这种噪音）',
+  planProj.tasksTruncated === false && planProj.tasksTruncatedText === '',
+  '实际 ' + JSON.stringify([planProj.tasksTruncated, planProj.tasksTruncatedText]))
+
+check('[计划·O-9] 服务端没给 total 时退回"行数即总数"，且**非布尔真值不算被截**' +
+  '（`' + "'yes'" + '` 这类真值若被当"有截断"，就等于把判据交给了取值形态）',
+  E.decorateAssignmentPlan({
+    task_prerequisites: [{ task_id: 1, title: 'x', status: 'pending', precondition_task_id: null }],
+  }).tasksTruncated === false &&
+    E.decorateAssignmentPlan({
+      task_prerequisites: [{ task_id: 1, title: 'x', status: 'pending', precondition_task_id: null }],
+      task_prerequisites_truncated: 'yes',
+    }).tasksTruncated === false)
+
+check('[计划·O-9] 模板 detail.wxml 里有这条提示的锚点与文案位',
+  detailTpl.indexOf('data-plan-truncated') !== -1 &&
+    detailTpl.indexOf('plan.tasksTruncatedText') !== -1)
+
 // ─────────────────────────────────────────────────────────────
 // 14. 航段命令的写侧（建段 / 改段留版本 / 版本历史 —— §10.1 第 4 步）
 //
@@ -3385,6 +3431,208 @@ check('[装饰契约] 成果页的版本行必须**按本成果过滤**（`relea
   /releasedRevisionFor\(list,\s*artifact/.test(
     fs.readFileSync(path.join(REPO, 'miniapp/pages/entrust/artifact/artifact.js'), 'utf8')),
   'artifact.js 里的调用形态')
+
+// ---- 委托货量变更：投影行为（S6-1 / D1-09 / §10.1 第 8 步）----------------
+//
+// 这一节守的是**界面上的那条对照**：`800.000 吨 → 950.000 吨`。
+// D1-09 要看的正是它 —— 而它有三个容易悄悄坏掉的地方：
+//
+//   ① 文案由前端自己拼（`数值 + ' ' + 单位`）⇒ 与别处漂移成两种写法；
+//   ② 旧值未知时被当成 0 ⇒ 历史看起来像"从 0 涨到 950"（编出来的一个事实）；
+//   ③ 「本委托货量」没进候选 / 没排在最前 ⇒ 选不到真正的变更落点。
+//
+// ⚠️ 判据落在**投影后的产物**上（`changeText` / `oldQuantityText` / 候选行的
+//    `target_kind`），不落在"函数里有没有那一行代码"上 —— 后者一重构就漂。
+
+// 一行**真实的 API 原文**（`GET /assignments/{id}/quantity-changes` 的 items[0]）
+const qtyChangeRaw = {
+  change_id: 4,
+  assignment_id: 3,
+  exception_id: 12,
+  base_revision: 5,
+  old_quantity: '800.000',
+  old_quantity_unit: '吨',
+  new_quantity: '950.000',
+  new_quantity_unit: '吨',
+  old_quantity_text: '800.000 吨',
+  new_quantity_text: '950.000 吨',
+  basis: '客户加货',
+  applied_by: 900,
+  applied_at: '2026-09-18 09:00:00'
+}
+const qtyDec = E.decorateQuantityChange(qtyChangeRaw)
+check('[货量变更投影] 一行就是那条对照（`800.000 吨 → 950.000 吨`）',
+  qtyDec.changeText === '800.000 吨 → 950.000 吨',
+  'changeText=' + JSON.stringify(qtyDec.changeText))
+check('[货量变更投影] 原值与文案**都给**（界面显示文案、程序比对用原值）',
+  qtyDec.oldQuantity === '800.000' && qtyDec.newQuantity === '950.000' &&
+    qtyDec.oldQuantityText === '800.000 吨',
+  'raw=' + JSON.stringify([qtyDec.oldQuantity, qtyDec.newQuantity]))
+check('[货量变更投影] 文案直接取**服务端**那一份（前端不拼 `数值 + 单位`）'
+  + '（各拼一份必然漂移成"历史里 800 吨、别处 800.000吨"）',
+  qtyDec.newQuantityText === qtyChangeRaw.new_quantity_text,
+  'newQuantityText=' + JSON.stringify(qtyDec.newQuantityText))
+check('[货量变更投影] 来源案件号必须带上（"这一改是谁批的"要能顺回去）',
+  // ⚠️ `_sid` 一律返回**字符串**（与"dataset 过来的状态键恒字符串"同一口径），
+  //    所以这里比的是 `'12'` 而不是 `12` —— 比错了会是一条**恒假**的断言。
+  qtyDec.sourceText.indexOf('#12') !== -1 && String(qtyDec.exceptionId) === '12',
+  'sourceText=' + JSON.stringify(qtyDec.sourceText) +
+  ' exceptionId=' + JSON.stringify(qtyDec.exceptionId))
+
+// ⭐ 旧值**未知保持未知**：从 NULL 改成确定值是合法变更，
+//    把它当成 0 会让历史显示"从 0 涨到 950" —— 那是编出来的一个事实。
+const qtyUnknown = E.decorateQuantityChange({
+  change_id: 5,
+  assignment_id: 3,
+  exception_id: 13,
+  base_revision: 6,
+  old_quantity: null,
+  old_quantity_unit: null,
+  new_quantity: '950.000',
+  new_quantity_unit: '吨',
+  old_quantity_text: '未知',
+  new_quantity_text: '950.000 吨',
+  basis: '',
+  applied_by: null,
+  applied_at: ''
+})
+check('[货量变更投影] 旧值未知 ⇒ 显示「未知」，**不得**显示成 0',
+  // ⚠️ 判据用**全等**而不是 `indexOf('0.000') === -1`：
+  //    新值 `950.000` 本身就含 `0.000`，那种写法是一条**恒假**的断言
+  //    （本轮实测踩到 —— 断言写错的表现是"改对了依然红"）。
+  qtyUnknown.oldQuantityText === '未知' &&
+    qtyUnknown.oldQuantity === '' &&
+    qtyUnknown.changeText === '未知 → 950.000 吨',
+  'oldQuantityText=' + JSON.stringify(qtyUnknown.oldQuantityText) +
+  ' changeText=' + JSON.stringify(qtyUnknown.changeText))
+check('[货量变更投影] 没写依据时说「未写依据」而不是留空（空行看起来像排版坏了）',
+  qtyUnknown.basisText === '未写依据',
+  'basisText=' + JSON.stringify(qtyUnknown.basisText))
+check('[货量变更投影] 空清单 ⇒ 空数组（"这单没改过货量"与"读失败"由页面分开说）',
+  Array.isArray(E.decorateQuantityChangeList([])) &&
+    E.decorateQuantityChangeList([]).length === 0 &&
+    E.decorateQuantityChangeList(null).length === 0,
+  'empty ok')
+
+// ⭐ 上一条**单靠取值比不出来**：服务端那份文案恰好等于"数值 + 空格 + 单位"时，
+//    前端自己拼一遍也能通过（反向自证实测：注入拼接后门禁仍是绿的）。
+//    ⇒ 再加一条**行为上可判定**的：有数、单位未知时，拼接会多出空格或 `null`，
+//      而服务端给的是**剥掉空白**的那一份。这一格就是"直通 vs 自己拼"的分水岭。
+const qtyNoUnit = E.decorateQuantityChange({
+  change_id: 6,
+  assignment_id: 3,
+  exception_id: 14,
+  base_revision: 7,
+  old_quantity: '800.000',
+  old_quantity_unit: null,
+  new_quantity: '950.000',
+  new_quantity_unit: '吨',
+  old_quantity_text: '800.000',
+  new_quantity_text: '950.000 吨',
+  basis: '口径修正',
+  applied_by: 900,
+  applied_at: '2026-09-18 09:30:00'
+})
+check('[货量变更投影] 单位缺失（历史行可为 NULL）⇒ 文案取服务端那一份，'
+  + '拼接会多出空格或 `null`',
+  qtyNoUnit.oldQuantityText === '800.000' && qtyNoUnit.changeText === '800.000 → 950.000 吨',
+  'oldQuantityText=' + JSON.stringify(qtyNoUnit.oldQuantityText) +
+  ' changeText=' + JSON.stringify(qtyNoUnit.changeText))
+
+// 另一条同样可判定的：**投影层不得再拼「数值 + 单位」**。
+// 判据落在这两个文案字段的**赋值形态**上（是否为裸标识符）——
+// 这是本仓对"同一事实只能有一份实现"已有的做法（见成果页那条 `releasedRevisionFor` 的形态检查）。
+const entrustSrc = fs.readFileSync(path.join(REPO, 'miniapp/utils/entrust.js'), 'utf8')
+const qtyProjBlock = entrustSrc.slice(
+  entrustSrc.indexOf('function decorateQuantityChange('),
+  entrustSrc.indexOf('function decorateQuantityChangeList(')
+)
+check('[货量变更投影] 两个文案字段**直通**服务端（投影层不得出现「数值 + 空格 + 单位」的拼接）',
+  qtyProjBlock.length > 0 &&
+    /newQuantityText:\s*\w+\s*,/.test(qtyProjBlock) &&
+    !/\+\s*'\s'\s*\+/.test(qtyProjBlock),
+  'block=' + qtyProjBlock.length + ' 有拼接=' + /\+\s*'\s'\s*\+/.test(qtyProjBlock))
+
+// ── 受影响项候选：「本委托货量」必须进候选、且排在**最前** ──────────────
+const candWithSelf = E.decorateCaseLinkTargets(
+  { items: [{ task_id: 1, task_type: 'quote', title: '报价' }] },
+  { items: [{ artifact_id: 2, artifact_type: 'customer_quote' }] },
+  [],
+  { assignment_id: 3, quantityText: '800.000 吨' }
+)
+check('[货量候选] 传了委托 ⇒ 候选里出现「本委托货量」，且 `target_kind` 是 `assignment`',
+  candWithSelf.length === 3 && candWithSelf[0].target_kind === 'assignment' &&
+    candWithSelf[0].target_id === '3',
+  'rows=' + JSON.stringify(candWithSelf.map((r) => r.target_kind)))
+check('[货量候选] 它排在**最前**（混在成果堆里会让人以为在改某一版报价）',
+  candWithSelf[0].text.indexOf('本委托货量') === 0,
+  'first=' + JSON.stringify(candWithSelf[0].text))
+check('[货量候选] 副标题带上**服务端给的**当前货量（未知就说未知，不显示 0）',
+  candWithSelf[0].sub.indexOf('800.000 吨') !== -1,
+  'sub=' + JSON.stringify(candWithSelf[0].sub))
+const candWithoutSelf = E.decorateCaseLinkTargets({ items: [] }, { items: [] }, [], null)
+check('[货量候选] 没拿到委托详情时**不产出**这一行（给一个点不动的候选比不给更糟）',
+  candWithoutSelf.length === 0,
+  'rows=' + candWithoutSelf.length)
+
+// ── 页面 data 与模板的接线 ───────────────────────────────────────────────
+// ⚠️ 变量名带 `Qty` 后缀：本节上面已有一份 `caseJs`（另一个用途），
+//    重名会直接 SyntaxError —— 顶层的 `const` 是同一个作用域。
+const caseJsQty = fs.readFileSync(path.join(REPO, 'miniapp/pages/entrust/case/case.js'), 'utf8')
+const caseTplQty = fs.readFileSync(path.join(REPO, 'miniapp/pages/entrust/case/case.wxml'), 'utf8')
+check('[货量接线] 案件页取数时**登记**了货量变更历史（否则卡片恒空）',
+  caseJsQty.indexOf('fetchQuantityChanges') !== -1 &&
+    caseJsQty.indexOf('decorateQuantityChangeList') !== -1,
+  'case.js 取数与投影')
+check('[货量接线] 读失败**必须**与"空列表"分开说（空列表的语义是"从没改过"）',
+  caseJsQty.indexOf('货量变更历史未能读取') !== -1,
+  'case.js 失败分支')
+check('[货量接线] 模板里有货量变更卡与三只输入框的锚点',
+  ['qty-list', 'qty-main', 'data-df="qty"', 'data-df="qty-unit"', 'data-df="qty-basis"']
+    .every(function (s) { return caseTplQty.indexOf(s) !== -1 }),
+  'case.wxml 锚点')
+check('[货量接线] 只在**已批准**分支里出现货量输入（驳回不该能改货量）',
+  /showQuantityChange\s*&&\s*decideForm\.to\s*===\s*'approved'/.test(caseTplQty),
+  '模板条件')
+check('[货量接线] 提交决定时把变更内容并进 `approved_changes`，键是 `assignment#<id>`',
+  /approvedChanges\['assignment#'\s*\+\s*targetId\]/.test(caseJsQty),
+  'case.js 组装')
+check('[货量接线] 应用确认里显示 `当前 → 将改为`（apply 不给人改写的机会，更不能盲点）',
+  caseTplQty.indexOf('quantityChangeText') !== -1 &&
+    caseTplQty.indexOf('quantityBasisText') !== -1,
+  'case.wxml 应用区')
+
+// ── 变更类别：「批准时补登」的唯一界面入口（A2 五之二）─────────────────────
+//
+// 应用变更**要求**类别已登记。而登记页此前没有类别选择器、本页也没有 ——
+// ⇒ 变更请求在界面上**根本应用不了**（类别只能靠种子或接口写进去）。
+// 这不是"少一个输入框"，是整条链路在界面上断掉。
+check('[变更类别] `caseCategoryOptions` 只给变更请求选项（异常案件带类别会 400）',
+  E.caseCategoryOptions('change_request').length === 5 &&
+    E.caseCategoryOptions('exception').length === 0 &&
+    E.caseCategoryOptions('').length === 0,
+  'change_request=' + E.caseCategoryOptions('change_request').length +
+  ' exception=' + E.caseCategoryOptions('exception').length)
+check('[变更类别] 五个取值与服务端 `revalidation.CHANGE_CATEGORIES` 逐格对齐',
+  (function () {
+    const src = fs.readFileSync(
+      path.join(REPO, 'backend/app/modules/entrust/revalidation.py'), 'utf8')
+    const got = E.caseCategoryOptions('change_request').map(function (o) { return o.key }).sort()
+    return got.length === 5 && got.every(function (k) { return src.indexOf('"' + k + '"') !== -1 })
+  })(),
+  JSON.stringify(E.caseCategoryOptions('change_request').map(function (o) { return o.key })))
+check('[变更类别] 案件页模板里有选择条与它的 tap 锚点',
+  caseTplQty.indexOf('data-cat=') !== -1 && caseTplQty.indexOf('onPickCategory') !== -1,
+  'case.wxml 选择条')
+check('[变更类别] 提交决定时把它并进 body（只在变更请求上，且只回传非空值）',
+  /body\.change_category\s*=\s*cat/.test(caseJsQty) &&
+    /this\.data\.kind\s*===\s*'change_request'/.test(caseJsQty),
+  'case.js 组装')
+check('[变更类别] 「货量输入框要不要出现」只有**一处**判据（`quantityVisibility`）'
+  + '（三处各写一份 `&&`，迟早有一处漏改 ⇒ 选了类别但输入框不出现）',
+  (caseJsQty.match(/quantityVisibility\(/g) || []).length >= 3 &&
+    caseJsQty.indexOf('cargo_quantity_category') !== -1,
+  'quantityVisibility 调用数=' + (caseJsQty.match(/quantityVisibility\(/g) || []).length)
 
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)

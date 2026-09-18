@@ -351,6 +351,16 @@
   border-top: 1rpx solid #E6ECF5;
 }
 
+/* 货量变更的「当前 → 将改为」。
+   它是这一块里**唯一**显示具体值的一行（其余目标只列字段名）——
+   因为这一类的值就是两个标量，而点确认之前必须看得见它；
+   颜色用正文色而不是 `.apply-sub` 的灰，是为了让它读起来像结论、不像附注。 */
+.apply-qty {
+  margin-top: 6rpx;
+  color: #0F2540;
+  font-weight: 600;
+}
+
 /* 取消按钮与「确认应用」分开：两个都是宽按钮，只有取消是虚线的，
    避免在误触时把"取消"当成确认（它们是相邻的整宽元素）。 */
 .act-btn-ghost {
@@ -398,6 +408,39 @@
   font-size: 24rpx;
   color: #8A5A00;
   line-height: 1.7;
+}
+
+/* ── 本委托货量变更历史（S6-1 / D1-09）────────────────────────────────
+   `changeText`（`800.000 吨 → 950.000 吨`）是这一块的主句：它是判据要看的
+   那条**对照**，所以给正文色与加粗；来源、时间、依据退成附注。 */
+.qty-list {
+  margin-top: 14rpx;
+}
+
+.qty-item {
+  margin-top: 14rpx;
+  padding-top: 14rpx;
+  border-top: 1rpx solid #E6ECF5;
+}
+
+.qty-item:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.qty-main {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #0F2540;
+  line-height: 1.6;
+}
+
+.qty-sub {
+  margin-top: 4rpx;
+  font-size: 23rpx;
+  color: #98A6B8;
+  line-height: 1.6;
 }
 
 /* ---- 本页 hover 反馈 ----

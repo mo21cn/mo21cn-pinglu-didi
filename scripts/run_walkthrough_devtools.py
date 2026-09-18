@@ -131,6 +131,7 @@ class Env:
         self.section = args.section
         self.pay = args.pay
         self.keep_db = args.keep_db
+        self.extra_seeds = getattr(args, "extra_seeds", "") or ""
 
     def _default_python(self) -> Path:
         cand = self.repo / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -540,6 +541,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ide", default=None, help="微信开发者工具可执行文件路径")
     parser.add_argument("--python", default=None, help="后端解释器（默认 repo/.venv）")
     parser.add_argument("--keep-db", action="store_true", help="跑完保留临时库（便于事后查数据）")
+    parser.add_argument(
+        "--extra-seeds",
+        default="",
+        help=(
+            "额外种子（逗号分隔的文件名，须在 backend/scripts/ 下），在固定顺序的种子之后铺。"
+            "用于「按需夹具」—— 例如 ㊾ 章要的 `seed_entrust_contract_flow.py`（它依赖 canonical）。"
+            "默认空 ⇒ 行为与从前完全一致（不进固定顺序，避免扰动其它章节的基线）"
+        ),
+    )
     parser.add_argument("--skip-ide", action="store_true", help="只起后端跑走查（IDE 已在跑时用）")
     parser.add_argument(
         "--kill-all-ide",
@@ -623,6 +633,16 @@ def main(argv: list[str] | None = None) -> int:
                 rc |= run_step(
                     env, [str(env.python), str(Path("scripts") / name)], name.removesuffix(".py")
                 ).returncode
+        # ⭐ 额外种子（`--extra-seeds`）：给「按需夹具」用 —— 它们**不进**固定顺序，
+        #    免得为跑某一章而扰动所有章节的基线；但某一章确实依赖它们时，得有一条
+        #    显式通路（此前只能在标准配方下看到 `FAIL: … 前置 …`，看起来像产品坏了）。
+        for name in [x.strip() for x in (env.extra_seeds or "").split(",") if x.strip()]:
+            if not (env.backend / "scripts" / name).exists():
+                log(f"    ⚠️ 额外种子不存在：{name}")
+                continue
+            rc |= run_step(
+                env, [str(env.python), str(Path("scripts") / name)], name.removesuffix(".py")
+            ).returncode
         if rc:
             log("种子阶段失败，终止")
             return 1

@@ -115,6 +115,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
+from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wechatide_client import DEFAULT_CLIENT, Client  # noqa: E402
@@ -1010,9 +1012,25 @@ class Walker:
 
         旧脚本用 `tapAt(page, '.role-card', 0|1)` 按序号点；工具无 index 参数，
         但身份卡带 `data-role` → 用属性选择器精确命中（等价且更明确）。
+
+        ⚠️ **先等身份卡真的在渲染树上，再点**（2026-09-18 O-8 定向验证的结论）。
+        `reLaunch` 是异步的：`current_path()` 已经报 `pages/index/index`，
+        而**渲染树里那张卡可能还没建出来**，此时 `tap` 是**静默落空**的 ——
+        接着就是等 `want` 等到超时，读数写成
+        `未进入货主工作台（pages/index/index）`，看起来像"权限/入口坏了"。
+        同一次运行里换个配方又全绿，说明这是**就绪读数**问题，不是业务缺陷。
+        ⇒ 与 `login_as` 里"未命中就补发一次 `reLaunch`"是同一手法：
+        把"没就绪"变成**可重试的条件**，而不是加固定等待（加 sleep 只会掩盖它）。
         """
-        self.c.tap(f'[data-role="{role}"]')
-        return self.c.wait_path(want, tries)
+        for _attempt in range(2):
+            for _ in range(20):
+                if self.c.count(f'[data-role="{role}"]') > 0:
+                    break
+                time.sleep(0.5)
+            self.c.tap(f'[data-role="{role}"]')
+            if self.c.wait_path(want, tries):
+                return True
+        return self.c.current_path() == want
 
     def wait_data(self, pred, tries: int = 20, gap: float = 0.4) -> dict:
         """轮询页面 data 直到满足条件（页面渲染是异步的，固定 sleep 不可靠）。"""
@@ -1081,6 +1099,36 @@ class Walker:
         val = self.c.evaluate("function(){return wx.getWindowInfo().windowHeight;}")
         return float(val) if isinstance(val, (int, float)) else 0.0
 
+    def wait_mine_ready(
+        self, tries: int = 40, gap: float = 0.5
+    ) -> tuple[str, dict, list[str], bool]:
+        """等「我的」页**就绪**：返回 `(path, page_data, 键名集合, 是否读到过 showEntrust)`。
+
+        为什么返回值这么啰嗦：这条前置在 O-8 那一族里**反复以 `showEntrust=None`
+        出现在读数里**，而 `None` 同时对应两种完全不同的情形 ——
+
+        1. 我们**根本还没停在「我的」页**（`switchTab` 没落地、页面没建出来）；
+        2. 页面在了、数据也取回来了，但它**没有产出 `showEntrust` 这个键**
+           （那是产品问题，不是"没等到"）。
+
+        只报一个 `None` 会把二者糊成一句，于是每次都要重新猜一遍。所以这里把
+        `path` 与**页面数据的键名集合**一起带出来 —— 读到哪个集合，一眼能分辨。
+        ⛔ 判据不放松：调用方仍按 `is True` 判定"入口可见"，`None` 与 `False` 都算不通过
+        （差别只在于读数说清了是哪一种）。
+        """
+        path = ""
+        data: dict = {}
+        saw_key = False
+        for _ in range(tries):
+            path = self.c.current_path()
+            data = self.c.page_data() or {}
+            if "showEntrust" in data:
+                saw_key = True
+                if data.get("showEntrust") is not None:
+                    break
+            time.sleep(gap)
+        return path, data, sorted(data.keys()), saw_key
+
     def open_workbench(self, code: str, tag: str = "⑯") -> bool:
         """登录指定身份 → 「我的」页委托入口 → 经理工作台（⑯ 章前置）。
 
@@ -1108,22 +1156,49 @@ class Walker:
         #    ⚠️ 轮询只让读数可靠，**不放松判据**：下面照样断言 `is True`，
         #    `None` 与 `False` 都会失败（差别只是"没读到"与"读到了但没有"）。
         mine: dict = {}
-        for _ in range(40):
-            mine = self.c.page_data()
-            if mine.get("showEntrust") is not None:
-                break
-            time.sleep(0.5)
+        path_mine, mine, keys_mine, saw_key = self.wait_mine_ready()
         # 入口是否可见由服务端决定 —— 这也是在验「我的」页的权限投影
         if not self.rep.rec(
             f"{tag} [{code}] 「我的」页委托入口可见（服务端放行）",
             mine.get("showEntrust") is True,
-            f"showEntrust={mine.get('showEntrust')}",
+            f"showEntrust={mine.get('showEntrust')!r} path={path_mine} "
+            f"页面数据键 {len(keys_mine)} 个{keys_mine[:12]}"
+            + (
+                ""
+                if saw_key
+                else "（**超时前一次都没读到 showEntrust 这个键** ⇒ 先查是不是没停在「我的」页、"
+                "页面有没有取到数，别把它读成「这个身份没有入口」）"
+            ),
         ):
             return False
         self.c.tap(".entrust-entry")
-        time.sleep(5)
-        path2 = self.c.current_path()
-        return self.rep.rec(f"{tag} [{code}] 点击入口进入经理工作台", path2 == WORKBENCH, path2)
+        # ⚠️ 不 `sleep(N)` 之后读数一次：实测这条路会在**单次读数**里拿到**空串**
+        #    （自动化层还没把新页面栈报回来），于是"点了但还没跳完"被记成
+        #    "没进工作台"，并把整节推成 `NOT_RUN` —— O-8 那一族里最贵的一类假红。
+        #    改成轮询到 path 有值再判，并把两种情形分开写在读数里：
+        #    `path` 为空 ⇒ 读不到页面栈（自动化层的读数问题）；
+        #    `path` 是别的页 ⇒ 真的没跳过去（那才是产品/入口问题）。
+        paths: list[str] = []
+        path2 = ""
+        for _ in range(30):
+            path2 = self.c.current_path()
+            if path2:
+                if not paths or paths[-1] != path2:
+                    paths.append(path2)
+                if path2 == WORKBENCH:
+                    break
+            time.sleep(0.5)
+        return self.rep.rec(
+            f"{tag} [{code}] 点击入口进入经理工作台",
+            path2 == WORKBENCH,
+            f"path={path2!r} 读到过={paths[-4:]}"
+            + (
+                ""
+                if path2
+                else "（**整整一轮都没读到页面栈** ⇒ 先按自动化层读数问题查，"
+                "别读成「入口点了没反应」）"
+            ),
+        )
 
     def reenter_workbench(self) -> str:
         """不重新登录，直接再进工作台 —— 验「上次选择是否被沿用」。"""
@@ -3990,14 +4065,19 @@ def sec_33(w: Walker) -> None:
 
     # switchTab 到「我的」只是**前置**（tabBar 页无深链入口），真正的入口是被点击的 `.entrust-entry`
     w.c.nav("switchTab", "/" + MINE, MINE)
-    time.sleep(2.2)
-    mine = w.c.page_data()
+    path_mine, mine, keys_mine, saw_key = w.wait_mine_ready()
     n_entry = w.c.count(".entrust-entry")
     if mine.get("showEntrust") is not True or n_entry != 1:
         w.rep.not_run(
             "㉝ 第三节前置 · 「我的」页委托入口不可见 ⇒ 真实入口链走不下去",
-            f"showEntrust={mine.get('showEntrust')} n_entry={n_entry}"
-            "（该身份没有委托入口；本节五类路径都要靠它）",
+            f"showEntrust={mine.get('showEntrust')!r} n_entry={n_entry} path={path_mine} "
+            f"页面数据键 {len(keys_mine)} 个{keys_mine[:12]}"
+            + (
+                ""
+                if saw_key
+                else "（**超时前一次都没读到 showEntrust 这个键** ⇒ 先查是否停在「我的」页、"
+                "页面有没有取到数，再谈「这个身份没有委托入口」）"
+            ),
         )
         return
     before = len(w.c.page_stack())
@@ -9710,35 +9790,132 @@ def sec_49(w: Walker) -> None:
     srv_sig = api_get(f"/entrust/contracts/{cart}/signature-evidence", tok) or {}
     n_row = w.c.count(".sig-row")
     first_row = w.c.outer_wxml(".sig-row")
-    w.rep.rec(
-        "㊾ ⑧ 经**界面**记一条签署证据：页面出现一行，且**绑的是版本**"
-        "（「第 1 版」）+ 形态 + 样件标注；与服务端同源",
-        len(items) == len(srv_sig.get("items") or [])
+    sig_srv = srv_sig.get("items") or []
+    sig_ok = (
+        len(items) == len(sig_srv)
         and n_row == len(items)
         and "第 1 版" in first_row
         and "样件扫描件" in first_row
-        and "样件标注" in first_row,
-        f"页面={len(items)} 服务端={len(srv_sig.get('items') or [])} 行={n_row} "
-        f"首行={first_row[:160]!r}",
+        and "样件标注" in first_row
+    )
+    # ⭐ O-8 归因（2026-09-18）：本条在**组合配方**（43,44,48,49）下曾 FAIL 而单跑全绿。
+    #    纪律是「沿真实调用链取页面 view 与 console 原文」——
+    #    ⛔ 不靠加等待/重跑刷绿灯，也不把"疑似 reload 失败"当成结论写出去。
+    #    诊断**只在失败时**拼进 note（成功时零噪音，且**不增加断言数**）。
+    diag = ""
+    if not sig_ok:
+        try:
+            pdump = w.c.page_data() or {}
+            contract = pdump.get("contract")
+            hints = {
+                k: pdump.get(k)
+                for k in ("contractHint", "sigHint", "sigOpen", "loadError", "err")
+                if k in pdump
+            }
+            sub = sorted(contract.keys()) if isinstance(contract, dict) else repr(contract)
+            diag = (
+                f"｜诊断 path={w.c.current_path()}"
+                f"｜page_data 顶层键={sorted(pdump.keys())}"
+                f"｜contract 子树={sub}"
+                f"｜hint 类键={hints}"
+                f"｜console 尾部={(w.c.errors() or '')[-240:]!r}"
+                f"｜.contract-card={(w.c.outer_wxml('.contract-card') or '')[:240]!r}"
+            )
+        except Exception as exc:  # 诊断本身失败不能让这一格变成"脚本坏了"
+            diag = f"｜诊断采集失败：{exc!r}"
+    w.rep.rec(
+        "㊾ ⑧ 经**界面**记一条签署证据：页面出现一行，且**绑的是版本**"
+        "（「第 1 版」）+ 形态 + 样件标注；与服务端同源",
+        sig_ok,
+        f"页面={len(items)} 服务端={len(sig_srv)} 行={n_row} 首行={first_row[:160]!r}" + diag,
     )
 
     # ⑥ 同形态再记一次 ⇒ 页内说清"已经记过"（409 的语义，不是静默失败）
+    #
+    # ⚠️ **这一格必须能区分两种情形**（2026-09-18 O-8 定向验证的结论）：
+    #   (a) 提交真的发生了、但页内没给提示； (b) 提交**根本没发生**（tap 落空）。
+    #   两者都表现为 `sigHint=''` ＋ 条数不变 —— 只断言 hint 的话，判据分不出
+    #   "产品没提示"与"工具没点到"，而这两种结论指向完全不同的下一步。
+    #   ⇒ 先确认**提交键在渲染树上**（`count > 0`，tap 才有落点），点完若仍无提示
+    #     就**补点一次**（与 `login_as` 补发 reLaunch、`enter_role` 先等卡片是同一手法），
+    #     并把"点击时到底有没有落点"记进读数 —— 加固定等待只会把 (b) 也等成绿灯。
     n_before = len(items)
+    tap_landed = False
+    probe = ""
+    d: dict = {}
+    open_tries = 0
+    opened = False
     if w.c.count('[data-act-sig-open="1"]'):
-        w.c.scroll_into('[data-act-sig-open="1"]')
-        w.c.tap('[data-act-sig-open="1"]')
-        d = w.wait_data(lambda x: x.get("sigOpen") is True, tries=20, gap=0.3)
-        w.c.scroll_into('[data-act-sig-kind="sample_scan"]')
-        w.c.tap('[data-act-sig-kind="sample_scan"]')
-        w.c.scroll_into('[data-act-sig-submit="1"]')
-        w.c.tap('[data-act-sig-submit="1"]')
-        d = w.wait_data(lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4)
+        # ⚠️ 这个锚点是**开关**，不是"展开键"：`detail.js` 的 `onToggleSig` 是
+        #    `sigOpen: !this.data.sigOpen`，同一个锚点在展开时显示「取消」。
+        #    ⇒ **盲点一下在已经展开时会把它收起来**，接下来 `[data-act-sig-kind]`
+        #    与 `[data-act-sig-submit]` 全都不在树上，读数表现为
+        #    `sigOpen=False / 提交键没落点` —— 看起来像"页面没给提示"。
+        #    正确做法是**先读状态再点**（人也是先看标签），并把"点了几次才展开"记进读数：
+        #    需要多于 1 次 ⇒ 说明点击有落空，那是走查侧的问题；一次都展开不了 ⇒ 才查页面。
+        for _ in range(3):
+            if (w.c.page_data() or {}).get("sigOpen") is True:
+                opened = True
+                break
+            open_tries += 1
+            w.c.scroll_into('[data-act-sig-open="1"]')
+            w.c.tap('[data-act-sig-open="1"]')
+            for _ in range(16):
+                if (w.c.page_data() or {}).get("sigOpen") is True:
+                    opened = True
+                    break
+                time.sleep(0.3)
+            if opened:
+                break
+        if opened:
+            w.c.scroll_into('[data-act-sig-kind="sample_scan"]')
+            w.c.tap('[data-act-sig-kind="sample_scan"]')
+            for _attempt in range(2):
+                has_btn = w.c.count('[data-act-sig-submit="1"]') > 0
+                if not has_btn:
+                    time.sleep(0.6)
+                    continue
+                tap_landed = True
+                w.c.scroll_into('[data-act-sig-submit="1"]')
+                w.c.tap('[data-act-sig-submit="1"]')
+                d = w.wait_data(
+                    lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4
+                )
+                if "已经记过" in str(d.get("sigHint") or ""):
+                    break
+    if not tap_landed:
+        # ⚠️ 找不到提交键时**把"为什么"直接打出来**，不要只报"没落点"：
+        #    提交键的渲染条件是 `canDeriveContract && contract && sigOpen`
+        #    （`detail.wxml`：`.contract-card` → `wx:if="{{contract}}"` → `wx:if="{{sigOpen}}"`），
+        #    这几个值里任何一个不成立都表现为"键不在树上"，而它们指向完全不同的排查方向。
+        #    再附一段卡片原文，连"模板改了属性名"这种也一并排除。
+        snap = w.c.page_data()
+        sig = snap.get("sig") or {}
+        probe = (
+            f"｜探针 sigOpen={snap.get('sigOpen')} 表单展开={opened}（点了 {open_tries} 次）"
+            f" contract={bool(snap.get('contract'))} "
+            f"canDeriveContract={snap.get('canDeriveContract')} sig.hasItems={sig.get('hasItems')}"
+            f"；卡片原文={w.c.outer_wxml('.contract-card')[:220]!r}"
+        )
+    if not d:
+        # ⚠️ 一次都没点到 ⇒ `d` 还是空字典，直接 `len(d["sig"]["items"])` 会得到 **0**，
+        #    读成"条数从 1 掉到 0"（看起来像"证据被删了"）。这里补一次真实读数，
+        #    让"条数"这一列始终是**页面上的实际条数**，而不是"我们有没有取到数"。
+        d = w.c.page_data()
     n_after = len((d.get("sig") or {}).get("items") or [])
     w.rep.rec(
         "㊾ ⑨ 同一版同一形态**再记一次** ⇒ 页内说清「已经记过」（服务端 409 的语义，"
         "不是静默失败，也没有记成两条互相打架的证据）",
         "已经记过" in str(d.get("sigHint") or "") and n_after == n_before,
-        f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after}",
+        f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after} "
+        f"表单展开={opened}（点了 {open_tries} 次）提交键有落点={tap_landed}"
+        + (
+            ""
+            if tap_landed
+            else "（**提交键没进渲染树 ⇒ 先看下面的探针：是「表单没展开」还是"
+            "「展开键点了不生效」，两者修法不同；⛔ 不是「页面没提示」**）"
+        )
+        + probe,
     )
 
     # ⑦ 常驻声明在页面上
@@ -9753,6 +9930,1060 @@ def sec_49(w: Walker) -> None:
     errs = w.new_errors(err_base)
     w.rep.rec(
         "㊾ ⑪ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
+    )
+
+
+def sec_50(w: Walker) -> None:
+    """㊿ 委托货量变更的**设备侧**取证（S6-1 / D1-09 / §10.1 第 8 步）。
+
+    合同 §10.1 第 8 步原文是 `Apply the 800→950 change`；D1-09 的判据是
+    「同一张委托上看到 `800 → 审批 → 950 → 原运力（900 吨候选）不适用 → 复核与重新确认`」。
+    **预置另一张 950 吨的委托不算数** —— 那只能说明系统里有 950，说明不了
+    "这张单被改过"，也说明不了审批、原子性、留痕与复核传播。
+
+    覆盖
+    ----
+    ① 前置：canonical 夹具的货量是 800.000 吨（夹具声明的值，不是断言产品行为）；
+    ② 变更前：那条 900 吨候选的运力确认**仍然成立**（`recheck.still_valid = true`）；
+    ③ 经**界面**补登变更类别「货物数量与品类」，再经界面进入复核；
+    ④ 经**界面**批准：三只输入（新值 / 单位 / 依据）真的写进页面 data，并落库；
+    ⑤ 经**界面**应用 ⇒ 货量落库为 950、历史留一行 `800.000 吨 → 950.000 吨`；
+    ⑥ 变更后：同一条确认 `still_valid = false`，且**只有** `capacity` 不过；
+    ⑦ 复核传播在页面上（含「船型、运力及货物适配」——复核与重新确认的落点）；
+    ⑧ 本章运行期零新增 console 报错。
+
+    ⚠️ 诚实边界
+    * 身份 `seed-owner`（经理）：货量变更的读写**两侧都只有经理侧**
+      （`basis` 是经理写的变更依据，货量历史端点不给货主放行）。
+    * **写侧**（登记变更请求 + 登记受影响项 + 运力确认）由接口铺 —— 它们是**前置**，
+      不是本章要取的证。本章要证的是「**经界面**审批与应用」那两步
+      （登记案件本身属 ⑯ 章与 `case-create` 页的取景范围）。
+    * 依赖 `seed_entrust_canonical.py`（唯一带 900 吨候选与 800 吨货量的夹具）。
+      没跑它 ⇒ 整章 `NOT_RUN`（不假绿）。
+    * 重跑：本章会改库。货量已是 950 时，⑤ 的**精确**那对值记 `NOT_RUN`
+      （要复现 `800 → 950` 请先重建库），其余断言按"当前值 → 当前值 + 100"照跑。
+    """
+    print("\n-- ㊿ 委托货量变更的设备侧取证（第 8 步）--", flush=True)
+
+    err_base = w.c.errors()
+    code_mgr = "seed-owner"
+    org_name = "演示经营主体·工作台"
+    demo_title = "DEMO-1 canonical · 钢材 800 吨 南宁 → 贵港"
+
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("㊿ 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == org_name:
+            org_id = str((r or {}).get("org_id") or "")
+    if not org_id:
+        w.rep.not_run("㊿ 全部断言", f"seed-owner 的组织里没有「{org_name}」")
+        return
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
+    hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    if not hit:
+        w.rep.not_run(
+            "㊿ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
+        )
+        return
+    aid = str((hit[0] or {}).get("assignment_id") or "")
+
+    ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
+    eid = str(ctx.get("entrustment_id") or "")
+    if not eid:
+        w.rep.not_run("㊿ 全部断言", f"委托 #{aid} 定位不到唯一授权")
+        return
+
+    # ── ① 前置：canonical 的货量 ────────────────────────────────────────────
+    det = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    cur_raw = det.get("quantity")
+    cur_unit = str(det.get("quantity_unit") or "吨")
+    if cur_raw is None:
+        w.rep.not_run("㊿ 全部断言", f"委托 #{aid} 的货量是空的（canonical 夹具声明为 800）")
+        return
+    cur = Decimal(str(cur_raw))
+    fresh = cur == Decimal("800")
+    w.rep.rec(
+        "㊿ 前置 · canonical 夹具的货量就是 800.000 吨（D1-09 的起点）"
+        + (
+            ""
+            if fresh
+            else f" —— ⚠️ 实为 {cur}，本章按「当前值 + 100」照跑，要复现 800→950 那对精确值需重建库"
+        ),
+        True,
+        f"quantity={cur_raw} unit={cur_unit}（夹具声明 800.000 吨：{'一致' if fresh else '已被改过'}）",
+    )
+
+    # ── 前置 B：900 吨候选的**运力确认**（变更后要判它不再适用）──────────
+    # ⚠️ 这两条端点返回的是**列表**（），不是分页对象 ——
+    #    按  读会抛 AttributeError（本轮实测），而异常会被章节兜底
+    #    记成「执行异常」，看起来像脚本坏了而不是读错形状。
+    cands = api_get(f"/entrust/assignments/{aid}/capacity-candidates", tok) or []
+    c900 = [c for c in cands if _same_dec((c or {}).get("capacity_tonnes"), "900.000")]
+    if not c900:
+        w.rep.not_run(
+            "㊿ 全部断言",
+            "该委托下没有 900 吨候选运力 —— canonical 夹具未铺（先跑 seed_entrust_canonical.py）",
+        )
+        return
+    cand_id = int((c900[0] or {}).get("candidate_id") or 0)
+    confs = api_get(f"/entrust/assignments/{aid}/capacity-confirmations", tok) or []
+    conf = [c for c in confs if int((c or {}).get("candidate_id") or 0) == cand_id]
+    if not conf:
+        # **前置**用接口铺一次：本章要证的是"经界面审批与应用"，不是"经界面确认运力"
+        # （后者是 ㊺ 章的范围）。⚠️ 它**不**计入本章的通过数 —— 只是让 ⑥ 有对象可判。
+        st, body = api_post(
+            f"/entrust/assignments/{aid}/capacity-confirmations",
+            tok,
+            {"candidate_id": cand_id, "agreed_scope": "整船包运（㊿ 前置）"},
+            _idem("walk-50-conf"),
+        )
+        if st != 200:
+            w.rep.not_run("㊿ 全部断言", f"无法确认 900 吨候选（HTTP {st}）：{body}")
+            return
+        conf = [body]
+    conf_id = str((conf[0] or {}).get("confirmation_id") or "")
+
+    # ── ② 变更前：这条确认还成立 ───────────────────────────────────────────
+    pre = api_get(f"/entrust/capacity-confirmations/{conf_id}/recheck", tok) or {}
+    w.rep.rec(
+        "㊿ ② 变更前 · 900 吨候选的运力确认**成立**（基线：确认在 800 吨需求下判过）",
+        pre.get("still_valid") is True,
+        f"still_valid={pre.get('still_valid')!r} 不过的规则="
+        f"{[r.get('rule_code') for r in (pre.get('rule_checks') or []) if r.get('outcome') == 'fail']}",
+    )
+
+    # ── 前置 C：登记变更请求 + 受影响项＝本委托（写侧前置）──────────────
+    arts = (api_get(f"/entrust/assignments/{aid}/artifacts?size=50", tok) or {}).get("items") or []
+    basis_art = [a for a in arts if (a or {}).get("current_revision_id")]
+    if not basis_art:
+        w.rep.not_run("㊿ 全部断言", f"委托 #{aid} 上没有带生效版本的成果（批准必须指向精确版本）")
+        return
+    basis_rev = int(basis_art[0]["current_revision_id"])
+
+    st, case = api_post(
+        f"/entrust/assignments/{aid}/exceptions",
+        tok,
+        {
+            "kind": "change_request",
+            "title": "走查·货量由 800 吨调整为 950 吨",
+            "severity": "medium",
+            "impact_kind": "review-required",
+            # ⚠️ **有意不在这里给类别**：类别由界面在批准时补登（③），
+            #    那正是"界面上有没有这个入口"的证据。
+            "links": [{"target_kind": "assignment", "target_id": int(aid)}],
+        },
+        _idem("walk-50-case"),
+    )
+    if st != 200:
+        w.rep.not_run("㊿ 全部断言", f"登记变更请求失败（HTTP {st}）：{case}")
+        return
+    cid = str((case or {}).get("case_id") or "")
+
+    # ── 界面：进工作台 → 案件页 ─────────────────────────────────────────────
+    if not w.open_workbench(code_mgr, tag="㊿"):
+        w.rep.not_run("㊿ 全部断言", "未能以 seed-owner 进入经理工作台")
+        return
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{CASE}?case_id={cid}", CASE)
+    d = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+
+    # ── ③ 经界面**补登变更类别**（界面上此前没有这个入口 ⇒ 变更请求应用不了）──
+    n_cat = w.c.count('[data-cat="cargo_quantity_category"]')
+    w.rep.rec(
+        "㊿ ③ 案件页有「变更类别」选择条，点它能把类别补登成「货物数量与品类」"
+        "（没有这个入口，变更请求在界面上根本应用不了：应用要求类别已登记）",
+        n_cat == 1,
+        f"选择项数={n_cat}（页面上 categoryOptions={len(d.get('categoryOptions') or [])}）",
+    )
+    if n_cat == 1:
+        w.c.scroll_into('[data-cat="cargo_quantity_category"]')
+        w.c.tap('[data-cat="cargo_quantity_category"]')
+        d = w.wait_data(
+            lambda x: (
+                str((x.get("decideForm") or {}).get("category") or "") == "cargo_quantity_category"
+            ),
+            tries=20,
+            gap=0.4,
+        )
+        w.rep.rec(
+            "㊿ ③b 选中类别后它真的落进了页面表单（补登的类别会随这次决定一起回传）",
+            str((d.get("decideForm") or {}).get("category") or "") == "cargo_quantity_category",
+            f"qty 输入框数={w.c.count('[data-df="qty"]')} 单位={w.c.count('[data-df="qty-unit"]')}",
+        )
+
+    # ── ③c 进入复核（`open → approved` 不是合法转移，必须两步）────────────
+    w.c.tap('[data-status="in_review"]')
+    w.c.scroll_into('[data-act-decide-submit="1"]')
+    w.c.tap('[data-act-decide-submit="1"]')
+    d = w.wait_data(lambda x: str(x.get("status") or "") == "in_review", tries=40, gap=0.5)
+    w.rep.rec(
+        "㊿ ③c 经界面进入复核（`open → approved` 不是合法转移，服务端会 409）",
+        str(d.get("status") or "") == "in_review",
+        f"status={d.get('status')!r} hint={d.get('decideHint')!r}",
+    )
+
+    # ── ④ 经界面批准（选已批准 → 三只输入 → 提交）────────────────────────
+    #
+    # ⚠️ **不重新导航**：`nav` 会开一个全新的页面实例（`decideForm` 清空）。
+    #    那本身没错，但多一次冷加载就多一次"输入框还没渲染出来就 tap"的机会 ——
+    #    本轮实测：第一版重新导航后提交，**后端日志里连那笔 POST 都没有**，
+    #    而页面上 `decideHint` 是空的（症状＝"什么都没发生"，最难查的一类）。
+    #    留在同一个实例上、等渲染树更新之后再点，路径最短。
+    # ⚠️ 新值必须**超过 900 吨**（那条候选的容量），否则 `capacity` 仍然通过、
+    #    这条判据就白跑一轮 —— 本轮实测：`800 + 100 = 900` 时 `still_valid` 仍是
+    #    True（900 ≥ 900 装得下），而 D1-09 说的是 **950**。
+    #    ⇒ 取 `max(当前 + 100, 950)`：首次是 950（D1-09 那对精确值），
+    #      重跑（当前已是 950）则继续加 100，仍然超容量，断言不为夹具状态而红。
+    new_qty = str(max(cur + 100, Decimal("950")))
+
+    def _fill_and_submit() -> dict:
+        """选「已批准」→ 填四只输入 → 提交。返回提交后的页面 data。"""
+        w.c.tap('[data-status="approved"]')
+        time.sleep(0.8)
+        for sel, val in (
+            ('[data-df="basis"]', str(basis_rev)),
+            ('[data-df="qty"]', new_qty),
+            ('[data-df="qty-unit"]', cur_unit),
+            ('[data-df="qty-basis"]', "走查 货量变更（D1-09）"),
+        ):
+            w.c.scroll_into(sel)
+            w.c.input_text(sel, val)
+        w.c.scroll_into('[data-act-decide-submit="1"]')
+        w.c.tap('[data-act-decide-submit="1"]')
+        return w.wait_data(lambda x: str(x.get("status") or "") == "approved", tries=30, gap=0.5)
+
+    # ── ④a 选「已批准」后，三只货量输入框**出现在渲染树上** ────────────────
+    #    判据取 `count(...)` 而不是内部状态键：条没渲染时 `showQuantityChange`
+    #    与 `decideForm.category` 照样是对的（本仓既有的一条纪律）。
+    d = w.wait_data(lambda x: str(x.get("view") or "") == "ready", tries=40, gap=0.5)
+    w.c.tap('[data-status="approved"]')
+    time.sleep(0.8)
+    n_qty = w.c.count('[data-df="qty"]')
+    n_unit = w.c.count('[data-df="qty-unit"]')
+    n_basis_input = w.c.count('[data-df="qty-basis"]')
+    w.rep.rec(
+        "㊿ ④a 选「已批准」后三只货量输入框**渲染出来了**（内部状态键对了不算数）",
+        n_qty == 1 and n_unit == 1 and n_basis_input == 1,
+        f"渲染树计数：新值={n_qty} 单位={n_unit} 依据={n_basis_input}"
+        f"｜showQuantityChange={d.get('showQuantityChange')!r}"
+        f"｜decideForm.to={((d.get('decideForm') or {}).get('to'))!r}"
+        f"｜quantityTargetId={d.get('quantityTargetId')!r}",
+    )
+
+    # ── ④b 填四只输入（输入通道断了的话，提交出去的是空变更）────────────────
+    for sel, val in (
+        ('[data-df="basis"]', str(basis_rev)),
+        ('[data-df="qty"]', new_qty),
+        ('[data-df="qty-unit"]', cur_unit),
+        ('[data-df="qty-basis"]', "走查 货量变更（D1-09）"),
+    ):
+        w.c.scroll_into(sel)
+        w.c.input_text(sel, val)
+    d = w.wait_data(
+        lambda x: str((x.get("quantityForm") or {}).get("quantity") or "") == new_qty,
+        tries=20,
+        gap=0.4,
+    )
+    qf = d.get("quantityForm") or {}
+    w.rep.rec(
+        "㊿ ④b 三只输入框真的把值写进了页面 data",
+        str(qf.get("quantity") or "") == new_qty
+        and str(qf.get("unit") or "") == cur_unit
+        and str(qf.get("basis") or "") == "走查 货量变更（D1-09）",
+        f"quantityForm={qf!r}",
+    )
+
+    # ── ④c 提交批准（tap 落空时重试一次；判据是**状态真的变了**）────────────
+    d = _fill_and_submit()
+    if str(d.get("status") or "") != "approved":
+        d = _fill_and_submit()
+    w.rep.rec(
+        "㊿ ④c 经界面批准落库（批准内容随这次请求进快照，`apply` 只认快照）",
+        str(d.get("status") or "") == "approved",
+        f"status={d.get('status')!r} hint={d.get('decideHint')!r}",
+    )
+
+    # 批准快照里必须记下"从哪改到哪" —— 应用确认条要拿它给人看
+    ap = d.get("approval") or {}
+    tgt = ((ap.get("targets") or []) or [{}])[0] or {}
+    w.rep.rec(
+        "㊿ ④d 应用确认条上能看到 `当前 → 将改为`（apply 不接受改写，不给对照就是盲操作）",
+        bool(tgt.get("quantityChangeText")) and new_qty in str(tgt.get("quantityChangeText")),
+        f"quantityChangeText={tgt.get('quantityChangeText')!r}",
+    )
+
+    # ── ⑤ 经界面应用 ───────────────────────────────────────────────────────
+    w.c.scroll_into('[data-act-apply="1"]')
+    w.c.tap('[data-act-apply="1"]')
+    time.sleep(0.6)
+    w.c.scroll_into('[data-act-apply-submit="1"]')
+    w.c.tap('[data-act-apply-submit="1"]')
+    d = w.wait_data(
+        lambda x: (
+            str(x.get("status") or "") == "applied" or len(x.get("quantityHistory") or []) > 0
+        ),
+        tries=60,
+        gap=0.5,
+    )
+    after = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    now_qty = after.get("quantity")
+    w.rep.rec(
+        f"㊿ ⑤ 经界面应用后**货量真的落库**（{cur_raw} → {now_qty}）",
+        _same_dec(now_qty, new_qty),
+        f"服务端 quantity={now_qty!r}（期望 {new_qty}）· 页面 status={d.get('status')!r}",
+    )
+    hist = d.get("quantityHistory") or []
+    mine = [h for h in hist if str(h.get("exceptionId") or "") == cid]
+    row = mine[0] if mine else {}
+    # ⚠️ 判据是**不变量**："那一行就是前后两段的拼接"，而不是我自己拼一个期望串 ——
+    #    服务端把货量格式化成固定 3 位小数（`800` → `800.000`），
+    #    拿接口原文那个 `800` 去拼期望串会差在**格式**上（本轮实测就这么红了一次）。
+    w.rep.rec(
+        "㊿ ⑤b 页面上出现那条对照（`<变更前> → <变更后>`，且来源案件号对得上）",
+        str(row.get("changeText") or "")
+        == f"{row.get('oldQuantityText')} → {row.get('newQuantityText')}"
+        and "→" in str(row.get("changeText") or "")
+        and str(row.get("exceptionId") or "") == cid,
+        f"changeText={row.get('changeText')!r} source={row.get('sourceText')!r} "
+        f"basis={row.get('basisText')!r}（历史共 {len(hist)} 行）",
+    )
+    if fresh:
+        srv_hist = api_get(f"/entrust/assignments/{aid}/quantity-changes", tok) or []
+        srv_row = [h for h in srv_hist if str(h.get("exception_id") or "") == cid]
+        w.rep.rec(
+            "㊿ ⑤c ⭐ D1-09 的**精确那对值**：`800.000 吨 → 950.000 吨`，且页面与服务端同源",
+            bool(row.get("changeText"))
+            and str(row.get("changeText")) == "800.000 吨 → 950.000 吨"
+            and bool(srv_row)
+            and _same_dec(srv_row[0].get("new_quantity"), "950.000"),
+            f"页面={row.get('changeText')!r} 服务端="
+            f"{(srv_row[0].get('old_quantity'), srv_row[0].get('new_quantity')) if srv_row else None}",
+        )
+    else:
+        w.rep.not_run(
+            "㊿ ⑤c D1-09 的精确那对值 `800.000 → 950.000`",
+            f"canonical 夹具的货量已被改到 {cur_raw}（本机上一轮走查的副作用）—— "
+            "要复现那对精确值请先重建库；本章 ⑤/⑤b 已按相对值取证",
+        )
+
+    # ── ⑥ 变更后：原运力不再适用（**只有** capacity 不过）──────────────────
+    post = api_get(f"/entrust/capacity-confirmations/{conf_id}/recheck", tok) or {}
+    fails = [
+        r.get("rule_code") for r in (post.get("rule_checks") or []) if r.get("outcome") == "fail"
+    ]
+    w.rep.rec(
+        "㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过"
+        "（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话）",
+        post.get("still_valid") is False and fails == ["capacity"],
+        f"still_valid={post.get('still_valid')!r} 不过的规则={fails} "
+        f"changed_fields={post.get('changed_fields')!r}",
+    )
+
+    # ── ⑦ 复核传播在页面上 ─────────────────────────────────────────────────
+    w.c.scroll_into('[data-act-apply="1"]')
+    d = w.wait_data(lambda x: len(x.get("revalidation") or []) > 0, tries=40, gap=0.5)
+    areas = [str(r.get("area") or "") for r in (d.get("revalidation") or [])]
+    w.rep.rec(
+        "㊿ ⑦ 页面上出现复核传播，含「船型、运力及货物适配」（＝复核与重新确认的落点）",
+        any("船型" in a for a in areas),
+        f"复核区域={areas}",
+    )
+
+    # ── ⑧ 零新增 console 报错 ──────────────────────────────────────────────
+    err_now = w.c.errors()
+    w.rep.rec(
+        "㊿ ⑧ 本章运行期无新增 console 报错",
+        err_now == err_base or not err_now,
+        (err_now or "(空)")[-160:],
+    )
+
+
+def _same_dec(raw: object, want: str) -> bool:
+    """定点比较：`"800.000"` / `800` / `Decimal("800")` 都算相等。
+
+    ⛔ 不用 `str(raw) == want`：SQLite 与 MySQL 读回来一个是 `NUMERIC`、一个是
+    `DECIMAL`，字符串形态可能差尾零（`800` vs `800.000`），拿字符串比会红在格式上。
+    """
+    try:
+        return Decimal(str(raw)) == Decimal(want)
+    except (TypeError, ValueError, InvalidOperation):
+        return False
+
+
+def _idem(tag: str) -> str:
+    """走查用的幂等键：每次唯一（同键重放会命中幂等记录、返回首次响应）。"""
+    return f"walk-{tag}-{time.time_ns()}"
+
+
+def sec_51(w: Walker) -> None:
+    """第 6 步**来源门槛的被拒剧本**：AG-02 载体 ⇒ 被拒 ⇒ 逐条核验 ⇒ 同版本发布成功。
+
+    为什么单开一章而不塞进 ㊹
+    ------------------------
+    ㊹ 章的载体是**经界面人工组装**的 `customer_quote`（来源 `manual`）⇒ 服务端没有
+    待核验的模型声明 ⇒ 门槛一次就过 ⇒ 那条 `else` 分支只能记 `NOT_RUN`
+    （`DEMO-1-readiness.md` §10.4 的 O-1 残留分支）。而本剧本需要一个**来源为模型声明**
+    的载体，两条剧本的载体**预期完全相反**，混在一章里必然互相污染读数
+    （㊹ 首跑就是这么得到 3 条假 FAIL 的）。本章独立、自带载体，跑不跑都不影响 ㊹。
+
+    覆盖
+    ----
+    ① 前置：canonical 委托在位；AG-02 会话可得（`session-context` 给授权 id，**不前端推导**）；
+    ② 经接口发起一次**带 `amount`** 的 AG-02 作业 ⇒ 提案里含 `customer_quote`；
+    ③ 采纳 ⇒ 成果的**版本来源是模型声明**，且服务端已写下**待核验声明**（≥1 条）；
+    ④ 经**界面**点「发布这一版」⇒ **被拒**，且页面把待核验清单**显示出来**
+       （只说"不能发布"是没法干活的）；
+    ⑤ 页面上**没有**「登记来源核验」的入口（这是被测事实，见下"诚实边界"）；
+    ⑥ 经接口逐条登记核验（必填依据）⇒ 门槛转为通过；
+    ⑦ 回界面**重新点发布** ⇒ 同一版本发布成功，且与服务端发布记录同源。
+
+    ⚠️ 诚实边界（都是被测事实的一部分，不是辩解）
+    * **作业的 `amount` 只能经接口给**：界面上没有这个入参（`miniapp` 全仓无 `amount`
+      输入锚点）。这正是"主链路缺『组装对客报价』"那条缺口的表现 —— 本章如实登记
+      "输入路径经接口"，**不假装是界面点的**。其余动作（进成果页、点发布）都是真机点击。
+    * **⑤ 是负例断言**（"页面上没有这个入口"）。它单独成立时没有信息量（任何页面都满足），
+      所以必须与 ④ **同时成立**才有意义 —— ④ 证明页面确实处在"被拒且看得见待核验清单"
+      的状态。这就是 O-1b 要的答案：**界面能告诉你为什么不能发，却给不了你解决它的入口**。
+    * 依赖「组织队列里有一张委托」（`seed_entrust_demo.py` 即可）。**不绑 canonical** ——
+      那是一个「要演示哪个状态就铺哪个」的可选夹具，把它当本章前置会让章节在标准配方下
+      直接变成一条 `FAIL`（首跑实测 `aid=''`）。载体由本章自造，与夹具无关。
+    * 本章**会写库**（建会话、发作业、采纳成果、核验、发布）。重跑：成果每次新采纳一份
+      （幂等键带时间戳），不会撞唯一键。
+    """
+    print("\n-- 51 第 6 步来源门槛：被拒 ⇒ 逐条核验 ⇒ 同版本发布（S6-3）--", flush=True)
+
+    code_mgr = CODE_OWNER
+    org_name = "演示经营主体·工作台"
+
+    err_base = w.c.errors()
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("51 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+
+    def _rev_row(page: dict, no: int) -> dict:
+        for r in page.get("revisions") or []:
+            if int((r or {}).get("revisionNo") or 0) == no:
+                return r or {}
+        return {}
+
+    # ---- ① 前置：组织队列里有一张委托 ----
+    org_id = ""
+    for o in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((o or {}).get("name") or "") == org_name:
+            org_id = str((o or {}).get("org_id") or "")
+            break
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    # ⭐ 不绑 canonical：本剧本的载体**自己造**（发作业 → 采纳），只需要队列里有一张委托。
+    #    把章节钉在一个「要演示哪个状态就铺哪个」的可选夹具上，会让它在标准配方下直接
+    #    变成一条 `FAIL`（首跑实测 `aid=''` 命中 0 张）—— 读者会以为产品坏了。
+    rows.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    aid = str((rows[0] or {}).get("assignment_id") or "") if rows else ""
+    w.rep.rec(
+        "51 前置 · 组织队列里有可用的委托（载体由本章自造，不依赖可选夹具）",
+        bool(aid),
+        f"aid={aid!r} status={(rows[0] or {}).get('status') if rows else None!r} 队列 {len(rows)} 张",
+    )
+    if not aid:
+        w.rep.not_run("51 来源门槛剧本", "没有 canonical 委托 ⇒ 先跑 seed_entrust_canonical.py")
+        return
+
+    # ---- ② 会话 + 带 amount 的作业 ----
+    ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
+    eid = str(ctx.get("entrustment_id") or "")
+    sid = ""
+    for s in (
+        api_get(f"/entrust/sessions?view=org&org_id={org_id}&assignment_id={aid}&size=50", tok)
+        or {}
+    ).get("items") or []:
+        if str((s or {}).get("agent_specialty") or "") == "agent_02":
+            sid = str((s or {}).get("session_id") or "")
+            break
+    if not sid and eid:
+        st_sess, sess = api_post(
+            f"/entrust/entrustments/{eid}/sessions",
+            tok,
+            {
+                "assignment_id": int(aid),
+                "agent_specialty": "agent_02",
+                "title": "S6-3 来源门槛剧本",
+            },
+            uuid.uuid4().hex,
+        )
+        if st_sess in (200, 201):
+            sid = str((sess or {}).get("session_id") or "")
+    w.rep.rec(
+        "51 前置 · 授权 id 由 `session-context` 给出（**不前端推导**），AG-02 会话可得",
+        bool(eid) and bool(sid),
+        f"entrustment_id={eid!r} session_id={sid!r}",
+    )
+    if not sid:
+        w.rep.not_run("51 来源门槛剧本", "拿不到 AG-02 会话 ⇒ 后续无法制造模型来源的载体")
+        return
+
+    # ⚠️ 作业输入的 `amount` **只能经接口给**（界面无此入参）—— 如实登记，不假装是界面点的。
+    st_job, job = api_post(
+        f"/entrust/sessions/{sid}/jobs",
+        tok,
+        {
+            "input": {
+                "amount": "18600",
+                "currency": "CNY",
+                "includes": ["内河运费", "港杂费"],
+                "quote_text": "承运人：贵港航运有限公司\n单价：18600 元/柜\n有效期：2026-12-31",
+            }
+        },
+        uuid.uuid4().hex,
+    )
+    job_id = str((job or {}).get("job_id") or "")
+    # 提交与执行是**两个动作**：不点 run，作业永远停在 `queued`（envelope 为 null）。
+    if job_id:
+        api_post(f"/entrust/agent/jobs/{job_id}/run", tok, {}, uuid.uuid4().hex)
+    jrow = {}
+    for _ in range(40):
+        jrow = (
+            ((api_get(f"/entrust/agent/jobs/{job_id}", tok) or {}).get("job") or {})
+            if job_id
+            else {}
+        )
+        if str(jrow.get("status") or "") in ("succeeded", "failed"):
+            break
+        time.sleep(1)
+    proposals = [
+        p
+        for p in ((jrow.get("envelope") or {}).get("artifact_proposals") or [])
+        if isinstance(p, dict)
+    ]
+    cq = [p for p in proposals if str(p.get("artifact_type") or "") == "customer_quote"]
+    w.rep.rec(
+        "51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`"
+        "（`ag02.py` 的产出条件就是作业输入带对客金额）",
+        str(jrow.get("status")) == "succeeded" and bool(cq),
+        f"job={job_id!r} status={jrow.get('status')!r} 提案类型="
+        f"{sorted({str(p.get('artifact_type')) for p in proposals})}",
+    )
+    if not cq:
+        w.rep.not_run("51 来源门槛剧本", "作业没有产出 customer_quote ⇒ 没有可发布的载体")
+        return
+
+    # ---- ③ 采纳 ⇒ 模型来源的成果 ----
+    st_adopt, art = api_post(
+        f"/entrust/agent/jobs/{job_id}/adopt",
+        tok,
+        {
+            "artifact_type": "customer_quote",
+            "payload": cq[0].get("payload") or {},
+            "note": "S6-3 来源门槛剧本：采纳 AG-02 的对客报价提案",
+        },
+        uuid.uuid4().hex,
+    )
+    art_id = str((art or {}).get("artifact_id") or "")
+    if st_adopt not in (200, 201) or not art_id:
+        w.rep.not_run("51 来源门槛剧本", f"采纳失败：st={st_adopt} {str(art)[:160]}")
+        return
+    rev = int((api_get(f"/entrust/artifacts/{art_id}", tok) or {}).get("current_revision_no") or 0)
+    if not rev:
+        rev = 1
+    gate = (api_get(f"/entrust/artifacts/{art_id}/source-checks?revision_no={rev}", tok) or {}).get(
+        "gate"
+    ) or {}
+    declared = gate.get("declared") or []
+    w.rep.rec(
+        "51 ③ 采纳 ⇒ 服务端写下**待核验声明**（这是「来源为模型声明」在数据上的样子）",
+        len(declared) >= 1 and bool(gate.get("pending")),
+        f"artifact={art_id!r} v{rev} declared={len(declared)} pending={len(gate.get('pending') or [])} "
+        f"ok={gate.get('ok')!r}",
+    )
+
+    # ---- ④ 经界面进入该成果页并发起发布 ----
+    if not w.open_workbench(code_mgr, tag="51"):
+        w.rep.not_run("51 ④ 经界面发布", "未能进入经理工作台")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    sel_card = f'[data-id="{aid}"]'
+    w.c.scroll_into(sel_card)
+    t_card = w.c.tap(sel_card)
+    ok_dt = w.c.wait_path(DETAIL, 30)
+    time.sleep(1.4)
+    w.wait_data(lambda x: bool(x.get("slots")), tries=40, gap=0.5)
+    sel_ref = f'[data-kind="artifact"][data-id="{art_id}"]'
+    w.c.scroll_into(sel_ref)
+    n_ref = w.c.count(sel_ref)
+    t_ref = w.c.tap(sel_ref)
+    ok_art = w.c.wait_path(ARTIFACT, 30)
+    time.sleep(1.3)
+    pg_art = w.wait_data(lambda x: x.get("artifact") is not None, tries=40, gap=0.5)
+    w.shot("51-1-模型来源成果页")
+    w.rep.rec(
+        "51 ④ 「工作台 → 委托卡 → 详情 → 成果引用 → 成果页」全程真实点击，落到**模型来源**的成果",
+        bool(t_card and ok_dt and t_ref and ok_art) and str(pg_art.get("artifactId")) == art_id,
+        f"card={t_card} detail={ok_dt} 引用锚点 {n_ref} 个 ref={t_ref} artifact={ok_art} "
+        f"落页 artifactId={pg_art.get('artifactId')!r}（期望 {art_id}）",
+    )
+
+    sel_rel = f'[data-act-release="1"][data-no="{rev}"]'
+    w.c.scroll_into(sel_rel)
+    n_rel = w.c.count(sel_rel)
+    t_rel = w.c.tap(sel_rel)
+    time.sleep(0.5)
+    n_strip = w.c.count('[data-act-release-submit="1"]')
+    t_sub = w.c.tap('[data-act-release-submit="1"]')
+    pg_rej = w.wait_data(
+        lambda x: bool(x.get("releaseHint")) or bool(_rev_row(x, rev).get("published")),
+        tries=40,
+        gap=0.5,
+    )
+    hint = str(pg_rej.get("releaseHint") or "")
+    published = bool(_rev_row(pg_rej, rev).get("published"))
+    w.shot("51-2-发布被门槛拒")
+    w.rep.rec(
+        "51 ④ 经界面点「发布这一版」⇒ **被来源门槛拒**，且页面把**待核验清单显示出来**"
+        "（只说「不能发布」是没法干活的）",
+        (not published) and ("待核验" in hint) and n_rel == 1 and bool(t_rel and t_sub and n_strip),
+        f"入口 {n_rel} 个 tap={t_rel} 确认条 {n_strip} submit={t_sub} published={published} "
+        f"releaseHint={hint[:140]!r}",
+    )
+
+    # ---- ⑤ 界面有没有「登记来源核验」的入口（O-1b 的判据）----
+    n_entry = w.c.count('[data-act-source-check="1"]') + w.c.count('[data-act-source-verify="1"]')
+    w.rep.rec(
+        "51 ⑤ ⭐ 界面上**没有**「登记来源核验」的入口（O-1b 的答案）——"
+        "页面能告诉你为什么不能发，却给不了你解决它的入口",
+        n_entry == 0 and (not published) and ("待核验" in hint),
+        f"核验入口锚点 {n_entry} 个；同一条断言与 ④ 同时成立才有信息量"
+        f"（④ 证明页面确实处在「被拒且看得见清单」的状态）",
+    )
+
+    # ---- ⑥ 经接口逐条核验（必填依据）----
+    ok_all = True
+    for p in gate.get("pending") or []:
+        st_v, _ = api_post(
+            f"/entrust/artifacts/{art_id}/source-checks",
+            tok,
+            {
+                "revision_no": rev,
+                "source_kind": p.get("kind"),
+                "source_ref": p.get("ref"),
+                "state": "verified",
+                "method": "S6-3 走查：逐条比对作业输入与提案载荷",
+            },
+            uuid.uuid4().hex,
+        )
+        ok_all = ok_all and st_v in (200, 201)
+    gate2 = (
+        api_get(f"/entrust/artifacts/{art_id}/source-checks?revision_no={rev}", tok) or {}
+    ).get("gate") or {}
+    w.rep.rec(
+        "51 ⑥ 经接口逐条登记核验（`method` 必填：无依据的核验等于没核）⇒ 门槛转为通过",
+        ok_all and bool(gate2.get("ok")),
+        f"pending 由 {len(gate.get('pending') or [])} 条 → {len(gate2.get('pending') or [])} 条；"
+        f"gate.ok={gate2.get('ok')!r}",
+    )
+
+    # ---- ⑦ 回界面重新点发布 ⇒ 同一版本成功 ----
+    n_cancel = w.c.count('[data-act-release-cancel="1"]')
+    if n_cancel:
+        w.c.tap('[data-act-release-cancel="1"]')
+        time.sleep(0.6)
+    w.c.scroll_into(sel_rel)
+    t_rel2 = w.c.tap(sel_rel)
+    time.sleep(0.6)
+    t_sub2 = w.c.tap('[data-act-release-submit="1"]')
+    pg_ok = w.wait_data(lambda x: bool(_rev_row(x, rev).get("published")), tries=60, gap=0.5)
+    published2 = bool(_rev_row(pg_ok, rev).get("published"))
+    w.shot("51-3-同版本发布成功")
+    rels = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok) or {}).get("items") or []
+    same = [
+        r
+        for r in rels
+        if str((r or {}).get("artifact_id") or "") == art_id
+        and int((r or {}).get("revision_no") or 0) == rev
+    ]
+    w.rep.rec(
+        "51 ⑦ 核验之后**回界面重新点发布** ⇒ 同一版本发布成功，且与服务端发布记录**同源**",
+        published2 and bool(same) and bool(t_rel2 and t_sub2),
+        f"tap={t_rel2} submit={t_sub2} published={published2}；"
+        f"服务端同成果同版本发布记录 {len(same)} 条（releaseId={same[0].get('release_id') if same else None}）",
+    )
+
+    err_now = w.c.errors()
+    w.rep.rec(
+        "51 ⑧ 本章运行期零新增 console 报错",
+        len(err_now) == len(err_base),
+        f"console 报错 {len(err_base)} → {len(err_now)}",
+    )
+
+
+def sec_52(w: Walker) -> None:
+    """财务与结算：费用 → 缺件补录 → 结算版本 → 内部确认 → 客户确认 → 收付 → 已结清。
+
+    对应 §10.1 第 10–11 步（S7-1 费用 / S7-2 缺件 / S7-3 结算与收付），是裁定 **Q4=A**
+    「第 10–12 步经现有界面演示」在**设备侧**的取证。
+
+    为什么单开一章
+    --------------
+    `pages/entrust/finance/finance` 是这三片后端**唯一的界面入口**。它的判据此前只有
+    「静态契约 ＋ 载荷驱动」两类（`verify_entrust_ui` / `verify_frontend_e2e`），
+    ⛔ 两者都**点不到按钮**：合同要求的是"经界面演示"，所以必须有一章真机点击。
+
+    ⚠️ 诚实边界（都是被测事实，不是辩解）
+    * **带必需证据的任务只能经接口铺**（`onSubmitTask` 的表单没有 `required_evidence`
+      入参）⇒ ⑦ 的**前置**是接口造的，**补录动作本身是真机点击**。如实写在读数里。
+    * **客户确认必须换身份**：`customer-confirm` 只有货主本人能做 ⇒ ⑫ 以 `seed-shipper`
+      重新登录、从**自己的**委托详情页进财务页点确认（不是拿经理身份调接口冒充客户）。
+    * 依赖「货主名下有一张 `claimed` 委托」（`seed_entrust_demo` 会铺）⇒ **不绑 canonical**
+      —— 那是"要演示哪个状态就铺哪个"的可选夹具，钉上去会让本章在标准配方下直接变 `FAIL`。
+    * 本章**会写库**（建任务、记费用、出结算、记收付、客户确认）。重跑不受影响：
+      每次新挑一张委托，幂等键带时间戳。
+    """
+    print("\n-- 52 财务与结算：第 10–11 步经界面走通（S7-1/S7-2/S7-3）--", flush=True)
+
+    finance_path = "pages/entrust/finance/finance"
+    err_base = w.c.errors()
+
+    tok_mgr = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    tok_shi = (api_login(CODE_SHIPPER) or {}).get("access_token") or ""
+    if not tok_mgr or not tok_shi:
+        w.rep.not_run(
+            "52 全部断言", "拿不到 seed-owner / seed-shipper 的 token（后端未起或种子未铺）"
+        )
+        return
+
+    def _has_text(payload: dict, needle: str) -> bool:
+        for b in payload.get("blockers") or []:
+            if needle in str((b or {}).get("text") or "") or needle in str(
+                (b or {}).get("message") or ""
+            ):
+                return True
+        return False
+
+    # ---- ① 前置：货主名下的一张已受理委托（本章自己挑，不依赖可选夹具）----
+    rows = (api_get("/entrust/assignments?view=owner&size=50", tok_shi) or {}).get("items") or []
+    claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
+    claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    aid = str((claimed[0] or {}).get("assignment_id") or "") if claimed else ""
+    w.rep.rec(
+        "52 前置 · 货主名下有一张已受理（claimed）委托 —— 本章自己挑一张，不绑可选夹具",
+        bool(aid),
+        f"aid={aid!r} claimed {len(claimed)} 张 / 名下共 {len(rows)} 张",
+    )
+    if not aid:
+        w.rep.not_run("52 财务与结算剧本", "货主名下没有 claimed 委托 ⇒ 先铺 seed_entrust_demo")
+        return
+
+    # ---- ② 前置夹具：一个**要求照片证据**的交接任务 ----
+    _st_t, task = api_post(
+        f"/entrust/assignments/{aid}/tasks",
+        tok_mgr,
+        {
+            "task_type": "handover",
+            "title": "卸货交接（52 章）",
+            "required_evidence": ["photo"],
+        },
+        uuid.uuid4().hex,
+    )
+    tid = str((task or {}).get("task_id") or "")
+    w.rep.rec(
+        "52 前置 · 经**接口**铺一个「要求照片证据」的任务（界面建任务没有 required_evidence 入参，如实登记）",
+        bool(tid),
+        f"task_id={tid!r}",
+    )
+    if not tid:
+        w.rep.not_run("52 财务与结算剧本", "任务未建成 ⇒ 缺件补录那一步无从演示")
+        return
+
+    # ---- ③ 经理侧：从委托详情点进「财务与结算」----
+    if not w.open_workbench(CODE_OWNER, tag="52"):
+        w.rep.not_run("52 财务与结算剧本", "未能以 seed-owner 进入经理工作台")
+        return
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("52 财务与结算剧本", f"打不开委托详情页（aid={aid}）")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    has_entry = w.c.count('[data-act-open-finance="1"]') > 0
+    w.c.scroll_into('[data-act-open-finance="1"]')
+    w.c.tap('[data-act-open-finance="1"]')
+    landed = w.c.wait_path(finance_path, 30)
+    w.rep.rec(
+        "52 ① 委托详情页上有「财务与结算」入口，且点得进 —— 这是第 10–11 步在**现有界面**上的入口",
+        has_entry and landed,
+        f"入口={has_entry} 落地={w.c.current_path()}",
+    )
+    if not landed:
+        w.rep.not_run("52 财务与结算剧本", "未能进入财务与结算页")
+        return
+
+    pd = w.wait_data(lambda x: x.get("canViewInternal") is True, tries=40, gap=0.4)
+    w.rep.rec(
+        "52 ② 经理视角取到**内部**读数（费用 / 缺件 / 结算 / 财务状态四块都由这一页取）",
+        pd.get("canViewInternal") is True,
+        f"canViewInternal={pd.get('canViewInternal')} 费用 {len(pd.get('charges') or [])} 条",
+    )
+    if not pd.get("canViewInternal"):
+        w.rep.not_run("52 财务与结算剧本", "经理侧拿不到内部读数（组织权限或种子问题）")
+        return
+
+    # ---- ④ 登记一条应收费用：**草稿不进合计** ----
+    n0 = len(pd.get("charges") or [])
+    counted0 = int(pd.get("chargeCounted") or 0)
+    w.c.scroll_into('[data-act="toggle-charge"]')
+    w.c.tap('[data-act="toggle-charge"]')
+    w.wait_data(lambda x: x.get("chargeOpen") is True, tries=20, gap=0.3)
+    w.c.input_text('[data-key="chargeKind"]', "freight")
+    w.c.input_text('[data-key="amount"]', "100000")
+    w.c.input_text('[data-key="basis"]', "合同附件三·费率表")
+    w.c.tap('[data-act="submit-charge"]')
+    pd = w.wait_data(lambda x: len(x.get("charges") or []) > n0, tries=40, gap=0.4)
+    drafts = [c for c in (pd.get("charges") or []) if c.get("status") == "draft"]
+    w.rep.rec(
+        "52 ③ 界面上登记出**草稿**费用行，且**草稿不进合计**（合同 S4 段第 9 条的确认前状态）",
+        len(drafts) >= 1 and int(pd.get("chargeCounted") or 0) == counted0,
+        f"草稿 {len(drafts)} 条｜计入条数 {counted0} → {pd.get('chargeCounted')}",
+    )
+    cid = str((drafts[-1] or {}).get("chargeId") or "") if drafts else ""
+
+    # ---- ⑤ 确认：确认后才进合计 ----
+    if cid:
+        w.c.scroll_into('[data-act="confirm-charge"]')
+        w.c.tap('[data-act="confirm-charge"]')
+        pd = w.wait_data(lambda x: int(x.get("chargeCounted") or 0) > counted0, tries=40, gap=0.4)
+        totals_txt = " ".join(
+            (t or {}).get("totalText") or "" for t in (pd.get("chargeTotals") or [])
+        )
+        w.rep.rec(
+            "52 ④ 界面确认后该行进合计（合计金额由服务端算，页面只显示它给的字符串）",
+            int(pd.get("chargeCounted") or 0) == counted0 + 1 and "100000" in totals_txt,
+            f"计入 {pd.get('chargeCounted')} 条，合计={totals_txt.strip()!r}",
+        )
+
+    # ---- ⑥ 提争议：**争议行退出合计**（合同 S4 段第 10 条）----
+    w.c.scroll_into('[data-act="open-dispute"]')
+    w.c.tap('[data-act="open-dispute"]')
+    w.wait_data(lambda x: x.get("disputeOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.input_text('[data-key="reason"]', "客户认为吨位口径不一致")
+    w.c.tap('[data-act="submit-dispute"]')
+    pd = w.wait_data(lambda x: int(x.get("chargeCounted") or 0) == counted0, tries=40, gap=0.4)
+    disputed = [c for c in (pd.get("charges") or []) if c.get("status") == "disputed"]
+    w.rep.rec(
+        "52 ⑤ 提争议后该行**退出合计**（合同 S4 段第 10 条：争议不进已确认总额）",
+        len(disputed) >= 1 and int(pd.get("chargeCounted") or 0) == counted0,
+        f"争议 {len(disputed)} 条｜计入条数回落 → {pd.get('chargeCounted')}",
+    )
+
+    # ---- ⑦ 处置：**显式给出是否计入 ＋ 最终金额**（裁定 Q2=B）----
+    w.c.scroll_into('[data-act="open-resolve"]')
+    w.c.tap('[data-act="open-resolve"]')
+    w.wait_data(lambda x: x.get("resolveOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.tap('[data-act="pick-outcome"][data-code="adjusted"]')
+    w.c.input_text('[data-key="method"]', "按复查后的吨位重算")
+    ok_counts = w.c.count('[data-act="pick-counts"][data-code="yes"]') > 0
+    w.c.tap('[data-act="pick-counts"][data-code="yes"]')
+    w.c.input_text('[data-key="finalAmount"]', "88000")
+    w.c.tap('[data-act="submit-resolve"]')
+    pd = w.wait_data(lambda x: int(x.get("chargeCounted") or 0) > counted0, tries=40, gap=0.4)
+    resolved = [c for c in (pd.get("charges") or []) if c.get("status") == "resolved"]
+    totals_txt = " ".join((t or {}).get("totalText") or "" for t in (pd.get("chargeTotals") or []))
+    w.rep.rec(
+        "52 ⑥ 处置时**显式选「计入」并给最终金额** ⇒ 合计按最终金额走（裁定 Q2=B："
+        "「已解决」一词决定不了是否计入）",
+        len(resolved) >= 1 and "88000" in totals_txt,
+        f"已解决 {len(resolved)} 条｜「计入」选项在={ok_counts}｜合计={totals_txt.strip()!r}",
+    )
+
+    # ---- ⑧ 缺件：在原任务上补录（§1 交接证据挂在任务上）----
+    gaps = pd.get("gaps") or []
+    miss_before = [g for g in gaps if g.get("missing")]
+    w.rep.rec(
+        "52 ⑦-a 缺件视图把「还缺什么」算出来（派生，不新建实体）—— 夹具任务要求照片",
+        any("photo" in (g.get("missing") or []) for g in gaps),
+        "；".join(f"#{g.get('taskId')} 缺 {g.get('missingText')!r}" for g in miss_before[:3])
+        or "无缺件",
+    )
+    w.c.scroll_into('[data-act="open-evidence"]')
+    w.c.tap('[data-act="open-evidence"]')
+    w.wait_data(lambda x: x.get("evidenceOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.tap('[data-act="pick-evidence-kind"][data-code="photo"]')
+    w.c.input_text('[data-key="ref"]', "att-discharge-52")
+    w.c.input_text('[data-key="occurredAt"]', "2026-09-17T08:30:00")
+    w.c.tap('[data-act="submit-evidence"]')
+    pd = w.wait_data(
+        lambda x: all(
+            "photo" not in (g.get("missing") or [])
+            for g in (x.get("gaps") or [])
+            if int(g.get("taskId") or 0) == int(tid)
+        ),
+        tries=40,
+        gap=0.4,
+    )
+    cleared = all(
+        "photo" not in (g.get("missing") or [])
+        for g in (pd.get("gaps") or [])
+        if int(g.get("taskId") or 0) == int(tid)
+    )
+    hint = str(pd.get("evidenceHint") or "")
+    w.rep.rec(
+        "52 ⑦-b 在**原任务**上补录一条证据 ⇒ 该任务的缺项消失（业务发生时间界面上必填）",
+        cleared and bool(hint),
+        f"缺项清空={cleared} 页内提示={hint!r}",
+    )
+
+    # ---- ⑨ 结算版本：生成 → 内部确认 ----
+    w.c.scroll_into('[data-act="create-settlement"]')
+    w.c.tap('[data-act="create-settlement"]')
+    pd = w.wait_data(lambda x: len(x.get("settlements") or []) >= 1, tries=40, gap=0.4)
+    v1 = [s for s in (pd.get("settlements") or []) if int(s.get("versionNo") or 0) == 1]
+    w.rep.rec(
+        "52 ⑧ 界面上生成结算**版本** v1（快照当时的费用事实；旧版本不改）",
+        len(v1) == 1,
+        f"版本数={len(pd.get('settlements') or [])} v1 状态={((v1 or [{}])[0]).get('statusText')!r}",
+    )
+    w.c.scroll_into('[data-act="approve-settlement"]')
+    w.c.tap('[data-act="approve-settlement"]')
+    pd = w.wait_data(
+        lambda x: any(s.get("status") == "approved" for s in (x.get("settlements") or [])),
+        tries=40,
+        gap=0.4,
+    )
+    w.rep.rec(
+        "52 ⑨ 内部确认（draft → approved）—— 只有适用版本能被确认",
+        any(s.get("status") == "approved" for s in (pd.get("settlements") or [])),
+        "状态=" + str([s.get("statusText") for s in (pd.get("settlements") or [])]),
+    )
+
+    # ---- ⑩ 财务状态：此刻应当卡在「客户尚未确认」----
+    w.rep.rec(
+        "52 ⑩ 财务状态在客户确认之前**不是**已结清，且把原因说出来（不是只给一个状态码）",
+        _has_text(pd, "客户尚未确认"),
+        "状态="
+        + str(pd.get("financialStatusText"))
+        + "｜blockers="
+        + str([b.get("text") for b in (pd.get("blockers") or [])])[:200],
+    )
+
+    # ---- ⑪ 记收付依据（合成样本，界面不宣称真实到账）----
+    w.c.scroll_into('[data-act="open-payment"]')
+    w.c.tap('[data-act="open-payment"]')
+    w.wait_data(lambda x: x.get("paymentOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.input_text('[data-key="amount"]', "88000")
+    w.c.input_text('[data-key="ref"]', "SAMPLE-52-001")
+    w.c.tap('[data-act="submit-payment"]')
+    pd = w.wait_data(lambda x: "合成样本" in str(x.get("settlementHint") or ""), tries=40, gap=0.4)
+    w.rep.rec(
+        "52 ⑪ 记一条收付依据：页内明说它是**合成样本**（不接真实支付、不宣称资金到账）",
+        "合成样本" in str(pd.get("settlementHint") or ""),
+        f"页内提示={str(pd.get('settlementHint'))[:120]!r}",
+    )
+
+    # ---- ⑫ 客户侧：换**货主本人**的身份进来确认这一版 ----
+    w.login_as(CODE_SHIPPER)
+    # ⚠️ `login_as` 只写 storage ＋ reLaunch，**应用的登录是页面 onLoad 里异步做的**
+    #    ⇒ 紧接着 `navigateTo` 会赶在拿到 token 之前，详情页按"未登录"处理
+    #    （读不到数据、也就没有入口）。
+    #    ⛔ 曾用"轮询 `wx.getStorageSync('access_token')` 非空"当就绪判据 —— 实测
+    #    该读数**恒为空**（本轨读不到这个键），于是它对"登录到底成没成"什么都没说，
+    #    只是把 20 秒等掉。改用本仓既有的就绪配方（见 ① / ② / ⑭ 章）：
+    #    `login_as` → **`enter_role` 点身份卡落到货主首页** → 再导航。
+    #    点身份卡本身就要求登录已经完成（首页没登录就没卡片可点），
+    #    所以它比读那个键更接近"真的就绪"。
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.not_run(
+            "52 ⑫ 客户确认",
+            f"货主身份切不过去（点身份卡没落到货主首页，path={w.c.current_path()}）",
+        )
+        return
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("52 ⑫ 客户确认", "货主侧打不开这张委托的详情页")
+        return
+    # 就绪：等到详情页**真的取到数**。读数里带 `view` ＋ 入口判据的中间量，
+    # 让"页面没取到数"与"取到了数但入口条件不成立"在读数上就分开 ——
+    # 两者都表现为"入口是 0 个"，但指向完全不同的修法。
+    shd = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    has_entry_shi = w.c.count('[data-act-open-finance="1"]') > 0
+    if not has_entry_shi:
+        w.rep.not_run(
+            "52 ⑫ 客户确认",
+            f"货主侧详情页**没有**「财务与结算」入口"
+            f"（view={shd.get('view')!r} 入口判据 canCreateCase={shd.get('canCreateCase')!r} "
+            f"槽位={len(shd.get('slots') or [])} path={w.c.current_path()}）",
+        )
+        return
+    w.c.scroll_into('[data-act-open-finance="1"]')
+    w.c.tap('[data-act-open-finance="1"]')
+    if not w.c.wait_path(finance_path, 30):
+        w.rep.not_run("52 ⑫ 客户确认", f"点了入口但没到财务页（path={w.c.current_path()}）")
+        return
+    cpd = w.wait_data(lambda x: x.get("customerMode") is True, tries=40, gap=0.4)
+    w.rep.rec(
+        "52 ⑫-a 货主侧走**对客通道**：看得到待确认的是哪一版，且**看不到内部成本**"
+        "（截图留存；页面本就不渲染 internal_total）",
+        cpd.get("customerMode") is True and bool(cpd.get("customerSettlementId")),
+        f"customerMode={cpd.get('customerMode')} 版本={cpd.get('customerVersionText')!r} "
+        f"待确认={cpd.get('awaitingCustomer')}",
+    )
+    if not cpd.get("awaitingCustomer"):
+        w.rep.not_run("52 ⑫-b 客户确认", "这一版当前不需要客户动作（可能已被历史轮次确认过）")
+    else:
+        w.c.scroll_into('[data-act="customer-confirm"]')
+        w.c.tap('[data-act="customer-confirm"]')
+        cpd2 = w.wait_data(
+            lambda x: (
+                "已接受" in str(x.get("settlementHint") or "") or x.get("awaitingCustomer") is False
+            ),
+            tries=40,
+            gap=0.4,
+        )
+        w.rep.rec(
+            "52 ⑫-b **客户本人**点了「确认这一版」⇒ 确认绑定在这一版上"
+            "（旧确认替不了新版本过关是结构保证的）",
+            cpd2.get("awaitingCustomer") is False,
+            f"待确认={cpd2.get('awaitingCustomer')} 页内提示={str(cpd2.get('settlementHint'))[:120]!r}",
+        )
+
+    # ---- ⑬ 回经理侧：四条判据全过 ⇒ 已结清 ----
+    # ⚠️ 同样不能 `login_as` 完就导航：应用侧登录是页面 onLoad 异步做的，
+    #    而页面的 onLoad **只跑一次** —— 赶在 token 之前进财务页，它会按"未登录"
+    #    取数失败并**停在错误态**（不会因为 token 后来到位而重取）⇒ 读到的是
+    #    `financialStatusText=None`，看起来像"财务状态没算出来"。
+    #    本仓既有就绪配方是 `open_workbench`（登录 → 身份卡 → 「我的」 → 轮询
+    #    `showEntrust` 有值为止，㉟ 章也在复用），这里照用。
+    if not w.open_workbench(CODE_OWNER, tag="52"):
+        w.rep.not_run("52 ⑬ 财务状态复看", "回不到经理侧就绪态（登录/入口未就绪）")
+    elif w.c.nav("navigateTo", f"/{finance_path}?assignment_id={aid}", finance_path):
+        fpd = w.wait_data(lambda x: x.get("canViewInternal") is True, tries=40, gap=0.4)
+        page_texts = [str((b or {}).get("text") or "") for b in (fpd.get("blockers") or [])]
+        # 同时问一次**派生端点**：页面与派生两处必须同结论（页面自己算一份 blocker
+        # 就是第二份判据，迟早与服务端漂移）。两条读的是**同一批事实**。
+        api_state = api_get(f"/entrust/assignments/{aid}/financial-status", tok_mgr) or {}
+        codes = [str((b or {}).get("code") or "") for b in (api_state.get("blockers") or [])]
+        # ⚠️ 判据**只说我做过的这件事**：⑫-b 的客户确认是否真的让
+        #    「客户尚未确认适用结算版本」这条未结成因消失。
+        #    ⛔ 不断言"已结清" —— 本章夹具上还有未关闭的案件与未结余额
+        #    （⑩ 的 blockers 就列着），把它们清掉属于**结案**那一步的演示（S4-b），
+        #    在这里断言"已结清"会是外推，而且会逼着本章去补两个与第 10–11 步无关的动作。
+        w.rep.rec(
+            "52 ⑬ 客户确认之后，「客户尚未确认适用结算版本」这条未结成因**消失**；"
+            "其余未结成因页面与派生端点两处同结论（不假装已结清）",
+            "customer_not_confirmed" not in codes
+            and not any("客户尚未确认" in t for t in page_texts),
+            f"页面状态={fpd.get('financialStatusText')!r} 页面未结成因={page_texts} "
+            f"／派生 status={api_state.get('financial_status')!r} codes={codes}",
+        )
+    else:
+        w.rep.not_run("52 ⑬ 财务状态复看", "回不到财务页")
+
+    w.shot("52-财务与结算")
+    errs = w.new_errors(err_base)
+    w.rep.rec(
+        "52 ⑭ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
     )
 
 
@@ -9801,6 +11032,9 @@ SECTIONS = {
     "11": sec_11,
     "13": sec_13,
     "14": sec_14,
+    "50": sec_50,
+    "51": sec_51,
+    "52": sec_52,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -9936,6 +11170,10 @@ DEFAULT_ORDER = [
     #    `route_scope` 条款里 —— 这是"派生用的是派生那一刻的航段"的真实形态，不是污染。
     # ⚠️ 副作用：派生一份合同 + 记一条证据。已派生过 ⇒ 读回已有那份（不重复派生）。
     "49",
+    "50",
+    # 51 独立于 49/50：它自带载体（AG-02 经接口产出 customer_quote），不依赖前面几章留下的状态。
+    "51",
+    "52",
 ]
 
 

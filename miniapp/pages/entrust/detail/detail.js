@@ -201,6 +201,17 @@ Page({
      */
     canCreateCase: false,
     /**
+     * 「财务与结算」入口（§10.1 第 10–11 步 / S7-1 · S7-2 · S7-3）。
+     *
+     * 与 `canCreateCase` **同值但不同因**，所以分开一个名字：
+     * 这个入口的判据是「这张委托处在财务命令成立的阶段 ∧ 我能读这张委托」——
+     * 后者由 `board` 是否取得表达（工作台的可见性判据与委托详情同一条：
+     * 货主本人 **或** 组织内 `entrust:view`）。
+     * ⛔ 不复用 `canCreateCase`：那是"登记案件"的能力，将来案件权限一变，
+     * 就会把与它无关的财务入口一起悄悄藏掉。
+     */
+    canOpenFinance: false,
+    /**
      * 「组装对客报价」入口（S3：合同 §10.1 第 6 步 `Release the offer` 的前置动作）。
      *
      * 为什么这一步必须存在：能被客户看到的成果类型只有 `customer_quote` /
@@ -637,6 +648,9 @@ Page({
       quoteHint: '',
       quoteSubmitting: false,
       canCreateCase: !!(board && board.status === 'claimed'),
+      // 「财务与结算」入口：同一阶段判据（费用/结算命令只在已受理上成立），
+      // 但**自成一格**（见 data 上的说明）—— 货主本人也要能进来做「确认这一版」。
+      canOpenFinance: !!(board && board.status === 'claimed'),
       unassignedHint: board ? board.unassignedHint : '',
       offer: offer ? decorateCustomerOffer(offer) : null,
       offerForm: '',
@@ -848,6 +862,21 @@ Page({
   onCreateCase() {
     R.go(
       '/pages/entrust/case-create/case-create?assignment_id=' +
+        encodeURIComponent(String(this.data.assignmentId)),
+      { from: SELF }
+    )
+  },
+
+  /**
+   * 进入「财务与结算」（§10.1 第 10–11 步）。
+   *
+   * 本页**不做**费用与结算本身：那需要三类可见性不同的取数（内部 / 对客 / 仅客户本人）
+   * 与一组带表单的命令，塞进七槽位总览会把这张卡变成半个财务系统；
+   * 且"客户确认的是哪一版"需要独立入口才核对得清（与本页不进成果编辑器同一理由）。
+   */
+  onOpenFinance() {
+    R.go(
+      '/pages/entrust/finance/finance?assignment_id=' +
         encodeURIComponent(String(this.data.assignmentId)),
       { from: SELF }
     )

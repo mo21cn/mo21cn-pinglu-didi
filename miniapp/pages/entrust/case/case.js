@@ -36,6 +36,7 @@ const {
   addCaseLink,
   applyCase,
   caseClosureOptions,
+  caseCategoryOptions,
   caseDecideAvailable,
   caseDecisionOptions,
   caseWriteError,
@@ -43,9 +44,12 @@ const {
   decideCase,
   decorateCase,
   decorateCaseLinkTargets,
+  decorateQuantityChangeList,
   fetchArtifactCandidates,
   fetchArtifactTypes,
+  fetchAssignment,
   fetchCase,
+  fetchQuantityChanges,
   fetchTaskCandidates,
   newIdempotencyKey,
   removeCaseLink,
@@ -93,6 +97,44 @@ Page({
     revisionNo: 1,
     /** 受影响项行的可点版本（比 `blocks` 里那份多一个 `linkId`） */
     affected: [],
+    /**
+     * 变更类别（A2 五之二；`''` ＝ 未登记）。页面用它决定"要不要连带给变更内容"。
+     */
+    changeCategory: '',
+    changeCategoryLabel: '',
+    /**
+     * **委托货量变更**的页内表单（S6-1 / D1-09 / §10.1 第 8 步）。
+     *
+     * 为什么它挂在「记录决定」里而不是另开一个"改货量"的按钮：
+     * 货量变更是一条**经审批**的变更 —— 批准快照记旧值、应用时逐目标核对、
+     * 同事务留历史并生成复核。给它一个独立的"直接改"入口，就等于把
+     * "改货量"与"经审批"分开，而 D1-09 要看的恰恰是后者。
+     * `apply` 只认批准快照、不接受临时入参（P4-A4），所以「改成什么」**只能在批准时**给。
+     */
+    showQuantityChange: false,
+    /** 本次要改的那张委托（＝案件自己的委托；键是 `assignment#<id>`） */
+    quantityTargetId: '',
+    quantityForm: { quantity: '', unit: '', basis: '' },
+    /**
+     * **本委托的货量变更历史**（append-only，跨案件）。
+     *
+     * 为什么放在案件页：批准、应用、复核三条动作都在这一屏上 ——
+     * `原来 800 → 批准改成 950 → 应用 → 生成复核` 这条链在同一处能一眼看完，
+     * 而"从哪改到哪"只在**委托**上有答案（案件只记自己那一次）。
+     *
+     * ⚠️ 读端点是**经理侧**（不给货主本人放行，理由是 `basis` 是经理写的话）。
+     * 所以它只在 `canAnyAction` 为真时取 —— 那个条件蕴含"有写权限"，也就是
+     * "是组织成员"。对没有写权限的读者**一条请求都不发**：发出去只会拿一个 404，
+     * 而"404"与"这单没改过货量"在界面上长得一样，不能让两种不同的原因共用一个空态。
+     */
+    quantityHistory: [],
+    quantityHistoryHint: '',
+    /**
+     * 变更类别的可选项（只有变更请求非空）。见 `caseCategoryOptions` 的注释：
+     * 这是"批准时补登类别"的**唯一界面入口** —— 没有它，变更请求在界面上应用不了。
+     */
+    categoryOptions: [],
+    decideForm: { to: '', note: '', basis: '', category: '' },
     // ── 处置能力（服务端 `capabilities` + 取值域镜像的共同结论）──────────
     canAddLink: false,
     canRemoveLink: false,
@@ -200,6 +242,12 @@ Page({
           viewState({ status: 200, total: 1 }),
           decorateCase(res[0], _typeLabels(res[1]))
         )
+        // 货量变更历史是**经理侧**读端点（理由见 data 里那段注释）：
+        // 只在有写权限时取。取数失败只让那一张卡说清原因，不把整页翻成错误态 ——
+        // 案件详情本身已经拿到了。
+        if (self.data.canAnyAction && self.data.assignmentId) return self.loadQuantityHistory()
+        self.setData({ quantityHistory: [], quantityHistoryHint: '' })
+        return null
       })
       .catch(function (err) {
         const status = (err && err.httpStatus) || 0
@@ -218,6 +266,23 @@ Page({
     const decisionOptions = detail ? caseDecisionOptions(kind, status) : []
     const canDecide = caseDecideAvailable(caps, kind, status)
     const canClose = !!caps.can_close && closureOptions.length > 0
+    const affected = detail ? this.affectedRows(detail) : []
+    // ── 「要不要连带给变更内容」的判据（三个条件缺一不可）────────────────
+    // ① 是**变更请求**（异常案件没有变更内容，服务端也会 400）；
+    // ② 变更类别是**货量类** —— 界面上只有这一类有可填的变更内容
+    //    （其余类别的载荷形状随成果类型而变，那属于各自的成果页）；
+    // ③ 已经登记了 `assignment` 受影响项 —— 变更的**落点**是那张委托。
+    //    ⚠️ 少了这一条，批准时会带上一个指向"没登记的受影响项"的内容，
+    //    快照里多出孤儿键，而应用时找不到目标 ⇒ 整批拒绝。
+    const assignmentRow = (affected || []).filter(function (row) {
+      return row && row.target_kind === 'assignment'
+    })[0]
+    const showQuantityChange = this.quantityVisibility({
+      kind: kind,
+      // 案件已登记的类别优先；本次表单里选的（补登）其次
+      category: (this.data.decideForm || {}).category || (detail && detail.changeCategory) || '',
+      quantityTargetId: assignmentRow ? String(assignmentRow.target_id) : ''
+    })
     this.setData({
       view: state.state,
       viewTitle: state.title,
@@ -231,7 +296,11 @@ Page({
       kind: kind,
       status: status,
       revisionNo: detail ? detail.revisionNo || 1 : 1,
-      affected: detail ? this.affectedRows(detail) : [],
+      affected: affected,
+      changeCategory: detail ? detail.changeCategory : '',
+      changeCategoryLabel: detail ? detail.changeCategoryLabel : '',
+      showQuantityChange: showQuantityChange,
+      quantityTargetId: assignmentRow ? String(assignmentRow.target_id) : '',
       // 渲染条件 = 服务端能力位 **且** 取值域镜像里真有可选项。
       // 只看 `can_decide` 会渲染出一个空的选择条（后端对 `change_request/rejected`
       // 与 `exception/applied` 给 `can_decide=true`，而它们唯一的出边 `closed`
@@ -252,7 +321,17 @@ Page({
       // 取数即清空处置表单（见 data 里的说明）
       applyOpen: false,
       applyHint: '',
-      decideForm: { to: '', note: '', basis: '' },
+      quantityHistory: [],
+      quantityHistoryHint: '',
+      categoryOptions: detail ? this.categoryOptionsFor(kind) : [],
+      decideForm: {
+        to: '',
+        note: '',
+        basis: '',
+        // 案件已登记的类别**预选**上：它决定"货量变更输入框要不要出现"，
+        // 也决定这次决定要不要把它回传（见 `caseCategoryOptions` 的注释）。
+        category: detail ? detail.changeCategory : ''
+      },
       decideHint: '',
       closeForm: { disp: '', evidence: '', resolution: '' },
       closeHint: '',
@@ -270,6 +349,34 @@ Page({
   },
 
   /**
+   * 「货量变更输入框要不要出现」的**唯一判据**（三个条件缺一不可）。
+   *
+   * ① 是**变更请求**（异常案件带变更类别会被服务端 400）；
+   * ② 变更类别是**货量类** —— 界面上只有这一类有可填的变更内容
+   *    （其余类别的载荷形状随成果类型而变，那属于各自的成果页）；
+   * ③ 已经登记了 `assignment` 受影响项 —— 变更的**落点**是那张委托。
+   *    ⚠️ 少了这一条，批准时会带上一个指向"没登记的受影响项"的内容，
+   *    快照里多出孤儿键，而应用时找不到目标 ⇒ 整批拒绝。
+   *
+   * 抽成一个纯函数是因为它现在有**三个调用点**（取数、换目标状态、选类别）：
+   * 三处各写一份 `&&` 表达式，迟早会有一处漏改，而症状是"选了类别但输入框不出现"，
+   * 页面上看起来只是"没这一块"。
+   */
+  quantityVisibility(ctx) {
+    const c = ctx || {}
+    return (
+      String(c.kind) === 'change_request' &&
+      String(c.category || '') === 'cargo_quantity_category' &&
+      !!String(c.quantityTargetId || '')
+    )
+  },
+
+  /** 案件页的类别选择条（只有变更请求非空）。 */
+  categoryOptionsFor(kind) {
+    return caseCategoryOptions(kind)
+  },
+
+  /**
    * 受影响项行（比 `blocks` 里那份多一个 `linkId` —— 移除时要它）。
    *
    * 从 `detail.blocks` 里取而不是另存一份 `affected` 投影：受影响记录是**六要素
@@ -282,6 +389,39 @@ Page({
       if (blocks[i].key === 'affected') return blocks[i].items || []
     }
     return []
+  },
+
+  /**
+   * 取**本委托**的货量变更历史（跨案件）。
+   *
+   * 与 `loadCandidates` 同一条纪律：读失败**必须**说清是失败，
+   * 不能落成一个空列表 —— 空列表的语义是"这单从没改过货量"，
+   * 而它恰恰是 D1-09 要看的那个"什么都没发生"。让两者长得一样，
+   * 就等于把"接口挂了"伪装成"业务上没发生过"。
+   */
+  loadQuantityHistory() {
+    const self = this
+    const id = this.data.assignmentId
+    if (!id) {
+      this.setData({ quantityHistory: [], quantityHistoryHint: '' })
+      return Promise.resolve()
+    }
+    return fetchQuantityChanges(id)
+      .then(function (rows) {
+        self.setData({
+          quantityHistory: decorateQuantityChangeList(rows),
+          quantityHistoryHint: ''
+        })
+      })
+      .catch(function (err) {
+        const status = (err && err.httpStatus) || 0
+        self.setData({
+          quantityHistory: [],
+          quantityHistoryHint: status
+            ? '货量变更历史未能读取（服务端返回 ' + status + '）'
+            : '货量变更历史未能读取：网络异常'
+        })
+      })
   },
 
   // ── 处置（切片四之六）────────────────────────────────────────────────
@@ -362,10 +502,36 @@ Page({
       fetchArtifactCandidates(id),
       fetchArtifactTypes().catch(function () {
         return []
+      }),
+      // 委托自身一行（「本委托货量」）。它失败**不**让面板整体失败：
+      // 少了这一行仍能登记任务/成果，只是这次改不了货量 —— 把整个候选面板
+      // 变成错误态，是拿一个可选能力换掉三个可用能力。
+      fetchAssignment(id).catch(function () {
+        return null
       })
     ])
       .then(function (res) {
-        const rows = decorateCaseLinkTargets(res[0], res[1], res[2])
+        // ⚠️ 变量名**不能**叫 `self`：外层已经用 `const self = this` 了，
+        // 重名会把 `self.setData` 变成"在一个委托对象上找 setData" —— 而它恰好
+        // 也可能有同名属性，于是静默走错分支。这类遮蔽在真机上只表现为"点了没反应"。
+        const selfAssignment = res[3] || null
+        const rows = decorateCaseLinkTargets(
+          res[0],
+          res[1],
+          res[2],
+          selfAssignment
+            ? {
+                assignment_id: selfAssignment.assignment_id,
+                // 当前货量由**服务端**给（`quantity` / `quantity_unit`），
+                // 这一层只负责拼成人话；未知就说未知，不显示 0。
+                quantityText:
+                  selfAssignment.quantity === null || selfAssignment.quantity === undefined
+                    ? '未知'
+                    : String(selfAssignment.quantity) +
+                      (selfAssignment.quantity_unit ? ' ' + selfAssignment.quantity_unit : '')
+              }
+            : null
+        )
         self.setData({
           candLoaded: true,
           candidates: rows,
@@ -448,20 +614,67 @@ Page({
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
     const to = ds.status || ''
     if (!to) return
-    // 换目标状态就清掉依据版本（它只对「已批准」有意义）与上一次的提示
+    // 换目标状态就清掉依据版本（它只对「已批准」有意义）与上一次的提示。
+    // ⚠️ **类别要留着**：它是案件级的业务判断，与"这次决定到什么状态"无关 ——
+    // 顺手清掉会让用户重选一遍，而漏选一次就是"批准了但类别没登记"。
+    const keepCategory = (this.data.decideForm || {}).category || ''
     this.setData({
-      decideForm: { to: to, note: (this.data.decideForm || {}).note || '', basis: '' },
+      decideForm: {
+        to: to,
+        note: (this.data.decideForm || {}).note || '',
+        basis: '',
+        category: keepCategory
+      },
       decideHint: ''
+    })
+    this.syncQuantityVisibility()
+  },
+
+  /** 选了变更类别 ⇒ 同步「货量变更输入框要不要出现」。 */
+  onPickCategory(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const cat = ds.cat || ''
+    if (!cat) return
+    this.setData({ 'decideForm.category': cat, decideHint: '' })
+    this.syncQuantityVisibility()
+  },
+
+  /**
+   * 按当前表单同步 `showQuantityChange`。
+   *
+   * 为什么必须在**选完类别之后**再同步一次：用户可能在一个表单里同时做两件事
+   * ——「把类别补登成货量类」和「批准这次变更」。若只按**案件已登记**的类别算，
+   * 补登的那一次就看不到输入框，用户得先提交一次、刷新、再回来填第二遍。
+   */
+  syncQuantityVisibility() {
+    this.setData({
+      showQuantityChange: this.quantityVisibility({
+        kind: this.data.kind,
+        category: (this.data.decideForm || {}).category || this.data.changeCategory,
+        quantityTargetId: this.data.quantityTargetId
+      })
     })
   },
 
   onDecideInput(e) {
     const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
     const field = ds.df || ''
-    if (field !== 'note' && field !== 'basis') return
-    const patch = { decideHint: '' }
-    patch['decideForm.' + field] = (e && e.detail && e.detail.value) || ''
-    this.setData(patch)
+    const value = (e && e.detail && e.detail.value) || ''
+    // 三份输入共用同一个 handler（`data-df` 区分），与案件页既有的
+    // `onCloseInput` / `onReopenInput` 同形：一个字段一个 handler 会让
+    // "新加一个输入框"变成两处改动，而漏掉的那处不会报错。
+    if (field === 'note' || field === 'basis') {
+      const patch = { decideHint: '' }
+      patch['decideForm.' + field] = value
+      this.setData(patch)
+      return
+    }
+    if (field === 'qty' || field === 'qty-unit' || field === 'qty-basis') {
+      const map = { qty: 'quantity', 'qty-unit': 'unit', 'qty-basis': 'basis' }
+      const patch = { decideHint: '' }
+      patch['quantityForm.' + map[field]] = value
+      this.setData(patch)
+    }
   },
 
   onSubmitDecision() {
@@ -479,11 +692,53 @@ Page({
       })
       return
     }
+    // ── 货量变更：**批准时**就必须把"改成什么"填齐 ──────────────────────
+    // 三条与服务端的校验同口径（`_validate_assignment_change`），在页内先说清
+    // 是为了不让人填完一屏再拿一个 400；但**判据只有服务端那份** ——
+    // 这里拦不住的，服务端仍然会拦（页内校验从不是权限或规则的边界）。
+    const q = this.data.quantityForm || {}
+    let approvedChanges = null
+    if (this.data.showQuantityChange && to === 'approved') {
+      const qtyRaw = String(q.quantity || '').trim()
+      const unitRaw = String(q.unit || '').trim()
+      const basisRaw = String(q.basis || '').trim()
+      if (!/^\d+(\.\d+)?$/.test(qtyRaw) || Number(qtyRaw) <= 0) {
+        this.setData({ decideHint: '变更后货量要填一个正数（如 950 或 950.5）' })
+        return
+      }
+      if (!unitRaw) {
+        this.setData({ decideHint: '变更后单位不能为空（如「吨」）' })
+        return
+      }
+      if (!basisRaw) {
+        this.setData({ decideHint: '变更依据不能为空 —— 它是这条变更里唯一解释"为什么改"的字段' })
+        return
+      }
+      const targetId = String(this.data.quantityTargetId || '')
+      if (!targetId) {
+        // 连受影响项都没登记（`showQuantityChange` 已要求有它）⇒ 这是编程错误，
+        // 不能静默降级成"这次不带变更内容"：那会批准一份**什么都没改**的决定。
+        this.setData({ decideHint: '本案件还没有登记「本委托货量」受影响项，无法提交货量变更' })
+        return
+      }
+      approvedChanges = {}
+      approvedChanges['assignment#' + targetId] = {
+        quantity: qtyRaw,
+        quantity_unit: unitRaw,
+        basis: basisRaw
+      }
+    }
     const self = this
     const body = { expected_revision: this.data.revisionNo, to_status: to }
     const note = String(f.note || '').trim()
     if (note) body.decision_note = note
     if (to === 'approved') body.basis_revision_id = Number(String(f.basis).trim())
+    if (approvedChanges) body.approved_changes = approvedChanges
+    // 类别只在**变更请求**上回传（异常案件带它会 400，`_require_known_change_category`）。
+    // 值取**表单里选的那一个**（可能正是本次补登的），没选就取案件已登记的。
+    // ⚠️ 只回传**非空**值：空串会让服务端把它当成"要写成空"。
+    const cat = String((this.data.decideForm || {}).category || '').trim()
+    if (cat && this.data.kind === 'change_request') body.change_category = cat
     return this.submit('提交中', function () {
       return decideCase(self.data.caseId, body, newIdempotencyKey('case-decide'))
     })

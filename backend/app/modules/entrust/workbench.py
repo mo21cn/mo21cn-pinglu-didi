@@ -65,6 +65,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.modules.entrust import exceptions as case_svc
+from app.modules.entrust import settlement as settlement_svc
 from app.modules.entrust.artifacts import (
     STATUS_ACTIVE as ARTIFACT_STATUS_ACTIVE,
 )
@@ -397,6 +398,36 @@ def _load_cases(session: Session, *, assignment_id: int) -> list[dict[str, Any]]
 
 
 # ── 四个派生字段（DR-0010 §3.5）──────────────────────────────────────────────
+
+
+def _customer_settlement_hint(session: Session, *, assignment_id: int) -> dict[str, Any] | None:
+    """**对客**的结算版本提示（货主可见）—— 只给 id / 版本号 / 客户决定状态。
+
+    ⛔ **白名单投影**：这一格会出现在**货主**的工作台上，所以绝不能带
+    `internal_total`（我们付给供应商的成本）或任何费用行 —— 客户要看明细走
+    `GET /settlements/{id}/customer-view`（那条通道才是对客的）。
+
+    为什么需要它（2026-09-18 补）：`customer-view` 与 `customer-confirm` 都按**版本 id** 取，
+    而版本清单 `GET /assignments/{id}/settlements` **没有货主面**（版本带内部成本）
+    ⇒ 没有这一格，客户就**不知道"我该确认哪一版"**，裁定 Q5 的「客户确认」在界面上
+    根本没有可走的路（写 §52 走查章时发现的）。这一格补的就是那个**发现路径**，
+    而且只补发现路径 —— 明细与确认仍各自走自己对客端点，不在这里复用内部投影。
+    """
+    row = settlement_svc.applicable_settlement(session, assignment_id=assignment_id)
+    if row is None:
+        return None
+    return {
+        "settlement_id": int(row["settlement_id"]),
+        "version_no": int(row["version_no"]),
+        "status": str(row["status"]),
+        "customer_decision": row["customer_decision"],
+        "customer_confirmed_at": row["customer_confirmed_at"],
+        # 客户此刻要不要动作：内部已确认、且自己还没表态。
+        # 这是**推导**而不是存下来的状态 —— 存一个就会出现"字段说要、链上不要"的分叉。
+        "awaiting_customer": bool(
+            row["status"] == settlement_svc.STATUS_APPROVED and row["customer_confirmed_at"] is None
+        ),
+    }
 
 
 def _overview_text(assignment: dict[str, Any]) -> str:
@@ -732,7 +763,9 @@ def _build_slot(
 def build_workbench(session: Session, *, assignment: dict[str, Any]) -> dict[str, Any]:
     """组装单委托工作台的七槽位摘要（调用方已完成可见性与权限校验）。
 
-    三条只读查询：本单任务、本单归属成果、"同 (货主, 组织) 下归属为空"的存量计数；
+    四条只读查询：本单任务、本单归属成果、"同 (货主, 组织) 下归属为空"的存量计数，
+    以及**对客结算版本提示**（`customer_settlement`，只给 id / 版本号 / 客户决定 ——
+    客户按版本 id 取对客投影，而版本清单没有货主面，见 `_customer_settlement_hint`）；
     `exceptions` 槽开放时再加一条（本单案件）。不留任何写路径 ——
     工作台是**投影**，写动作各自走自己的端点。
     """
@@ -763,6 +796,8 @@ def build_workbench(session: Session, *, assignment: dict[str, Any]) -> dict[str
         "unassigned_artifact_total": count_unassigned(
             session, owner_user_id=owner_user_id, org_id=org_id
         ),
+        # 对客的结算版本提示（货主可见；白名单，见函数文档）
+        "customer_settlement": _customer_settlement_hint(session, assignment_id=assignment_id),
     }
 
 
