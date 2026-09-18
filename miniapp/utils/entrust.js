@@ -594,6 +594,10 @@ function decorateDetail(row, permitted) {
   decorated.quantityText = decorated.quantityText
   decorated.statusHint = STATUS_HINT[data.status] || ''
   decorated.createdAt = data.created_at || ''
+  // 结案时间：**结案之后才存在**的事实（合同 §6.4 区分"运营完成"与"财务结案"，
+  // 这个字段是前者在界面上的可查验形态）。
+  // ⚠️ 未结案 ⇒ 空串，**不编占位时间**（后端是 NULL，"未知保持未知"）。
+  decorated.completedAt = data.completed_at || ''
   // 归属组织（S1 工作项 5）：优先用**组织名**。
   //
   // 此前这里只能给出 `组织 #7` —— 那不是设计，而是"后端没把名字交过来"的直接后果：
