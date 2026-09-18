@@ -159,7 +159,7 @@
 | 计划 vs 实绩里程碑 | **缺失** | `ent_task` 无 planned/actual |
 | 装卸/交接证据 | **缺连接** | `tasks.py:required_evidence` / `evidence_refs` + `TASK_TYPE_HANDOVER`，无装卸专项结构 |
 | 业务时间 vs 记录时间分离 | **缺失** | 无 `occurred_at` / `recorded_at`，只有 `created_at` |
-| 800→950 变更结构化审批与应用 | 已有 | `exceptions.py:decide_case` / `apply_case`（`CHANGE_CARGO`） |
+| 800→950 变更结构化审批与应用 | ✅ **已落地**（2026-09-18，S6-1） | `exceptions.py:decide` / `apply_case`（`CHANGE_CARGO`）＋**新受影响项类型 `assignment`**：把变更落到 `ent_assignment.quantity`（此前**没有命令**能改已受理单的货量 ⇒ D1-09 只能靠改库驱动，见 O-7）。批准快照记旧值 + 应用时值级核对 + 同一事务留历史（`ent_assignment_quantity_change`）与传播；界面入口在案件页（变更类别选择条 + 货量三只输入）；**㊿ 章设备侧 `PASS=17 / FAIL=0`** |
 | 影响映射与复核任务 | 已有 | `revalidation.py:IMPACT_MAP` / `apply_revalidation` |
 | 候选运力不适用的**确定性容量校验** | ✅ **已实现**（2026-09-17，落在 entrust 支线） | `capacity.evaluate` 逐规则判定；容量那条**不发明口径**，逐字取自 `demo1_canonical.json` 的 `deterministic_capacity_rule`（候选适用于某量 ⇔ `capacity_tonnes ≥` 该水运段实际承运量；声明单船且不拆批 ⇒ 必须**一条船**装下）。三种形态分开判（单船不拆批 / 多船 / 允许拆批）。⚠️ 与 `port/service.py:confirm` **无关** —— 那条属港口支线，本切片没动它 |
 | A2 接管任务 | 已有 | `tasks.py:takeover_task` |
@@ -378,9 +378,11 @@ inaccessible to B），任一句未取证则**整体不通过** —— 逐句的
 > 签署渠道/SDK/法律效力判定**不属于 DEMO-1**（合同 §11.1 的
 > `Artifacts and commitment` 行把 `external signing` 明确列为 **Later extension**）。
 >
-> **仍未做的（如实）**：**各步的设备侧走查** —— 第 6 步（㊹ 章 `NOT_RUN`，见
-> `DEMO-1-readiness.md` §10.4 的 O-1）与第 8 步（无"800→950 前后对照"的专门章节，O-2）；
-> 第 1/5/7 步已有设备证据。
+> **仍未做的（如实）**：**各步的设备侧走查** —— 第 6 步的"被来源门槛拒绝"那条**分支**
+> （㊹ 章主线已 `PASS=85 / FAIL=0`，该分支 `NOT_RUN`，见 `DEMO-1-readiness.md`
+> §10.4 的 O-1）。第 8 步**已补**（S6-1：命令 + 界面 + **㊿ 章设备侧 `PASS=17 / FAIL=0`**，
+> 见 §10.7）；第 1/5/7 步已有设备证据。
+> ⛔ 但**设备证据 ≠ 业务验收**：合同 §10.4 的裁定权在 HO。
 >
 > 逐条依据见 `DEMO-1-interface-delta.md` §7.10/§7.11/§7.12/**§7.25** 与
 > `docs/entrust/S3-发布与客户响应数据设计.md` §5/§6、`docs/entrust/S3-合同派生切片.md` §1–§10。
