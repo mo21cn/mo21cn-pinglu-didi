@@ -383,3 +383,59 @@ def test_plan_is_404_when_entrust_disabled(env, monkeypatch):
     monkeypatch.setattr(get_settings(), "ENTRUST_ENABLED", False)
     resp = _read_plan(env, manager, aid=aid)
     assert resp.status_code == 404, resp.text
+
+
+# ───────────────────────── 6. 截断可观测（开放项 O-9，2026-09-18 裁定）
+
+
+def test_plan_marks_truncation_when_tasks_exceed_limit(env, monkeypatch):
+    """任务数超过读模型上限 ⇒ `truncated=True`，且**总数照给**。
+
+    这就是 O-9 的判据：截断必须是一条**响应里的事实**。此前
+    `list_task_prerequisites` 把 `list_tasks` 回的总数丢掉了，于是"任务被截"
+    在响应里没有任何痕迹 —— 下游只能看到"前置解析不出来"，像是界面缺陷。
+
+    上限被 monkeypatch 成 3（而不是造 101 条任务）：判据是
+    「读到 3 条 / 总数 4 / 标记为真」**三个数之间的关系**，
+    把上限调小只让这个关系更容易看清，不改变它。
+    """
+    db = env.make_session()
+    manager, _owner, _outsider, _org, _eid, aid = _seed(env, db)
+    monkeypatch.setattr(plan_svc, "TASK_LIMIT", 3)
+
+    for i in range(4):
+        resp = _add_task(env, manager, aid=aid, task_type="quote", title=f"任务 {i}")
+        assert resp.status_code == 200, resp.text
+
+    body = _read_plan(env, manager, aid=aid).json()
+    assert body["task_prerequisites_total"] == 4
+    assert len(body["task_prerequisites"]) == 3
+    assert body["task_prerequisites_truncated"] is True
+
+
+def test_plan_not_marked_truncated_at_exactly_the_limit(env, monkeypatch):
+    """恰好等于上限 ⇒ **不**报截断。
+
+    边界用例：没有它，"把 `truncated` 恒写成 True"也能满足上一条用例。
+    """
+    db = env.make_session()
+    manager, _owner, _outsider, _org, _eid, aid = _seed(env, db)
+    monkeypatch.setattr(plan_svc, "TASK_LIMIT", 3)
+
+    for i in range(3):
+        resp = _add_task(env, manager, aid=aid, task_type="quote", title=f"任务 {i}")
+        assert resp.status_code == 200, resp.text
+
+    body = _read_plan(env, manager, aid=aid).json()
+    assert body["task_prerequisites_total"] == 3
+    assert len(body["task_prerequisites"]) == 3
+    assert body["task_prerequisites_truncated"] is False
+
+
+def test_plan_task_limit_matches_documented_value():
+    """真实上限被钉在测试里：要改它，就必须显式改这一行。
+
+    这个上限不是"性能护栏"，而是"什么时候必须把截断告诉下游"的**业务口径**；
+    顺手调大它（例如改成 1000）等于把同一类缺陷的触发门槛推远而不留痕迹。
+    """
+    assert plan_svc.TASK_LIMIT == 100

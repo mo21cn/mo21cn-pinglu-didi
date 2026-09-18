@@ -3019,6 +3019,46 @@ const detailTpl = read(path.join(MINI, 'pages/entrust/detail/detail.wxml'))
   check(`[计划] 模板 detail.wxml 里有行锚点 ${attr}`, detailTpl.indexOf(attr) !== -1)
 })
 
+// ── 截断可观测（开放项 O-9，2026-09-18 裁定）────────────────────
+//
+// `plan.task_prerequisites` 是**有界**读（`plan.TASK_LIMIT`）。被截时若响应里不留痕迹，
+// "某条任务的前置指向没读回来的那一行"就显示成「前置：任务 #99」——
+// 而上面刚好证明过：这句话与"本单真的没有前置"在投影里本来就长得不一样、
+// 但在**没有 total 的响应**里它们无法被区分。所以这里钉的是：
+// "被截"必须作为**上游给出的事实**进入投影，并且**能显示出来**。
+const planTrunc = E.decorateAssignmentPlan({
+  assignment_id: 8,
+  legs: [],
+  task_prerequisites: [
+    { task_id: 21, task_type: 'quote', title: '报价', status: 'pending',
+      precondition_task_id: null },
+  ],
+  task_prerequisites_total: 137,
+  task_prerequisites_truncated: true,
+})
+
+check('[计划·O-9] 被截 ⇒ 投影里带截断事实与一句可显示的话（含"共多少条"）',
+  planTrunc.tasksTruncated === true && /137/.test(planTrunc.tasksTruncatedText),
+  '实际 ' + JSON.stringify([planTrunc.tasksTruncated, planTrunc.tasksTruncatedText]))
+
+check('[计划·O-9] 没被截 ⇒ **不**说废话（文案是空串，不显示"共 N 条"这种噪音）',
+  planProj.tasksTruncated === false && planProj.tasksTruncatedText === '',
+  '实际 ' + JSON.stringify([planProj.tasksTruncated, planProj.tasksTruncatedText]))
+
+check('[计划·O-9] 服务端没给 total 时退回"行数即总数"，且**非布尔真值不算被截**' +
+  '（`' + "'yes'" + '` 这类真值若被当"有截断"，就等于把判据交给了取值形态）',
+  E.decorateAssignmentPlan({
+    task_prerequisites: [{ task_id: 1, title: 'x', status: 'pending', precondition_task_id: null }],
+  }).tasksTruncated === false &&
+    E.decorateAssignmentPlan({
+      task_prerequisites: [{ task_id: 1, title: 'x', status: 'pending', precondition_task_id: null }],
+      task_prerequisites_truncated: 'yes',
+    }).tasksTruncated === false)
+
+check('[计划·O-9] 模板 detail.wxml 里有这条提示的锚点与文案位',
+  detailTpl.indexOf('data-plan-truncated') !== -1 &&
+    detailTpl.indexOf('plan.tasksTruncatedText') !== -1)
+
 // ─────────────────────────────────────────────────────────────
 // 14. 航段命令的写侧（建段 / 改段留版本 / 版本历史 —— §10.1 第 4 步）
 //

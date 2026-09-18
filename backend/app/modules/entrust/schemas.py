@@ -234,9 +234,19 @@ class TaskOut(BaseModel):
 
 
 class TaskListOut(BaseModel):
+    """任务列表的一页。
+
+    ⭐ `has_more`（开放项 O-9，2026-09-18 裁定）：只给 `total` / `page` / `size`
+    的时候，"被截了没有"要**调用方自己算**（`page * size < total`）—— 少算一次就静默，
+    而"这张委托的任务超过上限"正是"不报错、只是少了几行"的那类缺陷
+    （2026-09-18 的 e2e 被它咬过一次：带前置的任务被截出首页，页面于是渲染不出前置）。
+    加一个布尔，把**结论**直接给出去；`total` 继续留着，需要精确数的调用方照样拿得到。
+    """
+
     total: int
     page: int
     size: int
+    has_more: bool
     items: list[TaskOut]
 
 
@@ -1648,11 +1658,19 @@ class AssignmentPlanOut(BaseModel):
 
     ⚠️ 本模型**不含**"三段"/"公路—内河—公路"这类**结论性文案**：段数是 `legs` 的
     属性，由界面按行渲染。在服务端把它拼成一句话，就多了一个会与数据脱节的落点。
+
+    ⭐ 两个"截断事实"字段（O-9，2026-09-18 裁定）：读模型**不分页**（分页是"列表"的语义，
+    计划只有一份），但"这份计划的任务部分是不是被截过"必须是**响应里的一条事实**，
+    而不是一个只有服务端知道的内部状态。`task_prerequisites_truncated` 为真时，
+    `task_prerequisites` 只是前 `plan.TASK_LIMIT` 条 —— 下游据此可以拒绝把
+    "没有前置"与"前置还没读回来"渲染成同一件事。
     """
 
     assignment_id: int
     legs: list[PlanLegOut] = Field(default_factory=list)
     task_prerequisites: list[PlanTaskOut] = Field(default_factory=list)
+    task_prerequisites_total: int = 0
+    task_prerequisites_truncated: bool = False
 
 
 def assignment_plan_out(data: dict[str, Any]) -> AssignmentPlanOut:
