@@ -92,7 +92,7 @@ def _r(
     )
 
 
-# ── 声明式矩阵（87 条，与 openapi 暴露的路由一一对应）──────────────────────
+# ── 声明式矩阵（102 条，与 openapi 暴露的路由一一对应）──────────────────────
 SCOPE_MATRIX: tuple[RouteScope, ...] = (
     # ── 受理链路（router.py）────────────────────────────────────────────
     _r(
@@ -957,6 +957,98 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "也可能是「认可但不计入」，调减是「按新金额计入」，拒绝是「不计入」；"
         "把这三件事压成一条规则正是裁定要消除的歧义。"
         "`counts_in_total=True` 时 `final_amount` 必填；为假时允许留空。",
+    ),
+    # ── 结算与收付依据（settlement_api.py）──────────────────────────────────
+    # ⚠️ 这 8 条**分成三条通道**，判据刻意不同（详见 settlement_api.py 模块文档）：
+    #    内部（版本清单/详情/派生）＝ 组织成员、**货主也 404**（含内部成本）；
+    #    对客（customer-view）＝ **有货主旁路**（这条通道的意义就是"客户能看"）；
+    #    仅客户本人（customer-confirm）＝ 只有 `owner_user_id` 能做。
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/settlements",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        owner_scope=True,
+        idempotent=True,
+        note="按**当前计入合计**的费用行生成一个**新**结算版本（快照）。"
+        "⚠️ 费用变了就再调一次 ⇒ v2；**旧版本一个字不改**，旧确认因此保留、"
+        "但结构上替不了新版本过关。没有可结算的费用行 ⇒ 400（空版本不该存在）；"
+        "计入行跨多币种 ⇒ 400（本期只支持 CNY，跨币种相加是明确不做的）。",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/settlements",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        note="版本链（升序）＋ `applicable_settlement_id`（＝**最大版本号**那一行）。"
+        "⚠️ 货主本人也 404：版本带 `internal_total`（我们付给供应商的成本）。"
+        "「适用版本」是**推导**出来的、不存字段 —— 存一个就会出现"
+        "「字段说有、链上没有」的分叉。",
+    ),
+    _r(
+        "GET",
+        "/settlements/{settlement_id}",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        note="内部详情（含内部成本合计与**快照行**：每条带 charge_id ＋ 当时 revision ＋"
+        " 计入金额，所以费用行后来被改也不影响「这一版当时算的是什么」）。",
+    ),
+    _r(
+        "POST",
+        "/settlements/{settlement_id}/approve",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        owner_scope=True,
+        idempotent=True,
+        note="内部确认（`draft → approved`）。⛔ 只能确认**适用版本**（最大版本号）："
+        "批准一个已被取代的版本在业务上没有意义，只会让「适用版本批准了吗」多出一个答案。",
+    ),
+    _r(
+        "GET",
+        "/settlements/{settlement_id}/customer-view",
+        GUARD_ENTRUSTMENT_VIEW,
+        "entrust:view",
+        owner_scope=True,
+        note="**对客投影**（裁定 Q5 第 2 条）：只出 `direction=receivable` 的行、"
+        "且字段按**白名单**裁剪 —— ⛔ 投影是**新建字典**而不是「从内部投影里删几个键」，"
+        "后者在加列时会默认把新列漏给客户，而漏出去的内部成本收不回来。"
+        "⚠️ 组织成员也放行：让经理能**预览客户看到的东西**（这个投影里本就没有内部字段）。",
+    ),
+    _r(
+        "POST",
+        "/settlements/{settlement_id}/customer-confirm",
+        GUARD_OWNER_SELF,
+        owner_scope=True,
+        idempotent=True,
+        note="**客户确认该精确版本**（裁定 Q5 第 1、4 条）—— 确认挂在**这一行**上，"
+        "不在委托上、也不在「最新版本」这个概念上。⛔ 一版只确认一次（要改口径请出**新版本**）；"
+        "⛔ 必须先内部确认（`draft` 上的客户确认没有意义）。"
+        "⚠️ 组织成员（看得见这个版本）来做 ⇒ **403**（看得见但这不是你能做的动作）；"
+        "看不见的第三方 ⇒ 404。",
+    ),
+    _r(
+        "POST",
+        "/settlements/{settlement_id}/payments",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        owner_scope=True,
+        idempotent=True,
+        note="记一条收付依据。⛔ `mode` **不是入参**（恒 `labeled_sample`）："
+        "能传 `live` 就等于让系统自称「资金已真实到账」（裁定 Q5 第 5 条）。"
+        "只能挂在**已确认**的版本上（要说清依据哪一版）；`ref` 必填（没凭据的收付不可核对）；"
+        "累计收付**不得超过该方向合计** —— 超出会让余额变负，而负数余额没有业务含义。",
+    ),
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/financial-status",
+        GUARD_ORG_MEMBER,
+        owner_scope=True,
+        note="`financial_status` 派生（§5.3.2 四条判据逐条落成 `blockers`）："
+        "① 有草稿/有争议的费用行；② 结算待批准（含**客户未确认该精确版本**与"
+        "**适用版本已过期**两种子情形）；③ 有未关闭的案件；④ 余额未结清。"
+        "四个都不成立才 `settled`。⚠️ `not_started` **只能**表示「确实没有任何"
+        "费用/结算/收付事实」，⛔ 不是「派生还没接好」的遮羞布；"
+        "含内部成本余额 ⇒ **货主本人也 404**。",
     ),
     _r(
         "PATCH",
