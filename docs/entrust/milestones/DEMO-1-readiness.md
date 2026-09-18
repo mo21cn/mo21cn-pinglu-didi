@@ -973,7 +973,7 @@ IDE / uvicorn 随发起 shell 结束被回收）。
 | 9 | Complete required revalidation/renewed acceptance; A2 takes over a task | 复核项投影 ＋ 人工接管（ENT-041 五之四）；㉜ 依赖 ㉛ 的应用产物 | **部分**（接管那一半见 D1-12） |
 | 10 | Record handovers; demonstrate missing evidence and a disputed extra | **无**（S4 未做） | **未开始** |
 | 11 | Resolve them with evidence and confirm settlement | **无**（S4 未做） | **未开始** |
-| 12 | Close under the actual rules; inspect retained history and a permitted reopen/re-evaluation | **走查第 53 章**（S4-b：结案命令 ＋ 界面入口 ＋ 只读前置）`PASS=10 / FAIL=0 / NOT_RUN=1` | **部分** —— 入口、五格清单、**两处同结论**、**被拦且缺项逐条可读**、被拦后状态未变**均已设备运行**；⛔ 「齐备 ⇒ 结案成功」缺一张五维齐备夹具（如实记 `NOT_RUN`）；**受控重开属 S4-c，未做** |
+| 12 | Close under the actual rules; inspect retained history and a permitted reopen/re-evaluation | **走查第 53 章**（S4-b：结案命令 ＋ 界面入口 ＋ 只读前置）`PASS=11 / FAIL=0 / NOT_RUN=1` | **部分** —— 入口、五格清单、**两处同结论**、**被拦且缺项逐条可读**、被拦后状态未变**均已设备运行**（截图 `miniapp-device-artifacts/walk-20260918-233709/`）；⛔ 「齐备 ⇒ 结案成功」缺一张五维齐备夹具（如实记 `NOT_RUN`）；**受控重开属 S4-c，未做** |
 | 13 | Reload/re-enter and inspect the same persistent records | **㊶**（重进后仍在列表/详情可见，出口判据①的独立断言）＋ ㉞ 第三节（换实例续接） | **部分**（真·跨进程续接记 `NOT_RUN`） |
 
 **小计**：**7 步已设备运行**（1 / 2 / 3 / 4 / 5 / 6 / 7 —— 其中步 2 的 live 那一半另算，见 D1-03）、
