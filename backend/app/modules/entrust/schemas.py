@@ -1829,3 +1829,112 @@ class AssignmentQuantityChangeOut(BaseModel):
 
 def assignment_quantity_change_out(data: dict[str, Any]) -> AssignmentQuantityChangeOut:
     return AssignmentQuantityChangeOut.model_validate(data)
+
+
+# ── 费用行（§10.1 第 10 步 / 合同 S4 段第 9–10 条）──────────────────────────
+# 金额与数量一律 `Decimal`（开发规范：金额/数量定点精度），**不经 float**。
+# ⛔ `amount` 与 `resolution_amount` **不设 `ge=0`**：负数的语义（冲销？红字？）
+#    **没有裁定过**，本切片不自造这条约束 —— 留到 S7-3 的口径里定。
+
+
+class ChargeCreateIn(BaseModel):
+    """登记一条费用行。
+
+    `charge_kind` 是**自由字符串**（裁定 Q3=A：`waiting_time` 只是其中一个取值，
+    不另建实体、不建计费引擎）；`direction` 由服务层校验取值域。
+    """
+
+    direction: str = Field(min_length=1, max_length=16)
+    charge_kind: str = Field(min_length=1, max_length=32)
+    amount: Decimal
+    currency: str | None = Field(default=None, max_length=8)
+    #: 计费依据**必填**：没有依据的费用行不可核对，合计也就失去意义。
+    basis: str = Field(min_length=1, max_length=255)
+    quantity: Decimal | None = None
+    unit: str | None = Field(default=None, max_length=24)
+    counterparty: str | None = Field(default=None, max_length=128)
+
+
+class ChargeTransitionIn(BaseModel):
+    """状态迁移的通用入参：只带乐观锁（并发的判据是它，不是"先查后写"）。"""
+
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ChargeDisputeIn(BaseModel):
+    """提争议：`reason` 必填（只标"有争议"而不说为什么，合计的差异无从复核）。"""
+
+    reason: str = Field(min_length=1, max_length=255)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ChargeResolveIn(BaseModel):
+    """处置争议。
+
+    ⛔ `counts_in_total` **必填**（裁定 Q2=B）：`resolved` 一词决定不了这笔算不算数。
+    `final_amount` 在 `counts_in_total=True` 时由服务层要求必填；为假时允许留空
+    （不进合计的金额写出来只会误导）。
+    """
+
+    outcome: str = Field(min_length=1, max_length=16)
+    method: str = Field(min_length=1, max_length=255)
+    counts_in_total: bool
+    final_amount: Decimal | None = None
+    evidence_ref: str | None = Field(default=None, max_length=128)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+
+class ChargeOut(BaseModel):
+    """一条费用行。金额/数量回**字符串**（跨语言消费者不会因 IEEE754 丢精度）。"""
+
+    charge_id: int
+    assignment_id: int
+    direction: str
+    charge_kind: str
+    quantity: str | None = None
+    unit: str | None = None
+    amount: str
+    currency: str
+    counterparty: str | None = None
+    basis: str
+    status: str
+    disputed_reason: str | None = None
+    resolution_outcome: str | None = None
+    resolution_amount: str | None = None
+    #: 是否计入合计。**未知保持 `None`**（不是 False）—— 未处置的行本来就没这个结论。
+    counts_in_total: bool | None = None
+    resolution_method: str | None = None
+    resolution_evidence_ref: str | None = None
+    resolved_by: int | None = None
+    resolved_at: str | None = None
+    revision: int
+    created_by: int | None = None
+    created_at: str
+    updated_at: str
+
+
+class ChargeTotalOut(BaseModel):
+    """一个 `(币种, 收付方向)` 分组的合计（⛔ 不跨币种相加 —— 裁定 Q1=C）。"""
+
+    currency: str
+    direction: str
+    total: str
+    counted_lines: int
+    excluded_lines: int
+
+
+class ChargeListOut(BaseModel):
+    """费用行 + 合计。`counted_lines` / `excluded_lines` 让"这个合计怎么来的"可被复核。"""
+
+    items: list[ChargeOut] = Field(default_factory=list)
+    groups: list[ChargeTotalOut] = Field(default_factory=list)
+    counted_lines: int = 0
+    excluded_lines: int = 0
+
+
+def charge_out(data: dict[str, Any]) -> ChargeOut:
+    return ChargeOut.model_validate(data)
+
+
+def charge_list_out(data: dict[str, Any]) -> ChargeListOut:
+    return ChargeListOut.model_validate(data)

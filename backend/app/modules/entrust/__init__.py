@@ -25,6 +25,7 @@ from app.modules.entrust.agent_api import router as agent_api_router
 from app.modules.entrust.artifacts_api import router as artifacts_api_router
 from app.modules.entrust.attachments_api import router as attachments_api_router
 from app.modules.entrust.capacity_api import router as capacity_api_router
+from app.modules.entrust.charges_api import router as charges_api_router
 from app.modules.entrust.contracts_api import router as contracts_api_router
 from app.modules.entrust.exceptions_api import router as exceptions_api_router
 from app.modules.entrust.extraction_api import router as extraction_api_router
@@ -45,6 +46,7 @@ router.include_router(extraction_api_router)
 router.include_router(legs_api_router)
 router.include_router(offers_api_router)
 router.include_router(plan_api_router)
+router.include_router(charges_api_router)
 router.include_router(quantity_api_router)
 router.include_router(tasks_api_router)
 
