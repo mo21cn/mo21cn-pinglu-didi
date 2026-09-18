@@ -54,6 +54,25 @@ class AssignmentCompleteIn(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class AssignmentReopenIn(BaseModel):
+    """重开（`completed → claimed`）：**乐观锁 ＋ 理由**（设计 §5.5 Q2 已裁）。
+
+    两个字段都必填，理由不同：
+
+    * `expected_revision`：重开撤销的是一次**已经生效的结案**，两个经理同时重开必须
+      有一个拿到 409 —— 与 `complete` 同一条裁决（条件 UPDATE 里带 `revision`）；
+    * `reason`：**没有理由的重开，在审计上等于"结论可以随时改"**。这里是
+      `min_length=1` 的硬约束（服务层再兜一次），并随那次撤销一起落进
+      `ent_assignment_reopen`（append-only）。
+
+    ⛔ 没有"强制重开"/"静默回退"。⚠️ 重开之后**不会**获得取消资格：
+    `cancel` 只对 `submitted` 生效（Q2），这条边界不在本模型里开。
+    """
+
+    expected_revision: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=512)
+
+
 class AssignmentOut(BaseModel):
     """委托单投影。
 

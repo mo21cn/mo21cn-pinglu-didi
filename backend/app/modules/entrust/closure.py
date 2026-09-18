@@ -49,6 +49,7 @@ from app.modules.entrust import settlement as settlement_svc
 from app.modules.entrust import tasks as task_svc
 from app.modules.entrust.access import (
     PERM_ASSIGN_COMPLETE,
+    PERM_ASSIGN_REOPEN,
     find_active_entrustments,
     resolve_context,
 )
@@ -635,6 +636,122 @@ def complete_assignment(
     return final
 
 
+def reopen_assignment(
+    session: Session,
+    *,
+    assignment_id: int,
+    actor_id: int,
+    expected_revision: int,
+    reason: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """重开：`completed → claimed`（**受控**：要权限、要理由、留痕；设计 §5.5 Q2 已裁）。
+
+    三处与 `complete` 的差别（都不是"顺手加个反向操作"）：
+
+    1. **理由必填**：重开撤销的是"对客户宣告做完"这一事实 —— 没有理由的重开，在审计上
+       等于"结论可以随时改"。服务层这里再兜一次（端点层已由 schema 拦）。
+    2. **必须留痕**：`complete` 改的是"现在还没结案"，而重开改的是"**曾经结过案**"
+       ⇒ 被撤销的那次结案（`completed_at`）、谁撤销的、为什么，必须落一条 append-only
+       记录（`ent_assignment_reopen`）。否则历史被抹平，而合同要求
+       `retain the complete history`。
+    3. **重开不自动获得取消资格**（Q2）：回到 `claimed` 之后 `cancel` 这条边**依然不存在**
+       （`cancel` 只对 `submitted` 生效的既有口径一个字不动）⇒ 重开之后只能再走 `complete`。
+
+    顺序（与 `complete` 同构）：取对象 → 权限 → 状态守卫 → revision → 行锁 ＋ 锁后重读
+    → 条件 UPDATE（同时清空 `completed_at`）→ **同一事务**写留痕 → 提交 → 重读返回。
+    """
+    text_reason = (reason or "").strip()
+    if not text_reason:
+        raise assignment_svc.AssignmentError("重开必须给出理由（reason 不能为空）")
+
+    assignment = assignment_svc.get_assignment(session, assignment_id)
+    if assignment is None:
+        raise assignment_svc.AssignmentNotFoundError(f"委托单 {assignment_id} 不存在")
+    _assert_can_reopen(session, assignment=assignment, user_id=actor_id)
+
+    status = str(assignment["status"])
+    if status != assignment_svc.STATUS_COMPLETED:
+        raise assignment_svc.AssignmentStateError(
+            f"委托单 {assignment_id} 状态为 {status}，只有已结案（completed）的委托可以重开"
+            "—— 重开是**撤销一次既有的结案**，不是通用回退"
+        )
+    previous_completed_at = assignment.get("completed_at")
+    if previous_completed_at is None:
+        # 不该发生（completed 必带 completed_at）：如实报错，
+        # ⛔ 不留一条"没说清撤销了什么"的留痕。
+        raise assignment_svc.AssignmentStateError(
+            f"委托单 {assignment_id} 处于 completed 但没有 completed_at —— "
+            "状态与事实不一致，拒绝重开（先查数据）"
+        )
+    if int(expected_revision) != int(assignment["revision"]):
+        raise assignment_svc.RevisionConflictError(
+            f"版本冲突：当前 revision={assignment['revision']}，"
+            f"请求基于 revision={expected_revision}（数据可能已被他人修改）"
+        )
+
+    _lock_assignment_row(session, assignment_id=assignment_id)
+    locked = assignment_svc.get_assignment(session, assignment_id)
+    if locked is None:
+        session.rollback()
+        raise assignment_svc.AssignmentNotFoundError(f"委托单 {assignment_id} 不存在")
+    if str(locked["status"]) != assignment_svc.STATUS_COMPLETED or int(locked["revision"]) != int(
+        expected_revision
+    ):
+        session.rollback()
+        raise assignment_svc.RevisionConflictError(
+            f"委托单 {assignment_id} 在重开期间被其他写者改动"
+            f"（status={locked['status']} revision={locked['revision']}）"
+        )
+
+    current = _fmt(now or assignment_svc.utcnow_naive())
+    result = cast(
+        "CursorResult[Any]",
+        session.execute(
+            text(
+                "UPDATE ent_assignment SET status = :to, completed_at = NULL, "
+                "revision = revision + 1, updated_at = :ts "
+                "WHERE id = :aid AND status = :from AND revision = :rev"
+            ),
+            {
+                "to": assignment_svc.STATUS_CLAIMED,
+                "from": assignment_svc.STATUS_COMPLETED,
+                "rev": int(expected_revision),
+                "ts": current,
+                "aid": assignment_id,
+            },
+        ),
+    )
+    if int(result.rowcount or 0) == 0:
+        session.rollback()
+        raise assignment_svc.RevisionConflictError(
+            f"委托单 {assignment_id} 已被其他写者改动，重开未生效（revision 或状态已变）"
+        )
+
+    # **同一事务**写留痕：把"被撤销的那次结案"钉进记录（append-only）。
+    session.execute(
+        text(
+            "INSERT INTO ent_assignment_reopen "
+            "(assignment_id, actor_user_id, reason, previous_completed_at, "
+            "previous_revision, created_at) "
+            "VALUES (:aid, :by, :reason, :prev, :rev, :ts)"
+        ),
+        {
+            "aid": assignment_id,
+            "by": actor_id,
+            "reason": text_reason,
+            "prev": previous_completed_at,
+            "rev": int(expected_revision),
+            "ts": current,
+        },
+    )
+    session.commit()
+
+    final = assignment_svc.get_assignment(session, assignment_id)
+    assert final is not None
+    return final
+
+
 def _collect_missing(
     session: Session, *, assignment_id: int, actor_id: int
 ) -> list[dict[str, Any]]:
@@ -668,16 +785,20 @@ def _fmt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _assert_can_complete(session: Session, *, assignment: dict[str, Any], user_id: int) -> None:
-    """结案的权限：组织成员 ＋（组织, 货主）作用域上有 `entrust:assignment:complete`。
+def _assert_can_operate(
+    session: Session, *, assignment: dict[str, Any], user_id: int, permission: str
+) -> None:
+    """结案/重开的权限：组织成员 ＋（组织, 货主）作用域上有 `permission`。
 
-    货主本人**不能**结案：结案是运营方对客户的宣告（合同 §6.4 要客户确认**结算**，
-    但"宣布完成"是运营侧动作）。所以这里**不用** `assert_can_view_assignment`
-    （它带货主旁路），而是先按参与方判 404、再按组织权限判 403：
+    货主本人**不能**做这两件事：结案是运营方对客户的宣告（合同 §6.4 要客户确认**结算**，
+    但"宣布完成"是运营侧动作），重开是**撤销**那次宣告。所以这里**不用**
+    `assert_can_view_assignment`（它带货主旁路），而是先按参与方判 404、再按组织权限判 403：
 
     * 非参与方（既不是货主、也不是该组织成员）⇒ 404，不泄漏存在性；
-    * 该组织成员但无 `entrust:assignment:complete` ⇒ 403（如 `member` 只读角色）；
-      货主在本条上同样落到 404 —— 与内部通道的既有口径一致。
+    * 该组织成员但无该权限码 ⇒ 403（如 `member` 只读角色）；货主在本条上同样落到 404。
+
+    ⚠️ 实现**只有一份**（权限码做参数）：结案与重开若各写一遍，迟早出现"改了结案的判据、
+    重开那条没跟上"——那正是本仓反复在防的形态。
     """
     org_id = assignment["org_id"]
     if org_id is None:
@@ -690,11 +811,25 @@ def _assert_can_complete(session: Session, *, assignment: dict[str, Any], user_i
     entrustment = load_entrustment(session, int(ids[0])) if ids else None
     if entrustment is None:
         raise not_found("委托单不存在")
-    if not context.can(PERM_ASSIGN_COMPLETE, owner_user_id=owner_id):
+    if not context.can(permission, owner_user_id=owner_id):
         raise HTTPException(
             status_code=403,
-            detail=(f"用户 {user_id} 缺少权限 {PERM_ASSIGN_COMPLETE}（作用于货主 {owner_id}）"),
+            detail=(f"用户 {user_id} 缺少权限 {permission}（作用于货主 {owner_id}）"),
         )
+
+
+def _assert_can_complete(session: Session, *, assignment: dict[str, Any], user_id: int) -> None:
+    """结案：`entrust:assignment:complete`（细节见 `_assert_can_operate`）。"""
+    _assert_can_operate(
+        session, assignment=assignment, user_id=user_id, permission=PERM_ASSIGN_COMPLETE
+    )
+
+
+def _assert_can_reopen(session: Session, *, assignment: dict[str, Any], user_id: int) -> None:
+    """重开：`entrust:assignment:reopen` —— **另一个权限码**（理由见 `access` 模块）。"""
+    _assert_can_operate(
+        session, assignment=assignment, user_id=user_id, permission=PERM_ASSIGN_REOPEN
+    )
 
 
 __all__ = [
@@ -710,4 +845,5 @@ __all__ = [
     "ClosureError",
     "closure_readiness",
     "complete_assignment",
+    "reopen_assignment",
 ]

@@ -189,6 +189,20 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
     ),
     _r(
         "POST",
+        "/assignments/{assignment_id}/reopen",
+        GUARD_ORG_MEMBER,
+        "entrust:assignment:reopen",
+        owner_scope=True,
+        idempotent=True,
+        note="**重开**（设计 §5.5 Q2 已裁）：`completed → claimed`，**理由必填**，"
+        "并在**同一事务**写 append-only 留痕（`ent_assignment_reopen` 记下被撤销的那次结案"
+        "── 否则「曾经结过案」在库里无从查证）。"
+        "⛔ 重开**不**恢复取消资格（`cancel` 仍只对 `submitted` 生效，Q2）。"
+        "权限码**独立于** `complete`：能结案 ≠ 能撤销结案。"
+        "并发复用 `expected_revision`。货主本人不能重开（与 `complete` 同因）。",
+    ),
+    _r(
+        "POST",
         "/assignments/{assignment_id}/cancel",
         GUARD_OWNER_SELF,
         idempotent=True,

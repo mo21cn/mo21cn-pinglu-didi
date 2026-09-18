@@ -48,6 +48,10 @@ PERM_ASSIGN_CLAIM = "entrust:assignment:claim"
 # 结案是**对客户宣告这件事做完了**（要过五个维度前置），把它并进 `claim`
 # 会让"谁能接单"隐式等于"谁能让委托结案"。
 PERM_ASSIGN_COMPLETE = "entrust:assignment:complete"
+# 重开（`completed → claimed`，设计 §5.5 Q2 已裁）。**独立于** `complete`：
+# 重开撤销的正是"已对客户宣告完成"这一事实，把它并进 `complete` 会让
+# "能结案"自动蕴含"能撤销结案"——那是两个敏感度不同的动作。
+PERM_ASSIGN_REOPEN = "entrust:assignment:reopen"
 PERM_QUOTE_CREATE = "entrust:quote:create"
 PERM_QUOTE_PUBLISH = "entrust:quote:publish"
 PERM_TASK_DISPATCH = "entrust:task:dispatch"
@@ -63,6 +67,7 @@ ALL_PERMISSIONS = frozenset(
         PERM_VIEW,
         PERM_ASSIGN_CLAIM,
         PERM_ASSIGN_COMPLETE,
+        PERM_ASSIGN_REOPEN,
         PERM_QUOTE_CREATE,
         PERM_QUOTE_PUBLISH,
         PERM_TASK_DISPATCH,
@@ -85,6 +90,7 @@ ORG_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_VIEW,
             PERM_ASSIGN_CLAIM,
             PERM_ASSIGN_COMPLETE,
+            PERM_ASSIGN_REOPEN,
             PERM_QUOTE_CREATE,
             PERM_QUOTE_PUBLISH,
             PERM_TASK_DISPATCH,
