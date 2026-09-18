@@ -9794,9 +9794,7 @@ def sec_49(w: Walker) -> None:
             tap_landed = True
             w.c.scroll_into('[data-act-sig-submit="1"]')
             w.c.tap('[data-act-sig-submit="1"]')
-            d = w.wait_data(
-                lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4
-            )
+            d = w.wait_data(lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4)
             if "已经记过" in str(d.get("sigHint") or ""):
                 break
     if not d:
@@ -9811,8 +9809,12 @@ def sec_49(w: Walker) -> None:
         "已经记过" in str(d.get("sigHint") or "") and n_after == n_before,
         f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after} "
         f"提交键有落点={tap_landed}"
-        + ("" if tap_landed else "（**提交键始终没进渲染树 ⇒ 这条不是\"页面没提示\"，"
-                                "而是\"点击没落地\"，先查表单是否真的展开**）"),
+        + (
+            ""
+            if tap_landed
+            else '（**提交键始终没进渲染树 ⇒ 这条不是"页面没提示"，'
+            '而是"点击没落地"，先查表单是否真的展开**）'
+        ),
     )
 
     # ⑦ 常驻声明在页面上
