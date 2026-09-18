@@ -878,6 +878,69 @@ SCOPE_MATRIX: tuple[RouteScope, ...] = (
         "⚠️ 不校验 mode 取值组合与段数（裁定：不强制 公–水–公）；只做结构完整性 —— "
         "mode 非空、起终点非空、seq ≥1 且委托内唯一（唯一键在 DB 上，撞号 409）。",
     ),
+    # ── 费用行：登记 / 确认 / 争议 / 处置 / 读合计（charges_api.py）────────────
+    # HO 0918-2 裁定：Q1=C（合计按**币种 × 收付方向**分开，不跨币种相加）、
+    # Q2=B（争议必须**显式处置 ＋ 证据**，并给出「最终金额 ＋ 是否计入」——
+    # `resolved` 一词决定不了是否计入）、Q3=A（`waiting_time` 用**普通费用行**，
+    # 不另建实体、不建计费引擎）。
+    # 判据取「这条通道上有没有内部信息」：费用行带 `counterparty` 与 `basis`
+    # —— 谁付谁、按什么算，是**内部成本口径** ⇒ **一条都不给货主本人放行**
+    # （与紧邻上面的运力那一组同型；而计划那一组相反，理由写在那条 note 里）。
+    # ⚠️ 客户侧投影（"只看对客费用与证据白名单"，裁定 Q5 第 2 条）**本切片没有**
+    # —— 它需要"哪些费用是对客的"这个口径，落在 S7-3；这里不假装已支持。
+    _r(
+        "GET",
+        "/assignments/{assignment_id}/charges",
+        GUARD_ORG_MEMBER,
+        "entrust:view",
+        note="费用行清单 ＋ 合计（按币种 × 收付方向分组）。"
+        "判据＝有组织边界、**不给货主本人放行**：行上带对手方与计费依据，是内部成本口径。"
+        "空列表是正常答复（这单还没记过费用），**不是** 404。"
+        "每组回 `counted_lines` / `excluded_lines`，让合计数可被复核。",
+    ),
+    _r(
+        "POST",
+        "/assignments/{assignment_id}/charges",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="登记一条费用行（状态 draft ⇒ **草稿不进合计**）。"
+        "权限沿用本仓已有的 `entrust:settlement:create`，不新造权限码。"
+        "`basis` 必填（没有依据的费用行不可核对）；`quantity` 与 `unit` 必须成对。"
+        "⚠️ **不校验金额正负**：负数的语义没有裁定过，本切片不自造这条约束。",
+    ),
+    _r(
+        "POST",
+        "/charges/{charge_id}/confirm",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="`draft → confirmed`（确认之后才进合计）。"
+        "状态机与 `revision` 乐观锁都在服务层的**唯一一处** `_transition` 里："
+        "`rowcount == 0` ⇒ 409（要么状态不对、要么版本过期），不静默覆盖。",
+    ),
+    _r(
+        "POST",
+        "/charges/{charge_id}/dispute",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="`confirmed → disputed`（**争议行不进合计** —— 合同 S4 段第 10 条原文）。"
+        "只能对**已确认**的费用提争议（草稿本就不计入）。`reason` 必填："
+        "只标「有争议」而不写为什么，合计的差异无从复核。",
+    ),
+    _r(
+        "POST",
+        "/charges/{charge_id}/resolve",
+        GUARD_ENTRUSTMENT_WRITE,
+        "entrust:settlement:create",
+        idempotent=True,
+        note="`disputed → resolved|rejected`：**显式处置 ＋ 依据**（裁定 Q2=B）。"
+        "⛔ `counts_in_total` 必填且**不从 `outcome` 推导** —— 认可可能是「全额计入」、"
+        "也可能是「认可但不计入」，调减是「按新金额计入」，拒绝是「不计入」；"
+        "把这三件事压成一条规则正是裁定要消除的歧义。"
+        "`counts_in_total=True` 时 `final_amount` 必填；为假时允许留空。",
+    ),
     _r(
         "PATCH",
         "/assignments/{assignment_id}/legs/{leg_id}",
