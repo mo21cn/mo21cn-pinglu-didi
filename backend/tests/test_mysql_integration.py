@@ -1323,6 +1323,9 @@ def _seed_closure_ready(db, *, owner_id: int = 970, manager_id: int = 971) -> in
       "可以结案"这件事本身就是这些命令产生的，手改出来的前提不证明链路可用；
     * 授权里的 `permissions` 必须含 `entrust:assignment:complete`：结案**另开了一个
       权限码**（认领是接单、结案是对客户宣告做完，两件事不该共用一个码）。
+      ⭐ 同理必须含 `entrust:assignment:reopen`（S4-c 重开是**撤销**那次宣告，又一个码）——
+      漏一个的后果是并发用例里**两个线程都撞 403 静默死掉**，读数只剩「有线程未完成: []」，
+      真因（夹具与权限码脱节）完全看不见（2026-09-19 实测，CI 上红了一次才发现）。
     """
     from app.modules.entrust import charges as charge_svc
     from app.modules.entrust import settlement as settle_svc
@@ -1335,8 +1338,8 @@ def _seed_closure_ready(db, *, owner_id: int = 970, manager_id: int = 971) -> in
             "UPDATE ent_entrustment SET permissions = :p WHERE org_id = :o AND entrust_user_id = :u"
         ),
         {
-            "p": '["entrust:view","entrust:assignment:complete","entrust:task:dispatch",'
-            '"entrust:settlement:create"]',
+            "p": '["entrust:view","entrust:assignment:complete","entrust:assignment:reopen",'
+            '"entrust:task:dispatch","entrust:settlement:create"]',
             "o": org_id,
             "u": owner_id,
         },
@@ -1431,6 +1434,11 @@ def test_complete_race_exactly_one_winner(mysql):
                     outcomes.append("won")
                 except svc.AssignmentError as exc:
                     outcomes.append(f"lost:{exc}")
+                except Exception as exc:  # noqa: BLE001
+                    # ⚠️ **非业务**异常（如夹具没给权限 ⇒ 403）也必须记进 `outcomes`：
+                    #    否则线程静默死掉，断言只会报「有线程未完成: []」，
+                    #    真因在读数里**完全看不见**（2026-09-19 CI 上实测红了一次）。
+                    outcomes.append(f"crashed:{type(exc).__name__}:{exc}")
             finally:
                 session.close()
 
@@ -1616,6 +1624,11 @@ def test_reopen_race_exactly_one_winner(mysql):
                     outcomes.append("won")
                 except svc.AssignmentError as exc:
                     outcomes.append(f"lost:{exc}")
+                except Exception as exc:  # noqa: BLE001
+                    # ⚠️ **非业务**异常（如夹具没给权限 ⇒ 403）也必须记进 `outcomes`：
+                    #    否则线程静默死掉，断言只会报「有线程未完成: []」，
+                    #    真因在读数里**完全看不见**（2026-09-19 CI 上实测红了一次）。
+                    outcomes.append(f"crashed:{type(exc).__name__}:{exc}")
             finally:
                 session.close()
 
