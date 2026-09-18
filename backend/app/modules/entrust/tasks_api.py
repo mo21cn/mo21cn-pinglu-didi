@@ -187,7 +187,17 @@ def list_tasks(
         if mapped is None:
             raise
         raise mapped from exc
-    return TaskListOut(total=total, page=page, size=size, items=[task_out(i) for i in items])
+    # `has_more` 按**已消费条数**算，不写 `page * size < total`：
+    # 页号越过末页时（`page` 很大、`items` 为空）前者仍给出"没有更多"，后者会算出
+    # 一个永远为真的值。两种写法在正常翻页下等价，差别只在异常页号上 ——
+    # 而"异常页号"恰恰是调用方最需要被告知"你没有取到东西"的时候。
+    return TaskListOut(
+        total=total,
+        page=page,
+        size=size,
+        has_more=(page - 1) * size + len(items) < total,
+        items=[task_out(i) for i in items],
+    )
 
 
 @router.get(

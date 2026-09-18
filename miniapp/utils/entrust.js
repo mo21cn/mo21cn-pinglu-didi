@@ -2574,15 +2574,37 @@ function applyCase(caseId, body, idempotencyKey) {
  * 是一句 403 —— 他会以为是权限问题，而不是"这个编号不属于本单"。
  *
  * 两个取数各自复用既有端点，不为本页新开一个"候选清单"接口：
- *   · 任务 → `GET /entrust/tasks?assignment_id=`；
+ *   · 任务 → `GET /entrust/tasks?assignment_id=`（**翻页取全**：这份候选要的是
+ *     "这张单的任务全集"，不是"第一页" —— 缘由写在 `fetchTaskCandidates` 里）；
  *   · 成果 → `GET /entrust/assignments/{id}/artifacts`。
  * 两者都是**该委托的可见性**，与案件一致；不需要额外授权。
  */
 function fetchTaskCandidates(assignmentId, size) {
-  return request({
-    url: BASE + '/tasks',
-    method: 'GET',
-    data: { assignment_id: assignmentId, page: 1, size: size || 50 }
+  const pageSize = size || 100
+  // 3 页护栏：任务数是"个位数"量级，正常情况下第 1 页就取完（端点的 `size` 上限是 100）。
+  // 留着上限是为了**不无限翻**，而不是"允许截断" —— 真到 300 条以上，响应里的
+  // `has_more` 仍为 true（事实留在数据里，不再是静默），只是这份候选不再是全集。
+  const MAX_PAGES = 3
+  const page = function (n) {
+    return request({
+      url: BASE + '/tasks',
+      method: 'GET',
+      data: { assignment_id: assignmentId, page: n, size: pageSize }
+    })
+  }
+  const collect = function (resp, n, acc) {
+    const items = acc.concat((resp && resp.items) || [])
+    // ⚠️ 严格判 `=== true`：老后端没有这个字段时**不翻页**，也不臆断"还有更多"
+    //    （与 `decorateAssignmentPlan` 对 `task_prerequisites_truncated` 的处置同口径）。
+    if (!resp || resp.has_more !== true || n >= MAX_PAGES) {
+      return Object.assign({}, resp || {}, { items: items })
+    }
+    return page(n + 1).then(function (next) {
+      return collect(next, n + 1, items)
+    })
+  }
+  return page(1).then(function (first) {
+    return collect(first, 1, [])
   })
 }
 
@@ -4146,6 +4168,12 @@ function decorateAssignmentPlan(payload) {
     }
   })
   const rawTasks = data.task_prerequisites || []
+  // 截断事实（O-9）：服务端给 total 与 truncated；字段缺失时退回"行数即总数"，
+  // 而不是默认"没被截" —— 后者会在老后端上把截断重新变回静默。
+  const tasksTotal = data.task_prerequisites_total == null
+    ? rawTasks.length
+    : Number(data.task_prerequisites_total)
+  const tasksTruncated = data.task_prerequisites_truncated === true
   // 前置**在本单清单内**解析：解析不到就不编标题（见上第 3 条）
   const titleById = {}
   rawTasks.forEach(function (t) {
@@ -4166,7 +4194,15 @@ function decorateAssignmentPlan(payload) {
     legs: legs,
     tasks: tasks,
     hasLegs: legs.length > 0,
-    hasTasks: tasks.length > 0
+    hasTasks: tasks.length > 0,
+    // ⚠️ 截断**必须**在界面上说出来（O-9）：任务被截时，某条任务的
+    //    `precondition_task_id` 可能正好指向没读回来的那一行 ⇒ 它显示成
+    //    「前置：任务 #7」（id 是事实、标题没有），与"这张单真的没有前置"长得一样。
+    //    这一行就是两者的分界；`hasTasks` 为真时也可能截断，所以不能只在空态里说。
+    tasksTruncated: tasksTruncated,
+    tasksTruncatedText: tasksTruncated
+      ? '只显示前 ' + tasks.length + ' 条（本单共 ' + tasksTotal + ' 条），未显示的任务也带前置关系'
+      : ''
   }
 }
 
