@@ -19,6 +19,31 @@
     <view class="empty-title">加载中</view>
   </view>
 
+  <block wx:elif="{{customerMode}}">
+    <!-- ── 对客通道（货主侧）：只看对客费用，并且只在这里做「客户确认」 ──
+         ⛔ 内部读数（费用行 / 版本链 / 财务状态）对货主一律 404 ⇒ 本分支里一个都不渲染，
+         而不是渲染成空区块（那会把"你没有这个视角"伪装成"这里本来就是空的"）。 -->
+    <view class="card">
+      <view class="card-title">结算确认</view>
+      <view class="hint">客户确认绑定「精确版本」：确认后若费用有变，会出新版本并需要重新确认。</view>
+
+      <block wx:if="{{customerSettlementId}}">
+        <view class="row">
+          <text class="row-k">{{customerVersionText}}</text>
+          <text class="row-sub">{{awaitingCustomer ? '等你确认这一版' : '你已表态过（如需改口径请让经理出新版本）'}}</text>
+        </view>
+        <view class="row" wx:for="{{customerLines}}" wx:key="key">
+          <text class="row-k">{{item.chargeKind}}</text>
+          <text class="row-v">{{item.amountText}} {{item.currency}}</text>
+          <text class="row-sub">依据：{{item.basis}}</text>
+        </view>
+        <view wx:if="{{awaitingCustomer}}" class="btn" data-act="customer-confirm" data-id="{{customerSettlementId}}" bindtap="onConfirmSettlement">确认这一版</view>
+      </block>
+      <view wx:else class="hint">{{customerHint}}</view>
+      <view wx:if="{{settlementHint}}" class="hint">{{settlementHint}}</view>
+    </view>
+  </block>
+
   <block wx:else>
     <!-- ── 财务结案状态（派生）────────────────────────────────────── -->
     <view class="card">

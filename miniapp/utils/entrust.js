@@ -4944,6 +4944,35 @@ function fetchFinancialStatus(assignmentId) {
   return request({ url: BASE + '/assignments/' + assignmentId + '/financial-status' })
 }
 
+/**
+ * 从**工作台载荷**里取「对客结算版本提示」（货主可见；白名单）。
+ *
+ * 为什么读工作台而不是结算端点：版本清单（`GET /assignments/{id}/settlements`）
+ * **没有货主面**（版本带 `internal_total` ＝ 我们付给供应商的成本），而
+ * `customer-view` 与 `customer-confirm` 都按**版本 id** 取 ⇒ 没有这一格，
+ * 客户就**不知道"我该确认哪一版"**，客户确认在界面上没有可走的路。
+ *
+ * ⛔ 这里只转交 **id 与状态**：金额与费用明细走 `fetchCustomerSettlement`，
+ *    内部成本**不在这一格**里（服务端那条投影是白名单，前端不二次加工）。
+ *    没有适用版本时回 `null` —— **未知保持未知**，不编一个空对象出来。
+ */
+function customerSettlementHint(payload) {
+  const d = payload || {}
+  const h = d.customer_settlement || null
+  if (!h) return null
+  return {
+    settlementId: _sid(h.settlement_id),
+    versionNo: Number(h.version_no || 0),
+    versionText: 'v' + String(h.version_no == null ? '' : h.version_no),
+    status: h.status || '',
+    statusText: SETTLEMENT_STATUS_LABELS[h.status] || h.status || '未知',
+    customerDecision: h.customer_decision || '',
+    customerConfirmedAt: h.customer_confirmed_at || '',
+    // 客户此刻要不要动作（服务端推导：内部已确认 且 自己还没表态）
+    awaitingCustomer: h.awaiting_customer === true
+  }
+}
+
 //: 费用状态 → 界面文案。**未登记的取值原样显示**（未知不假装知道）。
 const CHARGE_STATUS_LABELS = {
   draft: '草稿',
@@ -5348,6 +5377,7 @@ module.exports = {
   confirmCharge,
   confirmSettlement,
   createSettlement,
+  customerSettlementHint,
   decorateCharge,
   decorateChargeTotal,
   decorateEvidenceGap,
