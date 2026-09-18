@@ -1012,9 +1012,25 @@ class Walker:
 
         旧脚本用 `tapAt(page, '.role-card', 0|1)` 按序号点；工具无 index 参数，
         但身份卡带 `data-role` → 用属性选择器精确命中（等价且更明确）。
+
+        ⚠️ **先等身份卡真的在渲染树上，再点**（2026-09-18 O-8 定向验证的结论）。
+        `reLaunch` 是异步的：`current_path()` 已经报 `pages/index/index`，
+        而**渲染树里那张卡可能还没建出来**，此时 `tap` 是**静默落空**的 ——
+        接着就是等 `want` 等到超时，读数写成
+        `未进入货主工作台（pages/index/index）`，看起来像"权限/入口坏了"。
+        同一次运行里换个配方又全绿，说明这是**就绪读数**问题，不是业务缺陷。
+        ⇒ 与 `login_as` 里"未命中就补发一次 `reLaunch`"是同一手法：
+        把"没就绪"变成**可重试的条件**，而不是加固定等待（加 sleep 只会掩盖它）。
         """
-        self.c.tap(f'[data-role="{role}"]')
-        return self.c.wait_path(want, tries)
+        for _attempt in range(2):
+            for _ in range(20):
+                if self.c.count(f'[data-role="{role}"]') > 0:
+                    break
+                time.sleep(0.5)
+            self.c.tap(f'[data-role="{role}"]')
+            if self.c.wait_path(want, tries):
+                return True
+        return self.c.current_path() == want
 
     def wait_data(self, pred, tries: int = 20, gap: float = 0.4) -> dict:
         """轮询页面 data 直到满足条件（页面渲染是异步的，固定 sleep 不可靠）。"""
@@ -9753,22 +9769,52 @@ def sec_49(w: Walker) -> None:
     )
 
     # ⑥ 同形态再记一次 ⇒ 页内说清"已经记过"（409 的语义，不是静默失败）
+    #
+    # ⚠️ **这一格必须能区分两种情形**（2026-09-18 O-8 定向验证的结论）：
+    #   (a) 提交真的发生了、但页内没给提示； (b) 提交**根本没发生**（tap 落空）。
+    #   两者都表现为 `sigHint=''` ＋ 条数不变 —— 只断言 hint 的话，判据分不出
+    #   "产品没提示"与"工具没点到"，而这两种结论指向完全不同的下一步。
+    #   ⇒ 先确认**提交键在渲染树上**（`count > 0`，tap 才有落点），点完若仍无提示
+    #     就**补点一次**（与 `login_as` 补发 reLaunch、`enter_role` 先等卡片是同一手法），
+    #     并把"点击时到底有没有落点"记进读数 —— 加固定等待只会把 (b) 也等成绿灯。
     n_before = len(items)
+    tap_landed = False
     if w.c.count('[data-act-sig-open="1"]'):
         w.c.scroll_into('[data-act-sig-open="1"]')
         w.c.tap('[data-act-sig-open="1"]')
-        d = w.wait_data(lambda x: x.get("sigOpen") is True, tries=20, gap=0.3)
+        w.wait_data(lambda x: x.get("sigOpen") is True, tries=20, gap=0.3)
         w.c.scroll_into('[data-act-sig-kind="sample_scan"]')
         w.c.tap('[data-act-sig-kind="sample_scan"]')
-        w.c.scroll_into('[data-act-sig-submit="1"]')
-        w.c.tap('[data-act-sig-submit="1"]')
-        d = w.wait_data(lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4)
+        d: dict = {}
+        for _attempt in range(2):
+            has_btn = w.c.count('[data-act-sig-submit="1"]') > 0
+            if not has_btn:
+                time.sleep(0.6)
+                continue
+            tap_landed = True
+            w.c.scroll_into('[data-act-sig-submit="1"]')
+            w.c.tap('[data-act-sig-submit="1"]')
+            d = w.wait_data(lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4)
+            if "已经记过" in str(d.get("sigHint") or ""):
+                break
+    if not d:
+        # ⚠️ 一次都没点到 ⇒ `d` 还是空字典，直接 `len(d["sig"]["items"])` 会得到 **0**，
+        #    读成"条数从 1 掉到 0"（看起来像"证据被删了"）。这里补一次真实读数，
+        #    让"条数"这一列始终是**页面上的实际条数**，而不是"我们有没有取到数"。
+        d = w.c.page_data()
     n_after = len((d.get("sig") or {}).get("items") or [])
     w.rep.rec(
         "㊾ ⑨ 同一版同一形态**再记一次** ⇒ 页内说清「已经记过」（服务端 409 的语义，"
         "不是静默失败，也没有记成两条互相打架的证据）",
         "已经记过" in str(d.get("sigHint") or "") and n_after == n_before,
-        f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after}",
+        f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after} "
+        f"提交键有落点={tap_landed}"
+        + (
+            ""
+            if tap_landed
+            else '（**提交键始终没进渲染树 ⇒ 这条不是"页面没提示"，'
+            '而是"点击没落地"，先查表单是否真的展开**）'
+        ),
     )
 
     # ⑦ 常驻声明在页面上

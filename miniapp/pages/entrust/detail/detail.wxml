@@ -525,6 +525,22 @@
         </view>
       </view>
 
+      <!-- 已受理：进入「财务与结算」（§10.1 第 10–11 步 / S7-1 · S7-2 · S7-3 的界面入口）。
+           入口同样只在 claimed 时出现 —— 费用与结算的命令只在已受理的委托上成立
+           （后端 `create_settlement` 对非 claimed 直接 409），摆一个必然失败的按钮
+           等于把服务端规则说成"随机失败"。 -->
+      <view wx:if="{{canCreateCase}}" class="card slot-card">
+        <view class="slot-note">费用行、缺件补录、结算版本与收付依据都在这里；客户确认只由客户本人做</view>
+        <view class="slot-actions">
+          <view
+            class="slot-btn"
+            data-act-open-finance="open-finance"
+            bindtap="onOpenFinance"
+            hover-class="hover-dim"
+          >财务与结算</view>
+        </view>
+      </view>
+
       <!-- 归属机制上线前的历史成果：如实报数，不静默藏起来 -->
       <view wx:if="{{unassignedHint}}" class="card slot-card">
         <view class="slot-note">{{unassignedHint}}</view>

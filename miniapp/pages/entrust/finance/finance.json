@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "财务与结算",
+  "enablePullDownRefresh": false,
+  "backgroundTextStyle": "dark"
+}
