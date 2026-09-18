@@ -115,6 +115,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -10146,6 +10147,307 @@ def _idem(tag: str) -> str:
     return f"walk-{tag}-{time.time_ns()}"
 
 
+def sec_51(w: Walker) -> None:
+    """第 6 步**来源门槛的被拒剧本**：AG-02 载体 ⇒ 被拒 ⇒ 逐条核验 ⇒ 同版本发布成功。
+
+    为什么单开一章而不塞进 ㊹
+    ------------------------
+    ㊹ 章的载体是**经界面人工组装**的 `customer_quote`（来源 `manual`）⇒ 服务端没有
+    待核验的模型声明 ⇒ 门槛一次就过 ⇒ 那条 `else` 分支只能记 `NOT_RUN`
+    （`DEMO-1-readiness.md` §10.4 的 O-1 残留分支）。而本剧本需要一个**来源为模型声明**
+    的载体，两条剧本的载体**预期完全相反**，混在一章里必然互相污染读数
+    （㊹ 首跑就是这么得到 3 条假 FAIL 的）。本章独立、自带载体，跑不跑都不影响 ㊹。
+
+    覆盖
+    ----
+    ① 前置：canonical 委托在位；AG-02 会话可得（`session-context` 给授权 id，**不前端推导**）；
+    ② 经接口发起一次**带 `amount`** 的 AG-02 作业 ⇒ 提案里含 `customer_quote`；
+    ③ 采纳 ⇒ 成果的**版本来源是模型声明**，且服务端已写下**待核验声明**（≥1 条）；
+    ④ 经**界面**点「发布这一版」⇒ **被拒**，且页面把待核验清单**显示出来**
+       （只说"不能发布"是没法干活的）；
+    ⑤ 页面上**没有**「登记来源核验」的入口（这是被测事实，见下"诚实边界"）；
+    ⑥ 经接口逐条登记核验（必填依据）⇒ 门槛转为通过；
+    ⑦ 回界面**重新点发布** ⇒ 同一版本发布成功，且与服务端发布记录同源。
+
+    ⚠️ 诚实边界（都是被测事实的一部分，不是辩解）
+    * **作业的 `amount` 只能经接口给**：界面上没有这个入参（`miniapp` 全仓无 `amount`
+      输入锚点）。这正是"主链路缺『组装对客报价』"那条缺口的表现 —— 本章如实登记
+      "输入路径经接口"，**不假装是界面点的**。其余动作（进成果页、点发布）都是真机点击。
+    * **⑤ 是负例断言**（"页面上没有这个入口"）。它单独成立时没有信息量（任何页面都满足），
+      所以必须与 ④ **同时成立**才有意义 —— ④ 证明页面确实处在"被拒且看得见待核验清单"
+      的状态。这就是 O-1b 要的答案：**界面能告诉你为什么不能发，却给不了你解决它的入口**。
+    * 依赖「组织队列里有一张委托」（`seed_entrust_demo.py` 即可）。**不绑 canonical** ——
+      那是一个「要演示哪个状态就铺哪个」的可选夹具，把它当本章前置会让章节在标准配方下
+      直接变成一条 `FAIL`（首跑实测 `aid=''`）。载体由本章自造，与夹具无关。
+    * 本章**会写库**（建会话、发作业、采纳成果、核验、发布）。重跑：成果每次新采纳一份
+      （幂等键带时间戳），不会撞唯一键。
+    """
+    print("\n-- 51 第 6 步来源门槛：被拒 ⇒ 逐条核验 ⇒ 同版本发布（S6-3）--", flush=True)
+
+    code_mgr = CODE_OWNER
+    org_name = "演示经营主体·工作台"
+
+    err_base = w.c.errors()
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("51 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+
+    def _rev_row(page: dict, no: int) -> dict:
+        for r in page.get("revisions") or []:
+            if int((r or {}).get("revisionNo") or 0) == no:
+                return r or {}
+        return {}
+
+    # ---- ① 前置：组织队列里有一张委托 ----
+    org_id = ""
+    for o in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((o or {}).get("name") or "") == org_name:
+            org_id = str((o or {}).get("org_id") or "")
+            break
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    # ⭐ 不绑 canonical：本剧本的载体**自己造**（发作业 → 采纳），只需要队列里有一张委托。
+    #    把章节钉在一个「要演示哪个状态就铺哪个」的可选夹具上，会让它在标准配方下直接
+    #    变成一条 `FAIL`（首跑实测 `aid=''` 命中 0 张）—— 读者会以为产品坏了。
+    rows.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    aid = str((rows[0] or {}).get("assignment_id") or "") if rows else ""
+    w.rep.rec(
+        "51 前置 · 组织队列里有可用的委托（载体由本章自造，不依赖可选夹具）",
+        bool(aid),
+        f"aid={aid!r} status={(rows[0] or {}).get('status') if rows else None!r} 队列 {len(rows)} 张",
+    )
+    if not aid:
+        w.rep.not_run("51 来源门槛剧本", "没有 canonical 委托 ⇒ 先跑 seed_entrust_canonical.py")
+        return
+
+    # ---- ② 会话 + 带 amount 的作业 ----
+    ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
+    eid = str(ctx.get("entrustment_id") or "")
+    sid = ""
+    for s in (
+        api_get(f"/entrust/sessions?view=org&org_id={org_id}&assignment_id={aid}&size=50", tok)
+        or {}
+    ).get("items") or []:
+        if str((s or {}).get("agent_specialty") or "") == "agent_02":
+            sid = str((s or {}).get("session_id") or "")
+            break
+    if not sid and eid:
+        st_sess, sess = api_post(
+            f"/entrust/entrustments/{eid}/sessions",
+            tok,
+            {
+                "assignment_id": int(aid),
+                "agent_specialty": "agent_02",
+                "title": "S6-3 来源门槛剧本",
+            },
+            uuid.uuid4().hex,
+        )
+        if st_sess in (200, 201):
+            sid = str((sess or {}).get("session_id") or "")
+    w.rep.rec(
+        "51 前置 · 授权 id 由 `session-context` 给出（**不前端推导**），AG-02 会话可得",
+        bool(eid) and bool(sid),
+        f"entrustment_id={eid!r} session_id={sid!r}",
+    )
+    if not sid:
+        w.rep.not_run("51 来源门槛剧本", "拿不到 AG-02 会话 ⇒ 后续无法制造模型来源的载体")
+        return
+
+    # ⚠️ 作业输入的 `amount` **只能经接口给**（界面无此入参）—— 如实登记，不假装是界面点的。
+    st_job, job = api_post(
+        f"/entrust/sessions/{sid}/jobs",
+        tok,
+        {
+            "input": {
+                "amount": "18600",
+                "currency": "CNY",
+                "includes": ["内河运费", "港杂费"],
+                "quote_text": "承运人：贵港航运有限公司\n单价：18600 元/柜\n有效期：2026-12-31",
+            }
+        },
+        uuid.uuid4().hex,
+    )
+    job_id = str((job or {}).get("job_id") or "")
+    # 提交与执行是**两个动作**：不点 run，作业永远停在 `queued`（envelope 为 null）。
+    if job_id:
+        api_post(f"/entrust/agent/jobs/{job_id}/run", tok, {}, uuid.uuid4().hex)
+    jrow = {}
+    for _ in range(40):
+        jrow = (
+            ((api_get(f"/entrust/agent/jobs/{job_id}", tok) or {}).get("job") or {})
+            if job_id
+            else {}
+        )
+        if str(jrow.get("status") or "") in ("succeeded", "failed"):
+            break
+        time.sleep(1)
+    proposals = [
+        p
+        for p in ((jrow.get("envelope") or {}).get("artifact_proposals") or [])
+        if isinstance(p, dict)
+    ]
+    cq = [p for p in proposals if str(p.get("artifact_type") or "") == "customer_quote"]
+    w.rep.rec(
+        "51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`"
+        "（`ag02.py` 的产出条件就是作业输入带对客金额）",
+        str(jrow.get("status")) == "succeeded" and bool(cq),
+        f"job={job_id!r} status={jrow.get('status')!r} 提案类型="
+        f"{sorted({str(p.get('artifact_type')) for p in proposals})}",
+    )
+    if not cq:
+        w.rep.not_run("51 来源门槛剧本", "作业没有产出 customer_quote ⇒ 没有可发布的载体")
+        return
+
+    # ---- ③ 采纳 ⇒ 模型来源的成果 ----
+    st_adopt, art = api_post(
+        f"/entrust/agent/jobs/{job_id}/adopt",
+        tok,
+        {
+            "artifact_type": "customer_quote",
+            "payload": cq[0].get("payload") or {},
+            "note": "S6-3 来源门槛剧本：采纳 AG-02 的对客报价提案",
+        },
+        uuid.uuid4().hex,
+    )
+    art_id = str((art or {}).get("artifact_id") or "")
+    if st_adopt not in (200, 201) or not art_id:
+        w.rep.not_run("51 来源门槛剧本", f"采纳失败：st={st_adopt} {str(art)[:160]}")
+        return
+    rev = int((api_get(f"/entrust/artifacts/{art_id}", tok) or {}).get("current_revision_no") or 0)
+    if not rev:
+        rev = 1
+    gate = (api_get(f"/entrust/artifacts/{art_id}/source-checks?revision_no={rev}", tok) or {}).get(
+        "gate"
+    ) or {}
+    declared = gate.get("declared") or []
+    w.rep.rec(
+        "51 ③ 采纳 ⇒ 服务端写下**待核验声明**（这是「来源为模型声明」在数据上的样子）",
+        len(declared) >= 1 and bool(gate.get("pending")),
+        f"artifact={art_id!r} v{rev} declared={len(declared)} pending={len(gate.get('pending') or [])} "
+        f"ok={gate.get('ok')!r}",
+    )
+
+    # ---- ④ 经界面进入该成果页并发起发布 ----
+    if not w.open_workbench(code_mgr, tag="51"):
+        w.rep.not_run("51 ④ 经界面发布", "未能进入经理工作台")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    sel_card = f'[data-id="{aid}"]'
+    w.c.scroll_into(sel_card)
+    t_card = w.c.tap(sel_card)
+    ok_dt = w.c.wait_path(DETAIL, 30)
+    time.sleep(1.4)
+    w.wait_data(lambda x: bool(x.get("slots")), tries=40, gap=0.5)
+    sel_ref = f'[data-kind="artifact"][data-id="{art_id}"]'
+    w.c.scroll_into(sel_ref)
+    n_ref = w.c.count(sel_ref)
+    t_ref = w.c.tap(sel_ref)
+    ok_art = w.c.wait_path(ARTIFACT, 30)
+    time.sleep(1.3)
+    pg_art = w.wait_data(lambda x: x.get("artifact") is not None, tries=40, gap=0.5)
+    w.shot("51-1-模型来源成果页")
+    w.rep.rec(
+        "51 ④ 「工作台 → 委托卡 → 详情 → 成果引用 → 成果页」全程真实点击，落到**模型来源**的成果",
+        bool(t_card and ok_dt and t_ref and ok_art) and str(pg_art.get("artifactId")) == art_id,
+        f"card={t_card} detail={ok_dt} 引用锚点 {n_ref} 个 ref={t_ref} artifact={ok_art} "
+        f"落页 artifactId={pg_art.get('artifactId')!r}（期望 {art_id}）",
+    )
+
+    sel_rel = f'[data-act-release="1"][data-no="{rev}"]'
+    w.c.scroll_into(sel_rel)
+    n_rel = w.c.count(sel_rel)
+    t_rel = w.c.tap(sel_rel)
+    time.sleep(0.5)
+    n_strip = w.c.count('[data-act-release-submit="1"]')
+    t_sub = w.c.tap('[data-act-release-submit="1"]')
+    pg_rej = w.wait_data(
+        lambda x: bool(x.get("releaseHint")) or bool(_rev_row(x, rev).get("published")),
+        tries=40,
+        gap=0.5,
+    )
+    hint = str(pg_rej.get("releaseHint") or "")
+    published = bool(_rev_row(pg_rej, rev).get("published"))
+    w.shot("51-2-发布被门槛拒")
+    w.rep.rec(
+        "51 ④ 经界面点「发布这一版」⇒ **被来源门槛拒**，且页面把**待核验清单显示出来**"
+        "（只说「不能发布」是没法干活的）",
+        (not published) and ("待核验" in hint) and n_rel == 1 and bool(t_rel and t_sub and n_strip),
+        f"入口 {n_rel} 个 tap={t_rel} 确认条 {n_strip} submit={t_sub} published={published} "
+        f"releaseHint={hint[:140]!r}",
+    )
+
+    # ---- ⑤ 界面有没有「登记来源核验」的入口（O-1b 的判据）----
+    n_entry = w.c.count('[data-act-source-check="1"]') + w.c.count('[data-act-source-verify="1"]')
+    w.rep.rec(
+        "51 ⑤ ⭐ 界面上**没有**「登记来源核验」的入口（O-1b 的答案）——"
+        "页面能告诉你为什么不能发，却给不了你解决它的入口",
+        n_entry == 0 and (not published) and ("待核验" in hint),
+        f"核验入口锚点 {n_entry} 个；同一条断言与 ④ 同时成立才有信息量"
+        f"（④ 证明页面确实处在「被拒且看得见清单」的状态）",
+    )
+
+    # ---- ⑥ 经接口逐条核验（必填依据）----
+    ok_all = True
+    for p in gate.get("pending") or []:
+        st_v, _ = api_post(
+            f"/entrust/artifacts/{art_id}/source-checks",
+            tok,
+            {
+                "revision_no": rev,
+                "source_kind": p.get("kind"),
+                "source_ref": p.get("ref"),
+                "state": "verified",
+                "method": "S6-3 走查：逐条比对作业输入与提案载荷",
+            },
+            uuid.uuid4().hex,
+        )
+        ok_all = ok_all and st_v in (200, 201)
+    gate2 = (
+        api_get(f"/entrust/artifacts/{art_id}/source-checks?revision_no={rev}", tok) or {}
+    ).get("gate") or {}
+    w.rep.rec(
+        "51 ⑥ 经接口逐条登记核验（`method` 必填：无依据的核验等于没核）⇒ 门槛转为通过",
+        ok_all and bool(gate2.get("ok")),
+        f"pending 由 {len(gate.get('pending') or [])} 条 → {len(gate2.get('pending') or [])} 条；"
+        f"gate.ok={gate2.get('ok')!r}",
+    )
+
+    # ---- ⑦ 回界面重新点发布 ⇒ 同一版本成功 ----
+    n_cancel = w.c.count('[data-act-release-cancel="1"]')
+    if n_cancel:
+        w.c.tap('[data-act-release-cancel="1"]')
+        time.sleep(0.6)
+    w.c.scroll_into(sel_rel)
+    t_rel2 = w.c.tap(sel_rel)
+    time.sleep(0.6)
+    t_sub2 = w.c.tap('[data-act-release-submit="1"]')
+    pg_ok = w.wait_data(lambda x: bool(_rev_row(x, rev).get("published")), tries=60, gap=0.5)
+    published2 = bool(_rev_row(pg_ok, rev).get("published"))
+    w.shot("51-3-同版本发布成功")
+    rels = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok) or {}).get("items") or []
+    same = [
+        r
+        for r in rels
+        if str((r or {}).get("artifact_id") or "") == art_id
+        and int((r or {}).get("revision_no") or 0) == rev
+    ]
+    w.rep.rec(
+        "51 ⑦ 核验之后**回界面重新点发布** ⇒ 同一版本发布成功，且与服务端发布记录**同源**",
+        published2 and bool(same) and bool(t_rel2 and t_sub2),
+        f"tap={t_rel2} submit={t_sub2} published={published2}；"
+        f"服务端同成果同版本发布记录 {len(same)} 条（releaseId={same[0].get('release_id') if same else None}）",
+    )
+
+    err_now = w.c.errors()
+    w.rep.rec(
+        "51 ⑧ 本章运行期零新增 console 报错",
+        len(err_now) == len(err_base),
+        f"console 报错 {len(err_base)} → {len(err_now)}",
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
@@ -10192,6 +10494,7 @@ SECTIONS = {
     "13": sec_13,
     "14": sec_14,
     "50": sec_50,
+    "51": sec_51,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -10328,6 +10631,8 @@ DEFAULT_ORDER = [
     # ⚠️ 副作用：派生一份合同 + 记一条证据。已派生过 ⇒ 读回已有那份（不重复派生）。
     "49",
     "50",
+    # 51 独立于 49/50：它自带载体（AG-02 经接口产出 customer_quote），不依赖前面几章留下的状态。
+    "51",
 ]
 
 
