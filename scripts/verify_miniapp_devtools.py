@@ -11062,6 +11062,9 @@ def sec_53(w: Walker) -> None:
         ui_codes == sorted(set(srv_codes)),
         f"界面={ui_codes[:6]} 服务端={sorted(set(srv_codes))[:6]}",
     )
+    # 截图留证：「结案前先看得见清单」这一判据的**视觉**证据（与其它章节同一口径：
+    # 读数之外要有一张能被人眼复核的图）。
+    w.shot("53-结案五维清单")
 
     w.c.scroll_into('[data-act-complete-open="1"]')
     w.c.tap('[data-act-complete-open="1"]')
