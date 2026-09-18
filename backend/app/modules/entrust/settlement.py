@@ -386,11 +386,19 @@ def create_settlement(
         CursorResult[Any],
         session.execute(
             text(
+                # ⚠️ 列名**全部加反引号**（与本模块其它 INSERT 的写法不同，是刻意例外）：
+                #    `lines` 是 **MySQL 8 的保留字**（`LOAD DATA ... LINES TERMINATED BY`），
+                #    不加引号时 SQLite 正常、MySQL 直接 **1064 语法错**。
+                #    本仓开发/演示库都是 SQLite，且 S7-3 的用例原先**没有** `mysql` 标记
+                #    ⇒ 这条缺陷在本机与门禁里**完全看不见**，只有 CI 的 `pytest -m mysql`
+                #    跑出真实 MySQL 才暴露（2026-09-18 由 S4-b 的并发锚点首次触发）。
+                #    ⇒ 把整张列表都引起来，将来再撞上别的保留字也不会重演。
+                #    防复发：`tests/test_mysql_reserved_words_in_sql.py`（零依赖文本闸）。
                 "INSERT INTO ent_settlement "
-                "(assignment_id, version_no, status, lines, currency, customer_total, "
-                " internal_total, approved_by, approved_at, customer_confirmed_by, "
-                " customer_confirmed_at, customer_decision, customer_note, revision, "
-                " created_by, created_at, updated_at) "
+                "(`assignment_id`, `version_no`, `status`, `lines`, `currency`, "
+                "`customer_total`, `internal_total`, `approved_by`, `approved_at`, "
+                "`customer_confirmed_by`, `customer_confirmed_at`, `customer_decision`, "
+                "`customer_note`, `revision`, `created_by`, `created_at`, `updated_at`) "
                 "VALUES (:aid, :vno, :status, :lines, :cur, :ct, :it, NULL, NULL, NULL, "
                 " NULL, NULL, NULL, 1, :actor, :ts, :ts)"
             ),
