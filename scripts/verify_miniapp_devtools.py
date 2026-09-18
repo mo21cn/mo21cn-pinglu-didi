@@ -9712,16 +9712,44 @@ def sec_49(w: Walker) -> None:
     srv_sig = api_get(f"/entrust/contracts/{cart}/signature-evidence", tok) or {}
     n_row = w.c.count(".sig-row")
     first_row = w.c.outer_wxml(".sig-row")
-    w.rep.rec(
-        "㊾ ⑧ 经**界面**记一条签署证据：页面出现一行，且**绑的是版本**"
-        "（「第 1 版」）+ 形态 + 样件标注；与服务端同源",
-        len(items) == len(srv_sig.get("items") or [])
+    sig_srv = srv_sig.get("items") or []
+    sig_ok = (
+        len(items) == len(sig_srv)
         and n_row == len(items)
         and "第 1 版" in first_row
         and "样件扫描件" in first_row
-        and "样件标注" in first_row,
-        f"页面={len(items)} 服务端={len(srv_sig.get('items') or [])} 行={n_row} "
-        f"首行={first_row[:160]!r}",
+        and "样件标注" in first_row
+    )
+    # ⭐ O-8 归因（2026-09-18）：本条在**组合配方**（43,44,48,49）下曾 FAIL 而单跑全绿。
+    #    纪律是「沿真实调用链取页面 view 与 console 原文」——
+    #    ⛔ 不靠加等待/重跑刷绿灯，也不把"疑似 reload 失败"当成结论写出去。
+    #    诊断**只在失败时**拼进 note（成功时零噪音，且**不增加断言数**）。
+    diag = ""
+    if not sig_ok:
+        try:
+            pdump = w.c.page_data() or {}
+            contract = pdump.get("contract")
+            hints = {
+                k: pdump.get(k)
+                for k in ("contractHint", "sigHint", "sigOpen", "loadError", "err")
+                if k in pdump
+            }
+            sub = sorted(contract.keys()) if isinstance(contract, dict) else repr(contract)
+            diag = (
+                f"｜诊断 path={w.c.current_path()}"
+                f"｜page_data 顶层键={sorted(pdump.keys())}"
+                f"｜contract 子树={sub}"
+                f"｜hint 类键={hints}"
+                f"｜console 尾部={(w.c.errors() or '')[-240:]!r}"
+                f"｜.contract-card={(w.c.outer_wxml('.contract-card') or '')[:240]!r}"
+            )
+        except Exception as exc:  # 诊断本身失败不能让这一格变成"脚本坏了"
+            diag = f"｜诊断采集失败：{exc!r}"
+    w.rep.rec(
+        "㊾ ⑧ 经**界面**记一条签署证据：页面出现一行，且**绑的是版本**"
+        "（「第 1 版」）+ 形态 + 样件标注；与服务端同源",
+        sig_ok,
+        f"页面={len(items)} 服务端={len(sig_srv)} 行={n_row} 首行={first_row[:160]!r}" + diag,
     )
 
     # ⑥ 同形态再记一次 ⇒ 页内说清"已经记过"（409 的语义，不是静默失败）
