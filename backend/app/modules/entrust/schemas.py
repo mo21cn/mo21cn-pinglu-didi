@@ -139,10 +139,22 @@ class MyEntrustmentListOut(BaseModel):
 
 
 class EvidenceRef(BaseModel):
-    """一条证据：类别 + 来源（`ref` 是附件键 / 文件说明 / 外部凭据编号）。"""
+    """一条证据：类别 + 来源（`ref` 是附件键 / 文件说明 / 外部凭据编号）。
+
+    ⭐ `occurred_at`（**业务发生时间**）与 `source`（来源）对应 S4 段 §2：
+    「业务发生时间与记录时间**分开**，带 actor 与 source」。
+    **记录时间与记录人不在本契约里** —— 它们由服务端在写入时补
+    （`recorded_at` / `recorded_by`），提交方自称的记录时间一律不采纳。
+
+    两个新字段都是**可选**的，因此本契约对既有调用方**无行为变更**：
+    不传就是"未登记"，**不会**被默认成"现在"（把业务时间悄悄等同于记录时间，
+    正是 §2 要防的那件事）。
+    """
 
     kind: str = Field(min_length=1, max_length=32)
     ref: str = Field(min_length=1, max_length=512)
+    occurred_at: datetime | None = None
+    source: str | None = Field(default=None, max_length=64)
 
 
 class TaskCreate(BaseModel):
@@ -205,6 +217,65 @@ class TaskReassignIn(BaseModel):
     assignee_user_id: int = Field(ge=1)
 
 
+class TaskEvidenceIn(BaseModel):
+    """在**原任务**上补录一条证据（缺件的补救入口，S4 段 §8）。
+
+    为什么 `occurred_at` 在**这里**必填、而在 `EvidenceRef` 里可选：
+    补录的语义就是"事后登记一件**已经发生**的事"，说不出它何时发生的登记
+    没有把事情说清；而 `complete` 附带的 refs 是既有契约，保持原样不动。
+    两处都用同一个存储形状，只是一处严、一处宽。
+    """
+
+    kind: str = Field(min_length=1, max_length=32)
+    ref: str = Field(min_length=1, max_length=512)
+    occurred_at: datetime
+    source: str | None = Field(default=None, max_length=64)
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class EvidenceGapItem(BaseModel):
+    """**一个任务的证据齐备度** —— 派生读数，不落库、不是实体。"""
+
+    task_id: int
+    task_type: str
+    title: str
+    status: str
+    is_handover: bool
+    required: list[str]
+    registered: list[str]
+    missing: list[str]
+    satisfied: bool
+    wait_reason: str | None
+    waiting_on_evidence: bool
+
+
+class HandoverEvidenceOut(BaseModel):
+    """交接类任务的证据汇总（**交接＝任务**，不发明"交接成果"）。
+
+    `satisfied` 为 `None` 表示**这张委托上没有交接任务** —— 不是"已满足"。
+    把"没有对象"报成"通过"是真空通过，这一格必须能被区分出来。
+    """
+
+    present: bool
+    task_ids: list[int]
+    required: list[str]
+    registered: list[str]
+    missing: list[str]
+    satisfied: bool | None
+
+
+class EvidenceGapsOut(BaseModel):
+    """一张委托上"还缺什么证据"（S4 段 §8）的派生读模型。"""
+
+    assignment_id: int
+    tasks_total: int
+    tasks_with_requirement: int
+    tasks_waiting_on_evidence: int
+    missing_total: int
+    handover: HandoverEvidenceOut
+    items: list[EvidenceGapItem]
+
+
 class TaskOut(BaseModel):
     """任务投影。"""
 
@@ -250,9 +321,25 @@ class TaskListOut(BaseModel):
     items: list[TaskOut]
 
 
+class EvidenceRecordOut(BaseModel):
+    """补录一条证据的结果：更新后的任务 ＋ **重算后**的齐备度。
+
+    带上重算结果，是因为补录的**唯一目的**就是让缺件清单变短；
+    只回一个任务对象，调用方还得自己再推一遍。
+    """
+
+    task: TaskOut
+    gap: EvidenceGapItem
+
+
 def task_out(data: dict[str, Any]) -> TaskOut:
     """服务层 dict → 响应模型。"""
     return TaskOut.model_validate(data)
+
+
+def evidence_record_out(data: dict[str, Any]) -> EvidenceRecordOut:
+    """补录结果 dict → 响应模型（任务投影 ＋ 重算后的齐备度）。"""
+    return EvidenceRecordOut.model_validate({"task": data["task"], "gap": data["gap"]})
 
 
 # ── 附件（ENT-009） ──────────────────────────────────────────────────────────
