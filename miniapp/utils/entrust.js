@@ -165,6 +165,7 @@ const ORG_PERMISSION_LABELS = {
   'entrust:view': '查看委托',
   'entrust:assignment:claim': '受理委托',
   'entrust:assignment:complete': '结案',
+  'entrust:assignment:reopen': '重开',
   'entrust:quote:create': '制作报价',
   'entrust:quote:publish': '发布报价',
   'entrust:task:dispatch': '派发任务',
@@ -222,6 +223,15 @@ const ORG_PERM_VIEW = 'entrust:view'
  * ⚠️ 隐藏不等于放行：服务端仍按授权独立判定（同既有三个投影的用法）。
  */
 const ORG_PERM_COMPLETE = 'entrust:assignment:complete'
+
+/**
+ * 「重开」权限码（= 后端 `access.PERM_ASSIGN_REOPEN`，S4-c / 设计 §5.5 Q2）。
+ *
+ * **与结案分开**是刻意的：重开撤销的正是"已对客户宣告完成"这一事实 ——
+ * 把它并进 `complete` 会让"能结案"自动蕴含"能撤销结案"。
+ * 详情页拿它判「我能不能重开」，**只决定发不发那次请求**（与既有四个投影同一条纪律）。
+ */
+const ORG_PERM_REOPEN = 'entrust:assignment:reopen'
 
 function statusLabel(status) {
   const meta = STATUS_META[status]
@@ -4998,6 +5008,25 @@ function completeAssignment(assignmentId, body, idempotencyKey) {
   })
 }
 
+/**
+ * 重开（`completed → claimed`，S4-c / 设计 §5.5 Q2）。
+ *
+ * `body` 必须带 **`expected_revision` ＋ `reason`** 两项：
+ * * 前者是并发裁决点（与 `complete` 同一条：两个经理同时重开只有一个能成）；
+ * * 后者**必填** —— "没有理由的重开，在审计上等于结论可以随时改"。
+ *
+ * ⚠️ 重开**不**恢复取消资格（Q2），也**不**清除任何事实：被撤销的那次结案会原样
+ * 落进服务端的 append-only 留痕表。
+ */
+function reopenAssignment(assignmentId, body, idempotencyKey) {
+  return request({
+    url: BASE + '/assignments/' + assignmentId + '/reopen',
+    method: 'POST',
+    data: body,
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
 /** 五个维度 → 中文名（键与后端 `closure.DIMENSIONS` 逐字一致）。 */
 const CLOSURE_DIMENSION_LABELS = {
   tasks: '任务处置',
@@ -5520,7 +5549,9 @@ module.exports = {
   CLOSURE_CODE_LABELS,
   CLOSURE_DIMENSION_LABELS,
   ORG_PERM_COMPLETE,
+  ORG_PERM_REOPEN,
   completeAssignment,
   decorateClosureReadiness,
-  fetchClosureReadiness
+  fetchClosureReadiness,
+  reopenAssignment
 }

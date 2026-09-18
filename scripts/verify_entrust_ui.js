@@ -3634,6 +3634,45 @@ check('[变更类别] 「货量输入框要不要出现」只有**一处**判据
     caseJsQty.indexOf('cargo_quantity_category') !== -1,
   'quantityVisibility 调用数=' + (caseJsQty.match(/quantityVisibility\(/g) || []).length)
 
+// ── 受控重开（S4-c）：详情页**不得**长出"撤回/取消委托"入口（Q2）────────────────
+//
+// 设计 §5.5 Q2 裁定：重开**不**恢复取消资格 —— `completed → claimed` 之后，
+// 取消这条边**依然不存在**（只能再走 `complete`）。
+// ⇒ 在**静态层**钉住：详情页模板里不得出现「撤回/取消**这张委托**」类的交互锚点。
+//
+// ⚠️ 为什么不用走查断言：走查里写 `count('[data-act-cancel="1"]') == 0` 是**真空通过**
+// —— 委托详情页从来就没有这个锚点，数它恒为 0（`data-act-cancel="…"` 这种命名只长在
+// 交易模块的 orders.wxml 里，是"撤单"）。⇒ 判据放静态层，**按模式扫**，不依赖某个具体名字。
+//
+// ⚠️ 也不能见 `cancel` 就红：本页合法的 `*-cancel` 全是**「取消这次操作」的表单/确认条键**
+// （`data-act-complete-cancel` = 收起结案确认条）。所以按**命名约定**收口：
+// `data-act-<动作>-cancel` 合法；**裸** `data-act-cancel`（＝取消这张单）与
+// `data-act-cancel-*`（动作在前）不合法；`withdraw`/`revoke` 一律不合法。
+// 本页现有 9 个 cancel 锚点全部符合约定 —— 这条既是判据，也是那份约定的**登记处**。
+const detailActAnchors = (dtWxml.match(/data-act-[a-z0-9-]+/g) || [])
+//: 合法形态＝「动作」在前、「cancel」在后（取消的是**这次操作**）。
+const DETAIL_CANCEL_CONVENTION = /^data-act-[a-z0-9]+(?:-[a-z0-9]+)*-cancel$/
+const detailCancelAnchors = detailActAnchors.filter((a) => /cancel/i.test(a))
+const badCancelAnchors = detailCancelAnchors.filter((a) => !DETAIL_CANCEL_CONVENTION.test(a))
+const detailWithdrawAnchors = detailActAnchors.filter((a) => /withdraw|revoke/i.test(a))
+check('[受控重开] 详情页出现 `data-act-*` 锚点（正控：证明下面的扫描真的读到了本页）',
+  detailActAnchors.length >= 10,
+  '锚点数=' + detailActAnchors.length)
+check('[受控重开] 详情页的 `*-cancel` 锚点**全部**是「取消这次操作」形态'
+  + '（裸 `data-act-cancel` / `cancel-*` 即"取消这张单" ⇒ 属撤回，Q2 不允许）',
+  badCancelAnchors.length === 0,
+  'cancel 锚点=' + detailCancelAnchors.length + ' 违规=' + JSON.stringify(badCancelAnchors))
+check('[受控重开] 详情页**没有**任何 `withdraw`/`revoke` 类入口'
+  + '（撤回的词汇长在 artifact 页，「撤回这张委托」在本页不存在）',
+  detailWithdrawAnchors.length === 0,
+  '命中=' + JSON.stringify(detailWithdrawAnchors))
+check('[受控重开] 重开入口与结案入口是**两个**锚点、两个判据（`canReopen` ≠ `canComplete`）',
+  dtWxml.indexOf('data-act-reopen-open') !== -1 &&
+    dtWxml.indexOf('data-act-reopen-submit') !== -1 &&
+    dtJs.indexOf('ORG_PERM_REOPEN') !== -1 &&
+    /canReopen:\s*\n?\s*!!\(detail && detail\.status === 'completed'\)/.test(dtJs),
+  'reopen 锚点/权限码/判据')
+
 // ---- 输出 ----
 console.log(`检查完成：${checked} 项断言 / 覆盖 ${PAGE_CSS_CHECKS.length} 个页面 + 1 个契约模块`)
 if (errors.length) {

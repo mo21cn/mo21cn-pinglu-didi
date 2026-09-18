@@ -1249,6 +1249,11 @@ function loadPage(file, ctx) {
         completeAssignment: (id, body, key) =>
           pageWrite('POST', '/entrust/assignments/' + id + '/complete', body, key)
             .then(rejectIfNotOk),
+        // 重开（S4-c）：同一条通道（只在 `WRITE_ENABLED` 段里真发）。它把委托从
+        // `completed` 推回 `claimed`，所以在"读"的段里发生同样是污染世界。
+        reopenAssignment: (id, body, key) =>
+          pageWrite('POST', '/entrust/assignments/' + id + '/reopen', body, key)
+            .then(rejectIfNotOk),
         // 案件六个写命令（切片四之六）。与上面三条同一条通道：**只在 WRITE_ENABLED
         // 的段里**才真的发出去，取数阶段一律被拒 —— 登记案件会改库（新案件会进
         // 组织队列），在"读"的段里发生它会让后续断言拿到一个被自己污染的世界。

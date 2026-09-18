@@ -278,6 +278,16 @@ const WALK_ANCHORS = [
     value: '1', handler: 'onCompleteSubmit' },
   { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-complete-cancel',
     value: '1', handler: 'onCompleteCancel' },
+  // 重开（S4-c / 设计 §5.5 Q2）：入口 → 页内表单（**理由必填**）→ 提交。
+  // ⭐ 与结案**方向相反**的两个动作放在同一页：`canComplete` 与 `canReopen` 是两条
+  //    互不相干的判据（前者 `claimed` ＋ complete 码，后者 `completed` ＋ reopen 码），
+  //    ⛔ 谁也不要复用谁 —— 复用会让"能结案"等于"能撤销结案"。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-reopen-open',
+    value: '1', handler: 'onReopenOpen' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-reopen-submit',
+    value: '1', handler: 'onReopenSubmit' },
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml', attr: 'data-act-reopen-cancel',
+    value: '1', handler: 'onReopenCancel' },
   // 运输计划（三段航段）与必需任务前置（合同 §10.1 第 4 步；BP-03 第 1 条）。
   // 三个**行**锚点，判据都是"渲染树里数得出来的事实"：
   //   * 段数 = 段的行数（模板**不拼**"三段" —— 段数是数据的属性）；

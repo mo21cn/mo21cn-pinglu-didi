@@ -126,6 +126,10 @@ ORG_PERMISSIONS = [
     # 于是第 12 步在界面上根本走不到。⚠️ 它比 `entrust:view` **窄**：
     # 齐备度清单里带着结算版本、余额与案件处置（运营口径）。
     "entrust:assignment:complete",
+    # S4-c（设计 §5.5 Q2）：重开是**另一个**能力 —— 缺了它，已结案的委托在界面上
+    # 没有「重开」入口，第 12 步的 reopen 那一格走不到。⚠️ 它与结案分开是刻意的：
+    # "能结案"不该自动等于"能撤销结案"。
+    "entrust:assignment:reopen",
 ]
 
 #: 任务清单：`(task_type, title, 是否指派给经理)`。
