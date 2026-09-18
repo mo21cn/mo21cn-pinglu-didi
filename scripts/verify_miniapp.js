@@ -474,6 +474,17 @@ const WALK_ANCHORS = [
     attr: 'data-act-withdraw-submit', value: '1', handler: 'onWithdrawSubmit' },
   { kind: 'act', file: 'pages/entrust/artifact/artifact.wxml', class: 'btn-ghost',
     attr: 'data-act-withdraw-cancel', value: '1', handler: 'onWithdrawCancel' },
+  // 52 财务与结算（§10.1 第 10–11 步的界面入口；裁定 Q4=A 的界面落点）
+  // 入口在**委托详情页**上（只在 `claimed` 时出现）；本页自带一组页内动作。
+  // ⚠️ 本页的动作锚点用**同一个属性名** `data-act` 带不同取值（走查里的选择器都是
+  //    `[data-act="提交登记"]` 这种**有值**写法，不触发"裸属性选择器静默回 0"那条禁令），
+  //    因此按 `static` 登记 —— 与 `data-df` 在 detail / case 两页的登记方式一致。
+  //    按 `act` 登记会要求每个带 `data-act` 的标签都绑**同一个** handler，
+  //    而它们本来就绑着不同的 handler（那会直接报一串假的"应绑定 X"）。
+  { kind: 'act', file: 'pages/entrust/detail/detail.wxml',
+    attr: 'data-act-open-finance', value: '1', handler: 'onOpenFinance' },
+  { kind: 'static', file: 'pages/entrust/finance/finance.wxml', attr: 'data-act' },
+  { kind: 'static', file: 'pages/entrust/finance/finance.wxml', class: 'input', attr: 'data-key' },
 ]
 
 // 把 wxml 切成「标签」块：先剥掉注释（注释里的撇号会被当成引号，导致整个标签块

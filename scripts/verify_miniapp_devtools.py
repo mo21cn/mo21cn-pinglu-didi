@@ -9779,6 +9779,7 @@ def sec_49(w: Walker) -> None:
     #     并把"点击时到底有没有落点"记进读数 —— 加固定等待只会把 (b) 也等成绿灯。
     n_before = len(items)
     tap_landed = False
+    probe = ""
     if w.c.count('[data-act-sig-open="1"]'):
         w.c.scroll_into('[data-act-sig-open="1"]')
         w.c.tap('[data-act-sig-open="1"]')
@@ -9797,6 +9798,19 @@ def sec_49(w: Walker) -> None:
             d = w.wait_data(lambda x: "已经记过" in str(x.get("sigHint") or ""), tries=20, gap=0.4)
             if "已经记过" in str(d.get("sigHint") or ""):
                 break
+    if not tap_landed:
+        # ⚠️ 找不到提交键时**把"为什么"直接打出来**，不要只报"没落点"：
+        #    提交键的渲染条件是 `canDeriveContract && contract && sigOpen`
+        #    （`detail.wxml`：`.contract-card` → `wx:if="{{contract}}"` → `wx:if="{{sigOpen}}"`），
+        #    这几个值里任何一个不成立都表现为"键不在树上"，而它们指向完全不同的排查方向。
+        #    再附一段卡片原文，连"模板改了属性名"这种也一并排除。
+        snap = w.c.page_data()
+        sig = snap.get("sig") or {}
+        probe = (
+            f"｜探针 sigOpen={snap.get('sigOpen')} contract={bool(snap.get('contract'))} "
+            f"canDeriveContract={snap.get('canDeriveContract')} sig.hasItems={sig.get('hasItems')}"
+            f"；卡片原文={w.c.outer_wxml('.contract-card')[:220]!r}"
+        )
     if not d:
         # ⚠️ 一次都没点到 ⇒ `d` 还是空字典，直接 `len(d["sig"]["items"])` 会得到 **0**，
         #    读成"条数从 1 掉到 0"（看起来像"证据被删了"）。这里补一次真实读数，
@@ -9809,12 +9823,8 @@ def sec_49(w: Walker) -> None:
         "已经记过" in str(d.get("sigHint") or "") and n_after == n_before,
         f"sigHint={(d.get('sigHint') or '')!r} 条数 {n_before} → {n_after} "
         f"提交键有落点={tap_landed}"
-        + (
-            ""
-            if tap_landed
-            else '（**提交键始终没进渲染树 ⇒ 这条不是"页面没提示"，'
-            '而是"点击没落地"，先查表单是否真的展开**）'
-        ),
+        + ("" if tap_landed else '（**提交键没进渲染树 ⇒ 先看下面的探针，不是"页面没提示"**）')
+        + probe,
     )
 
     # ⑦ 常驻声明在页面上
@@ -10522,6 +10532,342 @@ def sec_51(w: Walker) -> None:
     )
 
 
+def sec_52(w: Walker) -> None:
+    """财务与结算：费用 → 缺件补录 → 结算版本 → 内部确认 → 客户确认 → 收付 → 已结清。
+
+    对应 §10.1 第 10–11 步（S7-1 费用 / S7-2 缺件 / S7-3 结算与收付），是裁定 **Q4=A**
+    「第 10–12 步经现有界面演示」在**设备侧**的取证。
+
+    为什么单开一章
+    --------------
+    `pages/entrust/finance/finance` 是这三片后端**唯一的界面入口**。它的判据此前只有
+    「静态契约 ＋ 载荷驱动」两类（`verify_entrust_ui` / `verify_frontend_e2e`），
+    ⛔ 两者都**点不到按钮**：合同要求的是"经界面演示"，所以必须有一章真机点击。
+
+    ⚠️ 诚实边界（都是被测事实，不是辩解）
+    * **带必需证据的任务只能经接口铺**（`onSubmitTask` 的表单没有 `required_evidence`
+      入参）⇒ ⑦ 的**前置**是接口造的，**补录动作本身是真机点击**。如实写在读数里。
+    * **客户确认必须换身份**：`customer-confirm` 只有货主本人能做 ⇒ ⑫ 以 `seed-shipper`
+      重新登录、从**自己的**委托详情页进财务页点确认（不是拿经理身份调接口冒充客户）。
+    * 依赖「货主名下有一张 `claimed` 委托」（`seed_entrust_demo` 会铺）⇒ **不绑 canonical**
+      —— 那是"要演示哪个状态就铺哪个"的可选夹具，钉上去会让本章在标准配方下直接变 `FAIL`。
+    * 本章**会写库**（建任务、记费用、出结算、记收付、客户确认）。重跑不受影响：
+      每次新挑一张委托，幂等键带时间戳。
+    """
+    print("\n-- 52 财务与结算：第 10–11 步经界面走通（S7-1/S7-2/S7-3）--", flush=True)
+
+    finance_path = "pages/entrust/finance/finance"
+    err_base = w.c.errors()
+
+    tok_mgr = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    tok_shi = (api_login(CODE_SHIPPER) or {}).get("access_token") or ""
+    if not tok_mgr or not tok_shi:
+        w.rep.not_run(
+            "52 全部断言", "拿不到 seed-owner / seed-shipper 的 token（后端未起或种子未铺）"
+        )
+        return
+
+    def _has_text(payload: dict, needle: str) -> bool:
+        for b in payload.get("blockers") or []:
+            if needle in str((b or {}).get("text") or "") or needle in str(
+                (b or {}).get("message") or ""
+            ):
+                return True
+        return False
+
+    # ---- ① 前置：货主名下的一张已受理委托（本章自己挑，不依赖可选夹具）----
+    rows = (api_get("/entrust/assignments?view=owner&size=50", tok_shi) or {}).get("items") or []
+    claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
+    claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    aid = str((claimed[0] or {}).get("assignment_id") or "") if claimed else ""
+    w.rep.rec(
+        "52 前置 · 货主名下有一张已受理（claimed）委托 —— 本章自己挑一张，不绑可选夹具",
+        bool(aid),
+        f"aid={aid!r} claimed {len(claimed)} 张 / 名下共 {len(rows)} 张",
+    )
+    if not aid:
+        w.rep.not_run("52 财务与结算剧本", "货主名下没有 claimed 委托 ⇒ 先铺 seed_entrust_demo")
+        return
+
+    # ---- ② 前置夹具：一个**要求照片证据**的交接任务 ----
+    _st_t, task = api_post(
+        f"/entrust/assignments/{aid}/tasks",
+        tok_mgr,
+        {
+            "task_type": "handover",
+            "title": "卸货交接（52 章）",
+            "required_evidence": ["photo"],
+        },
+        uuid.uuid4().hex,
+    )
+    tid = str((task or {}).get("task_id") or "")
+    w.rep.rec(
+        "52 前置 · 经**接口**铺一个「要求照片证据」的任务（界面建任务没有 required_evidence 入参，如实登记）",
+        bool(tid),
+        f"task_id={tid!r}",
+    )
+    if not tid:
+        w.rep.not_run("52 财务与结算剧本", "任务未建成 ⇒ 缺件补录那一步无从演示")
+        return
+
+    # ---- ③ 经理侧：从委托详情点进「财务与结算」----
+    if not w.open_workbench(CODE_OWNER, tag="52"):
+        w.rep.not_run("52 财务与结算剧本", "未能以 seed-owner 进入经理工作台")
+        return
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("52 财务与结算剧本", f"打不开委托详情页（aid={aid}）")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    has_entry = w.c.count('[data-act-open-finance="1"]') > 0
+    w.c.scroll_into('[data-act-open-finance="1"]')
+    w.c.tap('[data-act-open-finance="1"]')
+    landed = w.c.wait_path(finance_path, 30)
+    w.rep.rec(
+        "52 ① 委托详情页上有「财务与结算」入口，且点得进 —— 这是第 10–11 步在**现有界面**上的入口",
+        has_entry and landed,
+        f"入口={has_entry} 落地={w.c.current_path()}",
+    )
+    if not landed:
+        w.rep.not_run("52 财务与结算剧本", "未能进入财务与结算页")
+        return
+
+    pd = w.wait_data(lambda x: x.get("canViewInternal") is True, tries=40, gap=0.4)
+    w.rep.rec(
+        "52 ② 经理视角取到**内部**读数（费用 / 缺件 / 结算 / 财务状态四块都由这一页取）",
+        pd.get("canViewInternal") is True,
+        f"canViewInternal={pd.get('canViewInternal')} 费用 {len(pd.get('charges') or [])} 条",
+    )
+    if not pd.get("canViewInternal"):
+        w.rep.not_run("52 财务与结算剧本", "经理侧拿不到内部读数（组织权限或种子问题）")
+        return
+
+    # ---- ④ 登记一条应收费用：**草稿不进合计** ----
+    n0 = len(pd.get("charges") or [])
+    counted0 = int(pd.get("chargeCounted") or 0)
+    w.c.scroll_into('[data-act="toggle-charge"]')
+    w.c.tap('[data-act="toggle-charge"]')
+    w.wait_data(lambda x: x.get("chargeOpen") is True, tries=20, gap=0.3)
+    w.c.input_text('[data-key="chargeKind"]', "freight")
+    w.c.input_text('[data-key="amount"]', "100000")
+    w.c.input_text('[data-key="basis"]', "合同附件三·费率表")
+    w.c.tap('[data-act="submit-charge"]')
+    pd = w.wait_data(lambda x: len(x.get("charges") or []) > n0, tries=40, gap=0.4)
+    drafts = [c for c in (pd.get("charges") or []) if c.get("status") == "draft"]
+    w.rep.rec(
+        "52 ③ 界面上登记出**草稿**费用行，且**草稿不进合计**（合同 S4 段第 9 条的确认前状态）",
+        len(drafts) >= 1 and int(pd.get("chargeCounted") or 0) == counted0,
+        f"草稿 {len(drafts)} 条｜计入条数 {counted0} → {pd.get('chargeCounted')}",
+    )
+    cid = str((drafts[-1] or {}).get("chargeId") or "") if drafts else ""
+
+    # ---- ⑤ 确认：确认后才进合计 ----
+    if cid:
+        w.c.scroll_into('[data-act="confirm-charge"]')
+        w.c.tap('[data-act="confirm-charge"]')
+        pd = w.wait_data(lambda x: int(x.get("chargeCounted") or 0) > counted0, tries=40, gap=0.4)
+        totals_txt = " ".join(
+            (t or {}).get("totalText") or "" for t in (pd.get("chargeTotals") or [])
+        )
+        w.rep.rec(
+            "52 ④ 界面确认后该行进合计（合计金额由服务端算，页面只显示它给的字符串）",
+            int(pd.get("chargeCounted") or 0) == counted0 + 1 and "100000" in totals_txt,
+            f"计入 {pd.get('chargeCounted')} 条，合计={totals_txt.strip()!r}",
+        )
+
+    # ---- ⑥ 提争议：**争议行退出合计**（合同 S4 段第 10 条）----
+    w.c.scroll_into('[data-act="open-dispute"]')
+    w.c.tap('[data-act="open-dispute"]')
+    w.wait_data(lambda x: x.get("disputeOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.input_text('[data-key="reason"]', "客户认为吨位口径不一致")
+    w.c.tap('[data-act="submit-dispute"]')
+    pd = w.wait_data(lambda x: int(x.get("chargeCounted") or 0) == counted0, tries=40, gap=0.4)
+    disputed = [c for c in (pd.get("charges") or []) if c.get("status") == "disputed"]
+    w.rep.rec(
+        "52 ⑤ 提争议后该行**退出合计**（合同 S4 段第 10 条：争议不进已确认总额）",
+        len(disputed) >= 1 and int(pd.get("chargeCounted") or 0) == counted0,
+        f"争议 {len(disputed)} 条｜计入条数回落 → {pd.get('chargeCounted')}",
+    )
+
+    # ---- ⑦ 处置：**显式给出是否计入 ＋ 最终金额**（裁定 Q2=B）----
+    w.c.scroll_into('[data-act="open-resolve"]')
+    w.c.tap('[data-act="open-resolve"]')
+    w.wait_data(lambda x: x.get("resolveOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.tap('[data-act="pick-outcome"][data-code="adjusted"]')
+    w.c.input_text('[data-key="method"]', "按复查后的吨位重算")
+    ok_counts = w.c.count('[data-act="pick-counts"][data-code="yes"]') > 0
+    w.c.tap('[data-act="pick-counts"][data-code="yes"]')
+    w.c.input_text('[data-key="finalAmount"]', "88000")
+    w.c.tap('[data-act="submit-resolve"]')
+    pd = w.wait_data(lambda x: int(x.get("chargeCounted") or 0) > counted0, tries=40, gap=0.4)
+    resolved = [c for c in (pd.get("charges") or []) if c.get("status") == "resolved"]
+    totals_txt = " ".join((t or {}).get("totalText") or "" for t in (pd.get("chargeTotals") or []))
+    w.rep.rec(
+        "52 ⑥ 处置时**显式选「计入」并给最终金额** ⇒ 合计按最终金额走（裁定 Q2=B："
+        "「已解决」一词决定不了是否计入）",
+        len(resolved) >= 1 and "88000" in totals_txt,
+        f"已解决 {len(resolved)} 条｜「计入」选项在={ok_counts}｜合计={totals_txt.strip()!r}",
+    )
+
+    # ---- ⑧ 缺件：在原任务上补录（§1 交接证据挂在任务上）----
+    gaps = pd.get("gaps") or []
+    miss_before = [g for g in gaps if g.get("missing")]
+    w.rep.rec(
+        "52 ⑦-a 缺件视图把「还缺什么」算出来（派生，不新建实体）—— 夹具任务要求照片",
+        any("photo" in (g.get("missing") or []) for g in gaps),
+        "；".join(f"#{g.get('taskId')} 缺 {g.get('missingText')!r}" for g in miss_before[:3])
+        or "无缺件",
+    )
+    w.c.scroll_into('[data-act="open-evidence"]')
+    w.c.tap('[data-act="open-evidence"]')
+    w.wait_data(lambda x: x.get("evidenceOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.tap('[data-act="pick-evidence-kind"][data-code="photo"]')
+    w.c.input_text('[data-key="ref"]', "att-discharge-52")
+    w.c.input_text('[data-key="occurredAt"]', "2026-09-17T08:30:00")
+    w.c.tap('[data-act="submit-evidence"]')
+    pd = w.wait_data(
+        lambda x: all(
+            "photo" not in (g.get("missing") or [])
+            for g in (x.get("gaps") or [])
+            if int(g.get("taskId") or 0) == int(tid)
+        ),
+        tries=40,
+        gap=0.4,
+    )
+    cleared = all(
+        "photo" not in (g.get("missing") or [])
+        for g in (pd.get("gaps") or [])
+        if int(g.get("taskId") or 0) == int(tid)
+    )
+    hint = str(pd.get("evidenceHint") or "")
+    w.rep.rec(
+        "52 ⑦-b 在**原任务**上补录一条证据 ⇒ 该任务的缺项消失（业务发生时间界面上必填）",
+        cleared and bool(hint),
+        f"缺项清空={cleared} 页内提示={hint!r}",
+    )
+
+    # ---- ⑨ 结算版本：生成 → 内部确认 ----
+    w.c.scroll_into('[data-act="create-settlement"]')
+    w.c.tap('[data-act="create-settlement"]')
+    pd = w.wait_data(lambda x: len(x.get("settlements") or []) >= 1, tries=40, gap=0.4)
+    v1 = [s for s in (pd.get("settlements") or []) if int(s.get("versionNo") or 0) == 1]
+    w.rep.rec(
+        "52 ⑧ 界面上生成结算**版本** v1（快照当时的费用事实；旧版本不改）",
+        len(v1) == 1,
+        f"版本数={len(pd.get('settlements') or [])} v1 状态={((v1 or [{}])[0]).get('statusText')!r}",
+    )
+    w.c.scroll_into('[data-act="approve-settlement"]')
+    w.c.tap('[data-act="approve-settlement"]')
+    pd = w.wait_data(
+        lambda x: any(s.get("status") == "approved" for s in (x.get("settlements") or [])),
+        tries=40,
+        gap=0.4,
+    )
+    w.rep.rec(
+        "52 ⑨ 内部确认（draft → approved）—— 只有适用版本能被确认",
+        any(s.get("status") == "approved" for s in (pd.get("settlements") or [])),
+        "状态=" + str([s.get("statusText") for s in (pd.get("settlements") or [])]),
+    )
+
+    # ---- ⑩ 财务状态：此刻应当卡在「客户尚未确认」----
+    w.rep.rec(
+        "52 ⑩ 财务状态在客户确认之前**不是**已结清，且把原因说出来（不是只给一个状态码）",
+        _has_text(pd, "客户尚未确认"),
+        "状态="
+        + str(pd.get("financialStatusText"))
+        + "｜blockers="
+        + str([b.get("text") for b in (pd.get("blockers") or [])])[:200],
+    )
+
+    # ---- ⑪ 记收付依据（合成样本，界面不宣称真实到账）----
+    w.c.scroll_into('[data-act="open-payment"]')
+    w.c.tap('[data-act="open-payment"]')
+    w.wait_data(lambda x: x.get("paymentOpenKey") not in (None, ""), tries=20, gap=0.3)
+    w.c.input_text('[data-key="amount"]', "88000")
+    w.c.input_text('[data-key="ref"]', "SAMPLE-52-001")
+    w.c.tap('[data-act="submit-payment"]')
+    pd = w.wait_data(lambda x: "合成样本" in str(x.get("settlementHint") or ""), tries=40, gap=0.4)
+    w.rep.rec(
+        "52 ⑪ 记一条收付依据：页内明说它是**合成样本**（不接真实支付、不宣称资金到账）",
+        "合成样本" in str(pd.get("settlementHint") or ""),
+        f"页内提示={str(pd.get('settlementHint'))[:120]!r}",
+    )
+
+    # ---- ⑫ 客户侧：换**货主本人**的身份进来确认这一版 ----
+    w.login_as(CODE_SHIPPER)
+    # ⚠️ `login_as` 只写 storage ＋ reLaunch，**应用侧的登录是页面 onLoad 里异步做的**
+    #    ⇒ 紧接着 navigateTo 会赶在拿到 token 之前，详情页按"未登录"处理（读不到数据、
+    #    也就没有入口）。必须**等 token 真的落到 storage** 再走 —— 这与 O-8 那条
+    #    「章前就绪没有可断言的判据」是同一类问题（首跑就是这么得到 NOT_RUN 的）。
+    tok_ready = False
+    for _ in range(40):
+        if str(w.c.get_storage("access_token") or ""):
+            tok_ready = True
+            break
+        time.sleep(0.5)
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("52 ⑫ 客户确认", f"货主侧打不开委托详情页（token 就绪={tok_ready}）")
+        return
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    has_entry_shi = w.c.count('[data-act-open-finance="1"]') > 0
+    if not has_entry_shi:
+        w.rep.not_run(
+            "52 ⑫ 客户确认",
+            f"货主侧详情页**没有**「财务与结算」入口"
+            f"（token 就绪={tok_ready}，path={w.c.current_path()}）",
+        )
+        return
+    w.c.scroll_into('[data-act-open-finance="1"]')
+    w.c.tap('[data-act-open-finance="1"]')
+    if not w.c.wait_path(finance_path, 30):
+        w.rep.not_run("52 ⑫ 客户确认", f"点了入口但没到财务页（path={w.c.current_path()}）")
+        return
+    cpd = w.wait_data(lambda x: x.get("customerMode") is True, tries=40, gap=0.4)
+    w.rep.rec(
+        "52 ⑫-a 货主侧走**对客通道**：看得到待确认的是哪一版，且**看不到内部成本**"
+        "（截图留存；页面本就不渲染 internal_total）",
+        cpd.get("customerMode") is True and bool(cpd.get("customerSettlementId")),
+        f"customerMode={cpd.get('customerMode')} 版本={cpd.get('customerVersionText')!r} "
+        f"待确认={cpd.get('awaitingCustomer')}",
+    )
+    if not cpd.get("awaitingCustomer"):
+        w.rep.not_run("52 ⑫-b 客户确认", "这一版当前不需要客户动作（可能已被历史轮次确认过）")
+    else:
+        w.c.scroll_into('[data-act="customer-confirm"]')
+        w.c.tap('[data-act="customer-confirm"]')
+        cpd2 = w.wait_data(
+            lambda x: (
+                "已接受" in str(x.get("settlementHint") or "") or x.get("awaitingCustomer") is False
+            ),
+            tries=40,
+            gap=0.4,
+        )
+        w.rep.rec(
+            "52 ⑫-b **客户本人**点了「确认这一版」⇒ 确认绑定在这一版上"
+            "（旧确认替不了新版本过关是结构保证的）",
+            cpd2.get("awaitingCustomer") is False,
+            f"待确认={cpd2.get('awaitingCustomer')} 页内提示={str(cpd2.get('settlementHint'))[:120]!r}",
+        )
+
+    # ---- ⑬ 回经理侧：四条判据全过 ⇒ 已结清 ----
+    w.login_as(CODE_OWNER)
+    if w.c.nav("navigateTo", f"/{finance_path}?assignment_id={aid}", finance_path):
+        fpd = w.wait_data(lambda x: x.get("canViewInternal") is True, tries=40, gap=0.4)
+        w.rep.rec(
+            "52 ⑬ 客户确认 ＋ 收付依据齐备之后，财务状态转为**已结清**（§5.3.2 四条判据全不成立）",
+            str(fpd.get("financialStatusText") or "") == "已结清",
+            f"状态={fpd.get('financialStatusText')!r} blockers="
+            + str([b.get("text") for b in (fpd.get("blockers") or [])])[:200],
+        )
+    else:
+        w.rep.not_run("52 ⑬ 财务状态复看", "回不到财务页")
+
+    w.shot("52-财务与结算")
+    errs = w.new_errors(err_base)
+    w.rep.rec(
+        "52 ⑭ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
+    )
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
@@ -10569,6 +10915,7 @@ SECTIONS = {
     "14": sec_14,
     "50": sec_50,
     "51": sec_51,
+    "52": sec_52,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -10707,6 +11054,7 @@ DEFAULT_ORDER = [
     "50",
     # 51 独立于 49/50：它自带载体（AG-02 经接口产出 customer_quote），不依赖前面几章留下的状态。
     "51",
+    "52",
 ]
 
 

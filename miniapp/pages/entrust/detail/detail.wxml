@@ -534,7 +534,7 @@
         <view class="slot-actions">
           <view
             class="slot-btn"
-            data-act-open-finance="open-finance"
+            data-act-open-finance="1"
             bindtap="onOpenFinance"
             hover-class="hover-dim"
           >财务与结算</view>

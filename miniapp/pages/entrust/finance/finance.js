@@ -33,18 +33,19 @@ const {
   confirmCharge,
   confirmSettlement,
   createSettlement,
+  customerSettlementHint,
   decorateCharge,
   decorateChargeTotal,
   decorateEvidenceGap,
   decorateSettlement,
   disputeCharge,
-  fetchAssignment,
   fetchCharges,
   fetchCustomerSettlement,
   fetchEvidenceGaps,
   fetchFinancialStatus,
   fetchMyOrgs,
   fetchSettlements,
+  fetchWorkbench,
   newIdempotencyKey,
   recordCharge,
   recordSettlementPayment,
@@ -95,6 +96,13 @@ Page({
 
     // 组织权限（本地投影：不该看的一次请求都不发）
     canViewInternal: false,
+    // 对客通道（货主侧）：内部读数对它一律 404 ⇒ 走 workbench 给的「该确认哪一版」
+    customerMode: false,
+    customerSettlementId: '',
+    customerVersionText: '',
+    awaitingCustomer: false,
+    customerHint: '',
+    customerLines: [],
 
     // 费用
     charges: [],
@@ -186,28 +194,68 @@ Page({
       })
   },
 
-  /** 取数：内部三块只在有组织权限时取；对客投影始终取（货主本人也要看）。 */
+  /** 取数：内部三块只在有组织权限时取；**货主侧走对客通道**。 */
   fetchAll(canInternal) {
     const id = this.data.assignmentId
-    const jobs = []
-    if (canInternal) {
-      jobs.push(fetchCharges(id), fetchEvidenceGaps(id), fetchSettlements(id), fetchFinancialStatus(id))
-    } else {
-      jobs.push(fetchAssignment(id))
+    if (!canInternal) {
+      // ⚠️ 货主侧**一条内部请求都不发**（费用 / 版本链 / 财务状态对它都是 404）。
+      //    ⛔ 也不能就此渲染"空区块"：那会显示成「还没有计入合计的费用行」＋
+      //    「未开始」，把"你没有这个视角"伪装成一个正常的空状态 ——
+      //    正是本项目反复拦的「错误被显示成空」。
+      return fetchWorkbench(id)
+        .then((res) => {
+          const hint = customerSettlementHint(res)
+          if (!hint) {
+            this.setData({
+              loading: false,
+              canViewInternal: false,
+              customerMode: true,
+              customerSettlementId: '',
+              customerHint: '这张委托还没有结算版本 —— 等经理出结算后，这里会出现待你确认的那一版',
+              customerLines: []
+            })
+            return null
+          }
+          return fetchCustomerSettlement(hint.settlementId)
+            .then((view) => {
+              this.setData({
+                loading: false,
+                canViewInternal: false,
+                customerMode: true,
+                customerSettlementId: hint.settlementId,
+                customerVersionText: hint.versionText,
+                awaitingCustomer: hint.awaitingCustomer,
+                customerHint: '',
+                customerLines: this.customerLineRows(view)
+              })
+              return null
+            })
+            .catch((err) => this.applyError(err))
+        })
+        .catch((err) => this.applyError(err))
     }
-    return Promise.all(jobs).then((results) => {
-      if (!canInternal) {
-        // 货主侧：本页对它只到「能看到自己的委托」这一层；
-        // 费用与结算的内部读数对它是 404（与运力那一组同口径）。
-        this.setData({ loading: false, canViewInternal: false })
-        return null
-      }
-      const chargePayload = results[0] || {}
-      const gapPayload = results[1] || {}
-      const settlementPayload = results[2] || {}
-      const financial = results[3] || {}
-      this.applyFinance(chargePayload, gapPayload, settlementPayload, financial)
+    return Promise.all([
+      fetchCharges(id),
+      fetchEvidenceGaps(id),
+      fetchSettlements(id),
+      fetchFinancialStatus(id)
+    ]).then((results) => {
+      this.applyFinance(results[0] || {}, results[1] || {}, results[2] || {}, results[3] || {})
       return null
+    })
+  },
+
+  /** 对客投影 → 模板可直接渲染的行（字段名与服务端白名单一致，不自己挑）。 */
+  customerLineRows(view) {
+    return ((view && view.lines) || []).map(function (line) {
+      const l = line || {}
+      return {
+        key: String(l.charge_id == null ? '' : l.charge_id),
+        chargeKind: l.charge_kind || '',
+        amountText: l.amount === null || l.amount === undefined ? '未知' : String(l.amount),
+        currency: l.currency || '',
+        basis: l.basis || ''
+      }
     })
   },
 
@@ -553,16 +601,7 @@ Page({
               : view.customer_decision === 'rejected'
                 ? '客户不接受'
                 : '客户未确认',
-            lines: (view.lines || []).map(function (line) {
-              const l = line || {}
-              return {
-                key: String(l.charge_id == null ? '' : l.charge_id),
-                chargeKind: l.charge_kind || '',
-                amountText: l.amount === null || l.amount === undefined ? '未知' : String(l.amount),
-                currency: l.currency || '',
-                basis: l.basis || ''
-              }
-            })
+            lines: this.customerLineRows(view)
           },
           customerViewHint: '这是客户看到的内容：只有对客（应收）费用，没有内部成本'
         })

@@ -819,6 +819,24 @@ class WorkbenchSlotOut(BaseModel):
     counts: WorkbenchCountsOut
 
 
+class CustomerSettlementHintOut(BaseModel):
+    """**对客**的结算版本提示（货主可见；白名单，⛔ 不含任何金额与内部成本）。
+
+    补它的原因（2026-09-18）：`customer-view` / `customer-confirm` 都按**版本 id** 取，
+    而版本清单没有货主面 ⇒ 没有这一格，客户**不知道"我该确认哪一版"**，
+    裁定 Q5 的「客户确认」在界面上没有可走的路。这里只补**发现路径**：
+    明细走 `GET /settlements/{id}/customer-view`、决定走 `.../customer-confirm`。
+    """
+
+    settlement_id: int
+    version_no: int
+    status: str
+    customer_decision: str | None = None
+    customer_confirmed_at: str | None = None
+    #: 客户此刻要不要动作（推导：内部已确认 且 自己还没表态）
+    awaiting_customer: bool
+
+
 class WorkbenchOut(BaseModel):
     """单委托工作台聚合投影（UI-05 的取数入口）。
 
@@ -832,6 +850,8 @@ class WorkbenchOut(BaseModel):
     status: str
     slots: list[WorkbenchSlotOut]
     unassigned_artifact_total: int
+    #: 无适用结算版本时为 `None`（未知保持未知，不是空对象）
+    customer_settlement: CustomerSettlementHintOut | None = None
 
 
 # ── 异常与变更案件（ENT-030 / DR-0013）────────────────────────────────────────
