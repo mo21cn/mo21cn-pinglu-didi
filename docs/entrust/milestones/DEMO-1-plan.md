@@ -168,7 +168,7 @@
 | 争议排除在确认总额外 + 显式解决动作 | **缺失** | 未找到 |
 | 结算草稿 + 内部/客户确认 + 标注样本的外部付款证据 | **缺失** | 确认语义未找到 |
 | **委托级真实结案命令 + 前置判定 + 原子性** | **已实现（后端 ＋ 界面入口）** | S4-b 落地：`POST /assignments/{id}/complete`（五维度前置逐条报缺、幂等、`expected_revision` 乐观并发、MySQL 行锁）＋ 只读前置 `GET /assignments/{id}/closure-readiness`；界面入口在**委托详情页**的结案卡（五格清单先于按钮、页内确认条）。⚠️「齐备 ⇒ 结案成功」的设备侧证据仍缺一个**五维齐备夹具**（如实记 `NOT_RUN`） |
-| 重新打开语义 | 已有（task/case 级） | `tasks.py:reopen_task`、`exceptions.py:reopen_case`（同事务审计） |
+| 重新打开语义 | **已有（S4-c 落地）** | 委托级：`POST /assignments/{id}/reopen`（`completed → claimed`，**理由必填 ＋ append-only 留痕**，权限码独立于 `complete`；Q2：重开不恢复取消资格）。任务级/案件级：`tasks.py:reopen_task`、`exceptions.py:reopen_case`（同事务审计） |
 
 ### 3.5 BP-05 演示环境、复位与验收证据包
 
