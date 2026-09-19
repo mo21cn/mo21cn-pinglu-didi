@@ -133,6 +133,7 @@ class Env:
         self.keep_db = args.keep_db
         self.extra_seeds = getattr(args, "extra_seeds", "") or ""
         self.anchor = getattr(args, "anchor", "") or ""
+        self.chain = bool(getattr(args, "chain", False))
 
     def _default_python(self) -> Path:
         cand = self.repo / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -898,6 +899,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--chain",
+        action="store_true",
+        help=(
+            "链式连跑（S4-b 切片 §7.1 路径③）：翻成 `WALK_CHAIN=1` ⇒ 第 43 章建成那张"
+            "**新委托**后，其后各章经 `prefer_anchor()` 自动沿用同一张单。"
+            "⚠️ 必须与**业务顺序**的 `--section` 一起用（43,46,47,48,45,44,49,50,31,32,52,41）；"
+            "⛔ 默认关闭 —— 开了它 `--section all` 的全量分章回归会被改写语义"
+        ),
+    )
+    parser.add_argument(
         "--prepare-ide",
         action="store_true",
         help=(
@@ -1029,6 +1040,8 @@ def main(argv: list[str] | None = None) -> int:
             extra["WALK_PAY"] = "1"
         if env.anchor:
             extra["WALK_ANCHOR"] = env.anchor
+        if env.chain:
+            extra["WALK_CHAIN"] = "1"
         extra = extra or None
         done = run_step(
             env,

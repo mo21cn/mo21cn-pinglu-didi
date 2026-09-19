@@ -107,6 +107,7 @@ DR-0009 记的阻塞点是「按序号点第 i 个同类元素」，解法走它
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import re
@@ -444,6 +445,30 @@ WALK_ANCHOR = (os.environ.get("WALK_ANCHOR") or "").strip()
 CHAIN_ASSIGNMENT = ""
 
 
+#: ⭐ **显式开关**：链式连跑只在 `--chain`（runner 翻成 `WALK_CHAIN=1`）下生效。
+#: ⛔ 默认关闭是**必须**的 —— 否则 `--section all` 的全量分章回归会被改写语义：
+#: 各章会统统锚到第 43 章那张单上，而 49/50/52/53 的判据（合同/变更/结算/结案）
+#: 依赖**各自夹具**的载体 ⇒ 全量回归会变成一片 FAIL，而且看起来像产品坏了。
+CHAIN_ENABLED = (os.environ.get("WALK_CHAIN") or "").strip() not in ("", "0", "false", "False")
+
+#: 链式锚点的**逐章追踪** `{调用方函数名: [解析出的 aid, ...]}`。
+#: 为什么要有它：不带追踪时，"同一张委托"只是**机制**上的保证（`prefer_anchor`
+#: 在 16 个取单点统一优先返回链式锚点），报告里读不出来 ⇒ 评审者只能信我们。
+#: 有了它，报告收尾会逐章列出"这一章实际锚到了哪张单"，**同一张**就成了可核对的事实。
+CHAIN_TRACE: dict[str, list[str]] = {}
+
+
+def _trace_anchor(aid: str) -> None:
+    """记一笔"哪个章节函数取到了哪张单"（失败绝不影响主流程）。"""
+    try:
+        frame = inspect.currentframe()
+        caller = frame.f_back.f_back if frame and frame.f_back else None
+        fn = caller.f_code.co_name if caller else "?"
+    except Exception:
+        fn = "?"
+    CHAIN_TRACE.setdefault(fn, []).append(aid)
+
+
 def anchor_active() -> bool:
     """本轮是否有**任何一种**锚点生效（命令行给的，或第 43 章建单后记下的）。"""
     return bool(CHAIN_ASSIGNMENT or WALK_ANCHOR)
@@ -454,7 +479,10 @@ def prefer_anchor(picked: str) -> str:
 
     默认两个都空 ⇒ 原样放行，行为与从前**逐字一致**。
     """
-    return CHAIN_ASSIGNMENT or WALK_ANCHOR or picked
+    aid = CHAIN_ASSIGNMENT or WALK_ANCHOR or picked
+    if aid:
+        _trace_anchor(aid)
+    return aid
 
 
 def find_submitted(org_id: str, title: str, token: str) -> str:
@@ -902,6 +930,28 @@ class Reporter:
             ),
             flush=True,
         )
+        if CHAIN_TRACE:
+            uniq = sorted({a for aids in CHAIN_TRACE.values() for a in aids})
+            print("", flush=True)
+            print(
+                "  各章取单追踪（每章实际用到的委托 id —— 开了 `--chain` 时应**全部相同**）:",
+                flush=True,
+            )
+            for fn in sorted(CHAIN_TRACE):
+                aids = CHAIN_TRACE[fn]
+                flag = "" if len(set(aids)) == 1 else "   ⚠️ 同一章内锚点不一致"
+                print(f"    {fn:<18} aid={'／'.join(aids)}{flag}", flush=True)
+            verdict = "是" if len(uniq) == 1 else "否"
+            tail = "" if CHAIN_ENABLED else "（未开 `--chain` ⇒ 各章自挑，不同是正常的）"
+            print(
+                f"    合计 {len(CHAIN_TRACE)} 个取单点 · aid 集合={uniq} · 同一张={verdict}{tail}",
+                flush=True,
+            )
+        elif CHAIN_ASSIGNMENT or WALK_ANCHOR:
+            print(
+                "  ⚠️ 链式锚点已生效，但**没有任何取单点被调用** ⇒ 链没接上（请核对章节是否跑过）",
+                flush=True,
+            )
         for r in self.non_pass:
             print(f"  {r['kind']}: {r['step']} | {r['note']}", flush=True)
 
@@ -7319,6 +7369,9 @@ def sec_43(w: Walker) -> None:
       不假装修正发生在会话屏。
     """
     print("\n== ㊸ 主演示第 1–3 步（合同 §10.1，真实点击）==", flush=True)
+    # `global` 必须在**任何使用之前**（本函数后面的读数要读它）——
+    # 链式锚点要跨章传递，所以只能放模块级。
+    global CHAIN_ASSIGNMENT
 
     err_base = w.c.errors()
 
@@ -7457,13 +7510,13 @@ def sec_43(w: Walker) -> None:
         "㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证）",
         bool(aid),
         f"aid={aid} org={org_id}（{ORG_WORKBENCH}）"
-        f" ｜链式锚点={'已生效,其后各章沿用本单' if aid else '未设置'}",
+        f" ｜链式锚点="
+        f"{'已开启(--chain)：其后各章沿用本单' if CHAIN_ASSIGNMENT else '未开启（回归不被改写）'}",
     )
     # ⭐ **链式锚点**：这张**刚建成的新委托**就是本轮 13 步共用的那一张 —— 记进
     #    进程内变量；其后各章（46/47/48/45/44/49/50/31/32/52/41）经 `prefer_anchor()`
     #    一律沿用它，而不是各章按标题各挑一张。
-    global CHAIN_ASSIGNMENT
-    CHAIN_ASSIGNMENT = aid
+    CHAIN_ASSIGNMENT = aid if CHAIN_ENABLED else ""
 
     if not aid:
         w.rep.not_run("㊸ 第1步 · A1 受理及其后全部断言", "未能按标题定位新建的委托")
@@ -9283,13 +9336,31 @@ def sec_46(w: Walker) -> None:
     _bare_pre = w.c.query_selector_all("[data-plan-task-pre]")
     n_task_attr = -1 if _bare_task is None else len(_bare_task)
     n_pre_attr = -1 if _bare_pre is None else len(_bare_pre)
-    w.rep.rec(
-        "㊻ ⑤ 必需任务与**前置**逐行渲染（每一条任务行都带一行前置说明："
-        "「无固定前置」或有具体前置 —— 判不了的那一格也必须自己说话）",
-        n_task_cls == len(tasks_srv) and n_task_cls >= 1 and n_pre_cls == n_task_cls,
-        f"任务行 按类={n_task_cls} 裸属性={n_task_attr}（服务端 {len(tasks_srv)}）"
-        f" hasTasks={pl.get('hasTasks')!r}｜前置行 按类={n_pre_cls} 裸属性={n_pre_attr}",
-    )
+    # ⚠️ **零任务 ⇒ NOT_RUN，不是 FAIL，也不是 PASS**（2026-09-20 定档）：
+    #    判据是"任务行数 == 服务端任务数 ≥ 1 且每行都有前置行"。当服务端 0 条时，
+    #    `n_task_cls == 0 == len(tasks_srv)` 是**两侧都为空的恒真**（真空通过），
+    #    `>= 1` 又必然不成立 ⇒ 这一格在"没有任务"的载体上**没有对象**。
+    #    ⭐ 任务从哪来（代码直证）：全仓只有两处创建 —— `tasks_api.create_task`
+    #    （`POST /entrust/tasks`）与 `revalidation` 派生；**界面没有建任务入口**。
+    #    ⇒ 一张**全新委托**在第 4 步时必然还没有任务。有任务的载体上该断言照跑
+    #    （全量 `--section all` 的 ㊻ 就是在那一档上通过的）。
+    if not tasks_srv:
+        w.rep.not_run(
+            "㊻ ⑤ 必需任务与**前置**逐行渲染（每一条任务行都带一行前置说明："
+            "「无固定前置」或有具体前置 —— 判不了的那一格也必须自己说话）",
+            f"本轮载体 aid={aid} 的 `plan.task_prerequisites` = **0 条** ⇒ 该格**没有对象**"
+            "（两侧皆空会真空通过）。⭐ 任务只由 `POST /entrust/tasks` 与复核派生产生"
+            "（界面**无**建任务入口）⇒ 全新委托跑到第 4 步时必然没有任务。"
+            "有任务的载体上本断言照跑 —— 见 `--section all` 的 ㊻（那一档 PASS）",
+        )
+    else:
+        w.rep.rec(
+            "㊻ ⑤ 必需任务与**前置**逐行渲染（每一条任务行都带一行前置说明："
+            "「无固定前置」或有具体前置 —— 判不了的那一格也必须自己说话）",
+            n_task_cls == len(tasks_srv) and n_task_cls >= 1 and n_pre_cls == n_task_cls,
+            f"任务行 按类={n_task_cls} 裸属性={n_task_attr}（服务端 {len(tasks_srv)}）"
+            f" hasTasks={pl.get('hasTasks')!r}｜前置行 按类={n_pre_cls} 裸属性={n_pre_attr}",
+        )
 
     w.shot("㊻-运输计划卡")
     errs = w.new_errors(err_base)
@@ -10157,14 +10228,27 @@ def sec_50(w: Walker) -> None:
             return
         conf = [body]
     conf_id = str((conf[0] or {}).get("confirmation_id") or "")
+    # ⭐ 定档用的诊断读数（2026-09-20）：只打"失败的规则"看不出**为什么没有失败** ⇒
+    #    把候选容量、**全部**规则判定、变更字段、以及确认行自己的字段都打出来。
+    cand_cap = str((c900[0] or {}).get("capacity_tonnes") or "")
+
+    def _rules(resp: dict) -> str:
+        """`rule_code=outcome` 全量列表（不是只列 fail 的）。"""
+        return (
+            "["
+            + ", ".join(
+                f"{r.get('rule_code')}={r.get('outcome')}" for r in (resp.get("rule_checks") or [])
+            )
+            + "]"
+        )
 
     # ── ② 变更前：这条确认还成立 ───────────────────────────────────────────
     pre = api_get(f"/entrust/capacity-confirmations/{conf_id}/recheck", tok) or {}
     w.rep.rec(
         "㊿ ② 变更前 · 900 吨候选的运力确认**成立**（基线：确认在 800 吨需求下判过）",
         pre.get("still_valid") is True,
-        f"still_valid={pre.get('still_valid')!r} 不过的规则="
-        f"{[r.get('rule_code') for r in (pre.get('rule_checks') or []) if r.get('outcome') == 'fail']}",
+        f"still_valid={pre.get('still_valid')!r} 候选容量={cand_cap} 当前需求={cur_raw} "
+        f"全部规则={_rules(pre)} 确认字段={sorted((conf[0] or {}).keys())[:12]}",
     )
 
     # ── 前置 C：登记变更请求 + 受影响项＝本委托（写侧前置）──────────────
@@ -10392,6 +10476,7 @@ def sec_50(w: Walker) -> None:
         "（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话）",
         post.get("still_valid") is False and fails == ["capacity"],
         f"still_valid={post.get('still_valid')!r} 不过的规则={fails} "
+        f"候选容量={cand_cap} 当前需求={cur_raw} 全部规则={_rules(post)} "
         f"changed_fields={post.get('changed_fields')!r}",
     )
 
