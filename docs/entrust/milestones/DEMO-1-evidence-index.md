@@ -26,7 +26,7 @@
 | **命令** | `python scripts/run_walkthrough_devtools.py --section all --pay --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py` |
 | **时间** | 2026-09-19 `17:34:45` 起（产物目录名）～ 约 `18:46` 止 |
 | **环境** | Windows；仓库 `E:\pinglu-didi`；`.venv`（CPython 3.13）；模拟器＝微信开发者工具（wechatide 工具链）；数据库＝**runner 自建临时 SQLite**（非生产库） |
-| **模型模式** | ⚠️ **未设 `LLM_MOCK`**（`run_walkthrough_devtools.py` 里 `LLM_MOCK` 出现 **0** 次），且本机**无 `backend/.env`、无 `LLM_API_KEY`** ⇒ 按 `backend/app/agent/llm.py` 的**显式降级**走 mock 规则模板。⇒ 属 **fixture 级证据**，⛔ 不得据此声称"跑过一次真实模型会话" |
+| **模型模式** | ⚠️ **未设 `LLM_MOCK`**（`run_walkthrough_devtools.py` 里 `LLM_MOCK` 出现 **0** 次）。该轮**究竟走真模型还是降级 —— 未定**：判定取决于 `backend/.env.local` 是否存在，而该文件（gitignore，内含**真订阅 Key**）在 **2026-09-19 核实期间已缺失**，且**回收站无记录**（git 的 `unlink` 是**永久删除**，不经回收站）⇒ **无法回溯该轮的实际模式**。⛔ **不得写"本机无 Key"**（那是错误前提：Key 一直存在，只是文件被删）；⛔ 也不得据此声称跑过真实模型会话。**下一轮复跑时把 `LLM_MOCK` 显式钉在命令行**并记进本索引 |
 | **逐步结果** | 见下方「原始文件」中的 `walk-all-stdout.txt`（每步一行，含判据与读数） |
 | **汇总** | `PASS=750` / `FAIL=11` / `NOT_RUN=9` / `LIMITATION=17` / `ENV_BLOCKED=0` / `REVIEW_REQUIRED=0`；运行期 console error **0** |
 | **覆盖边界** | ⛔ 本章循环当时**不含** `53` / `54`（`DEFAULT_ORDER` 静默漏项，已修）⇒ **第 12 步与十三步产物链不在本轮内**；产物里 `53`/`54` 各出现 **0** 次 |
@@ -89,3 +89,4 @@
 | 2 | **本轮的"全量"不含 53/54** | 已修 `DEFAULT_ORDER`；**主链跑通后**做一次真正的全量回归（发包方裁定 P2） |
 | 3 | **合同 §12 另有两份交付物尚未建立** | `DEMO-1-walkthrough.md`（主脚本 / 角色 / 预期结果 / 诚实回退）与 `DEMO-1-acceptance.md`（D1 逐行结果 ＋ 候选 SHA ＋ CI ＋ 限制 ＋ HO 终裁）⇒ 待主链证据成形后一次写全，避免先写一份再推翻 |
 | 4 | **同一张新委托的 13 步主链** | ⛔ **尚无任何证据**。这是当前主任务，见 `DEMO-1-readiness.md` §10.2 的「本轮执行结果」栏 |
+| 5 | **密钥文件曾被本机删除故障永久删除** | 2026-09-19 核实发现 `backend/.env.local`（含**可用订阅 Key**）缺失、**回收站无记录**；已从 `_b_recon3.txt`（09-16 的 env 基线快照）找回并还原，`llm_key_doctor.py` **四步全绿**。⚠️ **untracked 文件不在护栏的恢复范围内** ⇒ 已扩展护栏（见 DR-0019 追加节） |
