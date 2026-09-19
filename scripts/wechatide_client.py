@@ -123,6 +123,35 @@ _RECTS_FN = (
 )
 
 
+def classify_page_stack(receipt: dict, stack: list) -> str:
+    """把一次「取栈」回执分成四类 —— 此前它们**同名同姓**，都被读成 `timeout`。
+
+    2026-09-19 实测：日志里 17 连击全是
+    `MCP_TOOL_ERROR: timeout waiting for automator response`，而**取栈只花 11.6~13.2s**
+    —— 我们的预算给的是 `GATE_PROBE_S=90`，**根本没吃满**。
+    ⇒ 那个 timeout 是 **IDE 内部的超时**，不是"我们等得不够久"。
+    两种情况处置完全相反（前者要查通道/窗口，后者只需加预算），
+    却在日志里长得一模一样。故在入口处把性质钉下来：
+
+    | kind | 判据 | 含义 |
+    | --- | --- | --- |
+    | `our_timeout` | 回执带 `__rc__=-1` / `__raw__` 以 TIMEOUT 开头 | **我们的**预算用尽，子进程被杀 |
+    | `channel_error` | 有回执但 `ok=false` | IDE/通道回错（automator 未注册、授权、窗口…） |
+    | `empty_stack` | `ok=true` 但栈为空 | 通道是**通的**，只是窗口没进小程序页 |
+    | `ok` | `ok=true` 且栈非空 | 正常 |
+
+    ⚠️ `our_timeout` 的耗时 ≈ 我们给的预算；`channel_error` 的耗时是**IDE 自己**的
+    内部超时（本机 ≈11.5s）—— 所以「耗时」与「kind」要**一起**看，单看哪个都会误判。
+    """
+    if receipt.get("__rc__") == -1 or str(receipt.get("__raw__", "")).startswith("TIMEOUT"):
+        return "our_timeout"
+    if receipt.get("ok") is False:
+        return "channel_error"
+    if not stack:
+        return "empty_stack"
+    return "ok"
+
+
 def resolve_ide_dir(explicit: str | None = None) -> str:
     """返回可用的 IDE 安装目录；找不到返回空串。"""
     for cand in (explicit, *IDE_CANDIDATES):
@@ -276,6 +305,17 @@ class Client:
         """
         return self.call_json("open_project_window", "--project", self.project, timeout=timeout)
 
+    def window_id(self, timeout: int | None = None) -> str:
+        """`open_project_window` 回执里的**窗口标识**（实测形如 `{"type":"reuse","winId":"s0"}`）。
+
+        为什么要单独把它读出来：取栈（`automation_runtime_info`）**不带窗口参数**，
+        它取的是哪一个窗口只有 IDE 自己知道。于是"每轮都重开窗 ⇒ 取栈指向旧窗口"
+        这类**目标窗口不一致**的猜测一直无法证伪 —— 现在把 `winId` 打进日志，
+        只要看它是否在轮次间漂移就够了（`type=open` 且 `winId` 递增 = 窗口在堆积）。
+        """
+        j = self.open_window(timeout=timeout)
+        return str(j.get("winId") or "")
+
     def page_stack(self, timeout: int | None = None) -> list:
         """当前页面栈。`--action currentPage` 在本版本会报错，故一律用 pageStack。"""
         j = self.tool("automation_runtime_info", "--action", "pageStack", timeout=timeout)
@@ -288,8 +328,16 @@ class Client:
         还是 **`ok: true` 但栈为空**（窗口没进小程序页）—— 两者处置完全不同，
         而只返回 `list` 的方法把区别吞掉了（`j.get("result")` 对失败回执同样给 `[]`）。
         """
+        t0 = time.time()
         j = self.tool("automation_runtime_info", "--action", "pageStack", timeout=timeout)
-        return list(j.get("result", {}).get("pageStack") or []), j
+        elapsed = time.time() - t0
+        stack = list(j.get("result", {}).get("pageStack") or [])
+        # ⚠️ 两个下划线前缀的键是**本封装注入的**（不是 IDE 回执的一部分）：
+        #    耗时与性质必须跟着回执一起走到日志里，否则"空栈"与"通道坏"又会被压成同一行。
+        j = dict(j)
+        j["__elapsed__"] = round(elapsed, 2)
+        j["__kind__"] = classify_page_stack(j, stack)
+        return stack, j
 
     def current_path(self) -> str:
         stack = self.page_stack()

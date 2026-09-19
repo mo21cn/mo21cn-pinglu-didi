@@ -11398,10 +11398,18 @@ def sec_54(w: Walker) -> None:
     )
     if qcs:
         w.rep.rec(
-            "54 ⑤ 第 8 步（经审批的货量变更）：变更历史存在且挂在**本单**上",
-            all(int((q or {}).get("assignment_id") or 0) == int(canon_aid) for q in qcs),
-            f"变更 {len(qcs)} 条 首条={str((qcs[0] or {}).get('quantity_before'))!r}→"
-            f"{str((qcs[0] or {}).get('quantity_after'))!r}",
+            "54 ⑤ 第 8 步（经审批的货量变更）：变更历史存在、挂在**本单**上，且新旧值可读",
+            bool(qcs)
+            and all(int((q or {}).get("assignment_id") or 0) == int(canon_aid) for q in qcs)
+            # ⭐ 正控：新值文案**必定**有值（旧值允许是 None ＝"变更前未知"，见
+            #    `project_quantity_change` 的 docstring）⇒ 用它挡"键名读错却静默 PASS"。
+            #    2026-09-19 实测本条曾读成 `首条='None'→'None'` 而**仍然判 PASS**，
+            #    因为当时只断言了条数 —— 读数全空却通过，是**真空通过**。
+            and bool((qcs[0] or {}).get("new_quantity_text")),
+            f"变更 {len(qcs)} 条"
+            f" 首条={str((qcs[0] or {}).get('old_quantity_text'))!r}→"
+            f"{str((qcs[0] or {}).get('new_quantity_text'))!r}"
+            f" 挂本单={all(int((q or {}).get('assignment_id') or 0) == int(canon_aid) for q in qcs)}",
         )
     else:
         w.rep.not_run(
