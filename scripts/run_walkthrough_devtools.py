@@ -388,10 +388,19 @@ AUTOMATION_DEAD_MIN_ELAPSED_S = 360
 #: ⭐ `empty_stack`（通道**通**、栈空）**已被证实**是 refresh 能救的状态：
 #:    调完连续 5 次取栈全转 `ok`（1.3~2.9s）且持续 ≥210s；
 #:    `close_project_window` 重开窗会**丢掉**这个就绪态（回到 `empty_stack`）。
-#: ⚠️ `channel_error`（IDE 内部 ≈11.6s 超时）**未验证** refresh 是否有效，
-#:    但也一并试一次（代价只有几秒，而"干等满预算"是确定的浪费）。
-GATE_AUTO_REFRESH_AFTER = 2
+#: ⭐ 实测补充（2026-09-19 傍晚，证据 E2）：`channel_error`（通道**已堵**）上 refresh
+#:    **无效** —— 连刷两次仍 11.7~11.9s 超时。故**只在 `empty_stack` 上触发**，
+#:    并把阈值降到 **1 次**（证据 E3：紧接的第二次探测就转 `channel_error` ⇒
+#:    要趁通道还通的时候救）。
+GATE_AUTO_REFRESH_AFTER = 1
 GATE_AUTO_REFRESH_MAX = 2
+
+#: 起 IDE 后**先静默**这么久再首次探测（证据 E3：立刻连续探测会把通道从"通"打成"堵"，
+#: 且**静默 45s 不能恢复** ⇒ 宁可先等，也别把它打堵）。
+GATE_INITIAL_QUIET_S = 35
+
+#: 两次探测之间的间隔（原为 3s；拉长以降低"打堵"概率，证据 E3）。
+GATE_PROBE_GAP_S = 15
 
 
 def _machine_pressure() -> str:
@@ -510,10 +519,12 @@ def should_auto_refresh(kinds: list[str], done: int) -> bool:
     依据（2026-09-19 对照实验）：`empty_stack`＝通道**通**、窗口没进小程序页
     ⇒ 调一次 refresh 让 IDE 重新编译加载，实测**连续 5 次转 `ok` 并持续 ≥210s**。
     ⛔ `kind=ok` 时不刷（已经好了，刷它会把页面打回重载）。
+    ⛔ `kind=channel_error` 也**不**刷：实测（2026-09-19，全量走查，单一控制者）
+    连刷两次仍 11.7~11.9s 超时 ⇒ 对"已堵"的通道 refresh 无效，刷它只是白等两轮。
     """
     if done >= GATE_AUTO_REFRESH_MAX:
         return False
-    return sum(1 for k in kinds if k in ("empty_stack", "channel_error")) >= GATE_AUTO_REFRESH_AFTER
+    return kinds.count("empty_stack") >= GATE_AUTO_REFRESH_AFTER
 
 
 def wait_ready(
@@ -537,6 +548,15 @@ def wait_ready(
     from wechatide_client import Client  # noqa: PLC0415
 
     client = Client(project=str(env.miniapp), timeout=probe_s)
+    # ⭐ 起手静默（只做一次；`wait_ready` 会被 main 与 hold_ide_channel 多次调用）。
+    #    证据 E3：IDE 刚起来就连续探测，第一次还通、第二次就堵，且静默救不回来。
+    if not getattr(env, "_gate_quiet_done", False):
+        log(
+            f"    ⏸ 起手静默 {GATE_INITIAL_QUIET_S}s 再开始探测"
+            "（实测：刚起来就连探会把通道从「通」打成「堵」，且堵后本轮不可自愈）"
+        )
+        time.sleep(GATE_INITIAL_QUIET_S)
+        env._gate_quiet_done = True  # noqa: SLF001  # 本函数自己的标记位
     t0 = time.time()
     last: dict = {}
     dead = 0
@@ -652,7 +672,7 @@ def wait_ready(
                 )
         else:
             dead = 0
-        time.sleep(3)
+        time.sleep(GATE_PROBE_GAP_S)
     log(
         f"    ✗ 闸门预算 {budget_s}s 用尽，页面栈仍为空。最后回执：{_brief(last)}"
         f"（kind={last.get('__kind__')}）"
