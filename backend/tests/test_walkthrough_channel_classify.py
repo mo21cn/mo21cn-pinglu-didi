@@ -185,30 +185,32 @@ def test_window_info_degrades_to_empty_when_missing(monkeypatch: pytest.MonkeyPa
 # ─────────────────────── 闸门里「主动刷新」的策略（2026-09-19 对照实验） ───────────────────────
 
 
-def test_should_auto_refresh_triggers_on_repeated_empty_stack() -> None:
-    """连续两次空栈 ⇒ 该主动 `simulator_refresh`。
+def test_should_auto_refresh_triggers_on_first_empty_stack() -> None:
+    """**一次** `empty_stack` 就触发刷新。
 
-    实测（对照实验）：`empty_stack` 是**通道通、窗口没进小程序页**，
-    调一次 refresh 后连续 5 次取栈全转 `ok`（1.3~2.9s）并持续 ≥210s。
+    实测：`empty_stack` 是**通道通、窗口没进小程序页** ⇒ 调一次 refresh 后连续 5 次
+    取栈全转 `ok`（1.3~2.9s）并持续 ≥210s；而**紧接的第二次探测就转 `channel_error`**
+    （通道被打堵，且静默救不回来）⇒ 必须**趁通道还通的时候**救，故阈值降到 1。
     """
+    assert runner.should_auto_refresh(["empty_stack"], 0) is True
     assert runner.should_auto_refresh(["empty_stack", "empty_stack"], 0) is True
 
 
-def test_should_auto_refresh_waits_for_threshold() -> None:
-    """只观测到一次空栈 ⇒ 先别刷（冷启动第一轮空是正常的，别把页面打回重载）。"""
-    assert runner.should_auto_refresh(["empty_stack"], 0) is False
-
-
 def test_should_auto_refresh_never_fires_when_stack_is_ok() -> None:
-    """⭐ **反向**断言：一旦取到栈就**绝不**刷（刷新会把页面打回重载，是破坏性的）。"""
+    """⭐ **反向**断言：历史里**只有 `ok`**（即取到过栈）时绝不刷。
+
+    ⚠️ 刻意**不**用 `["empty_stack", "ok"]` 这种组合当判据 —— 那是**测错了层**：
+    `wait_ready()` 在 `if stack: return True` 就返回了，**根本走不到**刷新的判断。
+    这条测试只回答"这个纯函数在什么样的历史下会/不会说该刷"。
+    """
     assert runner.should_auto_refresh(["ok"], 0) is False
-    assert runner.should_auto_refresh(["empty_stack", "ok"], 0) is False
-    assert runner.should_auto_refresh(["channel_error", "ok"], 0) is False
+    assert runner.should_auto_refresh(["ok", "ok"], 0) is False
+    assert runner.should_auto_refresh(["channel_error"], 0) is False
 
 
 def test_should_auto_refresh_is_not_vacuous() -> None:
     """同一长度下，两种历史必须给出**不同**结论（否则策略等于常量）。"""
-    bad = runner.should_auto_refresh(["empty_stack", "empty_stack"], 0)
+    bad = runner.should_auto_refresh(["empty_stack", "channel_error"], 0)
     good = runner.should_auto_refresh(["ok", "ok"], 0)
     assert bad is True
     assert good is False
@@ -223,10 +225,13 @@ def test_should_auto_refresh_respects_max() -> None:
     assert runner.should_auto_refresh(hist, runner.GATE_AUTO_REFRESH_MAX + 5) is False
 
 
-def test_should_auto_refresh_counts_channel_error_too() -> None:
-    """`channel_error`（IDE 内部 ≈11.6s 超时）也计入。
+def test_should_auto_refresh_ignores_channel_error() -> None:
+    """⭐ **`channel_error` 不触发刷新**（判据按实测结果改，不是凭直觉）。
 
-    ⚠️ 诚实边界：**未验证** refresh 对 `channel_error` 有效；
-    之所以一并试，是因为"试一次"只花几秒，而"干等满 900s 预算后早退"是确定的浪费。
+    2026-09-19 全量走查（**单一控制者**，无并发）实测：对 `channel_error` 连刷两次
+    `simulator_refresh`，取栈**仍然** 11.7~11.9s 超时 ⇒ 对"已堵"的通道 refresh **无效**，
+    刷它只是白等两轮（每轮 ≈11.6s）。
     """
-    assert runner.should_auto_refresh(["channel_error", "channel_error"], 0) is True
+    assert runner.should_auto_refresh(["channel_error"], 0) is False
+    assert runner.should_auto_refresh(["channel_error", "channel_error"], 0) is False
+    assert runner.should_auto_refresh(["our_timeout", "channel_error"], 0) is False
