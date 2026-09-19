@@ -428,6 +428,18 @@ def ensure_role(token: str, role: str) -> tuple[str, str]:
     return token, f"切换 {role} 失败（HTTP {status}）"
 
 
+# ── 路径② 锚定模式：`--anchor <aid>`（S4-b 切片 §7.1）────────────────────────
+#: runner 把 `--anchor <aid>` 翻成 `WALK_ANCHOR`：本轮**各章优先用同一张委托**，
+#: 用来把第 2–9 步的界面动作串在一张单上跑（此前各章各挑一张，链就走不起来）。
+#: 默认空 ⇒ `prefer_anchor()` 原样放行，行为与从前**逐字一致**。
+WALK_ANCHOR = (os.environ.get("WALK_ANCHOR") or "").strip()
+
+
+def prefer_anchor(picked: str) -> str:
+    """给了 `--anchor` 就用它；否则原样返回各章自己挑到的那张。"""
+    return WALK_ANCHOR or picked
+
+
 def find_submitted(org_id: str, title: str, token: str) -> str:
     """在该组织队列里找「标题匹配**且状态为 submitted**」的那张单（找不到给空串）。
 
@@ -4112,7 +4124,7 @@ def sec_33(w: Walker) -> None:
         )
         return
     # 优先种子里的 ASSIGNMENT_MAIN（claimed，才有「登记案件」入口），否则退到第一条
-    aid = ENTRUST_ASSIGNMENT_ID if ENTRUST_ASSIGNMENT_ID in ids else ids[0]
+    aid = prefer_anchor(ENTRUST_ASSIGNMENT_ID if ENTRUST_ASSIGNMENT_ID in ids else ids[0])
     w.rep.rec("㉝ 工作台委托队列非空（真实入口链起点）", True, f"ids={ids} ⇒ 选中 #{aid}")
 
     card = f'[data-id="{aid}"]'
@@ -7369,7 +7381,7 @@ def sec_43(w: Walker) -> None:
     #    既有章节一律写 `(api_login(code) or {}).get("access_token") or ""`，照抄。
     tok_owner = (api_login(CODE_OWNER) or {}).get("access_token") or ""
     org_id = my_org_id(CODE_OWNER, ORG_WORKBENCH)
-    aid = find_submitted(org_id, A1_MAIN_TITLE, tok_owner) if org_id else ""
+    aid = prefer_anchor(find_submitted(org_id, A1_MAIN_TITLE, tok_owner) if org_id else "")
     w.rep.rec(
         "㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证）",
         bool(aid),
@@ -7794,7 +7806,7 @@ def sec_44(w: Walker) -> None:
     tok_owner_raw = (api_login(CODE_OWNER) or {}).get("access_token") or ""
     tok_owner, role_note = ensure_role(tok_owner_raw, "owner")
     org_id = my_org_id(CODE_OWNER, ORG_WORKBENCH)
-    aid = newest_by_title(org_id, A1_MAIN_TITLE, tok_owner) if org_id else ""
+    aid = prefer_anchor(newest_by_title(org_id, A1_MAIN_TITLE, tok_owner) if org_id else "")
     if aid:
         w.rep.rec(
             "㊹ 前置 · 定位 ㊸ 建的那张委托（标题匹配取**最大** assignment_id，不限状态）",
@@ -8577,8 +8589,8 @@ def sec_45(w: Walker) -> None:
         hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
         return str((hit[0] or {}).get("assignment_id") or "") if hit else ""
 
-    aid = _newest_aid(title_main)
-    if not aid:
+    aid = prefer_anchor(_newest_aid(title_main))
+    if not aid and not WALK_ANCHOR:
         w.rep.not_run("㊺ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
 
@@ -9059,10 +9071,10 @@ def sec_46(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit:
+    if not hit and not WALK_ANCHOR:
         w.rep.not_run("㊻ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
-    aid = str((hit[0] or {}).get("assignment_id") or "")
+    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
 
     # ── 写①：建段（经 API —— 写侧没有界面，见 docstring）───────────────
     st1, body1 = api_post(
@@ -9267,10 +9279,10 @@ def sec_47(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit:
+    if not hit and not WALK_ANCHOR:
         w.rep.not_run("㊼ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
-    aid = str((hit[0] or {}).get("assignment_id") or "")
+    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
 
     plan0 = api_get(f"/entrust/assignments/{aid}/plan", tok) or {}
     legs0 = plan0.get("legs") or []
@@ -9492,13 +9504,13 @@ def sec_48(w: Walker) -> None:
     rows = (api_get("/entrust/assignments?view=owner&size=50", tok) or {}).get("items") or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit:
+    if not hit and not WALK_ANCHOR:
         w.rep.not_run(
             "㊽ 全部断言",
             f"seed-shipper 名下找不到「{demo_title}」（先跑 python scripts/seed_entrust_canonical.py）",
         )
         return
-    aid = str((hit[0] or {}).get("assignment_id") or "")
+    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
 
     plan0 = api_get(f"/entrust/assignments/{aid}/plan", tok) or {}
     legs0 = plan0.get("legs") or []
@@ -9642,12 +9654,12 @@ def sec_49(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit:
+    if not hit and not WALK_ANCHOR:
         w.rep.not_run(
             "㊾ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
         return
-    aid = str((hit[0] or {}).get("assignment_id") or "")
+    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
 
     # ① 前置：一条**已接受**的对客报价发布（种子铺；没有就整章 NOT_RUN）
     eid = ""
@@ -9986,12 +9998,12 @@ def sec_50(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit:
+    if not hit and not WALK_ANCHOR:
         w.rep.not_run(
             "㊿ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
         return
-    aid = str((hit[0] or {}).get("assignment_id") or "")
+    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
 
     ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
     eid = str(ctx.get("entrustment_id") or "")
@@ -10387,7 +10399,7 @@ def sec_51(w: Walker) -> None:
     #    把章节钉在一个「要演示哪个状态就铺哪个」的可选夹具上，会让它在标准配方下直接
     #    变成一条 `FAIL`（首跑实测 `aid=''` 命中 0 张）—— 读者会以为产品坏了。
     rows.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    aid = str((rows[0] or {}).get("assignment_id") or "") if rows else ""
+    aid = prefer_anchor(str((rows[0] or {}).get("assignment_id") or "") if rows else "")
     w.rep.rec(
         "51 前置 · 组织队列里有可用的委托（载体由本章自造，不依赖可选夹具）",
         bool(aid),
@@ -10670,7 +10682,7 @@ def sec_52(w: Walker) -> None:
     rows = (api_get("/entrust/assignments?view=owner&size=50", tok_shi) or {}).get("items") or []
     claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
     claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    aid = str((claimed[0] or {}).get("assignment_id") or "") if claimed else ""
+    aid = prefer_anchor(str((claimed[0] or {}).get("assignment_id") or "") if claimed else "")
     w.rep.rec(
         "52 前置 · 货主名下有一张已受理（claimed）委托 —— 本章自己挑一张，不绑可选夹具",
         bool(aid),
@@ -11015,7 +11027,7 @@ def sec_53(w: Walker) -> None:
     rows = (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
     claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
     claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0))
-    aid = str((claimed[0] or {}).get("assignment_id") or "") if claimed else ""
+    aid = prefer_anchor(str((claimed[0] or {}).get("assignment_id") or "") if claimed else "")
     w.rep.rec(
         "53 前置 · 队列里有一张已受理（claimed）委托 —— 本章自选一张，不绑按需夹具",
         bool(aid),
@@ -11098,8 +11110,13 @@ def sec_53(w: Walker) -> None:
     #
     # ⚠️ 标题与夹具逐字一致（`seed_entrust_completion_ready.ASSIGNMENT_TITLE`）——
     #    改一处要改两处，否则这里会静默记 NOT_RUN。
-    ready_aid = ""
-    org_rows = (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
+    # 路径②：给了 --anchor 就直接用它，跳过"按标题找"
+    ready_aid = WALK_ANCHOR
+    org_rows = (
+        []
+        if WALK_ANCHOR
+        else (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
+    )
     for r in org_rows:
         if str((r or {}).get("title") or "") == "演示委托·五维齐备（可结案）":
             ready_aid = str((r or {}).get("assignment_id") or "")
@@ -11275,8 +11292,8 @@ def sec_54(w: Walker) -> None:
     #: 第 12 步的载体（`--extra-seeds seed_entrust_completion_ready.py` 铺）与
     #: 第 4–8 步的载体（`seed_entrust_canonical.py` 铺）。两个都是**按需夹具**
     #: ⇒ 缺了就记 NOT_RUN 并点名，⛔ 不当成回归。
-    ready_aid = pick("五维齐备")
-    canon_aid = pick("canonical")
+    ready_aid = prefer_anchor(pick("五维齐备"))
+    canon_aid = prefer_anchor(pick("canonical"))
     any_claimed = [
         str((r or {}).get("assignment_id"))
         for r in rows
@@ -11390,7 +11407,9 @@ def sec_54(w: Walker) -> None:
         w.rep.not_run(
             "54 ⑤ 第 8 步（经审批的货量变更）",
             "canonical 单上还没有变更历史 ⇒ 该步还没跑过（㊿ 章会真做一次变更）。"
-            "⛔ 不是回归：**没有产物**与**产物不对**是两件事",
+            "⛔ 不是回归：**没有产物**与**产物不对**是两件事。"
+            "指引：先跑 ㊿ 章（它真做一次 800→950 的审批变更）本章即应转为 PASS，"
+            "一条命令连跑即可验证 —— `--section 50,54`（㊿ 会往同一张 canonical 单上写）",
         )
 
     # ⑥ 第 10 步（费用行）
