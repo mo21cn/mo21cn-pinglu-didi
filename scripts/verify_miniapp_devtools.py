@@ -1499,7 +1499,31 @@ def sec_15(w: Walker) -> None:
         return read()
 
     print("\n== ⑮ 发货方式选择 ==", flush=True)
-    w.c.nav("navigateTo", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
+    # ⭐ 2026-09-20：**先证明自己到了那一页**。此前这里只有一句 `nav()`，**不看返回值**
+    #    ⇒ 当模拟器停在上一次运行留下的深栈上（实测开窗即 `pages/mine/mine` ＋ 栈内还有
+    #    其它页）时，`navigateTo` **静默不落地**，随后 12 条断言**齐刷刷指向产品**
+    #    （"弹窗没出现／文案 0 字符／单选圈 0 个"），而真因是**这一章根本没进到那一页**。
+    #    这是"判据缺前置"的第 3 个实例（前两个：⑮ 没填表单就断货名、㊸ 没确认处理器跑没跑）。
+    #    ⇒ ① 先 `navigateTo`；② 没到就 `reLaunch` **换实例清栈**（本项目的既有手段：
+    #    `cargo.wxml` 的弹层初值只在 `onLoad` 给，复用实例不跑 `onLoad` ⇒ 必须换实例）；
+    #    ③ 两条都不到 ⇒ 点名 `NOT_RUN` 并**返回**（⛔ 不让后面 11 条去冤枉产品）。
+    arrived = w.c.nav("navigateTo", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
+    via = "navigateTo"
+    if not arrived:
+        arrived = w.c.nav("reLaunch", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
+        via = "reLaunch（清栈重进：上一次运行留下的深栈会让 navigateTo 静默不落地）"
+    w.rep.rec(
+        "⑮ 前置 · 真的到达「发布货源」页（⛔ 没有这一条，下面每一条都会指向产品）",
+        arrived and w.c.current_path() == PUBLISH_CARGO,
+        f"path={w.c.current_path()} via={via}",
+    )
+    if not arrived:
+        w.rep.not_run(
+            "⑮ 发货方式选择 · 全部断言",
+            "没能进入发布货物页（`navigateTo` 与 `reLaunch` 都没到达）⇒ 本格**没有对象**，"
+            f"⛔ 不是产品行为违反预期。path={w.c.current_path()}",
+        )
+        return
     cd = w.wait_data(lambda d: d.get("showChannel") is True, tries=30)
     time.sleep(1.0)
     w.shot("15-发货方式弹窗")
@@ -1626,9 +1650,39 @@ def sec_15(w: Walker) -> None:
     #    （`DEMO-1-readiness.md` §8.1 第 1 行；静态断言 `verify_ui_interactions.js`
     #    第 ⑨ 章同步改写），而**本章的真机断言当时没跟着改** ⇒ 它此后只能恒红。
     #    现在改断**新契约**：落点页 ＋ 源页表单值是否真的带过去了。
+    #
+    # ⭐ 2026-09-20（定档为「走查脚本缺前置」，⛔ 不是产品缺陷）：`cargo.js` 的
+    #    `pickEntrustDelivery()` 只在 `form.cargo_name` / `form.weight_t` **有值**时
+    #    才把它们放进 query（`if (f.cargo_name) qs.push(...)`；页头注释写明
+    #    "不代替用户说话"是**刻意**的）。本章此前**从未填过这两个字段** ⇒
+    #    下面两条断言**没有对象、恒红** —— "没有对象的断言恒红"与
+    #    "两侧皆空真空通过"同族，都是**判据缺正控**。
+    #    ⇒ 处置是**把前置建起来**（⛔ 不是放宽判据），并且**两侧都断**：
+    #    源页真的填进去了（正控）＋ 受理屏真的收到了同一串（被测事实）。
+    #    ⚠️ 用**真实输入**（`bindinput` 会触发）而不是只 `set_data`；真机输入失败时
+    #    退回 `set_data`，并把**走的是哪条**如实写进读数（证据等级不能省）。
+    w.c.scroll_into('input[data-field="cargo_name"]')
+    i_name = w.c.input_text('input[data-field="cargo_name"]', INTAKE_CARRY_NAME)
+    i_qty = w.c.input_text('input[data-field="weight_t"]', INTAKE_CARRY_QTY)
+    fill_via = "真实输入（bindinput）"
+    if not (i_name and i_qty):
+        w.c.set_data({"form.cargo_name": INTAKE_CARRY_NAME, "form.weight_t": INTAKE_CARRY_QTY})
+        fill_via = f"set_data 回填（真实输入 name={i_name} qty={i_qty}）"
+    time.sleep(0.6)
+    src_form = w.c.page_data().get("form") or {}
+    w.shot("15-委托发货前-源页表单已填")
+    w.rep.rec(
+        "⑮ 前置（正控）· 源页表单里**真的有**货名/货量 —— 没有它下面两格恒红"
+        "（`pickEntrustDelivery` 是**条件携带**：字段为空就不进 query）",
+        str(src_form.get("cargo_name") or "") == INTAKE_CARRY_NAME
+        and str(src_form.get("weight_t") or "") == INTAKE_CARRY_QTY,
+        f"form.cargo_name={src_form.get('cargo_name')!r} "
+        f"form.weight_t={src_form.get('weight_t')!r} 填值路径={fill_via}",
+    )
+
     w.c.set_data({"showChannel": True})
     time.sleep(0.9)
-    w.c.tap(".ch-card-entrust")
+    t_entrust = w.c.tap('[data-act-entrust="1"]')
     time.sleep(1.6)
     at_intake = w.c.wait_path(INTAKE, 25)
     time.sleep(1.2)  # 页面已就位但渲染帧可能滞后，静置后再截图
@@ -1636,19 +1690,20 @@ def sec_15(w: Walker) -> None:
     w.rep.rec(
         "⑮ 委托发货跳受理屏（UI-07）—— ⛔ 不再是「功能预览」占位页",
         at_intake,
-        f"path={w.c.current_path()}",
+        f"path={w.c.current_path()} tap={t_entrust}",
     )
     if at_intake:
         q = intake_query()
         w.rep.rec(
             "⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url）",
-            bool(str(q.get("cargo_name") or "").strip()),
-            f"cargo_name={q.get('cargo_name')!r}",
+            q.get("cargo_name") == INTAKE_CARRY_NAME,
+            f"cargo_name={q.get('cargo_name')!r} 期望={INTAKE_CARRY_NAME!r}",
         )
         w.rep.rec(
             "⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字）",
-            bool(str(q.get("quantity") or "").strip()) and q.get("quantity_unit") == "吨",
-            f"quantity={q.get('quantity')!r} unit={q.get('quantity_unit')!r}",
+            q.get("quantity") == INTAKE_CARRY_QTY and q.get("quantity_unit") == "吨",
+            f"quantity={q.get('quantity')!r} unit={q.get('quantity_unit')!r} "
+            f"期望={INTAKE_CARRY_QTY!r}/吨",
         )
 
     # 返回：深栈下 navigateBack 偶发抖动 → 重试直到回到发布货物页
@@ -7593,26 +7648,97 @@ def sec_43(w: Walker) -> None:
     #    （`uploading` 翻真）→ 是否落了附件行 → 是否提取完成。四个读数缺一个，
     #    就分不清"没点到"／"点了但写样本文件失败"／"上传失败"／"上传成功但提取失败"。
     #    ⛔ 这不是新诊断系统，只是把这条链上本来就存在的四个事件**如实报出来**。
+    #
+    # ⭐ 2026-09-20 补**第五格：样本文件**。`session.js:onUseSampleQuote()` 里
+    #    `uploading: true` 是在 `uploadQuote()` 的**第一条语句**设的，而写样本文件在它
+    #    **之前** ⇒ 「`uploading` 从未翻真」还能细分成两种完全不同的处置：
+    #      ① **处理器根本没进**（点击没落到元素上／`sessionId` 空导致早退——
+    #         后者页面只弹 toast，**不落任何读数**）；
+    #      ② **`writeFileSync` 抛了**（同样只弹 toast）。
+    #    样本文件在不在，正好把这两者与"上传失败"分开：文件在 ⇒ 处理器进过、写成功了。
+    #    ⚠️ ⛔ 不往产品代码里加调试计数 —— 只用页面**本来就有**的可观测量（只读）。
+    sample_fname = "DEMO1-canonical-sample-quotation.txt"
+
+    def sample_file() -> dict:
+        """只读探针：样本文件在不在（`accessSync`）＋ 大小。"""
+        val = w.c.evaluate(
+            "function(){var fm=wx.getFileSystemManager();"
+            "var p=(wx.env&&wx.env.USER_DATA_PATH?wx.env.USER_DATA_PATH:'')+'/'+"
+            + json.dumps(sample_fname)
+            + "+'';"
+            "try{fm.accessSync(p);var st={};try{st=fm.statSync(p)||{}}catch(e2){}"
+            "return {ok:true,path:p,size:(st&&st.size)||0}}"
+            "catch(e){return {ok:false,path:p,err:String((e&&e.errMsg)||e).slice(0,80)}}}"
+        )
+        return val if isinstance(val, dict) else {}
+
+    def reset_sample_file() -> dict:
+        """**删掉上一轮留下的样本文件**（⛔ 只删这一个已知文件，不碰别的东西）。
+
+        为什么必须删：`USER_DATA_PATH` 在同一个模拟器里**跨轮持久** —— 实测复跑时
+        「点击**前**文件就已经在了（2674 字节，上一轮写的）」，于是"点击后文件在不在"
+        **恒为真** ⇒ 第五格会**真空通过**。这正是本项目最忌讳的判据形态
+        （与"两侧皆空 `[] == []` 恒真"同族）。删掉之后，"文件在"才是**本轮**的事件；
+        页面每次点击都会重新写它（`writeFileSync`），所以删掉不影响演示。
+        """
+        val = w.c.evaluate(
+            "function(){var fm=wx.getFileSystemManager();"
+            "var p=(wx.env&&wx.env.USER_DATA_PATH?wx.env.USER_DATA_PATH:'')+'/'+"
+            + json.dumps(sample_fname)
+            + "+'';"
+            "try{fm.unlinkSync(p);return {ok:true,path:p}}"
+            "catch(e){return {ok:false,path:p,err:String((e&&e.errMsg)||e).slice(0,80)}}}"
+        )
+        return val if isinstance(val, dict) else {}
+
+    f_reset = reset_sample_file()
     n_sample = w.c.count('[data-act-sample-quote="1"]')
     d_before = w.c.page_data()
     att_before = len(d_before.get("attachments") or [])
     sess_before = str(d_before.get("sessionId") or "")
-    t_sample = w.c.tap('[data-act-sample-quote="1"]')
-    saw_uploading = False
-    for _ in range(20):
-        if w.c.page_data().get("uploading") is True:
-            saw_uploading = True
-            break
-        time.sleep(0.15)
-    pg_att = w.wait_data(
-        lambda x: any(
-            str((a or {}).get("extractStatus")) == "done" for a in (x.get("attachments") or [])
-        ),
-        tries=80,
-        gap=0.5,
-    )
+    f_before = sample_file()
+
+    def attempt(tag: str, tries: int) -> tuple[bool, bool, dict]:
+        """点一次「用内置示例报价单」并等到 done。返回 (tap, saw_uploading, page_data)。"""
+        t = w.c.tap('[data-act-sample-quote="1"]')
+        saw = False
+        for _ in range(20):
+            if w.c.page_data().get("uploading") is True:
+                saw = True
+                break
+            time.sleep(0.15)
+        pg = w.wait_data(
+            lambda x: any(
+                str((a or {}).get("extractStatus")) == "done" for a in (x.get("attachments") or [])
+            ),
+            tries=tries,
+            gap=0.5,
+        )
+        print(f"    [㊸ {tag}] tap={t} uploading={saw}", flush=True)
+        return bool(t), saw, pg
+
+    def done_of(pg: dict) -> list[dict]:
+        rows_now = pg.get("attachments") or []
+        return [a for a in rows_now if str((a or {}).get("extractStatus")) == "done"]
+
+    t_sample, saw_uploading, pg_att = attempt("首点", 40)
+    done_atts = done_of(pg_att)
+    f_after = sample_file()
+    handler_ran = bool(saw_uploading) or bool(f_after.get("ok"))
+
+    # ⭐ **受控重试（至多一次，且只在"处理器显然没执行"时做）**：
+    #    * 它区分「点击偶发没落到处理器上」与「处理器恒不执行」—— 这两种的修法不同；
+    #    * 只在 `handler_ran=False` 时才补点，**不会**造成重复上传（处理器跑过就不补）；
+    #    * ⛔ 不是"重跑到绿"：两次读数**都**进 note，第二次是**另一个事件**，不是第二次机会。
+    retry_tap: bool | None = None
+    retry_saw: bool | None = None
+    if not done_atts and not handler_ran:
+        retry_tap, retry_saw, pg_att = attempt("受控重试一次", 60)
+        done_atts = done_of(pg_att)
+        f_after = sample_file()
+        handler_ran = bool(retry_saw) or bool(f_after.get("ok"))
+
     atts = pg_att.get("attachments") or []
-    done_atts = [a for a in atts if str((a or {}).get("extractStatus")) == "done"]
     w.shot("43-6-附件已上传并提取")
     w.rep.rec(
         "㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**"
@@ -7621,9 +7747,22 @@ def sec_43(w: Walker) -> None:
         # ⭐ 必须把 `tap=` 打进读数：`attachments=0` 同时对应「点击没落到元素上」与
         #    「点了但上传失败」两种原因（首跑就卡在这里 —— 后端日志显示那一轮**根本没发**
         #    `POST /entrust/attachments`，而读数里看不出是哪种）。
-        f"锚点={n_sample} tap={t_sample} uploading={saw_uploading} sess={sess_before!r} "
+        f"锚点={n_sample} tap={t_sample} uploading={saw_uploading} "
+        f"重试(tap={retry_tap},uploading={retry_saw}) sess={sess_before!r} "
+        f"清残留(删除上一轮样本文件)={f_reset.get('ok')} 样本文件 先={f_before.get('ok')} "
+        f"后={f_after.get('ok')}({f_after.get('size')}字节) "
         f"att_before={att_before} attachments={len(atts)} done={len(done_atts)} "
         f"notice={str(pg_att.get('attachNotice') or '')[:60]!r}",
+    )
+    # ⭐ 把「处理器有没有执行」**单独断一条**：它直接决定下一步改哪儿，
+    #    ⛔ 不该埋在 note 里等读者自己推。判据＝`uploading` 翻真 **或** 样本文件已写出。
+    w.rep.rec(
+        "㊸ 第2步 · 「处理器是否真的执行」可判定（`uploading` 翻真 或 样本文件已写出）"
+        "—— 两者全否 ⇒ 是**点击没落到处理器上**，而不是「上传失败」",
+        handler_ran,
+        f"handler_ran={handler_ran}（依据 uploading={saw_uploading}/{retry_saw}、"
+        f"样本文件={f_after.get('ok')} err={f_after.get('err')!r}、"
+        f"sess={sess_before!r}（非空 ⇒ 不是「会话未就绪」那条早退））",
     )
     notice = str(pg_att.get("attachNotice") or "")
     w.rep.rec(
@@ -10621,12 +10760,16 @@ def sec_51(w: Walker) -> None:
     ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
     eid = str(ctx.get("entrustment_id") or "")
     sid = ""
+    sess_src = ""
+    sess_spec = ""
     for s in (
         api_get(f"/entrust/sessions?view=org&org_id={org_id}&assignment_id={aid}&size=50", tok)
         or {}
     ).get("items") or []:
         if str((s or {}).get("agent_specialty") or "") == "agent_02":
             sid = str((s or {}).get("session_id") or "")
+            sess_src = "复用该委托上已存在的 AG-02 会话"
+            sess_spec = str((s or {}).get("agent_specialty") or "")
             break
     if not sid and eid:
         st_sess, sess = api_post(
@@ -10641,10 +10784,22 @@ def sec_51(w: Walker) -> None:
         )
         if st_sess in (200, 201):
             sid = str((sess or {}).get("session_id") or "")
+            sess_src = "本章自建（该委托上没有 AG-02 会话）"
+            sess_spec = str((sess or {}).get("agent_specialty") or "")
     w.rep.rec(
         "51 前置 · 授权 id 由 `session-context` 给出（**不前端推导**），AG-02 会话可得",
         bool(eid) and bool(sid),
         f"entrustment_id={eid!r} session_id={sid!r}",
+    )
+    # ⭐ 2026-09-20（定档"编排/会话复用依赖"所需的读数）：会话**从哪来**会直接改变本章读数 ——
+    #    实测反序轮（51 先跑、自建会话）一路走到 `adopt` 成功；正序轮（复用上游经界面建的
+    #    会话）作业只产出 `quote_parsed`。⛔ 不印 `来源=` 与 `槽位=`，"51 失败"与
+    #    "51 的载体被上游污染"就分不开，只能靠猜。
+    w.rep.rec(
+        "51 前置 · 会话**来源与专业槽位**可读（复用/自建 ＋ `agent_specialty`）"
+        "—— 这是「编排依赖」这条定档的判据",
+        bool(sid) and bool(sess_spec),
+        f"session_id={sid!r} 来源={sess_src or '未取得'} agent_specialty={sess_spec!r}",
     )
     if not sid:
         w.rep.not_run("51 来源门槛剧本", "拿不到 AG-02 会话 ⇒ 后续无法制造模型来源的载体")
@@ -10684,15 +10839,66 @@ def sec_51(w: Walker) -> None:
         if isinstance(p, dict)
     ]
     cq = [p for p in proposals if str(p.get("artifact_type") or "") == "customer_quote"]
+    # ⭐ 2026-09-20：把**作业落库的输入原文**印出来（`job_out` 的 `input` 就是落库值）。
+    #    没有它，`提案类型=['quote_parsed']` 有两种读法：「作业没带 amount」与
+    #    「ag02 带了 amount 却没产出」—— 而这两者的处置完全不同（前者是本格没对象，
+    #    后者才是真缺陷）。⇒ 先断**前置**（输入真的带了对客金额），再断被测事实。
+    stored_input = jrow.get("input") or {}
+    amount_stored = str(stored_input.get("amount") or "")
+    input_note = json.dumps(stored_input, ensure_ascii=False)[:220]
     w.rep.rec(
-        "51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`"
-        "（`ag02.py` 的产出条件就是作业输入带对客金额）",
-        str(jrow.get("status")) == "succeeded" and bool(cq),
-        f"job={job_id!r} status={jrow.get('status')!r} 提案类型="
-        f"{sorted({str(p.get('artifact_type')) for p in proposals})}",
+        "51 ② 前置 · 作业**落库的输入**里真的带 `amount`（否则下一格没有对象："
+        "`ag02.py:310` 只在 `job_input.get('amount')` 非空时才追加 `customer_quote`）",
+        amount_stored == "18600",
+        f"job={job_id!r} session={sid!r}（来源={sess_src or '未取得'} 槽位={sess_spec!r}）"
+        f" amount={amount_stored!r} input={input_note}",
     )
+    if stored_input and amount_stored != "18600":
+        # 输入**有内容但没带对客金额** ⇒ 前置不成立（不是 ag02 的缺陷、也不是"跑过了"）。
+        w.rep.not_run(
+            "51 ② 客户报价提案",
+            f"作业落库的输入里**没有** `amount` ⇒ 这一格**没有对象**（⛔ 不是 ag02 的缺陷）。"
+            f"input={input_note}",
+        )
+    else:
+        # ⭐ 2026-09-20（第 4 个「判据要有正控」实例）：这条断言的前提是 **fixture 的规则** ——
+        #    `ag02.py:310` 那个「`amount` 非空 ⇒ 追加 `customer_quote`」写在
+        #    `mock_content()` **里面**，只在 fixture 模式（`LLM_MOCK=true` 或无 Key）执行；
+        #    走真模型时提案集合由**模型输出**决定。把两者混成一条判据，会让
+        #    **模型输出**与**链路缺陷**分不开，读数还会来回翻（实测：09-18/09-19 两轮 PASS，
+        #    09-20 两轮 FAIL，而输入里 `amount` 一直在、会话是本章自建 `agent_02`）。
+        #    ⇒ 按投影里的 `mocked`（三态）分开断：fixture 下**必须**成立（缺 ⇒ 真缺陷）；
+        #    真模型下缺提案**不是**链路缺陷（记 `NOT_RUN` 并点名要 fixture）；
+        #    未知则按**最严**判（⛔ 不静默放宽）。
+        mocked = jrow.get("mocked")
+        _note = (
+            f"job={job_id!r} status={jrow.get('status')!r} mocked={mocked!r} 提案类型="
+            f"{sorted({str(p.get('artifact_type')) for p in proposals})} input={input_note}"
+        )
+        _name = (
+            "51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`"
+            "（`ag02.py` 的产出条件就是作业输入带对客金额）"
+        )
+        if mocked is True:
+            w.rep.rec(_name, str(jrow.get("status")) == "succeeded" and bool(cq), _note)
+        elif mocked is False:
+            w.rep.not_run(
+                _name,
+                "本轮作业走**真模型**（`mocked=False`）⇒ 提案集合由**模型输出**决定，"
+                "缺 `customer_quote` 属**模型输出**而非链路缺陷（该追加逻辑在 "
+                "`ag02.mock_content()` 里，只在 fixture 模式执行）。要判定链路规则须以 "
+                f"fixture 跑（`LLM_MOCK=true`）。⛔ 既不记通过，也不记缺陷。 读数：{_note}",
+            )
+        else:
+            w.rep.rec(
+                _name,
+                str(jrow.get("status")) == "succeeded" and bool(cq),
+                f"mocked=未知 ⇒ 按最严判定（⛔ 不放宽）；{_note}",
+            )
     if not cq:
-        w.rep.not_run("51 来源门槛剧本", "作业没有产出 customer_quote ⇒ 没有可发布的载体")
+        # 输入里就缺 `amount` 时，上面已经把"没有对象"点名了 ⇒ 这里不再重复同一个理由。
+        if amount_stored == "18600":
+            w.rep.not_run("51 来源门槛剧本", "作业没有产出 customer_quote ⇒ 没有可发布的载体")
         return
 
     # ---- ③ 采纳 ⇒ 模型来源的成果 ----
