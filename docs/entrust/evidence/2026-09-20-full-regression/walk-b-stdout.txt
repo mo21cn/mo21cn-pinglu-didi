@@ -1,0 +1,104 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-060325
+章节    ：51,15,7
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.1s] pageStack=[{'pageId': 431, 'path': 'pages/mine/mine', 'query': {}, 'route': '/pages/mine/mine', 'title': '我的'}, {'pageId  (探测   1.1s)
+模拟器  ：pageStack 非空
+
+-- 51 第 6 步来源门槛：被拒 ⇒ 逐条核验 ⇒ 同版本发布（S6-3）--
+PASS | 51 前置 · 组织队列里有可用的委托（载体由本章自造，不依赖可选夹具） | aid='5' status='claimed' 队列 3 张
+PASS | 51 前置 · 授权 id 由 `session-context` 给出（**不前端推导**），AG-02 会话可得 | entrustment_id='1' session_id='1'
+PASS | 51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`（`ag02.py` 的产出条件就是作业输入带对客金额） | job='1' status='succeeded' 提案类型=['customer_quote', 'quote_parsed']
+PASS | 51 ③ 采纳 ⇒ 服务端写下**待核验声明**（这是「来源为模型声明」在数据上的样子） | artifact='8' v1 declared=2 pending=2 ok=False
+PASS | 51 [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | 51 [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 截图 51-1-模型来源成果页 | 27131B
+PASS | 51 ④ 「工作台 → 委托卡 → 详情 → 成果引用 → 成果页」全程真实点击，落到**模型来源**的成果 | card=True detail=True 引用锚点 1 个 ref=True artifact=True 落页 artifactId='8'（期望 8）
+PASS | 截图 51-2-发布被门槛拒 | 27131B
+PASS | 51 ④ 经界面点「发布这一版」⇒ **被来源门槛拒**，且页面把**待核验清单显示出来**（只说「不能发布」是没法干活的） | 入口 1 个 tap=True 确认条 1 submit=True published=False releaseHint='版本 v1 还有未核验的来源（assignment:5, operator_input:job_input）—— 未核验的提案不得作为已发布依据；请先逐条留下核验记录｜待核验：assignment:5、operator_input:job_input'
+PASS | 51 ⑤ ⭐ 界面上**没有**「登记来源核验」的入口（O-1b 的答案）——页面能告诉你为什么不能发，却给不了你解决它的入口 | 核验入口锚点 0 个；同一条断言与 ④ 同时成立才有信息量（④ 证明页面确实处在「被拒且看得见清单」的状态）
+PASS | 51 ⑥ 经接口逐条登记核验（`method` 必填：无依据的核验等于没核）⇒ 门槛转为通过 | pending 由 2 条 → 0 条；gate.ok=True
+PASS | 截图 51-3-同版本发布成功 | 28007B
+PASS | 51 ⑦ 核验之后**回界面重新点发布** ⇒ 同一版本发布成功，且与服务端发布记录**同源** | tap=True submit=True published=True；服务端同成果同版本发布记录 1 条（releaseId=2）
+PASS | 51 ⑧ 本章运行期零新增 console 报错 | console 报错 198 → 198
+
+== ⑮ 发货方式选择 ==
+PASS | 截图 15-发货方式弹窗 | 33817B
+PASS | ⑮ 进入发布货物页即弹出发货方式选择 | True
+PASS | ⑮ 两张卡片文案为「自主发货 / 委托发货」 | 面板文本 69 字符
+PASS | ⑮ 两段说明文案齐全（自行找船 / 平台承运） | self=True entrust=True
+PASS | ⑮ 两枚单选圈 + 「默认」标记（设计稿元素齐全） | ring=2 label=2
+PASS | ⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案） | ok
+PASS | ⑮ 卡片宽高比 ≈ 设计稿 3:1（非压扁/拉伸） | w/h=3.03 (227x75)
+PASS | ⑮ 两张卡片等高（同规格） | 75.0 vs 75.0
+PASS | ⑮ 卡片顺序：自主发货在委托发货之上 | self=230.5 entrust=390.5
+PASS | ⑮ 图标为白圆且在卡片左内侧 | Δleft=10.0 48x48
+PASS | ⑮ 单选圈在卡片右侧之外（设计稿布局） | ring.left=309.5 card.right=297.0
+PASS | ⑮ 说明文案在卡片下方且不重叠 | desc.top=322.5 card.bottom=305.5
+PASS | ⑮ 弹窗完整落在视口内（不被裁切） | panel=216..536 winH=844
+PASS | 截图 15-自主发货-留在发布页 | 31265B
+PASS | ⑮ 自主发货只关弹窗、留在发布货物页 | False
+PASS | ⑮ 关弹窗后发布页表单可用（原有内容仍在） | 2026-09-21
+PASS | ⑮ 点遮罩可关闭弹窗（不进占位页） | showChannel=False path=pages/publish/cargo/cargo
+PASS | 截图 15-委托发货-受理屏 | 20299B
+PASS | ⑮ 委托发货跳受理屏（UI-07）—— ⛔ 不再是「功能预览」占位页 | path=pages/entrust/intake/intake
+FAIL | ⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url） | cargo_name=None
+FAIL | ⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字） | quantity=None unit=None
+PASS | ⑮ 从受理屏可返回发布货物页（二级页栈正常） | pages/publish/cargo/cargo
+
+== ⑦ 合同（三级页 / 长按 / 仿真案例 / 已完成） ==
+PASS | 锚点预取：三身份 token + 订单/货源/船/预约/泊位 | pay=2 cargo=3 ship=1 appt=3 berth=1 sim=3
+PASS | ⑦ 待支付订单在列表可见 | order #2
+PASS | ⑦ 「查看合同」真实点击 | [data-act-contract="2"]
+PASS | 截图 07-合同预览三级页 | 47471B
+PASS | ⑦ 合同页进入 | pages/trade/contract/contract
+PASS | ⑦ 合同正文有内容 | html=5118 raw=1400
+PASS | ⑦ 风险卡渲染 | risks=4 high=1
+PASS | 截图 07b-订单页-长按合同弹层 | 44313B
+PASS | ⑦ 长按订单卡弹出合同弹层 | contract.show=True
+PASS | ⑦b 仿真案例 R3 在订单列表可见 | #5
+PASS | ⑦b 「查看合同」可点（R3）
+PASS | 截图 07c-合同-仿真案例-R3 | 41309B
+PASS | ⑦b R3 合同页进入 | pages/trade/contract/contract
+PASS | ⑦b R3 命中预期风险「装货日期临近」 | risks=运费未支付、装货日期临近、违约金标准未量化
+PASS | ⑦b R3 合同正文非空 | raw=1367
+PASS | ⑦b 仿真案例 R4 在订单列表可见 | #6
+PASS | ⑦b 「查看合同」可点（R4）
+PASS | 截图 07c-合同-仿真案例-R4 | 46599B
+PASS | ⑦b R4 合同页进入 | pages/trade/contract/contract
+PASS | ⑦b R4 命中预期风险「船舶证书临期」 | risks=运费未支付、船舶证书临期、滞期费未约定、货物保险未约定、违约金标准未量化
+PASS | ⑦b R4 合同正文非空 | raw=980
+PASS | ⑦b 仿真案例 R5 在订单列表可见 | #7
+PASS | ⑦b 「查看合同」可点（R5）
+PASS | 截图 07c-合同-仿真案例-R5 | 46542B
+PASS | ⑦b R5 合同页进入 | pages/trade/contract/contract
+PASS | ⑦b R5 命中预期风险「液货/危险品运输」 | risks=运费未支付、液货/危险品运输、滞期费未约定、货物保险未约定、违约金标准未量化
+PASS | ⑦b R5 合同正文非空 | raw=1432
+PASS | ⑦c 已完成订单可查看合同 | #1
+PASS | 截图 07d-合同-已完成订单-无风险 | 35524B
+PASS | ⑦c 已完成合同无风险项 | risks=0
+PASS | ⑦c 已完成合同正文非空 | raw=1134
+
+================ 汇总 ================
+断言 68 项：**通过 66** / 未取得通过证据 2
+  分档：PASS=66 | FAIL=2 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0 | LIMITATION=0
+  归并（HO 五档）：PASS=66 | FAIL=2 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0
+
+  各章取单追踪（每章实际用到的委托 id —— 开了 `--chain` 时应**全部相同**）:
+    sec_51             aid=5
+    合计 1 个取单点 · aid 集合=['5'] · 同一张=是（未开 `--chain` ⇒ 各章自挑，不同是正常的）
+  FAIL: ⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url） | cargo_name=None
+  FAIL: ⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字） | quantity=None unit=None
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-060325
+[重跑关联] 同章节历史运行 0 次（首次结果**保留不覆盖**）：无
+RESULT: FAIL （FAIL=2）
+
+===== 走查 stderr =====
+(空)
