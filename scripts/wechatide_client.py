@@ -305,16 +305,27 @@ class Client:
         """
         return self.call_json("open_project_window", "--project", self.project, timeout=timeout)
 
-    def window_id(self, timeout: int | None = None) -> str:
-        """`open_project_window` 回执里的**窗口标识**（实测形如 `{"type":"reuse","winId":"s0"}`）。
+    def window_info(self, timeout: int | None = None) -> dict:
+        """`open_project_window` 回执里的**窗口标识**：`{"type": ..., "winId": ...}`。
 
-        为什么要单独把它读出来：取栈（`automation_runtime_info`）**不带窗口参数**，
-        它取的是哪一个窗口只有 IDE 自己知道。于是"每轮都重开窗 ⇒ 取栈指向旧窗口"
-        这类**目标窗口不一致**的猜测一直无法证伪 —— 现在把 `winId` 打进日志，
-        只要看它是否在轮次间漂移就够了（`type=open` 且 `winId` 递增 = 窗口在堆积）。
+        ⚠️ 2026-09-19 实测（`E:\\_diag\\probe_channel.out`，两轮**完全一致**）：
+
+            {"ok": true, "tool": "open_project_window", "clientName": "WorkBuddy",
+             "result": {"success": true, "type": "reuse", "winId": "s0"}}
+
+        ⇒ 两个字段都在 **`result`** 里，**不在顶层**。此前按顶层读 ⇒ **恒为空字符串**
+        —— 一个"看起来有观测、实际永远读不到"的**假读数**（与 54 ⑤ 那次真空通过同型）。
+        ⇒ 判据与夹具都必须按**这个真实形状**来；⛔ 别用臆想的顶层形状。
+
+        为什么要读它：取栈（`automation_runtime_info`）**不带窗口参数**，
+        取的是哪一个窗口只有 IDE 自己知道 ⇒ "每轮重开窗、取栈却指向旧窗口"这类
+        **目标窗口不一致**的猜测，只能靠这两个字段证伪
+        （`type=open` 且 `winId` 递增 = 窗口在堆积；`type=reuse` 且 `winId` 恒定 = 同一个窗口）。
+        缺失时一律返回空串（⛔ 不回 `None`、更不回 `"None"`，否则日志里的 `—` 与真值同形）。
         """
         j = self.open_window(timeout=timeout)
-        return str(j.get("winId") or "")
+        res = j.get("result") or {}
+        return {"type": str(res.get("type") or ""), "winId": str(res.get("winId") or "")}
 
     def page_stack(self, timeout: int | None = None) -> list:
         """当前页面栈。`--action currentPage` 在本版本会报错，故一律用 pageStack。"""

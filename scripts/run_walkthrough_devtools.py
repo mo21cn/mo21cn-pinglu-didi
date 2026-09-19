@@ -529,9 +529,12 @@ def wait_ready(
         hit = receipt if not receipt.get("ok") else win
         # ⭐ 窗口标识：`type=open` 且 winId 递增 ⇒ 每轮都在**新开窗**（窗口堆积）；
         #    `type=reuse` 且 winId 稳定 ⇒ 同一个窗口。取栈不带窗口参数，只能靠这个观测。
-        wid = f"{win.get('type')}/{win.get('winId')}"
-        if win.get("winId"):
-            win_ids.append(str(win["winId"]))
+        #    ⚠️ 两个字段在回执的 **`result`** 里（实测 `{"result":{"type":"reuse","winId":"s0"}}`），
+        #    ⛔ **不是顶层** —— 按顶层读会恒为空（2026-09-19 踩过，见 DR-0020）。
+        win_res = win.get("result") or {}
+        wid = f"{win_res.get('type') or '—'}/{win_res.get('winId') or '—'}"
+        if win_res.get("winId"):
+            win_ids.append(str(win_res["winId"]))
         log(
             f"    [{t3 - t0:6.1f}s] pageStack={str(stack)[:110]}"
             f"  (开窗 {t2 - t1:5.1f}s / 取栈 {t3 - t2:5.1f}s / IDE {len(ide_procs())} 个)"
