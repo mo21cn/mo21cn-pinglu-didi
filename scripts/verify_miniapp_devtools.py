@@ -10471,14 +10471,40 @@ def sec_50(w: Walker) -> None:
     fails = [
         r.get("rule_code") for r in (post.get("rule_checks") or []) if r.get("outcome") == "fail"
     ]
-    w.rep.rec(
-        "㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过"
-        "（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话）",
-        post.get("still_valid") is False and fails == ["capacity"],
-        f"still_valid={post.get('still_valid')!r} 不过的规则={fails} "
-        f"候选容量={cand_cap} 当前需求={cur_raw} 全部规则={_rules(post)} "
-        f"changed_fields={post.get('changed_fields')!r}",
+    # ⭐ 定档读数（2026-09-20）：**变更后的需求要重新读** —— 章首的 `cur_raw` 是变更**前**
+    #    的值，拿它当"变更后"的读数会误导（上一轮实测就打出过 `当前需求=800`）。
+    det_now = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    demand_now = det_now.get("quantity")
+    _cand = c900[0] or {}
+    partial = bool(_cand.get("allows_partial_load"))
+    detail6 = (
+        f"still_valid={post.get('still_valid')!r} 不过的规则={fails} 候选容量={cand_cap} "
+        f"允许拆批={partial} 承运船数={_cand.get('vessel_count')!r} "
+        f"变更后需求={demand_now} 全部规则={_rules(post)} "
+        f"changed_fields={post.get('changed_fields')!r}"
     )
+    # ⚠️ **载体相关，不是缺陷**：`capacity.py` 规则④在 `allows_partial_load=True` 时
+    #    按「允许拆批 ⇒ 超出部分可分趟承运」**直接判过**（确定性算术，注释里写明了理由）。
+    #    ⇒ 这种候选上 `still_valid=True` 是**正确**结论，"变更后不再适用"这一格
+    #    **没有对象**。要取证 D1-09 必须用**不允许拆批**的候选
+    #    （规则④的另一支：`capacity × vessels < demand` ⇒ 判不过）——
+    #    canonical 夹具就是那一档（`--section all` 的 ㊿ 在那一档 PASS）。
+    if partial:
+        w.rep.not_run(
+            "㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过"
+            "（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话）",
+            "本轮载体那张 900 吨候选 **允许拆批** ⇒ 规则④按「分趟承运」判过，"
+            "`still_valid=True` 是**正确**结论、这一格**没有对象**"
+            "（⛔ 不是缺陷，也不计入通过）。要取证 D1-09 需**不允许拆批**的候选。"
+            f" 读数：{detail6}",
+        )
+    else:
+        w.rep.rec(
+            "㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过"
+            "（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话）",
+            post.get("still_valid") is False and fails == ["capacity"],
+            detail6,
+        )
 
     # ── ⑦ 复核传播在页面上 ─────────────────────────────────────────────────
     w.c.scroll_into('[data-act-apply="1"]')
