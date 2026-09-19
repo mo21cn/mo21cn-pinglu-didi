@@ -434,10 +434,27 @@ def ensure_role(token: str, role: str) -> tuple[str, str]:
 #: 默认空 ⇒ `prefer_anchor()` 原样放行，行为与从前**逐字一致**。
 WALK_ANCHOR = (os.environ.get("WALK_ANCHOR") or "").strip()
 
+#: ⭐ **链式锚点（进程内）**：第 43 章真的建成那张**新委托**之后写进来，其后各章
+#: 一律沿用它 —— 这才是「同一张委托走完 13 步」。
+#:
+#: 为什么不能用 `--anchor` 代替：① 第 1 步就是「客户提交新委托」⇒ `aid` 只能在
+#: 跑起来**之后**才知道，命令行锚点做不到；② 每次走查都会起**新的临时库**
+#: （`_walk_<时间戳>.db`）⇒ 也不能"上一轮建单、下一轮锚定"地跨进程接力。
+#: 所以链式锚点只能是**同一次运行内**的模块级变量。
+CHAIN_ASSIGNMENT = ""
+
+
+def anchor_active() -> bool:
+    """本轮是否有**任何一种**锚点生效（命令行给的，或第 43 章建单后记下的）。"""
+    return bool(CHAIN_ASSIGNMENT or WALK_ANCHOR)
+
 
 def prefer_anchor(picked: str) -> str:
-    """给了 `--anchor` 就用它；否则原样返回各章自己挑到的那张。"""
-    return WALK_ANCHOR or picked
+    """链式锚点 > 命令行 `--anchor` > 各章自己挑到的那张。
+
+    默认两个都空 ⇒ 原样放行，行为与从前**逐字一致**。
+    """
+    return CHAIN_ASSIGNMENT or WALK_ANCHOR or picked
 
 
 def find_submitted(org_id: str, title: str, token: str) -> str:
@@ -7369,6 +7386,19 @@ def sec_43(w: Walker) -> None:
     w.c.set_data({"form.cargo_name": CANON_CARGO, "form.weight_t": CANON_QTY})
     time.sleep(0.6)
     n_ent = w.c.count('[data-act-entrust="1"]')
+    # ⚠️ 实测（2026-09-20）：弹层由 `wx:if="{{showChannel}}"` 控制，而 `showChannel`
+    #    的**初始值只在 `onLoad` 里给**。页面实例被复用时不跑 `onLoad` ⇒ 上一轮点过
+    #    「委托发货」后它停在 false，锚点恒 0 —— 看起来像"入口消失"，其实是**旧实例
+    #    的残留状态**。⇒ 换一个实例（`reLaunch`）即可拿回初始态；⛔ 不是加等待刷绿，
+    #    也不是注入 UI 状态，与 ㉞ 章"换页面实例仍续接"同一手法。
+    reset_via = "先到就绪"
+    if n_ent != 1:
+        w.c.nav("reLaunch", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
+        time.sleep(1.5)
+        w.c.set_data({"form.cargo_name": CANON_CARGO, "form.weight_t": CANON_QTY})
+        time.sleep(0.6)
+        n_ent = w.c.count('[data-act-entrust="1"]')
+        reset_via = "换页面实例后命中"
     t_ent = w.c.tap('[data-act-entrust="1"]') if n_ent == 1 else False
     ok_intake = w.c.wait_path(INTAKE, 30)
     time.sleep(1.5)
@@ -7376,7 +7406,8 @@ def sec_43(w: Walker) -> None:
     w.rep.rec(
         "㊸ 第1步 · 发布货源 → 受理屏（真实点击；货名/货量随草稿带过去）",
         bool(ok_cargo and t_ent and ok_intake),
-        f"via={via_cargo} cargo_page={ok_cargo} 锚点命中 {n_ent} path={w.c.current_path()}",
+        f"via={via_cargo} cargo_page={ok_cargo} 锚点命中 {n_ent} reset={reset_via} "
+        f"path={w.c.current_path()}",
     )
     if not ok_intake:
         w.rep.not_run("㊸ 第1步 · 客户提交", "未进入受理屏，链路断在这里")
@@ -7425,8 +7456,15 @@ def sec_43(w: Walker) -> None:
     w.rep.rec(
         "㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证）",
         bool(aid),
-        f"aid={aid} org={org_id}（{ORG_WORKBENCH}）",
+        f"aid={aid} org={org_id}（{ORG_WORKBENCH}）"
+        f" ｜链式锚点={'已生效,其后各章沿用本单' if aid else '未设置'}",
     )
+    # ⭐ **链式锚点**：这张**刚建成的新委托**就是本轮 13 步共用的那一张 —— 记进
+    #    进程内变量；其后各章（46/47/48/45/44/49/50/31/32/52/41）经 `prefer_anchor()`
+    #    一律沿用它，而不是各章按标题各挑一张。
+    global CHAIN_ASSIGNMENT
+    CHAIN_ASSIGNMENT = aid
+
     if not aid:
         w.rep.not_run("㊸ 第1步 · A1 受理及其后全部断言", "未能按标题定位新建的委托")
         return
@@ -8649,7 +8687,7 @@ def sec_45(w: Walker) -> None:
         return str((hit[0] or {}).get("assignment_id") or "") if hit else ""
 
     aid = prefer_anchor(_newest_aid(title_main))
-    if not aid and not WALK_ANCHOR:
+    if not aid and not anchor_active():
         w.rep.not_run("㊺ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
 
@@ -9130,7 +9168,7 @@ def sec_46(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run("㊻ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
     aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
@@ -9338,7 +9376,7 @@ def sec_47(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run("㊼ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
     aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
@@ -9563,7 +9601,7 @@ def sec_48(w: Walker) -> None:
     rows = (api_get("/entrust/assignments?view=owner&size=50", tok) or {}).get("items") or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run(
             "㊽ 全部断言",
             f"seed-shipper 名下找不到「{demo_title}」（先跑 python scripts/seed_entrust_canonical.py）",
@@ -9713,7 +9751,7 @@ def sec_49(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run(
             "㊾ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
@@ -10057,7 +10095,7 @@ def sec_50(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run(
             "㊿ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
@@ -11170,10 +11208,10 @@ def sec_53(w: Walker) -> None:
     # ⚠️ 标题与夹具逐字一致（`seed_entrust_completion_ready.ASSIGNMENT_TITLE`）——
     #    改一处要改两处，否则这里会静默记 NOT_RUN。
     # 路径②：给了 --anchor 就直接用它，跳过"按标题找"
-    ready_aid = WALK_ANCHOR
+    ready_aid = CHAIN_ASSIGNMENT or WALK_ANCHOR
     org_rows = (
         []
-        if WALK_ANCHOR
+        if anchor_active()
         else (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
     )
     for r in org_rows:
