@@ -11293,31 +11293,72 @@ def sec_54(w: Walker) -> None:
     )
 
     # ② 第 2–3 步（报价成果与版本）：成果存在且**挂在本单上**
+    #
+    # ⚠️ 载体是 **`seed_entrust_contract_flow.py`**（它把成果铺在 canonical 那张单上），
+    #    ⛔ 不是 `seed_entrust_canonical.py` —— 后者只建委托与航段，**不建任何成果**
+    #    （源码里 `artifact` 出现 0 次）。首跑就是把这两者记混了：漏铺 contract_flow
+    #    ⇒ 成果 0 条，而断言报了 FAIL。⇒ 现在按"缺按需夹具"记 `NOT_RUN` **并点名**，
+    #    ⛔ 不写成 FAIL（"缺夹具"与"读不出来"是两件事，混了会把夹具问题读成产品缺陷）。
     arts = (
         _items(api_get(f"/entrust/assignments/{canon_aid}/artifacts", tok_mgr)) if canon_aid else []
     )
     kinds = sorted(
         {str((a or {}).get("artifact_type") or (a or {}).get("kind") or "?") for a in arts}
     )
-    w.rep.rec(
-        "54 ② 第 2–3 步（报价成果与版本）：canonical 单上有成果，且每条都带归属",
-        bool(arts)
-        and all(int((a or {}).get("assignment_id") or 0) == int(canon_aid) for a in arts),
-        f"canon_aid={canon_aid or '—'} 成果 {len(arts)} 条 kinds={kinds[:6]}"
-        f" 归属齐={all(int((a or {}).get('assignment_id') or 0) == int(canon_aid) for a in arts) if arts else '—'}",
-    )
+    if not arts:
+        w.rep.not_run(
+            "54 ② 第 2–3 步（报价成果与版本）",
+            f"canonical 单（{canon_aid or '—'}）上读不到成果 ⇒ 缺按需夹具 "
+            "`seed_entrust_contract_flow.py`（成果的载体是它，不是 canonical 种子）",
+        )
+    else:
+        w.rep.rec(
+            "54 ② 第 2–3 步（报价成果与版本）：canonical 单上有成果，且每条都带归属",
+            all(int((a or {}).get("assignment_id") or 0) == int(canon_aid) for a in arts),
+            f"canon_aid={canon_aid} 成果 {len(arts)} 条 kinds={kinds[:6]}"
+            f" 归属齐={all(int((a or {}).get('assignment_id') or 0) == int(canon_aid) for a in arts)}",
+        )
 
     # ③ 第 4 步（计划：航段 ＋ 必需任务前置）
+    #
+    # ⚠️ 分两半，载体不同（首跑把两件事混成一条，才会"因为没任务"整条红）：
+    #   a) **航段与前置字段**读 **canonical 载体**的 `plan`（它由 canonical 种子铺）；
+    #   b) **任务**读 `/entrust/tasks`（任务的权威读法；`plan.tasks` 只是投影）——
+    #      任务由 `seed_entrust_demo.py` 或 ㊳ 章产生，**本章不代替它造**：
+    #      一张带任务的单都没有 ⇒ 记 `NOT_RUN` **并点名**，⛔ 不把"没有产物"读成"读不出来"。
     plan = api_get(f"/entrust/assignments/{canon_aid}/plan", tok_mgr) if canon_aid else {}
     legs = _items((plan or {}).get("legs"))
-    ptasks = _items((plan or {}).get("tasks"))
     w.rep.rec(
-        "54 ③ 第 4 步（计划）：航段与任务都能读出来（前置字段有产出）",
-        bool(legs) and bool(ptasks),
-        f"legs={len(legs)} tasks={len(ptasks)}"
+        "54 ③-a 第 4 步（计划）：canonical 单上航段可读，且前置是响应里的一条事实",
+        bool(legs) and "task_prerequisites_total" in (plan or {}),
+        f"canon_aid={canon_aid or '—'} legs={len(legs)}"
         f" 前置总数={(plan or {}).get('task_prerequisites_total')!r}"
         f" 截断={(plan or {}).get('task_prerequisites_truncated')!r}",
     )
+    task_aid = ""
+    task_rows = []
+    for probe_aid in [canon_aid, *[str((r or {}).get("assignment_id") or "") for r in rows]]:
+        if not probe_aid:
+            continue
+        got_tasks = (
+            api_get(f"/entrust/tasks?assignment_id={probe_aid}&size=50", tok_mgr) or {}
+        ).get("items") or []
+        if got_tasks:
+            task_aid, task_rows = probe_aid, got_tasks
+            break
+    if not task_rows:
+        w.rep.not_run(
+            "54 ③-b 第 4 步（任务与前置）",
+            "队列里没有任何一张委托带任务 ⇒ 缺载体（任务由 `seed_entrust_demo.py` 铺，"
+            "或由 ㊳ 章在界面上建）；⛔ 不是回归：**没有产物**与**产物读不出来**是两件事",
+        )
+    else:
+        w.rep.rec(
+            "54 ③-b 第 4 步（任务与前置）：任务可读且**挂在它自己那张单上**",
+            all(int((t or {}).get("assignment_id") or 0) == int(task_aid) for t in task_rows),
+            f"载体=#{task_aid} 任务 {len(task_rows)} 条"
+            f" 归属齐={all(int((t or {}).get('assignment_id') or 0) == int(task_aid) for t in task_rows)}",
+        )
 
     # ④ 第 5 步（比价：≥2 条可比候选）
     cands = (

@@ -4266,6 +4266,70 @@ const expectList = (label, arr, key, { nonEmpty } = {}) => {
     }
   }
 
+  // ⑲ 结案（S4-b）：「提交」这段的执行验证 —— 载荷形状 ＋ **缺项必须逐条说清**
+  //
+  // 与 ⑱ 同一条理由：静态门禁只读源码文本，设备侧走查可能拿不到读数 ⇒ 这两条
+  // **不可逆/半不可逆**的写命令都得有一段执行级验证。
+  // ⚠️ 本段不需要"五维齐备"夹具：断言的是**页面发了什么**＋**被拒时说了什么**。
+  //    本单未齐备 ⇒ 服务端回的正是"缺哪几项"，那恰好是这条最该验的分支。
+  if (D.entrustCases.length) {
+    console.log('\n--- ⑲ 结案：提交载荷与缺项逐条可读 ---')
+    const caid = String(D.entrustCases[0][0])
+    try {
+      const cc = loadPage(path.join(ROOT, 'miniapp/pages/entrust/detail/detail.js'),
+        { role: 'manager' })
+      const cp = instantiate(cc, { role: 'manager', arg: { assignment_id: caid } })
+      cc.onLoad.call(cp, { assignment_id: caid })
+      await tick(90)
+      const crev = (cp._final().detail || {}).revision
+      if (crev === undefined || crev === null) {
+        fail('⑲ 详情页未产出 revision（结案的 expected_revision 取不到）', String(crev))
+      } else ok()
+
+      const n3 = pageWrites.length
+      WRITE_ENABLED = true
+      let thrown3 = null
+      try { await cc.onCompleteSubmit.call(cp) } catch (e) { thrown3 = e } finally { WRITE_ENABLED = false }
+      await tick(60)
+      if (thrown3) fail('⑲ 结案提交抛异常', thrown3.message)
+      else {
+        const wrote = pageWrites.slice(n3)
+        if (wrote.length !== 1) {
+          fail('⑲ 结案写请求数不为 1（前端重复提交或没提交）', String(wrote.length))
+        } else {
+          const w = wrote[0]
+          if (w.method !== 'POST' || w.path !== '/entrust/assignments/' + caid + '/complete') {
+            fail('⑲ 结案打到了别的路径', w.method + ' ' + w.path)
+          } else if (Object.keys(w.body || {}).sort().join(',') !== 'expected_revision') {
+            // 载荷**只**允许带乐观锁值：多塞字段等于把界面状态偷偷写进服务端
+            fail('⑲ 结案载荷字段不对（应只有 expected_revision）', JSON.stringify(w.body))
+          } else if (Number(w.body.expected_revision) !== Number(crev)) {
+            fail('⑲ 载荷的 expected_revision 不是页面持有的那一版', JSON.stringify(w.body))
+          } else ok()
+
+          const hint = String(cp._final().completeHint || '').trim()
+          const miss = (((w.data || {}).detail || {}).missing) || null
+          if (!hint) {
+            // ⚠️ 这一条正是 ⑱ 抓到的同类缺陷（"先设提示、再重载"被复位块吞掉）——
+            //    结案这条也必须真的有话说。
+            fail('⑲ 被拒但页面没有提示原因', String(w.status) + ' ' + JSON.stringify(w.data))
+          } else if (miss && miss.length) {
+            // 服务端逐条给了缺项 ⇒ 界面必须**逐条**摆出来（只说"缺 N 项"等于没说）
+            const missingText = miss.filter(function (m) {
+              return hint.indexOf(String(m.message)) === -1
+            })
+            if (missingText.length) {
+              fail('⑲ 提示没有逐条列出服务端给的缺项',
+                '漏 ' + missingText.length + ' 条；hint=' + hint.slice(0, 120))
+            } else ok()
+          } else ok()
+        }
+      }
+    } catch (e) {
+      fail('⑲ 详情页装载/取数抛异常', e.message)
+    }
+  }
+
   auditTemplates()
 
   console.log('\n' + '='.repeat(78))
