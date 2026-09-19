@@ -7498,7 +7498,21 @@ def sec_43(w: Walker) -> None:
         "或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。",
     )
 
+    # ⭐ 沿链取"**第一个缺失事件**"（HO 2026-09-19）：点击是否命中 → 处理器是否真的跑了
+    #    （`uploading` 翻真）→ 是否落了附件行 → 是否提取完成。四个读数缺一个，
+    #    就分不清"没点到"／"点了但写样本文件失败"／"上传失败"／"上传成功但提取失败"。
+    #    ⛔ 这不是新诊断系统，只是把这条链上本来就存在的四个事件**如实报出来**。
+    n_sample = w.c.count('[data-act-sample-quote="1"]')
+    d_before = w.c.page_data()
+    att_before = len(d_before.get("attachments") or [])
+    sess_before = str(d_before.get("sessionId") or "")
     t_sample = w.c.tap('[data-act-sample-quote="1"]')
+    saw_uploading = False
+    for _ in range(20):
+        if w.c.page_data().get("uploading") is True:
+            saw_uploading = True
+            break
+        time.sleep(0.15)
     pg_att = w.wait_data(
         lambda x: any(
             str((a or {}).get("extractStatus")) == "done" for a in (x.get("attachments") or [])
@@ -7516,7 +7530,9 @@ def sec_43(w: Walker) -> None:
         # ⭐ 必须把 `tap=` 打进读数：`attachments=0` 同时对应「点击没落到元素上」与
         #    「点了但上传失败」两种原因（首跑就卡在这里 —— 后端日志显示那一轮**根本没发**
         #    `POST /entrust/attachments`，而读数里看不出是哪种）。
-        f"tap={t_sample} attachments={len(atts)} done={len(done_atts)}",
+        f"锚点={n_sample} tap={t_sample} uploading={saw_uploading} sess={sess_before!r} "
+        f"att_before={att_before} attachments={len(atts)} done={len(done_atts)} "
+        f"notice={str(pg_att.get('attachNotice') or '')[:60]!r}",
     )
     notice = str(pg_att.get("attachNotice") or "")
     w.rep.rec(
