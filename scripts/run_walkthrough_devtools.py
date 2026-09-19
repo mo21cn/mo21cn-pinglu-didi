@@ -132,6 +132,7 @@ class Env:
         self.pay = args.pay
         self.keep_db = args.keep_db
         self.extra_seeds = getattr(args, "extra_seeds", "") or ""
+        self.anchor = getattr(args, "anchor", "") or ""
 
     def _default_python(self) -> Path:
         cand = self.repo / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -694,6 +695,69 @@ def run_step(
     return done
 
 
+def hold_ide_channel(env: Env, args: argparse.Namespace) -> int:
+    """把「起 IDE ＋ 等人工批准 ＋ 保活」收口成一条命令（闸门四档的第 ④ 档）。
+
+    为什么需要它：走查闸门失败分四档，第 ④ 档是**等人在 IDE 窗口点一次「允许」**
+    （回执 `taskType=auth / status=pending`），而 `alreadyTrusted` **按实例**计
+    ⇒ 正确姿势是「批准一次 ＋ 之后一律 `--skip-ide` 复用同一个实例」。
+    此前这四步是手工拼的（起 IDE → 人工点允许 → `sleep 3600` → 再跑 `--skip-ide`），
+    每轮都要试到第四档才发现。现在：
+
+        python scripts/run_walkthrough_devtools.py --prepare-ide --keepalive 3600
+
+    它**不跑走查**：起/复用 IDE → 过就绪闸门 → 打印下一步的完整命令 → 保活 hold 秒。
+
+    ⚠️ 保活必须**盖过整轮**：IDE 是本进程的子进程，本进程一退出它就被收走，
+       下一轮又会拿到一个**未批准**的新实例（这是实测踩过的那条）。
+    """
+    ok, why = probe_existing_ide(env)
+    log(f"探测现成实例：{'✅ 能用' if ok else '✗ 不能用'} —— {why}")
+    if ok:
+        log("⇒ 复用现成实例（等价 --skip-ide），**无需再点允许**")
+    elif args.skip_ide:
+        log("⇒ 给了 --skip-ide ⇒ ⛔ 不另起实例。请先人工起一个 IDE 并点「允许」，再重跑本命令。")
+        return 2
+    else:
+        log("⇒ 起一个新实例（摘掉 ELECTRON_RUN_AS_NODE、不传沙箱代理）")
+        ide = start_ide(env, kill_all=bool(args.kill_all_ide))
+        ready = bool(ide) and wait_ready(env)
+        if not ready:
+            hold = int(getattr(args, "keepalive", 0) or 0)
+            budget = max(180, hold or 600)
+            log("")
+            log("首次闸门未过。**先看这一条**：IDE 窗口若弹了「是否允许自动化」类提示，")
+            log("到窗口里点一次【允许】—— 批准是**按实例**计的，点完**不要**重起。")
+            log(f"本进程会继续等人工批准，最多 {budget}s（每轮只做只读探测，⛔ 不另起实例）。")
+            log("")
+            log(f"当前非本轮实例：{residual_ide_pids()}（这些不是要清的对象）")
+            deadline = time.time() + budget
+            while not ready and time.time() < deadline:
+                time.sleep(8)
+                ready = bool(ide) and wait_ready(env)
+        if not ready:
+            log("超时仍没过闸门 ⇒ ENV_BLOCKED，不代表任何业务结论。")
+            log("处置：① 先确认窗口里是否有待点提示；② 仍不通才考虑 --kill-all-ide 清场重起。")
+            kill_owned_ide_procs()
+            return 2
+        log("✅ 模拟器已就绪")
+    log("")
+    log("下一步用这条（⛔ 不要另起实例）：")
+    extra_cli = f" --extra-seeds {env.extra_seeds}" if env.extra_seeds else ""
+    anchor_cli = f" --anchor {env.anchor}" if env.anchor else ""
+    log(
+        f"  python scripts/run_walkthrough_devtools.py --skip-ide --section {env.section}"
+        f"{extra_cli}{anchor_cli}"
+    )
+    hold = int(getattr(args, "keepalive", 0) or 0)
+    if hold > 0:
+        log(f"保活 {hold}s —— 期间请勿关闭本进程：IDE 随本进程一起存活。")
+        time.sleep(hold)
+    else:
+        log("未给 --keepalive ⇒ 立即退出，IDE 会随本进程被收走。")
+    return 0
+
+
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 
 
@@ -727,6 +791,29 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="⚠️ 允许按进程名清理**所有**微信开发者工具实例（会关掉人工打开的窗口）",
     )
+    parser.add_argument(
+        "--anchor",
+        default="",
+        help=(
+            "锚定模式（S4-b 切片 §7.1 路径②）：把 `<aid>` 传给走查的 `WALK_ANCHOR`，"
+            "本轮**各章优先用同一张委托**，用于把第 2–9 步串在同一张单上跑。"
+            "默认空 ⇒ 行为与从前逐字一致（各章自己挑）"
+        ),
+    )
+    parser.add_argument(
+        "--prepare-ide",
+        action="store_true",
+        help=(
+            "只准备 IDE 通道（起/复用 IDE → 过就绪闸门 → 打印下一步命令 → 保活），"
+            "**不跑走查**。用于收口「起 IDE ＋ 人工批准 ＋ 保活 ＋ --skip-ide」四步手拼"
+        ),
+    )
+    parser.add_argument(
+        "--keepalive",
+        type=int,
+        default=0,
+        help="配合 --prepare-ide：保活秒数（建议 ≥ 整轮耗时，如 3600）",
+    )
     args = parser.parse_args(argv)
 
     if os.name != "nt":
@@ -753,6 +840,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     if REUSING_EXTERNAL_IDE:
         log("本轮为 `--skip-ide` 复用模式：上面这些实例就是**要复用的那个**，⛔ 不会去清它。")
+
+    # ⭐ 这一分支必须放在下面「起 IDE → 闸门 → 未就绪即 ENV_BLOCKED 返回 2」**之前**：
+    #    它存在的理由正是「闸门没过时别急着放弃，先耐心等人工批准」。
+    #    放到后面 ⇒ 闸门一失败就 return 2，这行永远走不到（2026-09-19 实测踩到，
+    #    日志里连一句"等人工批准"都没打出来）。
+    if args.prepare_ide:
+        return hold_ide_channel(env, args)
 
     ide = None
     reuse = bool(args.skip_ide)
@@ -833,7 +927,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         log(f"\n⑤ 跑走查章节 {env.section}（pay={env.pay}）")
-        extra = {"WALK_PAY": "1"} if args.pay else None
+        extra: dict[str, str] = {}
+        if args.pay:
+            extra["WALK_PAY"] = "1"
+        if env.anchor:
+            extra["WALK_ANCHOR"] = env.anchor
+        extra = extra or None
         done = run_step(
             env,
             [
