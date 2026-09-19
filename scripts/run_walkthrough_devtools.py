@@ -715,6 +715,9 @@ def hold_ide_channel(env: Env, args: argparse.Namespace) -> int:
     log(f"探测现成实例：{'✅ 能用' if ok else '✗ 不能用'} —— {why}")
     if ok:
         log("⇒ 复用现成实例（等价 --skip-ide），**无需再点允许**")
+    elif args.skip_ide:
+        log("⇒ 给了 --skip-ide ⇒ ⛔ 不另起实例。请先人工起一个 IDE 并点「允许」，再重跑本命令。")
+        return 2
     else:
         log("⇒ 起一个新实例（摘掉 ELECTRON_RUN_AS_NODE、不传沙箱代理）")
         ide = start_ide(env, kill_all=bool(args.kill_all_ide))
@@ -838,6 +841,13 @@ def main(argv: list[str] | None = None) -> int:
     if REUSING_EXTERNAL_IDE:
         log("本轮为 `--skip-ide` 复用模式：上面这些实例就是**要复用的那个**，⛔ 不会去清它。")
 
+    # ⭐ 这一分支必须放在下面「起 IDE → 闸门 → 未就绪即 ENV_BLOCKED 返回 2」**之前**：
+    #    它存在的理由正是「闸门没过时别急着放弃，先耐心等人工批准」。
+    #    放到后面 ⇒ 闸门一失败就 return 2，这行永远走不到（2026-09-19 实测踩到，
+    #    日志里连一句"等人工批准"都没打出来）。
+    if args.prepare_ide:
+        return hold_ide_channel(env, args)
+
     ide = None
     reuse = bool(args.skip_ide)
     if not reuse:
@@ -880,9 +890,6 @@ def main(argv: list[str] | None = None) -> int:
             kill_owned_ide_procs()
             return 2
         log("    ✅ 模拟器已就绪")
-
-    if args.prepare_ide:
-        return hold_ide_channel(env, args)
 
     log(f"\n③ 起后端（8000，临时库 {env.db.name}）")
     proc = start_backend(env)
