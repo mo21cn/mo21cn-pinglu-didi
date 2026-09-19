@@ -1,0 +1,192 @@
+{
+  "sections": [
+    "51"
+  ],
+  "project": "E:\\pinglu-didi\\miniapp",
+  "startedAt": "2026-09-20T06:57:32+0800",
+  "finishedAt": "2026-09-20T06:59:05+0800",
+  "argv": [
+    "scripts\\verify_miniapp_devtools.py",
+    "--shots",
+    "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-065700",
+    "--section",
+    "51"
+  ],
+  "verdict": "PASS",
+  "tally": {
+    "PASS": 17,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0,
+    "LIMITATION": 0
+  },
+  "rollup": {
+    "PASS": 17,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0
+  },
+  "passed": 17,
+  "notPassed": 0,
+  "attempt": 3,
+  "previousRuns": [
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260918-115356",
+      "finishedAt": "2026-09-18T11:59:31+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260918-115356",
+        "--section",
+        "51"
+      ],
+      "verdict": "FAIL",
+      "passed": 0,
+      "notPassed": 2
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260918-120048",
+      "finishedAt": "2026-09-18T12:04:11+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260918-120048",
+        "--section",
+        "51"
+      ],
+      "verdict": "PASS",
+      "passed": 15,
+      "notPassed": 0
+    }
+  ],
+  "results": [
+    {
+      "step": "51 前置 · 组织队列里有可用的委托（载体由本章自造，不依赖可选夹具）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid='5' status='claimed' 队列 3 张"
+    },
+    {
+      "step": "51 前置 · 授权 id 由 `session-context` 给出（**不前端推导**），AG-02 会话可得",
+      "ok": true,
+      "kind": "PASS",
+      "note": "entrustment_id='1' session_id='1'"
+    },
+    {
+      "step": "51 前置 · 会话**来源与专业槽位**可读（复用/自建 ＋ `agent_specialty`）—— 这是「编排依赖」这条定档的判据",
+      "ok": true,
+      "kind": "PASS",
+      "note": "session_id='1' 来源=本章自建（该委托上没有 AG-02 会话） agent_specialty='agent_02'"
+    },
+    {
+      "step": "51 ② 前置 · 作业**落库的输入**里真的带 `amount`（否则下一格没有对象：`ag02.py:310` 只在 `job_input.get('amount')` 非空时才追加 `customer_quote`）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "job='1' session='1'（来源=本章自建（该委托上没有 AG-02 会话） 槽位='agent_02'） amount='18600' input={\"amount\": \"18600\", \"currency\": \"CNY\", \"includes\": [\"内河运费\", \"港杂费\"], \"quote_text\": \"承运人：贵港航运有限公司\\n单价：18600 元/柜\\n有效期：2026-12-31\"}"
+    },
+    {
+      "step": "51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`（`ag02.py` 的产出条件就是作业输入带对客金额）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "job='1' status='succeeded' mocked=True 提案类型=['customer_quote', 'quote_parsed'] input={\"amount\": \"18600\", \"currency\": \"CNY\", \"includes\": [\"内河运费\", \"港杂费\"], \"quote_text\": \"承运人：贵港航运有限公司\\n单价：18600 元/柜\\n有效期：2026-12-31\"}"
+    },
+    {
+      "step": "51 ③ 采纳 ⇒ 服务端写下**待核验声明**（这是「来源为模型声明」在数据上的样子）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "artifact='8' v1 declared=2 pending=2 ok=False"
+    },
+    {
+      "step": "51 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "51 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 51-1-模型来源成果页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26163B"
+    },
+    {
+      "step": "51 ④ 「工作台 → 委托卡 → 详情 → 成果引用 → 成果页」全程真实点击，落到**模型来源**的成果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "card=True detail=True 引用锚点 1 个 ref=True artifact=True 落页 artifactId='8'（期望 8）"
+    },
+    {
+      "step": "截图 51-2-发布被门槛拒",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26163B"
+    },
+    {
+      "step": "51 ④ 经界面点「发布这一版」⇒ **被来源门槛拒**，且页面把**待核验清单显示出来**（只说「不能发布」是没法干活的）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口 1 个 tap=True 确认条 1 submit=True published=False releaseHint='版本 v1 还有未核验的来源（assignment:5, operator_input:job_input）—— 未核验的提案不得作为已发布依据；请先逐条留下核验记录｜待核验：assignment:5、operator_input:job_input'"
+    },
+    {
+      "step": "51 ⑤ ⭐ 界面上**没有**「登记来源核验」的入口（O-1b 的答案）——页面能告诉你为什么不能发，却给不了你解决它的入口",
+      "ok": true,
+      "kind": "PASS",
+      "note": "核验入口锚点 0 个；同一条断言与 ④ 同时成立才有信息量（④ 证明页面确实处在「被拒且看得见清单」的状态）"
+    },
+    {
+      "step": "51 ⑥ 经接口逐条登记核验（`method` 必填：无依据的核验等于没核）⇒ 门槛转为通过",
+      "ok": true,
+      "kind": "PASS",
+      "note": "pending 由 2 条 → 0 条；gate.ok=True"
+    },
+    {
+      "step": "截图 51-3-同版本发布成功",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26503B"
+    },
+    {
+      "step": "51 ⑦ 核验之后**回界面重新点发布** ⇒ 同一版本发布成功，且与服务端发布记录**同源**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True submit=True published=True；服务端同成果同版本发布记录 1 条（releaseId=2）"
+    },
+    {
+      "step": "51 ⑧ 本章运行期零新增 console 报错",
+      "ok": true,
+      "kind": "PASS",
+      "note": "console 报错 0 → 0"
+    }
+  ],
+  "console": {
+    "baselineCaptured": true,
+    "collectFailed": false,
+    "openPhaseWaived": [],
+    "openPhaseUnwaived": [],
+    "bizPhaseUnwaived": [],
+    "whitelist": [
+      {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": "open",
+        "evidence": "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+      },
+      {
+        "pattern": "routeDone with a webviewId",
+        "phase": "open",
+        "evidence": "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉（HO D1 明确点名这个范围过宽）"
+      }
+    ]
+  },
+  "consoleError": "",
+  "consoleErrorDetected": false,
+  "consoleNoiseCount": 0,
+  "consoleOtherCount": 0,
+  "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-065700"
+}

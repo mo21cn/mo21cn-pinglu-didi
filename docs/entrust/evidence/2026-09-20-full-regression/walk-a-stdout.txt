@@ -1,0 +1,128 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-055333
+章节    ：15,7,43,51
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.0s] pageStack=[{'pageId': 413, 'path': 'pages/index/index', 'query': {}, 'route': '/pages/index/index', 'title': '船好多'}]  (探测   1.0s)
+模拟器  ：pageStack 非空
+
+== ⑮ 发货方式选择 ==
+PASS | 截图 15-发货方式弹窗 | 33813B
+PASS | ⑮ 进入发布货物页即弹出发货方式选择 | True
+PASS | ⑮ 两张卡片文案为「自主发货 / 委托发货」 | 面板文本 69 字符
+PASS | ⑮ 两段说明文案齐全（自行找船 / 平台承运） | self=True entrust=True
+PASS | ⑮ 两枚单选圈 + 「默认」标记（设计稿元素齐全） | ring=2 label=2
+PASS | ⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案） | ok
+PASS | ⑮ 卡片宽高比 ≈ 设计稿 3:1（非压扁/拉伸） | w/h=3.03 (227x75)
+PASS | ⑮ 两张卡片等高（同规格） | 75.0 vs 75.0
+PASS | ⑮ 卡片顺序：自主发货在委托发货之上 | self=230.5 entrust=390.5
+PASS | ⑮ 图标为白圆且在卡片左内侧 | Δleft=10.0 48x48
+PASS | ⑮ 单选圈在卡片右侧之外（设计稿布局） | ring.left=309.5 card.right=297.0
+PASS | ⑮ 说明文案在卡片下方且不重叠 | desc.top=322.5 card.bottom=305.5
+PASS | ⑮ 弹窗完整落在视口内（不被裁切） | panel=216..536 winH=844
+PASS | 截图 15-自主发货-留在发布页 | 31313B
+PASS | ⑮ 自主发货只关弹窗、留在发布货物页 | False
+PASS | ⑮ 关弹窗后发布页表单可用（原有内容仍在） | 2026-09-21
+PASS | ⑮ 点遮罩可关闭弹窗（不进占位页） | showChannel=False path=pages/publish/cargo/cargo
+PASS | 截图 15-委托发货-受理屏 | 14527B
+PASS | ⑮ 委托发货跳受理屏（UI-07）—— ⛔ 不再是「功能预览」占位页 | path=pages/entrust/intake/intake
+FAIL | ⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url） | cargo_name=None
+FAIL | ⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字） | quantity=None unit=None
+PASS | ⑮ 从受理屏可返回发布货物页（二级页栈正常） | pages/publish/cargo/cargo
+
+== ⑦ 合同（三级页 / 长按 / 仿真案例 / 已完成） ==
+PASS | 锚点预取：三身份 token + 订单/货源/船/预约/泊位 | pay=2 cargo=3 ship=1 appt=3 berth=1 sim=3
+PASS | ⑦ 待支付订单在列表可见 | order #2
+PASS | ⑦ 「查看合同」真实点击 | [data-act-contract="2"]
+PASS | 截图 07-合同预览三级页 | 47451B
+PASS | ⑦ 合同页进入 | pages/trade/contract/contract
+PASS | ⑦ 合同正文有内容 | html=5030 raw=1312
+PASS | ⑦ 风险卡渲染 | risks=4 high=1
+PASS | 截图 07b-订单页-长按合同弹层 | 44303B
+PASS | ⑦ 长按订单卡弹出合同弹层 | contract.show=True
+PASS | ⑦b 仿真案例 R3 在订单列表可见 | #5
+PASS | ⑦b 「查看合同」可点（R3）
+PASS | 截图 07c-合同-仿真案例-R3 | 41317B
+PASS | ⑦b R3 合同页进入 | pages/trade/contract/contract
+PASS | ⑦b R3 命中预期风险「装货日期临近」 | risks=运费未支付、装货日期临近、违约金标准未量化
+PASS | ⑦b R3 合同正文非空 | raw=1339
+PASS | ⑦b 仿真案例 R4 在订单列表可见 | #6
+PASS | ⑦b 「查看合同」可点（R4）
+PASS | 截图 07c-合同-仿真案例-R4 | 48264B
+PASS | ⑦b R4 合同页进入 | pages/trade/contract/contract
+PASS | ⑦b R4 命中预期风险「船舶证书临期」 | risks=运费未支付、船舶证书临期、滞期费未约定、货物保险未约定、违约金标准未量化
+PASS | ⑦b R4 合同正文非空 | raw=1502
+PASS | ⑦b 仿真案例 R5 在订单列表可见 | #7
+PASS | ⑦b 「查看合同」可点（R5）
+PASS | 截图 07c-合同-仿真案例-R5 | 46510B
+PASS | ⑦b R5 合同页进入 | pages/trade/contract/contract
+PASS | ⑦b R5 命中预期风险「液货/危险品运输」 | risks=运费未支付、液货/危险品运输、滞期费未约定、货物保险未约定、违约金标准未量化
+PASS | ⑦b R5 合同正文非空 | raw=1408
+PASS | ⑦c 已完成订单可查看合同 | #1
+PASS | 截图 07d-合同-已完成订单-无风险 | 35507B
+PASS | ⑦c 已完成合同无风险项 | risks=0
+PASS | ⑦c 已完成合同正文非空 | raw=1155
+
+== ㊸ 主演示第 1–3 步（合同 §10.1，真实点击）==
+
+-- 一、第 1 步 · 客户（seed-shipper）真实点击提交一张新委托 --
+PASS | ㊸ 前置 · 清掉按 `user_id` 推导的在途载荷（跨轮次残留会把'新建'变成'续接'） | entrust_intake_draft_<user_id> 已清（清两次）
+PASS | 截图 43-1-受理屏 | 29688B
+PASS | ㊸ 第1步 · 发布货源 → 受理屏（真实点击；货名/货量随草稿带过去） | via=URL 直进（凸起锚点命中 0 个 —— 自定义 tabBar 是组件） cargo_page=True 锚点命中 1 reset=先到就绪 path=pages/entrust/intake/intake
+PASS | ㊸ 第1步 · 受理屏的目标清单里有「演示经营主体·工作台」（客户 A 授权出去的组织 —— 不是「我所在的组织」，后者会给出能选但必然 403 的选项） | targets=['演示经营主体·工作台']
+PASS | 截图 43-2-提交后落详情 | 29149B
+PASS | ㊸ 第1步 · 真实点击「提交委托」⇒ 落到该委托的详情页（不是停在原页、也不是落首页） | org=1（锚点 1、tap=True）、submit=True、path=pages/entrust/detail/detail
+PASS | ㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证） | aid=6 org=1（演示经营主体·工作台） ｜链式锚点=未开启（回归不被改写）
+
+-- 一、第 1 步 · A1（seed-owner）在工作台真实点击受理 --
+PASS | ㊸ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊸ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 截图 43-3-工作台-待受理 | 42203B
+PASS | ㊸ 第1步 · A1 在工作台看到这张**新提交**的委托，受理入口可被唯一命中 | [data-act-claim="6"] 命中 1
+PASS | 截图 43-4-受理成功 | 42887B
+PASS | ㊸ 第1步 · 真实点击受理 ⇒ 服务端 `submitted → claimed` 且 `claimed_by` 已落（**API 直证**，不只看界面） | 展开=True（确认条 1 个）提交=True status='claimed' claimed_by=2
+
+-- 二、第 2 步 · 会话屏：上传样报价单 → 提取 → 引用 → AG-02 --
+PASS | 截图 43-5-专属会话屏 | 25090B
+PASS | ㊸ 第2步 · 工作台卡片的「会话」入口真实点击 ⇒ 进该委托的专属会话屏 | path=pages/entrust/session/session sessionId='1'
+LIMITATION | ㊸ 第2步 · 「上传报价单（从系统里选文件）」 | 入口可被唯一命中（1 个），但点击会打开 **OS 级原生文件选择器** —— 它是系统弹层、不在小程序渲染树里，走查工具够不着它的选择项（技能 miniapp-device-walkthrough 的负例清单实测过）。**不计入通过**。要拿到这一格的证据需要 OS 级输入通道（本项目 ⑧b/㊶ 用过），或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。
+PASS | 截图 43-6-附件已上传并提取 | 25099B
+FAIL | ㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**（只有 done 的附件对 Agent 才是文本，否则它只是个文件名） | 锚点=1 tap=True uploading=False sess='1' att_before=0 attachments=0 done=0 notice=''
+FAIL | ㊸ 第2步 · 提取结果被**如实报出**（不是合成一句'上传成功'） | attachNotice=''
+NOT_RUN | ㊸ 第2步 · 引用附件调 AG-02 | 附件未提取完成（没有可引用的文本）
+
+-- 51 第 6 步来源门槛：被拒 ⇒ 逐条核验 ⇒ 同版本发布（S6-3）--
+PASS | 51 前置 · 组织队列里有可用的委托（载体由本章自造，不依赖可选夹具） | aid='6' status='claimed' 队列 4 张
+PASS | 51 前置 · 授权 id 由 `session-context` 给出（**不前端推导**），AG-02 会话可得 | entrustment_id='1' session_id='1'
+FAIL | 51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`（`ag02.py` 的产出条件就是作业输入带对客金额） | job='1' status='succeeded' 提案类型=['quote_parsed']
+NOT_RUN | 51 来源门槛剧本 | 作业没有产出 customer_quote ⇒ 没有可发布的载体
+
+================ 汇总 ================
+断言 77 项：**通过 69** / 未取得通过证据 8
+  分档：PASS=69 | FAIL=5 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=2 | LIMITATION=1
+  归并（HO 五档）：PASS=69 | FAIL=5 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=3
+
+  各章取单追踪（每章实际用到的委托 id —— 开了 `--chain` 时应**全部相同**）:
+    sec_43             aid=6
+    sec_51             aid=6
+    合计 2 个取单点 · aid 集合=['6'] · 同一张=是（未开 `--chain` ⇒ 各章自挑，不同是正常的）
+  FAIL: ⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url） | cargo_name=None
+  FAIL: ⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字） | quantity=None unit=None
+  LIMITATION: ㊸ 第2步 · 「上传报价单（从系统里选文件）」 | 入口可被唯一命中（1 个），但点击会打开 **OS 级原生文件选择器** —— 它是系统弹层、不在小程序渲染树里，走查工具够不着它的选择项（技能 miniapp-device-walkthrough 的负例清单实测过）。**不计入通过**。要拿到这一格的证据需要 OS 级输入通道（本项目 ⑧b/㊶ 用过），或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。
+  FAIL: ㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**（只有 done 的附件对 Agent 才是文本，否则它只是个文件名） | 锚点=1 tap=True uploading=False sess='1' att_before=0 attachments=0 done=0 notice=''
+  FAIL: ㊸ 第2步 · 提取结果被**如实报出**（不是合成一句'上传成功'） | attachNotice=''
+  NOT_RUN: ㊸ 第2步 · 引用附件调 AG-02 | 附件未提取完成（没有可引用的文本）
+  FAIL: 51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`（`ag02.py` 的产出条件就是作业输入带对客金额） | job='1' status='succeeded' 提案类型=['quote_parsed']
+  NOT_RUN: 51 来源门槛剧本 | 作业没有产出 customer_quote ⇒ 没有可发布的载体
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-055333
+[重跑关联] 同章节历史运行 1 次（首次结果**保留不覆盖**）：2026-09-20T05:53:15+0800=FAIL
+RESULT: FAIL （FAIL=5 / NOT_RUN=2 / LIMITATION=1）
+
+===== 走查 stderr =====
+(空)

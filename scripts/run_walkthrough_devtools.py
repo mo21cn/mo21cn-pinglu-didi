@@ -133,6 +133,8 @@ class Env:
         self.keep_db = args.keep_db
         self.extra_seeds = getattr(args, "extra_seeds", "") or ""
         self.anchor = getattr(args, "anchor", "") or ""
+        self.chain = bool(getattr(args, "chain", False))
+        self.llm_mock = bool(getattr(args, "llm_mock", False))
 
     def _default_python(self) -> Path:
         cand = self.repo / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -153,6 +155,13 @@ class Env:
         env["DATABASE_URL"] = "sqlite:///" + (db or str(self.db)).replace("\\", "/")
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
+        # ⭐ `--llm-mock`：强制后端走 **fixture**（本地规则模板），用于判定"链路规则"类断言 ——
+        #    实测 `ag02.py:310` 那个"`amount` 非空 ⇒ 追加 `customer_quote`"写在
+        #    `mock_content()` 里面，**只在 fixture 模式执行**；走真模型时提案集合由模型决定，
+        #    于是同一条断言会在不同轮次之间来回翻（09-18/09-19 PASS、09-20 FAIL）。
+        #    ⚠️ 两种模式**不能互相冒充**：fixture 只证链路规则，真模型质量仍未验证。
+        if self.llm_mock:
+            env["LLM_MOCK"] = "true"
         return env
 
     def ide_env(self) -> dict[str, str]:
@@ -269,6 +278,54 @@ def port_open(port: int = 8000) -> bool:
         return False
     finally:
         s.close()
+
+
+def port_holder(port: int = 8000) -> str:
+    """尽力找出占用该端口的进程（Windows：`netstat -ano` → `tasklist`）。查不到返回空串。
+
+    ⚠️ 只**读**，⛔ 不杀任何进程 —— 判断"能不能跑"是本脚本的事，"清场"不是。
+    """
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True,
+            text=True,
+            encoding="gbk",
+            errors="replace",
+            timeout=20,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    pids: list[str] = []
+    for line in out.splitlines():
+        parts = line.split()
+        if (
+            len(parts) >= 5
+            and parts[0].upper() == "TCP"
+            and parts[3].upper() == "LISTENING"
+            and parts[1].endswith(f":{port}")
+            and parts[4] not in pids
+        ):
+            pids.append(parts[4])
+    if not pids:
+        return ""
+    names = []
+    for pid in pids:
+        try:
+            raw = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                encoding="gbk",
+                errors="replace",
+                timeout=20,
+            ).stdout
+            rows = raw.strip().splitlines()
+            nm = rows[0].split(",")[0].strip('"') if rows else "?"
+        except (OSError, subprocess.SubprocessError):
+            nm = "?"
+        names.append(f"pid={pid} {nm}")
+    return "、".join(names)
 
 
 def health(timeout: float = 2.0) -> bool:
@@ -898,6 +955,27 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--chain",
+        action="store_true",
+        help=(
+            "链式连跑（S4-b 切片 §7.1 路径③）：翻成 `WALK_CHAIN=1` ⇒ 第 43 章建成那张"
+            "**新委托**后，其后各章经 `prefer_anchor()` 自动沿用同一张单。"
+            "⚠️ 必须与**业务顺序**的 `--section` 一起用（43,46,47,48,45,44,49,50,31,32,52,41）；"
+            "⛔ 默认关闭 —— 开了它 `--section all` 的全量分章回归会被改写语义"
+        ),
+    )
+    parser.add_argument(
+        "--llm-mock",
+        action="store_true",
+        help=(
+            "强制后端走 **fixture**（`LLM_MOCK=true`）—— 用于判定「链路规则」类断言。"
+            "实测：`ag02.py:310` 的「`amount` 非空 ⇒ 追加 `customer_quote`」写在 "
+            "`mock_content()` 里，**只在 fixture 模式执行**；走真模型时提案集合由模型决定，"
+            "同一条断言会在轮次之间来回翻。⚠️ 两种模式**不能互相冒充**："
+            "fixture 只证链路规则，真模型质量仍未验证（⛔ 报告里必须写明本轮是哪种）"
+        ),
+    )
+    parser.add_argument(
         "--prepare-ide",
         action="store_true",
         help=(
@@ -989,6 +1067,27 @@ def main(argv: list[str] | None = None) -> int:
         log("    ✅ 模拟器已就绪")
 
     log(f"\n③ 起后端（8000，临时库 {env.db.name}）")
+    log(
+        "    模型模式："
+        + (
+            "**fixture**（`--llm-mock` ⇒ `LLM_MOCK=true`）—— 只证链路规则"
+            if env.llm_mock
+            else "**真模型**（未加 `--llm-mock`）—— 提案集合由模型输出决定，⛔ 不代表链路规则"
+        )
+    )
+    # ⛔ **互斥闸门**（2026-09-20 实测教训）：两个运行器**同时**起后端时，两边都监听 8000
+    #    但各自连的是**对方的**临时库 ⇒ 读数会长出「拿不到 seed-owner 的 token」、
+    #    「入口命中 0」、「request:fail」这类**看起来像产品坏了**的假象 —— 当天就废掉两轮，
+    #    而两轮的 `RESULT` 都只是普通的 `FAIL`，⛔ 完全看不出被污染。
+    #    ⇒ 起后端前先探测；被占用就**拒跑并点名**（退出码 2 ＝ 环境阻塞，不代表任何业务结论）。
+    #    ⛔ 它不替用户杀进程；也**不给**"忽略占用"的开关 —— 那种开关最后一定会被用来绕过它。
+    if port_open(8000):
+        holder = port_holder(8000)
+        log(f"    ⛔ 8000 已被占用：{holder or '（拿不到持有者信息）'}")
+        log("    ⇒ **拒绝启动**：本运行器必须独占 8000。请先停掉那个后端（或它的运行器）再重跑。")
+        log("       ⛔ 不要靠「重跑几次」绕过 —— 并发读数会被污染成假红/假绿。")
+        log("  退出码 2（环境阻塞）：这条不代表任何业务结论，也不计入通过。")
+        return 2
     proc = start_backend(env)
     if not health():
         log("后端没起来，终止")
@@ -1029,6 +1128,8 @@ def main(argv: list[str] | None = None) -> int:
             extra["WALK_PAY"] = "1"
         if env.anchor:
             extra["WALK_ANCHOR"] = env.anchor
+        if env.chain:
+            extra["WALK_CHAIN"] = "1"
         extra = extra or None
         done = run_step(
             env,
