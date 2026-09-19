@@ -72,7 +72,7 @@
 | **已实现** | 迁移 ＋ 服务 ＋ 端点 ＋ 权限码 ＋ 矩阵（105）＋ 界面重开卡（页内表单）＋ 走查 ⑨ |
 | **已自动化验证** | 门禁 **16 项**；`pytest` 含 **5** 条重开用例（理由必填 422 / 非 completed 409 / 清空 `completed_at` ＋ 留痕一条 / 权限四档 / 版本过期 ＋ 同键重放 ＋ 二次拒绝不多写留痕）＋ Q2 边界一条 |
 | **CI 覆盖** | 后端 lint+test；MySQL 真实执行的并发锚点 |
-| **仍待验收** | ① 走查 ⑨ 的**设备侧**证据（本切片交付时本机走查通道不通，见下）；② 本机无 MySQL ⇒ 并发锚点的执行结果只由 CI 提供 |
+| **仍待验收** | ① ~~走查 ⑨ 的**设备侧**证据~~ ⇒ **已取得**（2026-09-19 上午，见 §7）；② 本机无 MySQL ⇒ 并发锚点的执行结果只由 CI 提供（**已由 CI 12/12 作证**） |
 
 ⚠️ **CI 抓到的第一个真缺陷（已修，2026-09-19）**：MySQL 并发锚点 `test_reopen_race_exactly_one_winner`
 **首轮红**，读数却是 `AssertionError: 第 0 轮有线程未完成: []` —— **`outcomes` 是空的**，
@@ -119,3 +119,32 @@ OSError: [WinError 1450] 系统资源不足，无法完成请求的服务。   �
 ⛔ 因此 ⑨ **和 ⑧-d 的复验**都**不能**写成通过，它们是下一条要补的读数；
 处置是**注销或重启**这台机器再跑（清 IDE 进程没用）。已把这一档做进 runner：
 闸门失败时打印「资源读数 ＋ 是哪一档 ＋ 该做什么」，不再让人从"页面打不开"倒推真因。
+
+## 7. 补跑（2026-09-19 上午，重启后）：⑨ 的设备侧读数**已取得**
+
+`PASS=33 / FAIL=0 / NOT_RUN=1`（第 53 章 ×24 **全 PASS** ＋ 第 54 章 ×10 的 9 PASS/1 NOT_RUN），
+截图 `miniapp-device-artifacts/walk-20260919-090034/`（5 张）。命令：
+
+```
+run_walkthrough_devtools.py --skip-ide --section 53,54 \
+  --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py,seed_entrust_completion_ready.py
+```
+
+⑨ 的五条读数（②④ 是原缺口）：
+
+| 断言 | 读数 |
+| --- | --- |
+| ⑨-a 入口出现 | `入口=True canReopen=True` |
+| ⑨-b 空理由就地拦 | `reopenHint='重开必须给出理由（它会与你撤销的那次结案一起留痕）'` |
+| ⑨-c 重开成功 | `status='claimed'` 且 `completedAt=''` |
+| ⑨-d 结案入口复现 | `结案入口数=1` |
+| ⑨-e Q2 边界（带正控） | `撤回入口数=0 / 正控 complete-open=1` |
+
+⚠️ **重启后仍然不通，真因是第 4 档（本轮新查明）**：不是资源、不是残留，而是
+**要人在 IDE 窗口里点一次「允许」**——回执长相是
+`{"result":{"taskType":"auth","status":"pending","message":"Waiting for user authorization."}}`
+（或 `source=auth / "wait WechatIDE authorization timeout"`），而 IDE 日志同时显示
+`session_init … authResult=allow`。`alreadyTrusted: true` **在新实例上不作数**（批准按**实例**），
+所以"批准一次 + **复用同一个实例**（`--skip-ide`）"才是正解。⛔ 期间我按 runner 的旧提示
+去清过 12 个"非本轮实例"——它们其实是**本轮 IDE 自己的子进程**（判据已修：见
+`DEMO-1-interface-delta.md` #264）。

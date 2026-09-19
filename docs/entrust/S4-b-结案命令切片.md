@@ -141,6 +141,13 @@ python scripts/run_walkthrough_devtools.py --section 53 \
     --extra-seeds seed_entrust_completion_ready.py
 ```
 
+⭐ **⑧-d 复验已完成**（2026-09-19 上午，重启后）：
+`PASS | 53 ⑧-d 「保留历史」可查验：详情页多出「结案时间」一行 |
+字段行=委托编号,归属,提交时间,数据版本,结案时间`
+—— 原 FAIL 是**断言读错键**（`fields` 是页面 data 的**顶层**键，首跑读成 `detail.fields`），
+复验为 PASS，截图 `miniapp-device-artifacts/walk-20260919-090034/53-结案后（留痕）.jpg`。
+同轮第 53 章 **24 项全 PASS**（含 ⑨ 重开五条），见 `S4-c-受控重开切片.md` §7。
+
 | 断言 | 结果 |
 | --- | --- |
 | ⑧-a 齐备的委托上，界面直接说「可以结案」（缺项清单为空） | **PASS** |
@@ -172,10 +179,13 @@ python scripts/run_walkthrough_devtools.py --section 53 \
 
 ⛔ 在 ①完成之前，**不得**把"13 步已经连跑通过"写进任何交付说明。
 
-**进展（2026-09-19）**：**路径 ① 已实现** —— 走查新增**第 54 章「十三步的产物链（读侧断言）」**
-（9 组断言，按步序串成清单；⛔ 章内明写它**不声称**"同委托连跑通过"）。⚠️ 其**设备侧读数尚未取得**：
-与第 53 章同一轮跑时闸门撞 `WinError 1450 系统资源不足`（**IDE 进程为 0** ⇒ 会话级资源到限，
-需注销/重启，见 `S4-c-受控重开切片.md` §6）⇒ `PASS/FAIL/NOT_RUN` **全为空**，
-⛔ 不得按"没报错"读成通过。**路径 ②③ 仍未做。**
+**进展（2026-09-19）**：**路径 ① 已实现且已取得设备读数** —— 走查新增**第 54 章「十三步的产物链（读侧断言）」**
+（本章 10 项：`PASS=9 / NOT_RUN=1`，唯一 NOT_RUN 是第 8 步货量变更——它由 ㊿ 章真做一次；
+⛔ 章内明写它**不声称**"同委托连跑通过"）。命令
+`--skip-ide --section 53,54 --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py,seed_entrust_completion_ready.py`
+⇒ 两章合计 `PASS=33 / FAIL=0 / NOT_RUN=1`，截图 `miniapp-device-artifacts/walk-20260919-090034/`。
+⭐ 首跑的两处 FAIL 都是**载体选错**（② 的成果在 `seed_entrust_contract_flow.py` 铺的 canonical 单上、
+不在 canonical 种子；③-b 的任务要走 `/entrust/tasks`）⇒ 已按"缺夹具记 `NOT_RUN` 并点名"收口。
+**路径 ②③ 仍未做。**
 ⚠️ 另一次更正：本节先前把该轮失败记成"IDE 残留实例（21 个）挡住"—— 那是**冷却期**的成因；
 本轮同配方在**残留为 0** 时同样失败，真因在系统层（`CreateProcess` 被拒）。
