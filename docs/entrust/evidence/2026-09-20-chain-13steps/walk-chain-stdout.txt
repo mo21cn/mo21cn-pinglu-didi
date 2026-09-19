@@ -1,0 +1,341 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-001602
+章节    ：43,46,47,48,45,44,49,50,31,32,52,41
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.4s] pageStack=[{'pageId': 40, 'path': 'pages/shipper/shipper', 'query': {}, 'route': '/pages/shipper/shipper', 'title': '找船'  (探测   1.4s)
+模拟器  ：pageStack 非空
+
+== ㊸ 主演示第 1–3 步（合同 §10.1，真实点击）==
+
+-- 一、第 1 步 · 客户（seed-shipper）真实点击提交一张新委托 --
+PASS | ㊸ 前置 · 清掉按 `user_id` 推导的在途载荷（跨轮次残留会把'新建'变成'续接'） | entrust_intake_draft_<user_id> 已清（清两次）
+PASS | 截图 43-1-受理屏 | 29689B
+PASS | ㊸ 第1步 · 发布货源 → 受理屏（真实点击；货名/货量随草稿带过去） | via=URL 直进（凸起锚点命中 0 个 —— 自定义 tabBar 是组件） cargo_page=True 锚点命中 1 reset=先到就绪 path=pages/entrust/intake/intake
+PASS | ㊸ 第1步 · 受理屏的目标清单里有「演示经营主体·工作台」（客户 A 授权出去的组织 —— 不是「我所在的组织」，后者会给出能选但必然 403 的选项） | targets=['演示经营主体·工作台']
+PASS | 截图 43-2-提交后落详情 | 29178B
+PASS | ㊸ 第1步 · 真实点击「提交委托」⇒ 落到该委托的详情页（不是停在原页、也不是落首页） | org=1（锚点 1、tap=True）、submit=True、path=pages/entrust/detail/detail
+PASS | ㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证） | aid=6 org=1（演示经营主体·工作台） ｜链式锚点=已生效,其后各章沿用本单
+
+-- 一、第 1 步 · A1（seed-owner）在工作台真实点击受理 --
+PASS | ㊸ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊸ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 截图 43-3-工作台-待受理 | 42212B
+PASS | ㊸ 第1步 · A1 在工作台看到这张**新提交**的委托，受理入口可被唯一命中 | [data-act-claim="6"] 命中 1
+PASS | 截图 43-4-受理成功 | 41915B
+PASS | ㊸ 第1步 · 真实点击受理 ⇒ 服务端 `submitted → claimed` 且 `claimed_by` 已落（**API 直证**，不只看界面） | 展开=True（确认条 1 个）提交=True status='claimed' claimed_by=2
+
+-- 二、第 2 步 · 会话屏：上传样报价单 → 提取 → 引用 → AG-02 --
+PASS | 截图 43-5-专属会话屏 | 25090B
+PASS | ㊸ 第2步 · 工作台卡片的「会话」入口真实点击 ⇒ 进该委托的专属会话屏 | path=pages/entrust/session/session sessionId='1'
+LIMITATION | ㊸ 第2步 · 「上传报价单（从系统里选文件）」 | 入口可被唯一命中（1 个），但点击会打开 **OS 级原生文件选择器** —— 它是系统弹层、不在小程序渲染树里，走查工具够不着它的选择项（技能 miniapp-device-walkthrough 的负例清单实测过）。**不计入通过**。要拿到这一格的证据需要 OS 级输入通道（本项目 ⑧b/㊶ 用过），或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。
+PASS | 截图 43-6-附件已上传并提取 | 35298B
+PASS | ㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**（只有 done 的附件对 Agent 才是文本，否则它只是个文件名） | 锚点=1 tap=True uploading=False sess='1' att_before=0 attachments=1 done=1 notice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent'
+PASS | ㊸ 第2步 · 提取结果被**如实报出**（不是合成一句'上传成功'） | attachNotice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent 已能读到这份报价单'
+PASS | 截图 43-7-AG02-终态 | 37232B
+PASS | ㊸ 第2步 · 真实点击「让 Agent 解析这份报价单」⇒ 作业跑到**终态**（不是只停在排队） | status='succeeded' jobId='1'
+PASS | ㊸ 第2步 · 作业产出**提案**并在页面上列出条数（提案 ≠ 成果，才需要人工采纳） | proposalCount=1
+PASS | ㊸ 第2步 · 作业来源里含 `attachment_text`（Agent 读的是**附件文本**，不是文件名）—— API 直证 | kinds=['attachment_text', 'assignment'] jobId=1
+PASS | ㊸ 第2步 · 没有未核验来源（来源核对覆盖 `findings` 内的嵌套引用，见 PR #131） | unverified_sources=[]
+
+-- 三、第 3 步 · 采纳 → 更正一个字段 → 从工作台打开同一份成果 --
+PASS | 截图 43-8-采纳成成果 | 36667B
+PASS | ㊸ 第3步 · 真实点击「采纳为成果」→ 页内确认条 → 确认 ⇒ 提案变成成果 | ask=True confirm=True（确认条 1 个）artifact_id=8
+PASS | 截图 43-9-成果页 | 22529B
+PASS | ㊸ 第3步 · 从**会话屏的成果卡**真实点击进入成果页（同一份） | path=pages/entrust/artifact/artifact artifactId='8'（期望 8）
+PASS | 截图 43-10-编辑态-已改一个字段 | 26480B
+PASS | ㊸ 第3步 · 真实点击「编辑内容」→ **真实输入**改一个字段（页面识别到有未保存改动） | 字段#0 锚点 1 个 input=True '西江航运有限公司' → '西江航运有限公司（走查更正）' dirty=True
+PASS | ㊸ 第3步 · 保存 ⇒ **追加一个新版本**（append-only，不是就地改掉旧版本） | revisions 1 → 2 notice='已保存为 v2，生效版本仍是 v1（需确认才会切换）'
+PASS | 截图 43-11-页内确认条 | 24981B
+PASS | ㊸ 第3步 · 「设为生效版本」走**页内确认条**（原生弹层的确认键走查工具点不到 ⇒ 这条路径本来拿不到设备证据） | 入口 1 个、确认条 1 个
+PASS | ㊸ 第3步 · 确认切换生效版本 ⇒ **服务端**的生效版本号 == 页面刚保存的那一版（API 直证） | 刚保存 v2 / 服务端 v2 / saveNotice='生效版本已切换为 v2'
+
+-- 三、第 3 步 · 从工作台 → 委托卡 → 详情页 → 成果槽位 打开同一份 --
+PASS | ㊸ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊸ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 截图 43-12-详情页-成果槽位 | 30682B
+PASS | ㊸ 第3步 · 工作台 → 委托卡 → 详情页（真实点击，经页面的 `go()` 决策） | path=pages/entrust/detail/detail slots=7
+PASS | 截图 43-13-从工作台打开同一份成果 | 23163B
+PASS | ㊸ 第3步 · 槽位里的成果引用可点，且打开的是**被点的那一条**（同一 `artifact_id`，不是'打开最新一份'） | 引用锚点 1 个、期望 aid=8、落页 artifactId='8'
+PASS | ㊸ 第3步 · 工作台侧看到的是**更正后**的内容（D1-04「更正出现在所有共享视图」—— 这是本步唯一真正的判据） | 期望页面字段值里含 '西江航运有限公司（走查更正）'；实际命中（字段 11 个，生效版本证据见上一条）
+PASS | ㊸ 本章运行期 console 无未归因错误 | 增量 0 条
+
+-- ㊻ 运输计划（第 4 步 · 真实渲染）--
+PASS | ㊻ ① 写命令真建段（**经 API**）：建段 + 写下第 1 版历史。⚠️ 写侧界面由 ㊼ 章取证（两章分工）⇒ 这一格证明的是**写链路**，**不是**「界面能建段」 | HTTP=200 leg_id='4' revision_no=1
+PASS | ㊻ ② 改段**留版本**（而不是覆盖）：改完之后历史里**两版都在**，且第 1 版记的仍是**当时**的到达地（快照，不是回连当前行） | HTTP=200 历史=2 版 kinds=['created', 'updated'] 第1版到达地='走查终点'
+PASS | ㊻ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊻ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | ㊻ ③ 运输计划卡**真的渲染**：段行数 = 服务端段数（判据落渲染树，不看内部状态键） | 段行 按类=1 裸属性=0 值属性=1 服务端段数=1 hasLegs=True data.legs=1
+PASS | ㊻ ④ 页面读到的那一段与**服务端事实**同源，且**未登记的运输方式原样回显**（`air` ⇒ 显示 `air`，不兜底成「公路」） | 页面段={'legId': '4', 'seqText': '88', 'modeText': 'air', 'routeText': '走查起点 → 走查终点（改）', 'modeRaw': 'air', 'fromRaw': '走查起点', 'toRaw': '走查终点（改）'} 服务端方式标签=['air']
+FAIL | ㊻ ⑤ 必需任务与**前置**逐行渲染（每一条任务行都带一行前置说明：「无固定前置」或有具体前置 —— 判不了的那一格也必须自己说话） | 任务行 按类=0 裸属性=0（服务端 0） hasTasks=False｜前置行 按类=0 裸属性=0
+PASS | 截图 ㊻-运输计划卡 | 30477B
+PASS | ㊻ ⑥ 本章运行期**无新增 console 报错** | 无
+PASS | ㊻ ⑦ 写入口（`data-act-leg-open`）**已在渲染树里** ⇒ 写侧界面存在（本章的写操作仍**经 API**：经界面写由 ㊼ 章取证，两章分工、不互相借证据） | 写入口元素数=1（界面不存在时这里会是 0 —— 那才是需要记限制的形状）
+
+-- ㊼ 航段命令写侧界面（第 4 步 · 真机建段/改段/版本历史）--
+PASS | ㊼ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊼ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | ㊼ ① 写入口（「加一段」）与段行都在渲染树里（判据落渲染树，不看内部状态键） | 加一段=1 段行=1 服务端段数=1 plan='6'
+PASS | ㊼ ② 建段表单渲染出来，且顺序号预填「**最大序号 + 1**」（契约只要求 seq 唯一、不要求连续 —— 用「段数 + 1」在有空洞时会撞号） | 输入框=1 预填='89' 期望=89 服务端序号=[88]
+PASS | ㊼ ③ 输入真的接上了（`input_text` 触发 `bindinput` ⇒ handler 按 `data-df` 认领到字段） | 四个输入框都键入成功
+PASS | ㊼ ④ 经**界面**建段：页面段行数 = 服务端段数，新段那一行在渲染树里，且**未登记的方式原样显示**（`air` ⇒ `air`，不兜底成「公路」） | 页面段=2 服务端段=2 类行=2 值锚点=1 行文本='<view class="plan-leg" data-plan-leg="89"><view class="plan-leg-head"><text class="plan-leg-seq">89</text><text class="plan-leg-mode">air</text><text class="pla'
+PASS | ㊼ ⑤ 改段表单**回填服务端原值**（方式＝`air` 而不是显示文案）——回填标签会在库里造出「公路」这个取值，而它与 `road` 在界面上长得一模一样 | 回填 seq='89' mode='air' from='㊼起点89' to='㊼终点89'
+PASS | ㊼ ⑥ 「一个字段都没改」在**本地**就被拦下：页内提示说清原因，且**没有**把注定 400 的请求发出去（段数未变、页面未刷新） | legHint='与当前版本完全相同 —— 这不是一次改动（只写改动说明也不算），所以没有可提交的内容' 段数 2 → 2
+PASS | ㊼ ⑦ 快捷项把方式改成已登记取值（`water` === 选中项的 key：两侧都是字符串） | legForm.mode='water'
+PASS | ㊼ ⑧ 经**界面**改段：段行的方式标签变成服务端的「内河」、终点也换了；服务端历史里**两版都在**（改段留版本，不是覆盖） | 行文本='<view class="plan-leg" data-plan-leg="89"><view class="plan-leg-head"><text class="plan-leg-seq">89</text><text class="plan-leg-mode">内河</text><text class="plan' 历史=2版 kinds=['created', 'updated']
+PASS | ㊼ ⑨ 版本历史在渲染树里（`.plan-rev` 行数 ≥ 2）且**第 1 版保留当时的方式 `air`**——历史被当前值覆盖时行数**照样**是 2，所以判据必须读第 1 版的内容 | 版本行=2 页面版数=2 服务端=2 第1版文本='<view class="plan-rev" data-plan-rev="第 1 版"><view class="row-between"><text class="plan-rev-no">第 1 版</text><text class="slot-note">建段</text></view><text class'
+PASS | 截图 ㊼-航段命令写侧 | 33142B
+PASS | ㊼ ⑩ 本章运行期**无新增 console 报错** | 无
+
+-- ㊽ 货主本人经界面建段（第 4 步 · 参与方判据的另一半）--
+PASS | ㊽ [seed-shipper] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊽ [seed-shipper] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | ㊽ ① 货主看到的详情页里**也有**建段入口（判据＝参与方，不是角色）——段行数与服务端一致 | 加一段=1 段行=2 服务端段数=2
+PASS | ㊽ ② 建段表单渲染出来，顺序号预填「最大序号 + 1」 | 预填='90' 期望=90 服务端序号=[88, 89]
+PASS | ㊽ ③ 货主侧的 `input_text` 真的接上了 `bindinput`（`data-df` 映射表认领到字段） | 四个输入框都键入成功
+PASS | ㊽ ④ 货主经界面建段成功：页面段数 = 服务端段数，新段那一行在渲染树里 | 页面段=3 服务端段=3 值锚点=1 行文本='<view class="plan-leg" data-plan-leg="90"><view class="plan-leg-head"><text class="plan-leg-seq">90</text><text class="plan-leg-mode">铁路</text><text class="plan'
+PASS | ㊽ ⑤ 服务端读回来的段集合里**真的有**这一段（不是前端往 `plan.legs` 里塞了一行） | 服务端序号=['88', '89', '90'] 期望含=90
+PASS | 截图 ㊽-货主建段 | 33118B
+PASS | ㊽ ⑥ 本章运行期**无新增 console 报错** | 无
+
+-- ㊺ 运力确认闭环（真实点击）--
+PASS | ㊺ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊺ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/entrust/workbench/workbench']
+
+-- 一、运力块渲染（先证有）--
+PASS | ㊺ ① 经理侧详情页真的渲染出运力块：**登记入口唯一可点**。没有它，后面三条（可输入 / 409 分流 / 确认成功）全部无从谈起 | canViewCapacity=True 入口命中=1
+PASS | 截图 45-1-运力块-登记入口 | 33122B
+
+-- 二、登记表单可输入 --
+PASS | ㊺ ②a 点「登记候选运力」⇒ 表单在**页内**展开（提交 / 取消同时可点） | tap=True capOpen=True submit=1 cancel=1
+PASS | ㊺ ②b 真机打的字**真的进了页面 data**（判据是 capForm 里有值，不是「输入框看得见」）—— 本切片那个只在真机上暴露的缺陷（`data-df` 在 handler 的映射表里没有对应项 ⇒ `bindinput` 照常触发、查表查不到就静默空转）正是死在这一条上 | carrier='㊺ 甲承运 0920-002715' 吨位='900' 有效期='2026-12-18' 类别='document' 拆批=True 输入回执=True
+PASS | 截图 45-2-登记表单-已打字 | 33096B
+PASS | ㊺ ②c 真实点击「登记候选运力」⇒ 候选**真的落库**（API 直证；页面 toast 不算证据） | tap=True candidate_id=4 status='candidate'
+PASS | 截图 45-3-候选已登记 | 33092B
+
+-- 三、409 分流（规则不过）--
+PASS | ㊺ ③a 点「确认这一条」⇒ 确认条在**页内**展开（范围 / 备注可输入 + 提交可点） —— 判据取**渲染树**：三个可点/可输入锚点各命中一次，不看内部状态键（它条都没渲染时也照样被置上） | tap=True capConfirmKey='5' 期望='5' 范围框=1 备注框=1 提交键=1
+PASS | ㊺ ③b 规则不过 ⇒ 页面把**逐条**判定照实显示（四条规则全在，**含通过项** —— 后端特意全给，前端不得过滤） | 判定行=4 codes=['demand_known', 'evidence', 'validity', 'capacity'] 提交键 tap=True 范围输入回执=True 页内提示=''
+PASS | ㊺ ③c 过期候选**只在有效期上**不通过（根因要分得出来：「这一条为什么不行」与「这些规则都跑了」是两件事） | 通过项=['demand_known', 'evidence', 'capacity'] 未过项=['validity']
+PASS | 截图 45-4-规则不过的逐条判定 | 33113B
+
+-- 四、确认成功 --
+PASS | ㊺ ④a 真实点击「确认运力」⇒ 确认**真的落库**（API 直证：服务端读得回来） —— 一条候选只能确认一次是库上的唯一约束，不是先查后写 | confirmation_id=1 artifact_id=9 rules=4 范围框=1 打开 tap=True 提交 tap=True 范围输入回执=True 提交后页内提示=''
+PASS | ㊺ ④b 确认产出**采购确认成果**且逐规则判定落库（4 条；少一条＝有规则没跑） | artifact=9 rules=4 ruleset='v1'
+PASS | ㊺ ④c 确认成功后页面**重取并渲染**出确认卡（条数 +1），而不是前端往数组里塞一行 —— 候选状态也从 confirmed 回来 | 确认前=0 确认后=1
+PASS | ㊺ ④d 确认卡上的「只读复算」入口可被**唯一命中**（D1-09 的可点形态：用当前事实重跑同一套规则，不改任何行） | data-act-cap-recheck 命中=1
+PASS | ㊺ ④e 点「复算这条确认」⇒ **判定表真的渲染出来**（结果锚点唯一命中），而不是「请求发了、页面什么都没多出来」—— 「点了没反应」与「算出来不成立」在截图上长得一样，只有渲染树分得开 | tap=True 判定表锚点=1 validLabel='按当前事实仍然成立' 基准日='2026-09-19' 变化='判定读到的列没有变化（结论变化来自别处，请报障）'
+PASS | ㊺ ④f 复算**不改任何行**（D1-09 的「只读」）：复算前后确认行逐字相同 —— 「不再成立」是**按当时事实重跑**得出的结论，不是把这条确认作废掉 | 不同的键=[] confirmation_id=1 artifact_id=9 rules=4
+PASS | 截图 45-5-确认成功 | 33128B
+
+-- 五、负例：二次确认（状态冲突）--
+PASS | ㊺ ⑤ 同一候选二次确认 ⇒ **409**，且 `detail.existing_confirmation_id` 指回已存在的那条确认（客户端据此去读它，而不是拿一句「已经确认过了」把用户拦住） —— 界面对这一种要**刷新**，与「规则不过⇒不刷新」处置相反；混在一起会把用户送进死循环。注：界面侧的这条分支驱动不到（候选确认后 `confirmable=false`，确认条不再出现）⇒ 前端那一支由静态门禁守 | status=409 顶层keys=['detail'] detail.message='候选运力 4 已经确认过（确认记录 #1，成果 #9）—— 一条候选只能确认一次；要改资源或改结论，登记新的候选再确认（已作出的确认不能被覆盖）' existing_confirmation_id=1 existing_artifact_id=9 （本次确认 id=1）
+PASS | ㊺ 本章运行期 console 无未归因错误 | 增量 0 条
+
+== ㊹ 主演示第 6 步（合同 §10.1，真实点击）==
+
+-- 前置 · 定位 ㊸ 建的委托与其成果 --
+PASS | ㊹ 前置 · 定位 ㊸ 建的那张委托（标题匹配取**最大** assignment_id，不限状态） | aid=6 org=1（演示经营主体·工作台）token=已切到 owner
+PASS | ㊹ 前置 · 该委托下有**成果**（㊸ 的产出） | 成果 2 份：[('9', 'procurement_confirm'), ('8', 'quote_parsed')]；未归属 1 份（只统计归属恰好等于本委托的）
+NOT_RUN | ㊹ 前置 · 该委托下有**客户可见**的成果（第 6 步只能发布客户可见类型） | 客户可见白名单=['contract_review', 'customer_quote']；命中类型=无 id=无。依据：`offers.release_offer` 要求 `registry.project_for_customer(...)` 非空 —— 内部成果（如 `quote_parsed` 船东报价）一律 400，这是**设计**而非缺陷。⇒ 前置不成立（不是行为违反预期），故记 `NOT_RUN` 而不是 `FAIL`。
+
+-- 〇、经理经界面组装一份对客报价（第 6 步的载体）--
+PASS | ㊹ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊹ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | ㊹ 〇 经理在该委托详情页有「组装对客报价」入口（判据＝授权可唯一定位 ∧ 所在组织内有 `entrust:quote:create`） | 入口数=1
+PASS | ㊹ 〇 表单渲染出来且三个输入框真的接上 `bindinput`（`data-df` 认领表；币种已预填故不键入） | 三个输入框都键入成功
+PASS | ㊹ 〇 经**界面**组装出的对客报价出现在服务端成果清单里，且类型在客户可见白名单内 | 成果清单：[('10', 'customer_quote'), ('9', 'procurement_confirm'), ('8', 'quote_parsed')]；命中 customer_quote id=10
+PASS | 截图 44-0-组装对客报价 | 33120B
+
+-- 一、经理（seed-owner）真实点击进入成果页 --
+PASS | ㊹ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊹ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 截图 44-1-成果页 | 25991B
+PASS | ㊹ 第6步 · 工作台 → 委托卡 → 详情 → 成果引用 → 成果页（全程真实点击，经页面的 `go()` 决策） | card=True detail=True 引用锚点 1 个 ref=True artifact=True 落页 artifactId='10'（期望 10）
+PASS | ㊹ 第6步 · 成果页列出可发布的版本，且选出的目标版本**未发布过** | 版本 1 个：[1]；目标 v1（isCurrent=True published=False）
+
+-- 二、真实点击发布 → 来源门槛 --
+PASS | ㊹ 第6步 · 发布前先取**服务端**的门槛结论（它决定下面走哪条剧本） | gate.ok=True declared=0 pending=0 ⇒ 人工直写：无待核验声明，一次发布即成功
+PASS | 截图 44-2-发布确认条 | 25991B
+PASS | ㊹ 第6步 · 「发布这一版给客户」入口走**页内确认条**（发布会被客户与审计看到，确认动作必须可被真机验证，不用原生弹层） | 版本行锚点 1 个（`v1` 唯一）、tap=True、确认条 1 个
+PASS | 截图 44-3-发布结果 | 27147B
+PASS | ㊹ 第6步 · 发布前**来源门槛**生效：未核验的来源不得作为已发布依据 —— 被拒时页面把**待核验清单**显示出来（只说'不能发布'是没法干活的） | submit=True published(页面)=True released(服务端)=True 门槛预读=True 漂移=False releaseHint=''（人工直写的载体不在门槛下 ⇒ 预期是一次发布即成功）
+PASS | ㊹ 第6步 · 门槛状态经 **API 直证**（页面判定与后端同源） | gate.ok=True declared=0 pending=0 missing_declaration=False ⇒ 页面 published=True / 服务端 released=True
+NOT_RUN | ㊹ 第6步 · 界面提供登记「来源核验」的入口（把待核验项变成已核验，才能发布） | 本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。
+NOT_RUN | ㊹ 第6步 · 【替代通路】经 API 逐条登记核验后，门槛转为通过 | 本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。
+NOT_RUN | ㊹ 第6步 · 门槛通过后**重新真实点击**发布 ⇒ 该版本变为已发布 | 本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。
+PASS | 截图 44-4-已发布 | 27164B
+PASS | ㊹ 第6步 · 版本行上出现**发布号与状态**，且该版本不再给发布入口（重复发布同一版只会把客户手上那份取代掉，没有收益） | releaseId='2' 该版本的发布入口剩余 0 个
+PASS | ㊹ 第6步 · 服务端的发布记录指向**精确 revision**，且冻结了客户快照（`customer_snapshot.payload` 非空 —— 空快照是本切片踩过的静默降级） | 该版本发布 1 条（其中 released 1 条）；快照键=['artifact_type', 'content_source', 'data_origin', 'payload', 'revision_no', 'signature_mode'] payload 字段数=4
+NOT_RUN | ㊹ 第6步 · 授权下载清单**冻结在发布记录上**（不是「同属一条委托就全开」） | 本轮载体 `artifact#10` **没有附件**（授权清单两侧都是空）⇒ 断言会**真空通过**（`[] == []` 恒真）⇒ 记 `NOT_RUN`。要取证这条，需让载体本身带附件；本章 〇 节组装的对客报价是没有附件的（㊸ 上传的附件挂在**会话**上，不在成果上）。
+PASS | ㊹ 第6步 · 经理响应客户发布 ⇒ **403**（看得见、无权；冒充货主不是 404 而是明确拒绝） | HTTP=403（期望 403）
+
+-- 三、客户（seed-shipper，货主本人）真实点击接受 --
+PASS | 截图 44-5-客户侧-对客报价 | 33118B
+PASS | ㊹ 第6步 · 客户经**真实入口**（我的 → 我的委托 → 该单）进详情页，并在页面上看到「对客报价」卡 | via=真实点击「我的委托」 我的委托入口 1 个 列表页=True 本单卡 1 个 detail=True path=pages/entrust/detail/detail
+PASS | ㊹ 第6步 · 客户看到的是**发布时那一版**（版本号与服务端发布记录逐字相等） | 页面 v1/发布#2；服务端 v1/发布#2
+PASS | ㊹ 第6步 · 内容是**发布时冻结**的那份（客户侧渲染出的字段非空） | contentRows=4 contentEmpty=False
+PASS | ㊹ 第6步 · 数据来源标注常驻显示（`unknown` 照实说'来源未标注'，不折成人工录入） | mode='manual' label='人工录入' 锚点 1 个
+PASS | ㊹ 第6步 · 签署模式如实标注（不写这一句，'已接受'会被读成一份已生效的法律签署） | signatureMode='labeled_sample' hint='本次客户确认按演示口径记录为「样本签署」，不作为已生效的法律签署'
+PASS | ㊹ 第6步 · 客户**可以**响应（`canRespond=True` 且还没响应过） | canRespond=True decided=False
+PASS | 截图 44-6-客户响应页内展开条 | 33118B
+PASS | ㊹ 第6步 · 「接受这一版」走**页内展开条**（不是原生弹层）——这是唯一会改变业务事实、且后端用 `UNIQUE(release_id)` 钉死'只能响应一次'的动作 | tap=True offerForm='accept' 提交锚点 1 个
+PASS | 截图 44-7-客户已接受 | 33118B
+PASS | ㊹ 第6步 · 真实点击「确认提交」⇒ 页面转为**已响应**态并显示决定与时间 | submit=True decided=True decisionLabel='接受' respondedAt='2026-09-19 16:33:24'
+PASS | ㊹ 第6步 · 已响应后**不再给响应表单**（响应不可修改，与后端'只能响应一次'一致） | 接受入口 0 个、提交入口 0 个
+PASS | ㊹ 第6步 · 客户响应**已落库**（API 直证，页面自述不算数）：客户在「我收到的发布」里能看到自己的决定与备注 | HTTP 载荷：release=2 revision=1 decision='accept' responded_at='2026-09-19 16:33:24'
+PASS | ㊹ 第6步 · 经理通道看到的**是同一条**发布与同一条响应（两条投影对得上） | 经理侧：v1 decision='accept'；客户侧：v1 decision='accept'
+PASS | ㊹ 第6步 · 同一次发布二次响应 ⇒ **409**（判据是 `UNIQUE(release_id)`，不是前端拦） | HTTP=409（期望 409）
+
+-- 四、有响应的发布：撤回入口消失（界面层复核）--
+PASS | ㊹ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊹ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 截图 44-8-经理侧-撤回入口消失 | 26004B
+PASS | ㊹ 第6步 · 有客户响应的发布**不给撤回入口**（后端本来就 409；摆一个必然失败的按钮等于把业务规则说成'随机失败'） | detail=True artifact=True 撤回入口 0 个；版本行客户决定='接受'
+PASS | ㊹ 本章运行期 console 无未归因错误 | 增量 0 条
+
+-- ㊾ 合同派生与签署证据的界面取证（第 7 步）--
+PASS | ㊾ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊾ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | ㊾ ② 未派生时页面有「生成合同核对稿」入口，且它**不带**任何业务入参（合同内容只能来自已接受事实，界面不该能填金额） | 入口数=1
+PASS | ㊾ ③ 经**界面**派生成功：页面拿到的合同与服务端**同一个成果同一版本**（报价版本与合同版本各自精确） | 页面='11' 服务端='11' 报价版本=1
+PASS | ㊾ ④ 逐字段来源表渲染出来，行数 = 服务端来源行数（D1-08 要的是「能检查它怎么来的」，不是「有一份合同」） | 页面行数=18 服务端=18
+PASS | ㊾ ⑤ 「这份合同少写了什么」如实列出（有缺失项时页面上必须写得出"未提供"）—— 列出来而不是编默认值，这是派生与编造的分界 | 服务端缺失项=[] 卡片文本='<view class="card slot-card contract-card"><view class="row-between slot-head"><text class="slot-title">合同核对稿</text><tex'
+PASS | ㊾ ⑥ 合同卡上有「记一条签署证据」入口 | 入口数=1
+PASS | ㊾ ⑦ 证据表单的输入接上了 `bindinput`（`data-df="sig-note"` 被认领） | kind='sample_scan' 键入=True
+PASS | ㊾ ⑧ 经**界面**记一条签署证据：页面出现一行，且**绑的是版本**（「第 1 版」）+ 形态 + 样件标注；与服务端同源 | 页面=1 服务端=1 行=1 首行='<view class="sig-row" data-sig-row="#1"><text class="sig-rev">第 1 版</text><text class="sig-kind">样件扫描件</text><text class="sig-mode">样件标注（不构成实时电子签署）</text><text '
+PASS | ㊾ ⑨ 同一版同一形态**再记一次** ⇒ 页内说清「已经记过」（服务端 409 的语义，不是静默失败，也没有记成两条互相打架的证据） | sigHint='证据未记录：合同第 1 版已经记过一条「样件扫描件」证据 —— 同一版同一形态只记一条（这是重放/双击被唯一约束挡住，不是业务冲突）' 条数 1 → 1 表单展开=True（点了 1 次）提交键有落点=True
+PASS | ㊾ ⑩ 常驻声明真的渲染出来（「不构成实时电子签署」）—— 合同 §3.2 / D1-08 要求证据与状态不得等同于实时电子签；页面上没写就会被读成「签过了」 | 卡片文本=<view class="card slot-card contract-card"><view class="row-between slot-head"><text class="slot-title">合同核对稿</text><text class="slot-note">第 1 版</text></view><view class="contract-line">
+            
+PASS | 截图 ㊾-合同派生与签署证据 | 33117B
+PASS | ㊾ ⑪ 本章运行期**无新增 console 报错** | 无
+
+-- ㊿ 委托货量变更的设备侧取证（第 8 步）--
+PASS | ㊿ 前置 · canonical 夹具的货量就是 800.000 吨（D1-09 的起点） | quantity=800 unit=吨（夹具声明 800.000 吨：一致）
+PASS | ㊿ ② 变更前 · 900 吨候选的运力确认**成立**（基线：确认在 800 吨需求下判过） | still_valid=True 不过的规则=[]
+PASS | ㊿ [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | ㊿ [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | ㊿ ③ 案件页有「变更类别」选择条，点它能把类别补登成「货物数量与品类」（没有这个入口，变更请求在界面上根本应用不了：应用要求类别已登记） | 选择项数=1（页面上 categoryOptions=5）
+PASS | ㊿ ③b 选中类别后它真的落进了页面表单（补登的类别会随这次决定一起回传） | qty 输入框数=0 单位=0
+PASS | ㊿ ③c 经界面进入复核（`open → approved` 不是合法转移，服务端会 409） | status='in_review' hint=''
+PASS | ㊿ ④a 选「已批准」后三只货量输入框**渲染出来了**（内部状态键对了不算数） | 渲染树计数：新值=1 单位=1 依据=1｜showQuantityChange=True｜decideForm.to=''｜quantityTargetId='6'
+PASS | ㊿ ④b 三只输入框真的把值写进了页面 data | quantityForm={'quantity': '950', 'unit': '吨', 'basis': '走查 货量变更（D1-09）'}
+PASS | ㊿ ④c 经界面批准落库（批准内容随这次请求进快照，`apply` 只认快照） | status='approved' hint=''
+PASS | ㊿ ④d 应用确认条上能看到 `当前 → 将改为`（apply 不接受改写，不给对照就是盲操作） | quantityChangeText='将改为 950.000 吨（当前 800.000 吨）'
+PASS | ㊿ ⑤ 经界面应用后**货量真的落库**（800 → 950） | 服务端 quantity='950'（期望 950）· 页面 status='applied'
+PASS | ㊿ ⑤b 页面上出现那条对照（`<变更前> → <变更后>`，且来源案件号对得上） | changeText='800.000 吨 → 950.000 吨' source='来源变更案件 #3' basis='走查 货量变更（D1-09）'（历史共 1 行）
+PASS | ㊿ ⑤c ⭐ D1-09 的**精确那对值**：`800.000 吨 → 950.000 吨`，且页面与服务端同源 | 页面='800.000 吨 → 950.000 吨' 服务端=('800.000', '950.000')
+FAIL | ㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话） | still_valid=True 不过的规则=[] changed_fields=['demand_tonnes']
+PASS | ㊿ ⑦ 页面上出现复核传播，含「船型、运力及货物适配」（＝复核与重新确认的落点） | 复核区域=['船型、运力及货物适配', '采购范围与成本', '交接数量、单位及作业安排', '报价复核', '合同复核']
+PASS | ㊿ ⑧ 本章运行期无新增 console 报错 | anonymous> (http://127.0.0.1:46736/__dev__/WAServiceMainContext.js?t=wechat&v=3.17.3:1:215631)\n    at Or (http://127.0.0.1:46736/__dev__/WAS... (length=1232)"]
+
+== ㉛ 案件页「应用变更」（真写造 approved 形态）==
+PASS | 锚点预取：三身份 token + 订单/货源/船/预约/泊位 | pay=2 cargo=3 ship=1 appt=3 berth=1 sim=3
+PASS | ㉛ 前置 · 有带生效版本的 customer_quote 成果（复核候选里的类型） | artifacts=5
+PASS | ㉛ 前置 · 登记变更案件（带 change_category） | HTTP 200 case_id=4 {'case_id': 4, 'assignment_id': 1, 'org_id': 1, 'kind': 'change_request', 'title': '走查㉛·变更：货量调整', 'cause': None, 'severity': 'medium', 'impa
+PASS | ㉛ 前置 · 进入复核（open → in_review） | HTTP 200
+PASS | ㉛ 前置 · 批准（依据版本 id + 结构化修改内容） | HTTP 200 {'case_id': 4, 'assignment_id': 1, 'org_id': 1, 'kind': 'change_request', 'title': '走查㉛·变更：货量调整', 'c
+PASS | ㉛ approved 态案件页 ready | ready
+PASS | 截图 31-案件页-已批准 | 22756B
+PASS | ㉛ 批准快照摘要到位（先看清将发生什么，再点确认） | categoryLabel=货物数量与品类 targets=1
+PASS | ㉛ 「查看并应用已批准的变更」锚点唯一命中 | n=1
+PASS | ㉛ 未应用时「复核传播」为空（顺序契约：先应用、再传播） | n=0
+PASS | 截图 31-案件页-应用确认条 | 22756B
+PASS | ㉛ 真点击展开**页内确认条**（不是 wx.showModal —— 弹层不在渲染树里、工具点不到） | box=1 submit=1 cancel=1
+PASS | ㉛ 确认条列出受影响项（不是只给一个空按钮） | n=1
+PASS | ㉛ 「取消」能收回确认条（点错了回得去） | box=0
+PASS | 截图 31-案件页-应用后-复核传播 | 22747B
+PASS | ㉛ 真点击「确认应用」后出现「复核传播」清单 | n=5
+PASS | ㉛ 应用后不再给「应用变更」入口（已应用不可重复应用） | False
+PASS | ㉛ 复核清单每项带复核任务号与区域（不是空壳） | [{'key': 'artifact:3', 'area': '报价复核', 'taskTypeLabel': '询价', 'targetText': '成果 #3', 'revisionText': '版本 id 13', 'reviewTaskId': 13, 'taskTi
+PASS | ㉛ 「复核传播」卡片真的渲染出来（DOM 条目数与数据一致） | dom=5 data=5
+
+== ㉜ 成果页「待复核」徽标 ==
+PASS | ㉜ 前置 · 从 REST 复核项拿到它指向的成果 id | art_id=3 rv=5
+PASS | 截图 32-成果页-待复核徽标 | 30331B
+PASS | ㉜ 成果页带上 needsRevalidation（派生自复核项） | {'count': 1, 'areasText': '报价复核', 'caseIds': [4], 'caseIdsText': '#4', 'reviewTaskIds': [13], 'reviewTaskIdsText': '#13'
+PASS | ㉜ 徽标标题真的渲染出「待复核」（有元素、不是空白） | n=1
+PASS | ㉜ 徽标给出复核区域与复核任务号（不是空壳） | areas=报价复核 tasks=#13 lines=3
+
+-- 52 财务与结算：第 10–11 步经界面走通（S7-1/S7-2/S7-3）--
+PASS | 52 前置 · 货主名下有一张已受理（claimed）委托 —— 本章自己挑一张，不绑可选夹具 | aid='6' claimed 3 张 / 名下共 4 张
+PASS | 52 前置 · 经**接口**铺一个「要求照片证据」的任务（界面建任务没有 required_evidence 入参，如实登记） | task_id='18'
+PASS | 52 [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | 52 [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 52 ① 委托详情页上有「财务与结算」入口，且点得进 —— 这是第 10–11 步在**现有界面**上的入口 | 入口=True 落地=pages/entrust/finance/finance
+PASS | 52 ② 经理视角取到**内部**读数（费用 / 缺件 / 结算 / 财务状态四块都由这一页取） | canViewInternal=True 费用 0 条
+PASS | 52 ③ 界面上登记出**草稿**费用行，且**草稿不进合计**（合同 S4 段第 9 条的确认前状态） | 草稿 1 条｜计入条数 0 → 0
+PASS | 52 ④ 界面确认后该行进合计（合计金额由服务端算，页面只显示它给的字符串） | 计入 1 条，合计='100000.0000'
+PASS | 52 ⑤ 提争议后该行**退出合计**（合同 S4 段第 10 条：争议不进已确认总额） | 争议 1 条｜计入条数回落 → 0
+PASS | 52 ⑥ 处置时**显式选「计入」并给最终金额** ⇒ 合计按最终金额走（裁定 Q2=B：「已解决」一词决定不了是否计入） | 已解决 1 条｜「计入」选项在=True｜合计='88000.0000'
+PASS | 52 ⑦-a 缺件视图把「还缺什么」算出来（派生，不新建实体）—— 夹具任务要求照片 | #18 缺 'photo'
+PASS | 52 ⑦-b 在**原任务**上补录一条证据 ⇒ 该任务的缺项消失（业务发生时间界面上必填） | 缺项清空=True 页内提示='已补录 —— 这个任务的必需证据齐了'
+PASS | 52 ⑧ 界面上生成结算**版本** v1（快照当时的费用事实；旧版本不改） | 版本数=1 v1 状态='待内部确认'
+PASS | 52 ⑨ 内部确认（draft → approved）—— 只有适用版本能被确认 | 状态=['已内部确认']
+PASS | 52 ⑩ 财务状态在客户确认之前**不是**已结清，且把原因说出来（不是只给一个状态码） | 状态=未结清｜blockers=['客户尚未确认适用结算版本', '有未关闭的案件', '未结余额非零']
+PASS | 52 ⑪ 记一条收付依据：页内明说它是**合成样本**（不接真实支付、不宣称资金到账） | 页内提示='已记一条收付依据（labeled_sample：合成样本，不代表真实到账）'
+PASS | 52 ⑫-a 货主侧走**对客通道**：看得到待确认的是哪一版，且**看不到内部成本**（截图留存；页面本就不渲染 internal_total） | customerMode=True 版本='v1' 待确认=True
+PASS | 52 ⑫-b **客户本人**点了「确认这一版」⇒ 确认绑定在这一版上（旧确认替不了新版本过关是结构保证的） | 待确认=False 页内提示='客户已接受这一版'
+PASS | 52 [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | 52 [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 52 ⑬ 客户确认之后，「客户尚未确认适用结算版本」这条未结成因**消失**；其余未结成因页面与派生端点两处同结论（不假装已结清） | 页面状态='未结清' 页面未结成因=['有未关闭的案件'] ／派生 status='open' codes=['open_cases']
+PASS | 截图 52-财务与结算 | 38579B
+PASS | 52 ⑭ 本章运行期**无新增 console 报错** | 无
+
+== ㊶ 「我的委托」客户侧状态屏（出口判据① 的独立断言 + 承接组织）==
+PASS | ㊶ 前置①：`seed-shipper-orgpicker` 对**甲组织**有生效委托授权（取 `/my-entrustments`，不是 `/my-orgs`）⇒ 它能把单提交到甲，而甲的组织名正是本章要断言的「承接组织」 | 授权组织数=2 甲#2 授权组织名=['演示经营主体·乙', '演示经营主体·甲']
+PASS | ㊶ 前置②：载体单已建成并**提交到甲组织**（`submitted`）。标题取唯一值 —— 列表里同时有种子单与本轮新单，靠标题 / id 才能把它们分开 | 建单 HTTP=200 id='7' 提交 HTTP=200 status='submitted'
+PASS | ㊶ 前置③：另建一张**草稿**载体单（`org_id` 为空）—— 它是「承接组织未知」这一格的载体：只有真的有这么一张单，才能证「尚未委托组织」不是编出来的文案 | 建单 HTTP=200 id='8' org_name=None
+
+-- 一、「我的」页的货主侧入口（真实点击）--
+PASS | ㊶ ① 「我的」页上**货主侧**入口可见并真实渲染出来（`showMineEntrust=true` + 锚点命中 1）。⚠️ 它由**独立**探测驱动（`view=owner`），与同页的经理入口（`view=org`）不共用一个开关 ——共用一个开关时货主永远看不到自己的委托列表，而这类缺陷不会报错 | showMineEntrust=True 锚点命中=1
+PASS | 截图 41-1-我的-货主侧入口-可见 | 32835B
+PASS | ㊶ ② 真实点击入口 ⇒ 进入「我的委托」列表，五态落到 ready，且**刚提交的那一单在列表里**（这就是此前缺的那条：它证明界面能看见这张单，而不只是数据库里有它） | tap=True view='ready' 条目数=4 命中=True
+PASS | 截图 41-2-我的委托-列表-已提交单在列 | 41502B
+
+-- 二、承接组织两格（有 / 无）--
+PASS | ㊶ ③ 列表上该单的**承接组织显示为组织名**（不是 `组织 #7` 这类裸编号）。⚠️ 补这条断言是必然的：后端此前只给 `org_id`，界面只能把编号端给货主看 | orgName='演示经营主体·甲' orgLabel='演示经营主体·甲'
+PASS | ㊶ ④ **未知保持未知**：草稿载体单（没有承接组织）在列表上显示「尚未委托组织」，既**不是**空白、也**不是**一个编出来的组织名 —— 空白看起来像界面没渲染，而编一个名字会让货主以为已经有人接手了 | orgName='' orgLabel='尚未委托组织'
+PASS | 截图 41-3-我的委托-承接组织两格 | 41451B
+
+-- 三、reLaunch 重进列表 ⇒ 该单仍在 --
+PASS | ㊶ ⑤ **出口判据① 的独立断言**：`reLaunch`（换页面实例、清空页面栈）**两次**之后，这一单**仍在返回的列表载荷里**，且状态仍是 `submitted`、承接组织仍是甲 ——⚠️ 这是本章存在的理由：㉞ 证的是"草稿续接"、后端证的是"落库"，**都不是**"重新加载后界面仍看得见它" | 两次 view='ready'/'ready' 第二次条目数=4 命中=True status='submitted'
+PASS | 截图 41-4-我的委托-reLaunch-重进后仍在 | 41397B
+
+-- 四、真点击该行 ⇒ 详情；详情再重进 --
+PASS | ㊶ ⑥ 从列表**真实点击这一行** ⇒ 落到**这一张**的详情（编号对得上，而不是「列表第一条」），且状态与承接组织与服务端真相一致 | tap=True 落点=detail view='ready' page 的 assignmentId='7' status='submitted' orgText='演示经营主体·甲'
+PASS | 截图 41-5-详情页-来自列表真实点击 | 29860B
+PASS | ㊶ ⑦ **详情页也重进一次**：换页面实例后详情仍可见、状态与承接组织不变 ——判据① 说的是 `survives reload`，而"列表看得见"与"详情看得见"是**两条**独立通路（列表走投影列表接口，详情走单张接口 + 工作台载荷） | view='ready' status='submitted' orgText='演示经营主体·甲'
+PASS | 截图 41-6-详情页-reLaunch-重进后仍在 | 29866B
+
+-- 五、负例：另一个货主的列表里不含它 --
+PASS | ㊶ ⑧ 负例：**另一个货主**（`seed-shipper`）的 `view=owner` 列表里**不含**这张单 ——`view=owner` 的可见性边界是"我自己的"，不是"所有人的"。⚠️ 没有这条，上面所有"看得见"的断言都可能是"列表其实是全表" | 对方 total=4 含本章载体单=False
+PASS | ㊶ 去向记录（**复用**，不是本章新证）：出口判据① 里「**UI-created**」那一半由 **㉞ 章**覆盖（真机走真实入口建草稿 → 提交 → 落到详情），本章补的是「**重进后仍在列表 / 详情可见**」那一半。两半**互不替代** ⇒本章**单独不构成**判据① 通过；整句是否成立由 HO 判 | 去向：㉞ = UI-created · 本章 = survives reload（列表 + 详情两条通路）
+PASS | ㊶ 本章 console 无未豁免 error（页面自身的运行期错误）
+LIMITATION | ㊶ **下拉刷新（真手势）与分页第 2 页**无法由本工具触发 | 本页 `enablePullDownRefresh=true`（`onPullDownRefresh` → `load()`），但下拉是**真实触摸手势**，走查工具只能发 tap / 程序化导航，造不出这个手势；分页第 2 页需要 >20 张单（`PAGE_SIZE=20`），而种子里没有那么多。⇒ `onPullDownRefresh` 与 `pageHint` 的多页分支**未取得设备证据**（与产品无关，是工具边界）。本章能证的是：首屏取数、五态、列表三项内容、真实点击进详情、两条通路各自的 reLaunch 重进、以及 `view=owner` 的可见性负例。
+
+================ 汇总 ================
+断言 241 项：**通过 232** / 未取得通过证据 9
+  分档：PASS=232 | FAIL=2 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=5 | LIMITATION=2
+  归并（HO 五档）：PASS=232 | FAIL=2 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=7
+  LIMITATION: ㊸ 第2步 · 「上传报价单（从系统里选文件）」 | 入口可被唯一命中（1 个），但点击会打开 **OS 级原生文件选择器** —— 它是系统弹层、不在小程序渲染树里，走查工具够不着它的选择项（技能 miniapp-device-walkthrough 的负例清单实测过）。**不计入通过**。要拿到这一格的证据需要 OS 级输入通道（本项目 ⑧b/㊶ 用过），或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。
+  FAIL: ㊻ ⑤ 必需任务与**前置**逐行渲染（每一条任务行都带一行前置说明：「无固定前置」或有具体前置 —— 判不了的那一格也必须自己说话） | 任务行 按类=0 裸属性=0（服务端 0） hasTasks=False｜前置行 按类=0 裸属性=0
+  NOT_RUN: ㊹ 前置 · 该委托下有**客户可见**的成果（第 6 步只能发布客户可见类型） | 客户可见白名单=['contract_review', 'customer_quote']；命中类型=无 id=无。依据：`offers.release_offer` 要求 `registry.project_for_customer(...)` 非空 —— 内部成果（如 `quote_parsed` 船东报价）一律 400，这是**设计**而非缺陷。⇒ 前置不成立（不是行为违反预期），故记 `NOT_RUN` 而不是 `FAIL`。
+  NOT_RUN: ㊹ 第6步 · 界面提供登记「来源核验」的入口（把待核验项变成已核验，才能发布） | 本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。
+  NOT_RUN: ㊹ 第6步 · 【替代通路】经 API 逐条登记核验后，门槛转为通过 | 本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。
+  NOT_RUN: ㊹ 第6步 · 门槛通过后**重新真实点击**发布 ⇒ 该版本变为已发布 | 本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。
+  NOT_RUN: ㊹ 第6步 · 授权下载清单**冻结在发布记录上**（不是「同属一条委托就全开」） | 本轮载体 `artifact#10` **没有附件**（授权清单两侧都是空）⇒ 断言会**真空通过**（`[] == []` 恒真）⇒ 记 `NOT_RUN`。要取证这条，需让载体本身带附件；本章 〇 节组装的对客报价是没有附件的（㊸ 上传的附件挂在**会话**上，不在成果上）。
+  FAIL: ㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话） | still_valid=True 不过的规则=[] changed_fields=['demand_tonnes']
+  LIMITATION: ㊶ **下拉刷新（真手势）与分页第 2 页**无法由本工具触发 | 本页 `enablePullDownRefresh=true`（`onPullDownRefresh` → `load()`），但下拉是**真实触摸手势**，走查工具只能发 tap / 程序化导航，造不出这个手势；分页第 2 页需要 >20 张单（`PAGE_SIZE=20`），而种子里没有那么多。⇒ `onPullDownRefresh` 与 `pageHint` 的多页分支**未取得设备证据**（与产品无关，是工具边界）。本章能证的是：首屏取数、五态、列表三项内容、真实点击进详情、两条通路各自的 reLaunch 重进、以及 `view=owner` 的可见性负例。
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-001602
+[重跑关联] 同章节历史运行 0 次（首次结果**保留不覆盖**）：无
+RESULT: FAIL （FAIL=2 / NOT_RUN=5 / LIMITATION=2）
+
+===== 走查 stderr =====
+(空)
