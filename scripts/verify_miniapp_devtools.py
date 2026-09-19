@@ -434,10 +434,27 @@ def ensure_role(token: str, role: str) -> tuple[str, str]:
 #: 默认空 ⇒ `prefer_anchor()` 原样放行，行为与从前**逐字一致**。
 WALK_ANCHOR = (os.environ.get("WALK_ANCHOR") or "").strip()
 
+#: ⭐ **链式锚点（进程内）**：第 43 章真的建成那张**新委托**之后写进来，其后各章
+#: 一律沿用它 —— 这才是「同一张委托走完 13 步」。
+#:
+#: 为什么不能用 `--anchor` 代替：① 第 1 步就是「客户提交新委托」⇒ `aid` 只能在
+#: 跑起来**之后**才知道，命令行锚点做不到；② 每次走查都会起**新的临时库**
+#: （`_walk_<时间戳>.db`）⇒ 也不能"上一轮建单、下一轮锚定"地跨进程接力。
+#: 所以链式锚点只能是**同一次运行内**的模块级变量。
+CHAIN_ASSIGNMENT = ""
+
+
+def anchor_active() -> bool:
+    """本轮是否有**任何一种**锚点生效（命令行给的，或第 43 章建单后记下的）。"""
+    return bool(CHAIN_ASSIGNMENT or WALK_ANCHOR)
+
 
 def prefer_anchor(picked: str) -> str:
-    """给了 `--anchor` 就用它；否则原样返回各章自己挑到的那张。"""
-    return WALK_ANCHOR or picked
+    """链式锚点 > 命令行 `--anchor` > 各章自己挑到的那张。
+
+    默认两个都空 ⇒ 原样放行，行为与从前**逐字一致**。
+    """
+    return CHAIN_ASSIGNMENT or WALK_ANCHOR or picked
 
 
 def find_submitted(org_id: str, title: str, token: str) -> str:
@@ -7369,6 +7386,19 @@ def sec_43(w: Walker) -> None:
     w.c.set_data({"form.cargo_name": CANON_CARGO, "form.weight_t": CANON_QTY})
     time.sleep(0.6)
     n_ent = w.c.count('[data-act-entrust="1"]')
+    # ⚠️ 实测（2026-09-20）：弹层由 `wx:if="{{showChannel}}"` 控制，而 `showChannel`
+    #    的**初始值只在 `onLoad` 里给**。页面实例被复用时不跑 `onLoad` ⇒ 上一轮点过
+    #    「委托发货」后它停在 false，锚点恒 0 —— 看起来像"入口消失"，其实是**旧实例
+    #    的残留状态**。⇒ 换一个实例（`reLaunch`）即可拿回初始态；⛔ 不是加等待刷绿，
+    #    也不是注入 UI 状态，与 ㉞ 章"换页面实例仍续接"同一手法。
+    reset_via = "先到就绪"
+    if n_ent != 1:
+        w.c.nav("reLaunch", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
+        time.sleep(1.5)
+        w.c.set_data({"form.cargo_name": CANON_CARGO, "form.weight_t": CANON_QTY})
+        time.sleep(0.6)
+        n_ent = w.c.count('[data-act-entrust="1"]')
+        reset_via = "换页面实例后命中"
     t_ent = w.c.tap('[data-act-entrust="1"]') if n_ent == 1 else False
     ok_intake = w.c.wait_path(INTAKE, 30)
     time.sleep(1.5)
@@ -7376,7 +7406,8 @@ def sec_43(w: Walker) -> None:
     w.rep.rec(
         "㊸ 第1步 · 发布货源 → 受理屏（真实点击；货名/货量随草稿带过去）",
         bool(ok_cargo and t_ent and ok_intake),
-        f"via={via_cargo} cargo_page={ok_cargo} 锚点命中 {n_ent} path={w.c.current_path()}",
+        f"via={via_cargo} cargo_page={ok_cargo} 锚点命中 {n_ent} reset={reset_via} "
+        f"path={w.c.current_path()}",
     )
     if not ok_intake:
         w.rep.not_run("㊸ 第1步 · 客户提交", "未进入受理屏，链路断在这里")
@@ -7425,8 +7456,15 @@ def sec_43(w: Walker) -> None:
     w.rep.rec(
         "㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证）",
         bool(aid),
-        f"aid={aid} org={org_id}（{ORG_WORKBENCH}）",
+        f"aid={aid} org={org_id}（{ORG_WORKBENCH}）"
+        f" ｜链式锚点={'已生效,其后各章沿用本单' if aid else '未设置'}",
     )
+    # ⭐ **链式锚点**：这张**刚建成的新委托**就是本轮 13 步共用的那一张 —— 记进
+    #    进程内变量；其后各章（46/47/48/45/44/49/50/31/32/52/41）经 `prefer_anchor()`
+    #    一律沿用它，而不是各章按标题各挑一张。
+    global CHAIN_ASSIGNMENT
+    CHAIN_ASSIGNMENT = aid
+
     if not aid:
         w.rep.not_run("㊸ 第1步 · A1 受理及其后全部断言", "未能按标题定位新建的委托")
         return
@@ -7498,7 +7536,21 @@ def sec_43(w: Walker) -> None:
         "或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。",
     )
 
+    # ⭐ 沿链取"**第一个缺失事件**"（HO 2026-09-19）：点击是否命中 → 处理器是否真的跑了
+    #    （`uploading` 翻真）→ 是否落了附件行 → 是否提取完成。四个读数缺一个，
+    #    就分不清"没点到"／"点了但写样本文件失败"／"上传失败"／"上传成功但提取失败"。
+    #    ⛔ 这不是新诊断系统，只是把这条链上本来就存在的四个事件**如实报出来**。
+    n_sample = w.c.count('[data-act-sample-quote="1"]')
+    d_before = w.c.page_data()
+    att_before = len(d_before.get("attachments") or [])
+    sess_before = str(d_before.get("sessionId") or "")
     t_sample = w.c.tap('[data-act-sample-quote="1"]')
+    saw_uploading = False
+    for _ in range(20):
+        if w.c.page_data().get("uploading") is True:
+            saw_uploading = True
+            break
+        time.sleep(0.15)
     pg_att = w.wait_data(
         lambda x: any(
             str((a or {}).get("extractStatus")) == "done" for a in (x.get("attachments") or [])
@@ -7516,7 +7568,9 @@ def sec_43(w: Walker) -> None:
         # ⭐ 必须把 `tap=` 打进读数：`attachments=0` 同时对应「点击没落到元素上」与
         #    「点了但上传失败」两种原因（首跑就卡在这里 —— 后端日志显示那一轮**根本没发**
         #    `POST /entrust/attachments`，而读数里看不出是哪种）。
-        f"tap={t_sample} attachments={len(atts)} done={len(done_atts)}",
+        f"锚点={n_sample} tap={t_sample} uploading={saw_uploading} sess={sess_before!r} "
+        f"att_before={att_before} attachments={len(atts)} done={len(done_atts)} "
+        f"notice={str(pg_att.get('attachNotice') or '')[:60]!r}",
     )
     notice = str(pg_att.get("attachNotice") or "")
     w.rep.rec(
@@ -8633,7 +8687,7 @@ def sec_45(w: Walker) -> None:
         return str((hit[0] or {}).get("assignment_id") or "") if hit else ""
 
     aid = prefer_anchor(_newest_aid(title_main))
-    if not aid and not WALK_ANCHOR:
+    if not aid and not anchor_active():
         w.rep.not_run("㊺ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
 
@@ -9114,7 +9168,7 @@ def sec_46(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run("㊻ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
     aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
@@ -9322,7 +9376,7 @@ def sec_47(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == title_main]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run("㊼ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
     aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
@@ -9547,7 +9601,7 @@ def sec_48(w: Walker) -> None:
     rows = (api_get("/entrust/assignments?view=owner&size=50", tok) or {}).get("items") or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run(
             "㊽ 全部断言",
             f"seed-shipper 名下找不到「{demo_title}」（先跑 python scripts/seed_entrust_canonical.py）",
@@ -9697,7 +9751,7 @@ def sec_49(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run(
             "㊾ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
@@ -10041,7 +10095,7 @@ def sec_50(w: Walker) -> None:
     ) or []
     hit = [r for r in rows if str((r or {}).get("title") or "") == demo_title]
     hit.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
-    if not hit and not WALK_ANCHOR:
+    if not hit and not anchor_active():
         w.rep.not_run(
             "㊿ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
@@ -11154,10 +11208,10 @@ def sec_53(w: Walker) -> None:
     # ⚠️ 标题与夹具逐字一致（`seed_entrust_completion_ready.ASSIGNMENT_TITLE`）——
     #    改一处要改两处，否则这里会静默记 NOT_RUN。
     # 路径②：给了 --anchor 就直接用它，跳过"按标题找"
-    ready_aid = WALK_ANCHOR
+    ready_aid = CHAIN_ASSIGNMENT or WALK_ANCHOR
     org_rows = (
         []
-        if WALK_ANCHOR
+        if anchor_active()
         else (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
     )
     for r in org_rows:
@@ -11517,6 +11571,142 @@ def sec_54(w: Walker) -> None:
         w.rep.not_run("54 ⑨ 第 13 步（重进可见）", "没有齐备委托可用来做重进验证")
 
 
+def sec_55(w: Walker) -> None:
+    """第 9 步的**后半部分**：人工接管（合同 §10.1 第 9 步 / R9 / AC-16 的任务层落点）。
+
+    为什么单开一章
+    --------------
+    第 9 步原文是 `Complete required revalidation / renewed acceptance; A2 takes over a task`。
+    前半（复核 / 重新接受）已由 ㉛（应用变更 ⇒ 复核项）与 ㉜（成果页复核徽标）覆盖；
+    后半 **「接管一个任务」在走查里此前零覆盖** —— 全仓 grep「接管」在走查脚本里只命中
+    一条与代理有关的注释。而它是 R9 / AC-16 的判据落点，不能一直空着。
+
+    手段的诚实边界（沿用 O-1b 的既有裁定）
+    ------------------------------------
+    * **界面没有接管入口** —— 接管维持「经理经接口登记」的口径 ⇒ 接管**动作本身**
+      只能经接口取证，⛔ 不得写成「界面上可以接管」；本节反过来把「界面无入口」也断言出来；
+    * 但**后果**必须可断言，且要在服务端与界面两处都断言：
+      ① 接管推进执行代次（`lease_generation` +1、负责人改为接管人）⇒
+         **持旧代次的提交被拒**（409，且理由必须点名代次/接管）——
+         这就是"旧结果不得覆盖接管后的人工状态"；
+      ② 界面侧：委托详情页**没有**接管入口（0 命中），与 O-1b 的口径一致。
+    """
+    print("\n== 55 第 9 步后半 · 人工接管（经接口 ＋ 两处后果断言）==", flush=True)
+    tok_mgr = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    tok_shi = (api_login(CODE_SHIPPER) or {}).get("access_token") or ""
+    if not tok_mgr or not tok_shi:
+        w.rep.not_run(
+            "55 全部断言", "拿不到 seed-owner / seed-shipper 的 token（后端未起或种子未铺）"
+        )
+        return
+
+    def _task_of(resp: dict) -> dict:
+        """回执可能是任务本体、也可能是包一层的对象，两种都认（读不到就返回空）。"""
+        d = resp or {}
+        for cand in (d.get("task"), d):
+            if isinstance(cand, dict) and cand.get("lease_generation") is not None:
+                return cand
+        return {}
+
+    # ---- ① 载体：货主名下的一张已受理委托（与 52 章同口径：自己挑，不绑可选夹具）----
+    rows = (api_get("/entrust/assignments?view=owner&size=50", tok_shi) or {}).get("items") or []
+    claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
+    claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    aid = prefer_anchor(str((claimed[0] or {}).get("assignment_id") or "") if claimed else "")
+    w.rep.rec(
+        "55 前置 · 有一张已受理（claimed）委托可挂任务",
+        bool(aid),
+        f"aid={aid!r} claimed {len(claimed)} 张",
+    )
+    if not aid:
+        w.rep.not_run("55 接管剧本", "货主名下没有 claimed 委托 ⇒ 先铺 seed_entrust_demo")
+        return
+
+    # ---- ② 前置任务：经**接口**铺一个**不要求证据**的任务 -----------------------
+    #    ⛔ `required_evidence` 必须为空：否则第 ④ 步的 409 也可能是"证据未齐"，
+    #    两条成因分不开，判据就失去意义。
+    st_t, task = api_post(
+        f"/entrust/assignments/{aid}/tasks",
+        tok_mgr,
+        {"task_type": "handover", "title": "接管演练（55 章）", "required_evidence": []},
+        uuid.uuid4().hex,
+    )
+    tid = str((task or {}).get("task_id") or "")
+    w.rep.rec(
+        "55 ① 经**接口**铺一个「不要求证据」的任务"
+        "（界面建任务没有 required_evidence 入参，如实登记）",
+        bool(tid),
+        f"HTTP={st_t} task_id={tid!r}（空 required_evidence 是刻意的：让 409 只能来自代次）",
+    )
+    if not tid:
+        w.rep.not_run("55 接管剧本", "任务未建成")
+        return
+
+    before = _task_of(api_get(f"/entrust/tasks/{tid}", tok_mgr))
+    g0 = before.get("lease_generation")
+    a0 = before.get("assignee_user_id")
+    w.rep.rec(
+        "55 ② 接管前的读数（执行代次 / 负责人）—— 后面两条断言的基线",
+        g0 is not None,
+        f"lease_generation={g0} assignee_user_id={a0} status={before.get('status')}",
+    )
+    if g0 is None:
+        w.rep.not_run(
+            "55 接管剧本",
+            f"任务详情里读不到 lease_generation ⇒ 回执形状 {list(before)[:12]}",
+        )
+        return
+
+    # ---- ③ 经接口接管（如实登记：界面无入口）--------------------------------
+    st_k, kres = api_post(f"/entrust/tasks/{tid}/takeover", tok_mgr, {}, uuid.uuid4().hex)
+    after = _task_of(kres) or _task_of(api_get(f"/entrust/tasks/{tid}", tok_mgr))
+    g1 = after.get("lease_generation")
+    a1 = after.get("assignee_user_id")
+    w.rep.rec(
+        "55 ③ 经接口接管 ⇒ 执行代次 +1、负责人改为接管人"
+        "（界面无接管入口，⛔ 不写成界面上可以接管）",
+        st_k == 200 and g1 == (int(g0) + 1) and str(a1 or "") != "",
+        f"HTTP={st_k} lease_generation {g0}→{g1} assignee {a0}→{a1}",
+    )
+
+    # ---- ④ 旧代次提交被拒（"旧结果不得覆盖接管后的人工状态"）------------------
+    st_old, old_res = api_post(
+        f"/entrust/tasks/{tid}/complete",
+        tok_mgr,
+        {"expected_generation": int(g0)},
+        uuid.uuid4().hex,
+    )
+    detail = str((old_res or {}).get("detail") or (old_res or {}).get("message") or old_res)
+    # ⚠️ 判据必须**点名成因**：只判 `409` 会把"证据未齐 / 状态不允许"也算过。
+    named = any(k in detail for k in ("代次", "接管", "改派", "generation", "lease"))
+    w.rep.rec(
+        "55 ④ 持**旧代次**提交完成 ⇒ **被拒 409，且理由点名代次/接管**"
+        "（接管后旧结果不得覆盖人工状态）",
+        st_old == 409 and named,
+        f"HTTP={st_old} 点名成因={named} detail={detail[:120]!r}（旧代次 {g0} / 当前 {g1}）",
+    )
+
+    # ---- ⑤ 界面侧：委托详情页**没有**接管入口（与 O-1b 口径一致）--------------
+    if not w.open_workbench(CODE_OWNER, tag="55"):
+        w.rep.not_run("55 ⑤ 界面无接管入口", "未能进入经理工作台")
+        return
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("55 ⑤ 界面无接管入口", f"打不开委托详情页（aid={aid}）")
+        return
+    pd = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    # ⚠️ 必须用**带值**属性选择器：本工具链对裸属性选择器（`[data-act-x]`）
+    #    直接抛 ValueError（它会静默回 0，比报错更危险）。本项目的锚点约定就是
+    #    `data-act-<动作>="1"`，照它写即可。
+    n_take = w.c.count('[data-act-takeover="1"]') + w.c.count('[data-act-task-takeover="1"]')
+    w.shot("55-1-委托详情-无接管入口")
+    w.rep.rec(
+        "55 ⑤ 委托详情页正常渲染，且页内**没有**接管入口（0 命中）—— 与 O-1b 一致",
+        bool(pd.get("view")) and n_take == 0,
+        f"view={pd.get('view')!r} 接管锚点命中={n_take}",
+    )
+    _ = w.c.errors()
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
@@ -11569,6 +11759,10 @@ SECTIONS = {
     #: 54 = 十三步的产物链（**读侧**）：只断言"每一步的产物在不在、归属对不对"，
     #: ⛔ 它不是"13 步在同一张委托上连跑"的证明（后者见 S4-b 文档 §7.1）。
     "54": sec_54,
+    #: 55 = 第 9 步**后半**（人工接管）：此前走查里零覆盖。
+    #: ⚠️ 接管**动作**只能经接口（O-1b：界面无入口，本节把「无入口」也断言出来），
+    #:    但「代次 +1 ⇒ 旧代次提交被拒」与「界面无入口」两处后果都断言。
+    "55": sec_55,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -11719,6 +11913,9 @@ DEFAULT_ORDER = [
     # ⛔ 它不是"13 步在同一张委托上连跑"的证明（见 `S4-b-结案命令切片.md` §7.1）。
     # ⚠️ ⑤ 需要 ㊿ 章先跑过 —— 本表里 50 排在它前面，顺序不可打乱。
     "54",
+    # 55 = 第 9 步后半（人工接管）。⛔ 不登记进本表就属于"静默漏项"：
+    #    `--section all` 会漏掉它，而读数不会变红、`--help` 也列不到。
+    "55",
 ]
 
 
