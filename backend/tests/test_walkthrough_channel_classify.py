@@ -180,3 +180,53 @@ def test_window_info_degrades_to_empty_when_missing(monkeypatch: pytest.MonkeyPa
     client = _bare_client()
     monkeypatch.setattr(client, "open_window", lambda *a, **k: {"ok": False})
     assert client.window_info() == {"type": "", "winId": ""}
+
+
+# ─────────────────────── 闸门里「主动刷新」的策略（2026-09-19 对照实验） ───────────────────────
+
+
+def test_should_auto_refresh_triggers_on_repeated_empty_stack() -> None:
+    """连续两次空栈 ⇒ 该主动 `simulator_refresh`。
+
+    实测（对照实验）：`empty_stack` 是**通道通、窗口没进小程序页**，
+    调一次 refresh 后连续 5 次取栈全转 `ok`（1.3~2.9s）并持续 ≥210s。
+    """
+    assert runner.should_auto_refresh(["empty_stack", "empty_stack"], 0) is True
+
+
+def test_should_auto_refresh_waits_for_threshold() -> None:
+    """只观测到一次空栈 ⇒ 先别刷（冷启动第一轮空是正常的，别把页面打回重载）。"""
+    assert runner.should_auto_refresh(["empty_stack"], 0) is False
+
+
+def test_should_auto_refresh_never_fires_when_stack_is_ok() -> None:
+    """⭐ **反向**断言：一旦取到栈就**绝不**刷（刷新会把页面打回重载，是破坏性的）。"""
+    assert runner.should_auto_refresh(["ok"], 0) is False
+    assert runner.should_auto_refresh(["empty_stack", "ok"], 0) is False
+    assert runner.should_auto_refresh(["channel_error", "ok"], 0) is False
+
+
+def test_should_auto_refresh_is_not_vacuous() -> None:
+    """同一长度下，两种历史必须给出**不同**结论（否则策略等于常量）。"""
+    bad = runner.should_auto_refresh(["empty_stack", "empty_stack"], 0)
+    good = runner.should_auto_refresh(["ok", "ok"], 0)
+    assert bad is True
+    assert good is False
+    assert bad != good
+
+
+def test_should_auto_refresh_respects_max() -> None:
+    """刷够次数就停（⛔ 不许无限刷/刷屏）。"""
+    hist = ["empty_stack"] * 9
+    assert runner.should_auto_refresh(hist, 0) is True
+    assert runner.should_auto_refresh(hist, runner.GATE_AUTO_REFRESH_MAX) is False
+    assert runner.should_auto_refresh(hist, runner.GATE_AUTO_REFRESH_MAX + 5) is False
+
+
+def test_should_auto_refresh_counts_channel_error_too() -> None:
+    """`channel_error`（IDE 内部 ≈11.6s 超时）也计入。
+
+    ⚠️ 诚实边界：**未验证** refresh 对 `channel_error` 有效；
+    之所以一并试，是因为"试一次"只花几秒，而"干等满 900s 预算后早退"是确定的浪费。
+    """
+    assert runner.should_auto_refresh(["channel_error", "channel_error"], 0) is True
