@@ -383,6 +383,16 @@ AUTOMATION_DEAD_MAX = 4
 #: 高于它才允许按连续计数收手。这样既不误杀冷启动，也保住了"真坏了就别等满预算"。
 AUTOMATION_DEAD_MIN_ELAPSED_S = 360
 
+#: 闸门里「主动刷新」的策略（2026-09-19 对照实验，见 DR-0020 §第三轮）：
+#: 累计到这么多次"空栈"就调一次 `simulator_refresh`，整轮最多调 `..._MAX` 次。
+#: ⭐ `empty_stack`（通道**通**、栈空）**已被证实**是 refresh 能救的状态：
+#:    调完连续 5 次取栈全转 `ok`（1.3~2.9s）且持续 ≥210s；
+#:    `close_project_window` 重开窗会**丢掉**这个就绪态（回到 `empty_stack`）。
+#: ⚠️ `channel_error`（IDE 内部 ≈11.6s 超时）**未验证** refresh 是否有效，
+#:    但也一并试一次（代价只有几秒，而"干等满预算"是确定的浪费）。
+GATE_AUTO_REFRESH_AFTER = 2
+GATE_AUTO_REFRESH_MAX = 2
+
 
 def _machine_pressure() -> str:
     """一句话的**机器资源读数**（给"闸门起不来"提供证据，而不是猜）。
@@ -491,6 +501,21 @@ def _brief(obj: object) -> str:
     return " ".join(bits)
 
 
+def should_auto_refresh(kinds: list[str], done: int) -> bool:
+    """现在该不该主动 `simulator_refresh` 一次？（**纯函数**，便于 CI 侧断言）
+
+    判据只依赖「已经观测到的 kind 序列」与「已经刷过几次」，不看时间 ——
+    这样它在 CI 里可被直接测（不需要 IDE）。
+
+    依据（2026-09-19 对照实验）：`empty_stack`＝通道**通**、窗口没进小程序页
+    ⇒ 调一次 refresh 让 IDE 重新编译加载，实测**连续 5 次转 `ok` 并持续 ≥210s**。
+    ⛔ `kind=ok` 时不刷（已经好了，刷它会把页面打回重载）。
+    """
+    if done >= GATE_AUTO_REFRESH_MAX:
+        return False
+    return sum(1 for k in kinds if k in ("empty_stack", "channel_error")) >= GATE_AUTO_REFRESH_AFTER
+
+
 def wait_ready(
     env: Env,
     budget_s: int = GATE_BUDGET_S,
@@ -516,6 +541,8 @@ def wait_ready(
     last: dict = {}
     dead = 0
     win_ids: list[str] = []
+    kind_hist: list[str] = []
+    refresh_done = 0
     while time.time() - t0 < budget_s:
         t1 = time.time()
         try:
@@ -527,6 +554,8 @@ def wait_ready(
         t3 = time.time()
         last = receipt or {}
         hit = receipt if not receipt.get("ok") else win
+        if receipt.get("__kind__"):
+            kind_hist.append(str(receipt["__kind__"]))
         # ⭐ 窗口标识：`type=open` 且 winId 递增 ⇒ 每轮都在**新开窗**（窗口堆积）；
         #    `type=reuse` 且 winId 稳定 ⇒ 同一个窗口。取栈不带窗口参数，只能靠这个观测。
         #    ⚠️ 两个字段在回执的 **`result`** 里（实测 `{"result":{"type":"reuse","winId":"s0"}}`），
@@ -548,6 +577,21 @@ def wait_ready(
             )
         if stack:
             return True
+        # ⭐ 主动救一次（而不是干等满预算）：空栈累计够次数就 `simulator_refresh`。
+        #    实测依据见 `GATE_AUTO_REFRESH_AFTER` 的注释与 DR-0020 §第三轮。
+        if should_auto_refresh(kind_hist, refresh_done):
+            refresh_done += 1
+            log(
+                f"    ↻ 已在给 {refresh_done}/{GATE_AUTO_REFRESH_MAX} 次主动 `simulator_refresh`"
+                f"（累计空栈 {sum(1 for k in kind_hist if k in ('empty_stack', 'channel_error'))} 次，"
+                f"最近 kind={receipt.get('__kind__')}）—— 实测 refresh 后取栈会转 `ok` 并持续。"
+            )
+            try:
+                rr = client.refresh()
+                log(f"      refresh 回执 ok={rr.get('ok')}")
+            except Exception as exc:  # noqa: BLE001
+                log(f"      refresh 异常：{str(exc)[:120]}")
+            time.sleep(5)
         # ⚠️ **早退**：命中"automation runtime 未注册"的签名时，等满预算也不会好 ——
         #    同一个 IDE 重试不会自愈（实测连续 12+ 次全命中），正确动作是**换一个
         #    已经注册好的实例**（`--skip-ide`），见 docstring 坑 ⑤ / DR-0009 §8.5⑨。
