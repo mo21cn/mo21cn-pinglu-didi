@@ -594,6 +594,49 @@
         <view wx:if="{{completeHint}}" class="slot-note">{{completeHint}}</view>
       </view>
 
+      <!-- 重开（S4-c / 设计 §5.5 Q2）。入口只在「已结案 ∧ 有 entrust:assignment:reopen」时出现
+           （判据见 detail.js 的 data.canReopen）。
+           ⚠️ 它是**受控**动作：理由必填（前端先拦、服务端再兜），被撤销的那次结案会留痕
+           —— 所以这里是**页内表单**，不是一句「确认重开吗」。
+           ⛔ 重开不恢复取消资格（Q2）：这里不会因此多出一个「撤回」入口。 -->
+      <view wx:if="{{canReopen}}" class="card slot-card">
+        <view class="slot-note">重开会把这张委托退回「已受理」，并记下你撤销的那次结案与理由</view>
+        <view class="slot-actions">
+          <view
+            wx:if="{{!reopenOpen}}"
+            class="slot-btn"
+            data-act-reopen-open="1"
+            bindtap="onReopenOpen"
+            hover-class="hover-dim"
+          >重开</view>
+          <view
+            wx:if="{{reopenOpen}}"
+            class="slot-btn"
+            data-act-reopen-submit="1"
+            bindtap="onReopenSubmit"
+            hover-class="hover-dim"
+          >确认重开</view>
+          <view
+            wx:if="{{reopenOpen}}"
+            class="slot-btn"
+            data-act-reopen-cancel="1"
+            bindtap="onReopenCancel"
+            hover-class="hover-dim"
+          >取消</view>
+        </view>
+        <view wx:if="{{reopenOpen}}" class="slot-note">理由（必填，会随这次撤销一起留痕）</view>
+        <input
+          wx:if="{{reopenOpen}}"
+          class="slot-input"
+          value="{{reopenReason}}"
+          placeholder="例如：费用口径填错，需要纠正后重新结案"
+          placeholder-class="input-ph"
+          maxlength="512"
+          bindinput="onReopenInput"
+        />
+        <view wx:if="{{reopenHint}}" class="slot-note">{{reopenHint}}</view>
+      </view>
+
       <!-- 归属机制上线前的历史成果：如实报数，不静默藏起来 -->
       <view wx:if="{{unassignedHint}}" class="card slot-card">
         <view class="slot-note">{{unassignedHint}}</view>

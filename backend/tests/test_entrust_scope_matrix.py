@@ -216,8 +216,10 @@ def test_matrix_size_matches_baseline():
     ⭐ S4-b 的**界面入口**（`GET …/closure-readiness`）**再 +1 ⇒ 104**：结案
     **不可逆**，界面要先让人看见清单再执行，所以补一个**只读前置**；它与命令
     **共用同一把锁**（`entrust:assignment:complete`）⇒ 权限码没有再多一个。
+    ⭐ S4-c 的**受控重开**（`POST …/reopen`）**再 +1 ⇒ 105**：它另开一个权限码
+    （`entrust:assignment:reopen`，能结案 ≠ 能撤销结案），并带**必填理由**与留痕。
     """
-    assert len(sm.SCOPE_MATRIX) == 104
+    assert len(sm.SCOPE_MATRIX) == 105
 
 
 # ── 2. 声明本身的自洽性 ────────────────────────────────────────────────────

@@ -72,6 +72,9 @@ REQUIRED_PERMS = (
     "entrust:view",
     "entrust:assignment:claim",
     "entrust:assignment:complete",
+    # S4-c：重开是另一个权限码 —— 本夹具铺出来的委托要能被**演示重开**
+    # （第 12 步的 `permitted reopen`），所以这里也一并给上。
+    "entrust:assignment:reopen",
     "entrust:task:dispatch",
     "entrust:settlement:create",
 )

@@ -973,7 +973,7 @@ IDE / uvicorn 随发起 shell 结束被回收）。
 | 9 | Complete required revalidation/renewed acceptance; A2 takes over a task | 复核项投影 ＋ 人工接管（ENT-041 五之四）；㉜ 依赖 ㉛ 的应用产物 | **部分**（接管那一半见 D1-12） |
 | 10 | Record handovers; demonstrate missing evidence and a disputed extra | **无**（S4 未做） | **未开始** |
 | 11 | Resolve them with evidence and confirm settlement | **无**（S4 未做） | **未开始** |
-| 12 | Close under the actual rules; inspect retained history and a permitted reopen/re-evaluation | **走查第 53 章**（S4-b：结案命令 ＋ 界面入口 ＋ 只读前置 ＋ **五维齐备夹具**）`PASS=16 / FAIL=1`（带夹具）｜`PASS=11 / FAIL=0 / NOT_RUN=1`（不带夹具） | **部分** —— 入口、五格清单、**两处同结论**、**被拦且缺项逐条可读**、被拦后状态未变、**齐备 ⇒ 结案成功**、结案后入口消失**均已设备运行**（截图 `walk-20260918-233709/`、`walk-20260918-235640/`）；⚠️ ⑧-d「保留历史」那条的 FAIL 是**断言读错键**（已修、**未复验** —— 随后两次跑撞 `ENV_BLOCKED`）；**第 2–9 步的界面动作在同一张委托上连跑仍未做**（见 `S4-b-结案命令切片.md` §7.1）；**受控重开属 S4-c，未做** |
+| 12 | Close under the actual rules; inspect retained history and a permitted reopen/re-evaluation | **走查第 53 章**（S4-b：结案命令 ＋ 界面入口 ＋ 只读前置 ＋ **五维齐备夹具**）`PASS=16 / FAIL=1`（带夹具）｜`PASS=11 / FAIL=0 / NOT_RUN=1`（不带夹具）｜**S4-c 受控重开**（命令 ＋ 留痕 ＋ 权限码 ＋ 界面，走查 ⑨ **设备侧待补**） | **部分** —— 入口、五格清单、**两处同结论**、**被拦且缺项逐条可读**、被拦后状态未变、**齐备 ⇒ 结案成功**、结案后入口消失**均已设备运行**（截图 `walk-20260918-233709/`、`walk-20260918-235640/`）；⚠️ ⑧-d「保留历史」的 FAIL 是**断言读错键**（已修、未复验）；**受控重开（S4-c）已实现并有用例与 MySQL 并发锚点，但走查 ⑨ 的设备侧读数未取得**（本机 `CreateProcess` 被系统层拒：`WinError 1450 系统资源不足`，**IDE 进程为 0** ⇒ 会话级资源到限，需注销/重启，见 `S4-c-受控重开切片.md` §6）；**第 2–9 步界面动作在同一张委托上连跑仍未做**（见 `S4-b-结案命令切片.md` §7.1） |
 | 13 | Reload/re-enter and inspect the same persistent records | **㊶**（重进后仍在列表/详情可见，出口判据①的独立断言）＋ ㉞ 第三节（换实例续接） | **部分**（真·跨进程续接记 `NOT_RUN`） |
 
 **小计**：**7 步已设备运行**（1 / 2 / 3 / 4 / 5 / 6 / 7 —— 其中步 2 的 live 那一半另算，见 D1-03）、

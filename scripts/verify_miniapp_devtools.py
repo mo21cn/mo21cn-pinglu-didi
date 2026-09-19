@@ -11158,6 +11158,253 @@ def sec_53(w: Walker) -> None:
     )
     w.shot("53-结案后（留痕）")
 
+    # ---- ⑤ 受控重开（S4-c / 设计 §5.5 Q2）：理由必填 ＋ 退回 claimed ＋ 入口复现 ----
+    has_reopen = w.c.count('[data-act-reopen-open="1"]') > 0
+    w.rep.rec(
+        "53 ⑨-a 已结案的委托上出现「重开」入口（判据＝completed ∧ entrust:assignment:reopen）",
+        has_reopen,
+        f"入口={has_reopen} canReopen={d4.get('canReopen')!r}",
+    )
+    if not has_reopen:
+        w.rep.not_run(
+            "53 ⑨ 受控重开剧本", "重开入口未出现（权限或状态判据不满足）⇒ 后续三步无从演示"
+        )
+        return
+    w.c.scroll_into('[data-act-reopen-open="1"]')
+    w.c.tap('[data-act-reopen-open="1"]')
+    time.sleep(0.6)
+    # 负例：理由留空 ⇒ **页内拦住**（不发请求）
+    w.c.scroll_into('[data-act-reopen-submit="1"]')
+    w.c.tap('[data-act-reopen-submit="1"]')
+    time.sleep(1.2)
+    hint_empty = str(w.c.page_data().get("reopenHint") or "")
+    w.rep.rec(
+        "53 ⑨-b 理由为空 ⇒ 就地要求补理由（「受控」不是一句口号）",
+        "理由" in hint_empty,
+        f"reopenHint={hint_empty[:70]!r}",
+    )
+    w.shot("53-重开-理由必填")
+    # 正例：填理由 → 提交 → 回到 claimed
+    w.c.set_data({"reopenReason": "费用口径填错，需要纠正后重新结案"})
+    time.sleep(0.5)
+    w.c.tap('[data-act-reopen-submit="1"]')
+    back = w.wait_data(
+        lambda x: str((x.get("detail") or {}).get("status")) == "claimed", tries=60, gap=0.5
+    )
+    d9 = back.get("detail") or {}
+    w.rep.rec(
+        "53 ⑨-c **受控重开成功**：状态回到 claimed，且 `completed_at` 被清空",
+        str(d9.get("status")) == "claimed" and not d9.get("completedAt"),
+        f"status={d9.get('status')!r} completedAt={d9.get('completedAt')!r}",
+    )
+    entry_back = w.c.count('[data-act-complete-open="1"]')
+    w.rep.rec(
+        "53 ⑨-d 重开之后「结案」入口重新出现（它回到的正是可结案的那个状态）",
+        entry_back > 0,
+        f"结案入口数={entry_back}",
+    )
+    # ⚠️ 这一条只是**渲染层旁证**（页面不长出「撤回」入口）。Q2 的**硬证据**在 pytest 的
+    #    `test_reopen_never_restores_cancel`（服务端拒绝）＋ 静态层**按模式扫描**
+    #    （`verify_entrust_ui.js` 的四条「受控重开」）—— 三者互不替代。
+    # ⚠️ **必须带正控**：`[data-act-cancel="1"]` 在本页**从来不存在**（那个命名只长在交易模块的
+    #    orders.wxml，意思是"撤单"）⇒ 裸数它恒为 0，是**真空通过**。正控＝同一次读数里数一个
+    #    此刻必然存在的锚点（`[data-act-complete-open="1"]`，上一条刚证明它 > 0），
+    #    以证明「数得动」，让这条 0 有信息量。
+    positive_control = w.c.count('[data-act-complete-open="1"]')
+    cancel_entries = w.c.count('[data-act-cancel="1"]')
+    w.rep.rec(
+        "53 ⑨-e Q2 边界（渲染层旁证）：页面不出现「撤回」入口"
+        "（带正控：`complete-open` 同时数得到 ⇒ 这条 0 不是「数不动」）",
+        cancel_entries == 0 and positive_control > 0,
+        f"撤回入口数={cancel_entries} 正控 complete-open={positive_control}"
+        f"（硬证据＝pytest test_reopen_never_restores_cancel ＋ 静态扫描 verify_entrust_ui.js）",
+    )
+    w.shot("53-重开后（退回已受理）")
+
+
+def sec_54(w: Walker) -> None:
+    """**十三步的产物链（读侧断言）**：每一步的产物在不在、归属对不对、读侧看不看得见。
+
+    ⛔ 本章**不声称**"13 步在同一张委托上连跑通过" —— 那是
+    `docs/entrust/S4-b-结案命令切片.md` §7.1 里仍没做的那件事（需要给走查一个
+    "本章用这张委托"的入口）。本章回答的是**它的前提**，而且此前从来没人回答过：
+
+        链上每一环的产物是否真实存在、是否挂在**某张**委托上、读侧能否看见它。
+
+    为什么值得单独一章：13 步此前是 13 份**互不相干**的读数 —— 没人知道
+    "第 5 步的候选还在不在""第 7 步的合同是不是还挂着 assignment_id"。
+    本章按**步序**串成一张清单，缺哪一步就点名到步。
+
+    判据纪律（三条，别放松）：
+    * **只读**（⛔ 不写库）；
+    * **归属是必查项**：产物挂在别的委托上 ＝ 这一步在这张单上没有产物
+      （本仓踩过"成果归属不到单张委托"）；
+    * 缺产物记 `NOT_RUN` 并说清**缺哪一步、缺什么**（夹具没铺 / 该步没跑），
+      ⛔ 不把"没有"读成"做到"。
+    """
+    print("\n-- 54 十三步的产物链（读侧）--", flush=True)
+
+    tok_mgr = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    if not tok_mgr:
+        w.rep.not_run("54 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+
+    def _items(payload):
+        """宽容取值：列表端点的包裹键在不同模块里叫法不同（`items` / `artifacts` …）。
+
+        ⚠️ 取不到就回空表并**把键名打进读数** —— 首跑即能看出真实结构，
+        而不是以"空"的面目失败（那会像"这一步没做"）。
+        """
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            for k in ("items", "artifacts", "releases", "versions", "rows"):
+                v = payload.get(k)
+                if isinstance(v, list):
+                    return v
+        return []
+
+    rows = (api_get("/entrust/assignments?view=org&size=50", tok_mgr) or {}).get("items") or []
+
+    def pick(needle: str) -> str:
+        for r in rows:
+            if needle in str((r or {}).get("title") or ""):
+                return str((r or {}).get("assignment_id") or "")
+        return ""
+
+    #: 第 12 步的载体（`--extra-seeds seed_entrust_completion_ready.py` 铺）与
+    #: 第 4–8 步的载体（`seed_entrust_canonical.py` 铺）。两个都是**按需夹具**
+    #: ⇒ 缺了就记 NOT_RUN 并点名，⛔ 不当成回归。
+    ready_aid = pick("五维齐备")
+    canon_aid = pick("canonical")
+    any_claimed = [
+        str((r or {}).get("assignment_id"))
+        for r in rows
+        if str((r or {}).get("status")) in ("claimed", "completed")
+    ]
+
+    # ① 第 1 步（创建/提交/受理）：委托本体 ＋ 授权可唯一定位
+    ctx = api_get(f"/entrust/assignments/{ready_aid}/session-context", tok_mgr) if ready_aid else {}
+    w.rep.rec(
+        "54 ① 第 1 步（受理）：队列里有已受理的委托，且授权能被**唯一定位**",
+        bool(any_claimed) and bool((ctx or {}).get("entrustment_id")),
+        f"claimed/completed {len(any_claimed)} 张 queue={len(rows)} 张"
+        f" ready_aid={ready_aid or '—'} entrustment_id={(ctx or {}).get('entrustment_id')!r}",
+    )
+
+    # ② 第 2–3 步（报价成果与版本）：成果存在且**挂在本单上**
+    arts = (
+        _items(api_get(f"/entrust/assignments/{canon_aid}/artifacts", tok_mgr)) if canon_aid else []
+    )
+    kinds = sorted(
+        {str((a or {}).get("artifact_type") or (a or {}).get("kind") or "?") for a in arts}
+    )
+    w.rep.rec(
+        "54 ② 第 2–3 步（报价成果与版本）：canonical 单上有成果，且每条都带归属",
+        bool(arts)
+        and all(int((a or {}).get("assignment_id") or 0) == int(canon_aid) for a in arts),
+        f"canon_aid={canon_aid or '—'} 成果 {len(arts)} 条 kinds={kinds[:6]}"
+        f" 归属齐={all(int((a or {}).get('assignment_id') or 0) == int(canon_aid) for a in arts) if arts else '—'}",
+    )
+
+    # ③ 第 4 步（计划：航段 ＋ 必需任务前置）
+    plan = api_get(f"/entrust/assignments/{canon_aid}/plan", tok_mgr) if canon_aid else {}
+    legs = _items((plan or {}).get("legs"))
+    ptasks = _items((plan or {}).get("tasks"))
+    w.rep.rec(
+        "54 ③ 第 4 步（计划）：航段与任务都能读出来（前置字段有产出）",
+        bool(legs) and bool(ptasks),
+        f"legs={len(legs)} tasks={len(ptasks)}"
+        f" 前置总数={(plan or {}).get('task_prerequisites_total')!r}"
+        f" 截断={(plan or {}).get('task_prerequisites_truncated')!r}",
+    )
+
+    # ④ 第 5 步（比价：≥2 条可比候选）
+    cands = (
+        _items(api_get(f"/entrust/assignments/{canon_aid}/capacity-candidates", tok_mgr))
+        if canon_aid
+        else []
+    )
+    w.rep.rec(
+        "54 ④ 第 5 步（比价）：canonical 单上有 **≥2 条**可比候选（BP-03 第 2 条）",
+        len(cands) >= 2,
+        f"候选 {len(cands)} 条"
+        + (f" 首个={str((cands[0] or {}).get('candidate_id'))!r}" if cands else ""),
+    )
+
+    # ⑤ 第 8 步（货量变更历史）—— 只在㊿ 章跑过（或经接口改过货量）之后才非空
+    qcs = (
+        _items(api_get(f"/entrust/assignments/{canon_aid}/quantity-changes", tok_mgr))
+        if canon_aid
+        else []
+    )
+    if qcs:
+        w.rep.rec(
+            "54 ⑤ 第 8 步（经审批的货量变更）：变更历史存在且挂在**本单**上",
+            all(int((q or {}).get("assignment_id") or 0) == int(canon_aid) for q in qcs),
+            f"变更 {len(qcs)} 条 首条={str((qcs[0] or {}).get('quantity_before'))!r}→"
+            f"{str((qcs[0] or {}).get('quantity_after'))!r}",
+        )
+    else:
+        w.rep.not_run(
+            "54 ⑤ 第 8 步（经审批的货量变更）",
+            "canonical 单上还没有变更历史 ⇒ 该步还没跑过（㊿ 章会真做一次变更）。"
+            "⛔ 不是回归：**没有产物**与**产物不对**是两件事",
+        )
+
+    # ⑥ 第 10 步（费用行）
+    charges = (
+        _items(api_get(f"/entrust/assignments/{ready_aid}/charges", tok_mgr)) if ready_aid else []
+    )
+    w.rep.rec(
+        "54 ⑥ 第 10 步（费用行）：齐备委托上有已确认的费用（缺了它结算无从谈起）",
+        bool(charges),
+        f"ready_aid={ready_aid or '—'} 费用 {len(charges)} 条"
+        + (f" 状态={str((charges[0] or {}).get('status'))!r}" if charges else ""),
+    )
+
+    # ⑦ 第 11 步（结算版本 ＋ 客户确认 ＋ 收付 ⇒ 派生结清）
+    stl = api_get(f"/entrust/assignments/{ready_aid}/settlements", tok_mgr) if ready_aid else {}
+    versions = _items((stl or {}).get("items") or (stl or {}).get("versions"))
+    fin = (
+        api_get(f"/entrust/assignments/{ready_aid}/financial-status", tok_mgr) if ready_aid else {}
+    )
+    w.rep.rec(
+        "54 ⑦ 第 11 步（结算与收付）：有结算版本，且派生口径是**已结清**",
+        bool(versions) and str((fin or {}).get("financial_status")) == "settled",
+        f"版本 {len(versions)} 个 financial_status={(fin or {}).get('financial_status')!r}"
+        f" blockers={len((fin or {}).get('blockers') or [])}",
+    )
+
+    # ⑧ 第 12 步（结案齐备度）—— 这一环的前置是上面每一环
+    cr = (
+        api_get(f"/entrust/assignments/{ready_aid}/closure-readiness", tok_mgr) if ready_aid else {}
+    )
+    w.rep.rec(
+        "54 ⑧ 第 12 步（结案齐备）：五维度全过（它是**前面每一环**的汇总，不是并列的一项）",
+        (cr or {}).get("ready") is True,
+        f"ready={(cr or {}).get('ready')!r} 缺项={len((cr or {}).get('missing') or [])}"
+        f" 逐维度={(cr or {}).get('missing_by_dimension')!r}",
+    )
+
+    # ⑨ 第 13 步（重进可见）：**整页重取之后**仍看得到同一张单（不是内存里的残留）
+    if ready_aid:
+        w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={ready_aid}", DETAIL)
+        got = w.wait_data(
+            lambda x: x.get("view") not in (None, "", "loading") and (x.get("detail") or {}),
+            tries=60,
+            gap=0.5,
+        )
+        det = got.get("detail") or {}
+        w.rep.rec(
+            "54 ⑨ 第 13 步（重进可见）：详情页重取之后仍读到同一张委托（含状态与版本）",
+            str(det.get("assignmentId")) == str(ready_aid) and bool(det.get("status")),
+            f"页面 assignmentId={det.get('assignmentId')!r} status={det.get('status')!r}"
+            f" revision={det.get('revision')!r}",
+        )
+    else:
+        w.rep.not_run("54 ⑨ 第 13 步（重进可见）", "没有齐备委托可用来做重进验证")
+
 
 SECTIONS = {
     "smoke": sec_smoke,
@@ -11208,6 +11455,9 @@ SECTIONS = {
     "51": sec_51,
     "52": sec_52,
     "53": sec_53,
+    #: 54 = 十三步的产物链（**读侧**）：只断言"每一步的产物在不在、归属对不对"，
+    #: ⛔ 它不是"13 步在同一张委托上连跑"的证明（后者见 S4-b 文档 §7.1）。
+    "54": sec_54,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章

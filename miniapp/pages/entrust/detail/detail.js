@@ -50,6 +50,7 @@ const {
   LEG_MODE_CHOICES,
   ORG_PERM_CLAIM,
   ORG_PERM_COMPLETE,
+  ORG_PERM_REOPEN,
   ORG_PERM_QUOTE_CREATE,
   ORG_PERM_VIEW,
   TASK_TYPE_LABELS,
@@ -60,6 +61,7 @@ const {
   capacityRuleRows,
   claimAssignment,
   completeAssignment,
+  reopenAssignment,
   confirmCapacity,
   createArtifact,
   createLeg,
@@ -238,6 +240,19 @@ Page({
     completeOpen: false,
     completing: false,
     completeHint: '',
+    /**
+     * 「重开」入口（S4-c / 设计 §5.5 Q2）：**已结案 ∧ 组织内有 `entrust:assignment:reopen`**。
+     *
+     * 判据用**委托本体**的 `detail.status`（不是 `board.status`）：已结案的委托，
+     * 工作台载荷可能为空，而"能不能重开"只取决于委托自己的状态。
+     * ⚠️ 与 `canComplete`（`claimed` ＋ `complete` 码）是**两个方向**的判据，⛔ 不复用 ——
+     * 复用会让"能结案"自动等于"能撤销结案"，而那正是 Q2 要挡的事。
+     */
+    canReopen: false,
+    reopenOpen: false,
+    reopening: false,
+    reopenReason: '',
+    reopenHint: '',
     /**
      * 「组装对客报价」入口（S3：合同 §10.1 第 6 步 `Release the offer` 的前置动作）。
      *
@@ -523,6 +538,7 @@ Page({
     this.permittedQuoteOrgs = {}
     this.permittedViewOrgs = {}
     this.permittedCompleteOrgs = {}
+    this.permittedReopenOrgs = {}
     // 重取时把两处页内交互面**复位**：整页刷新之后，展开着的确认条 / 输入条都已经
     // 失去了它当初的判据（权限与委托状态都可能变了）⇒ 让它们回到"未展开"，
     // 而不是留一个点了必然失败的按钮。复位只放在这里一处，页面别处不再各收一次。
@@ -623,6 +639,8 @@ Page({
         // 结案：比上面三个都**窄**一档（清单带结算版本、余额与案件处置
         // ⇒ 看得见缺项的人就是能结案的人）。第四个投影，不与上面任何一个复用。
         self.permittedCompleteOrgs = permittedOrgIds(orgItems, ORG_PERM_COMPLETE)
+        // 重开：与结案**分开的权限码**（能结案 ≠ 能撤销结案）。
+        self.permittedReopenOrgs = permittedOrgIds(orgItems, ORG_PERM_REOPEN)
         const detail = decorateDetail(res[0], self.permittedOrgIds)
         const board = decorateWorkbench(res[1])
         // 只挑**本单**的那条：`/my-offer-releases` 是"我收到的全部发布"，
@@ -702,8 +720,20 @@ Page({
       // 齐备度整页刷新就重取：它的语义是"**现在**缺什么"，缓存它等于让界面说旧话。
       closure: null,
       closureHint: '',
-      completeHint: '',
+      // ⚠️ `completeHint` / `reopenHint` **刻意不在这里复位**：它们是"**上一次尝试的结果**"，
+      //    而结案/重开的 409 分支做的正是「**先设提示、再 `load()`**」——在这里把它们复位，
+      //    等于把服务端刚给出的原因**吞掉**，用户只看到"点了没反应"（e2e ⑱ 段实测抓到：
+      //    `被拒但页面没有提示原因 → 409 委托单 3 状态为 claimed…`）。
+      //    清除点＝用户重新展开表单（`onCompleteOpen` / `onReopenOpen`）。
       completing: false,
+      // 「重开」入口：**已结案** ∧ 组织内有 `entrust:assignment:reopen`。
+      // 判据用**委托本体**的 status（已结案的委托，工作台载荷可能为空）。
+      canReopen:
+        !!(detail && detail.status === 'completed') &&
+        isPermittedOrg(this.permittedReopenOrgs, detail && detail.orgId),
+      reopenOpen: false,
+      reopenReason: '',
+      reopening: false,
       unassignedHint: board ? board.unassignedHint : '',
       offer: offer ? decorateCustomerOffer(offer) : null,
       offerForm: '',
@@ -1366,6 +1396,69 @@ Page({
           hint = '结案失败：网络异常'
         }
         self.setData({ completing: false, completeHint: hint })
+      })
+  },
+
+  onReopenOpen() {
+    this.setData({ reopenOpen: true, reopenHint: '' })
+  },
+
+  onReopenCancel() {
+    this.setData({ reopenOpen: false, reopenReason: '', reopenHint: '', reopening: false })
+  },
+
+  onReopenInput(e) {
+    this.setData({ reopenReason: String((e && e.detail && e.detail.value) || '') })
+  },
+
+  /**
+   * 重开（`completed → claimed`）。**受控**：理由必填（前端先拦一次，服务端再兜一次）。
+   *
+   * ⚠️ 与结案的两处不同：
+   * ① 理由**必填** —— 空理由**不发请求**（服务端会 422，但界面上不如直接说清）；
+   * ② 成功后回到 `claimed` ⇒ 整页重取（结案卡会重新出现，那正是重开的目的）。
+   * ⛔ 重开**不**恢复取消资格（Q2）：页面不会因此长出「撤回」入口。
+   */
+  onReopenSubmit() {
+    const self = this
+    const id = this.data.assignmentId
+    if (!id || this.data.reopening) return Promise.resolve()
+    const reason = String(this.data.reopenReason || '').trim()
+    if (!reason) {
+      // 前端先拦：这一条是「受控」的一部分（不是把服务端的校验搬过来当唯一防线）。
+      this.setData({ reopenHint: '重开必须给出理由（它会与你撤销的那次结案一起留痕）' })
+      return Promise.resolve()
+    }
+    const revision = Number((this.data.detail && this.data.detail.revision) || 1)
+    this.setData({ reopening: true, reopenHint: '' })
+    return reopenAssignment(
+      id,
+      { expected_revision: revision, reason: reason },
+      newIdempotencyKey('reopen')
+    )
+      .then(function () {
+        self.setData({ reopening: false, reopenOpen: false, reopenReason: '' })
+        wx.showToast({ title: '已重开', icon: 'success' })
+        return self.load()
+      })
+      .catch(function (err) {
+        const detail = err && err.detail
+        const status = (err && err.httpStatus) || 0
+        let hint
+        if (status === 409) {
+          const why =
+            (detail && detail.message) ||
+            (typeof detail === 'string' ? detail : '状态或版本已变化，请刷新后再看')
+          hint = '重开未生效：' + why
+          self.load()
+        } else if (status === 403) {
+          hint = '没有重开权限（需要 entrust:assignment:reopen）'
+        } else if (status) {
+          hint = '重开失败（服务端返回 ' + status + '）'
+        } else {
+          hint = '重开失败：网络异常'
+        }
+        self.setData({ reopening: false, reopenHint: hint })
       })
   },
 

@@ -29,6 +29,7 @@ from app.modules.entrust._http import (
 from app.modules.entrust.schemas import (
     AssignmentCompleteIn,
     AssignmentOut,
+    AssignmentReopenIn,
     ClosureReadinessOut,
     assignment_out,
     closure_readiness_out,
@@ -124,3 +125,58 @@ def get_closure_readiness(
             raise
         raise mapped from exc
     return closure_readiness_out(data).model_dump(mode="json")
+
+
+#: 幂等作用域：与权限码同串（理由见 `_SCOPE_COMPLETE` 上方）。
+_SCOPE_REOPEN = "entrust:assignment:reopen"
+
+
+@router.post(
+    "/assignments/{assignment_id}/reopen",
+    response_model=AssignmentOut,
+    summary="重开：completed → claimed（**理由必填** ＋ 留痕；经理，幂等）",
+    dependencies=[Depends(require_entrust_enabled)],
+)
+def reopen_assignment(
+    assignment_id: int,
+    body: AssignmentReopenIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    idempotency_key: Annotated[str | None, Header()] = None,
+) -> Any:
+    """撤销一次**已生效**的结案（设计 §5.5 Q2：受控 —— 要权限、要理由、留痕）。
+
+    | 码 | 含义 | 调用方该做什么 |
+    | --- | --- | --- |
+    | **200** | 重开成功（或同键重放历史成功响应） | 读 `status`（回到 `claimed`）与 `revision` |
+    | **409** | 非 `completed`／`expected_revision` 过期 | 先刷新再决定 —— 重开**不是**通用回退 |
+    | **422** | 缺 `reason` 或 `expected_revision` | 补上理由（它就是"受控"的一部分） |
+    | **403 / 404** | 无 `entrust:assignment:reopen` ／ 非参与方 | 换身份，别重试 |
+
+    ⚠️ 重开**不**顺带恢复取消资格：`cancel` 仍只对 `submitted` 生效（Q2）。
+    被撤销的那次结案（`completed_at`）原样写进 `ent_assignment_reopen`（append-only），
+    所以"曾经结过案"这句话在库里查得到。
+    """
+    key = guard_or_400(idempotency_key)
+    return run_write(
+        db,
+        scope=_SCOPE_REOPEN,
+        key=key,
+        actor_user_id=int(user.id),
+        # `reason` 进 payload：同键**异体**（换了理由）必须 409，而不是拿旧响应重放。
+        payload={
+            "assignment_id": assignment_id,
+            "expected_revision": body.expected_revision,
+            "reason": body.reason,
+        },
+        business=lambda: assignment_out(
+            cl.reopen_assignment(
+                db,
+                assignment_id=assignment_id,
+                actor_id=int(user.id),
+                expected_revision=body.expected_revision,
+                reason=body.reason,
+            )
+        ).model_dump(mode="json"),
+        map_domain_error=map_closure_error,
+    )
