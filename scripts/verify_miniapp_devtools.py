@@ -1409,6 +1409,28 @@ def sec_12(w: Walker) -> None:
 
 def sec_15(w: Walker) -> None:
     """⑮ 发货方式选择：自主发货 / 委托发货（纯前端 + 几何对齐设计稿）。"""
+
+    def intake_query() -> dict:
+        """读受理屏（`pages/entrust/intake/intake`）实例自己记着的 `onLoad` 入参。
+
+        为什么要解一次码：query 是框架**原样（未解码）**交给 `onLoad` 的，中文会以
+        百分号编码出现（`sec_34.entry_carry_probe` 的注释记过那次"入口参数不合法"的根因）。
+        """
+
+        def read() -> dict:
+            val = w.c.evaluate(
+                "function(){var s=getCurrentPages()||[];"
+                "for(var i=s.length-1;i>=0;i--){var p=s[i];"
+                "if(p&&p.route==='pages/entrust/intake/intake'){var o=p.options||{};"
+                "var out={};for(var k in o){var r=String(o[k]);"
+                "try{out[k]=decodeURIComponent(r)}catch(e){out[k]=r}}"
+                "return out;}}"
+                "return {};}"
+            )
+            return val if isinstance(val, dict) else {}
+
+        return read()
+
     print("\n== ⑮ 发货方式选择 ==", flush=True)
     w.c.nav("navigateTo", "/" + PUBLISH_CARGO, PUBLISH_CARGO)
     cd = w.wait_data(lambda d: d.get("showChannel") is True, tries=30)
@@ -1531,24 +1553,36 @@ def sec_15(w: Walker) -> None:
         f"showChannel={d3.get('showChannel')} path={w.c.current_path()}",
     )
 
-    # 行为 3：委托发货 → 「功能预览，即将开放」占位页
+    # 行为 3：委托发货 → **受理屏（UI-07）**，并把货名 / 货量 / 量纲带过去。
+    # ⚠️ 这一格**曾经**断的是「跳『功能预览，即将开放』占位页」。S1 增量 1 把
+    #    `pickEntrustDelivery()` 由占位跳转改成经 `R.go()` 进 UI-07
+    #    （`DEMO-1-readiness.md` §8.1 第 1 行；静态断言 `verify_ui_interactions.js`
+    #    第 ⑨ 章同步改写），而**本章的真机断言当时没跟着改** ⇒ 它此后只能恒红。
+    #    现在改断**新契约**：落点页 ＋ 源页表单值是否真的带过去了。
     w.c.set_data({"showChannel": True})
     time.sleep(0.9)
     w.c.tap(".ch-card-entrust")
     time.sleep(1.6)
-    at_preview = w.c.wait_path(PREVIEW, 25)
+    at_intake = w.c.wait_path(INTAKE, 25)
     time.sleep(1.2)  # 页面已就位但渲染帧可能滞后，静置后再截图
-    w.shot("15-委托发货-功能预览")
-    w.rep.rec("⑮ 委托发货跳「功能预览」占位页", at_preview, w.c.current_path())
-    if at_preview:
-        pvd = w.c.page_data()
+    w.shot("15-委托发货-受理屏")
+    w.rep.rec(
+        "⑮ 委托发货跳受理屏（UI-07）—— ⛔ 不再是「功能预览」占位页",
+        at_intake,
+        f"path={w.c.current_path()}",
+    )
+    if at_intake:
+        q = intake_query()
         w.rep.rec(
-            "⑮ 占位页文案为「功能预览，即将开放」",
-            str(pvd.get("title")) == "功能预览，即将开放",
-            str(pvd.get("title")),
+            "⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url）",
+            bool(str(q.get("cargo_name") or "").strip()),
+            f"cargo_name={q.get('cargo_name')!r}",
         )
-        n = w.c.count(".preview-text")
-        w.rep.rec("⑮ 占位页仅一行文案（空白页）", n == 1, str(n))
+        w.rep.rec(
+            "⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字）",
+            bool(str(q.get("quantity") or "").strip()) and q.get("quantity_unit") == "吨",
+            f"quantity={q.get('quantity')!r} unit={q.get('quantity_unit')!r}",
+        )
 
     # 返回：深栈下 navigateBack 偶发抖动 → 重试直到回到发布货物页
     back = False
@@ -1558,7 +1592,7 @@ def sec_15(w: Walker) -> None:
         if w.c.wait_path(PUBLISH_CARGO, 15):
             back = True
             break
-    w.rep.rec("⑮ 从占位页可返回发布货物页（二级页栈正常）", back, w.c.current_path())
+    w.rep.rec("⑮ 从受理屏可返回发布货物页（二级页栈正常）", back, w.c.current_path())
     w.c.back()
     time.sleep(1.0)
 
@@ -1866,8 +1900,14 @@ def sec_25(w: Walker) -> None:
             f"empty={r0.get('empty')}",
         )
 
-    if not w.c.tap(".btn-primary"):
-        w.rep.rec("㉕B 点「编辑内容」", False, ".btn-primary 未命中")
+    # ⚠️ 必须用**锚点**，不能用 `.btn-primary`：成果详情页现在有**五**处 `.btn-primary`，
+    #    其中「发布 / 撤回 / 确认版本」三张卡的提交键排在「编辑内容」**之前**，而工具
+    #    **没有 index 参数**（`nth-child` 被忽略、坐标触摸也落到第一个）⇒ 点的是"发布"
+    #    的提交键，于是 `editing` 恒不为真、后面整段编辑态断言连锁塌掉（读到的是
+    #    "编辑表单里没有 receivable_lines"，看着像产品坏了）。`data-act-edit` 才是
+    #    这一格要点的那个键自己的锚点（`verify_miniapp.js` 第 446 行已登记）。
+    if not w.c.tap('[data-act-edit="1"]'):
+        w.rep.rec("㉕B 点「编辑内容」", False, '[data-act-edit="1"] 未命中')
     d2 = w.wait_data(lambda x: x.get("editing") is True, tries=12, gap=0.5)
     w.rep.rec(
         "㉕B 点「编辑内容」后进入编辑态",
@@ -7473,7 +7513,10 @@ def sec_43(w: Walker) -> None:
         "㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**"
         "（只有 done 的附件对 Agent 才是文本，否则它只是个文件名）",
         bool(t_sample) and len(done_atts) >= 1,
-        f"attachments={len(atts)} done={len(done_atts)}",
+        # ⭐ 必须把 `tap=` 打进读数：`attachments=0` 同时对应「点击没落到元素上」与
+        #    「点了但上传失败」两种原因（首跑就卡在这里 —— 后端日志显示那一轮**根本没发**
+        #    `POST /entrust/attachments`，而读数里看不出是哪种）。
+        f"tap={t_sample} attachments={len(atts)} done={len(done_atts)}",
     )
     notice = str(pg_att.get("attachNotice") or "")
     w.rep.rec(
@@ -11665,6 +11708,17 @@ DEFAULT_ORDER = [
     # 51 独立于 49/50：它自带载体（AG-02 经接口产出 customer_quote），不依赖前面几章留下的状态。
     "51",
     "52",
+    # 53 = 结案 ＋ 受控重开（合同 §10.1 第 12 步）。
+    # ⛔ 此前**不在本表**里 ⇒ `--section all` 会**静默**跳过整整一章（第 12 步的设备证据
+    #    只剩"单独跑那一次"），而且 `--help` 里也列不到它 —— 属于本项目最忌讳的
+    #    "静默漏项"：读数不会变红，只是少了一章。
+    # ⚠️ 「齐备 ⇒ 结案成功」那一段要夹具 `seed_entrust_completion_ready.py`；标准配方下
+    #    它记 `NOT_RUN` 并点名夹具（**不假绿**），其余断言照跑。
+    "53",
+    # 54 = 十三步的**产物链（读侧）**：只断言每一步的产物在不在、归属对不对。
+    # ⛔ 它不是"13 步在同一张委托上连跑"的证明（见 `S4-b-结案命令切片.md` §7.1）。
+    # ⚠️ ⑤ 需要 ㊿ 章先跑过 —— 本表里 50 排在它前面，顺序不可打乱。
+    "54",
 ]
 
 
