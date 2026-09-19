@@ -1,0 +1,47 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-065700
+章节    ：51
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.1s] pageStack=[{'pageId': 486, 'path': 'pages/mine/mine', 'query': {}, 'route': '/pages/mine/mine', 'title': '我的'}, {'pageId  (探测   1.1s)
+模拟器  ：pageStack 非空
+
+-- 51 第 6 步来源门槛：被拒 ⇒ 逐条核验 ⇒ 同版本发布（S6-3）--
+PASS | 51 前置 · 组织队列里有可用的委托（载体由本章自造，不依赖可选夹具） | aid='5' status='claimed' 队列 3 张
+PASS | 51 前置 · 授权 id 由 `session-context` 给出（**不前端推导**），AG-02 会话可得 | entrustment_id='1' session_id='1'
+PASS | 51 前置 · 会话**来源与专业槽位**可读（复用/自建 ＋ `agent_specialty`）—— 这是「编排依赖」这条定档的判据 | session_id='1' 来源=本章自建（该委托上没有 AG-02 会话） agent_specialty='agent_02'
+PASS | 51 ② 前置 · 作业**落库的输入**里真的带 `amount`（否则下一格没有对象：`ag02.py:310` 只在 `job_input.get('amount')` 非空时才追加 `customer_quote`） | job='1' session='1'（来源=本章自建（该委托上没有 AG-02 会话） 槽位='agent_02'） amount='18600' input={"amount": "18600", "currency": "CNY", "includes": ["内河运费", "港杂费"], "quote_text": "承运人：贵港航运有限公司\n单价：18600 元/柜\n有效期：2026-12-31"}
+PASS | 51 ② 带 `amount` 的 AG-02 作业 ⇒ 提案里**有** `customer_quote`（`ag02.py` 的产出条件就是作业输入带对客金额） | job='1' status='succeeded' mocked=True 提案类型=['customer_quote', 'quote_parsed'] input={"amount": "18600", "currency": "CNY", "includes": ["内河运费", "港杂费"], "quote_text": "承运人：贵港航运有限公司\n单价：18600 元/柜\n有效期：2026-12-31"}
+PASS | 51 ③ 采纳 ⇒ 服务端写下**待核验声明**（这是「来源为模型声明」在数据上的样子） | artifact='8' v1 declared=2 pending=2 ok=False
+PASS | 51 [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | 51 [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | 截图 51-1-模型来源成果页 | 26163B
+PASS | 51 ④ 「工作台 → 委托卡 → 详情 → 成果引用 → 成果页」全程真实点击，落到**模型来源**的成果 | card=True detail=True 引用锚点 1 个 ref=True artifact=True 落页 artifactId='8'（期望 8）
+PASS | 截图 51-2-发布被门槛拒 | 26163B
+PASS | 51 ④ 经界面点「发布这一版」⇒ **被来源门槛拒**，且页面把**待核验清单显示出来**（只说「不能发布」是没法干活的） | 入口 1 个 tap=True 确认条 1 submit=True published=False releaseHint='版本 v1 还有未核验的来源（assignment:5, operator_input:job_input）—— 未核验的提案不得作为已发布依据；请先逐条留下核验记录｜待核验：assignment:5、operator_input:job_input'
+PASS | 51 ⑤ ⭐ 界面上**没有**「登记来源核验」的入口（O-1b 的答案）——页面能告诉你为什么不能发，却给不了你解决它的入口 | 核验入口锚点 0 个；同一条断言与 ④ 同时成立才有信息量（④ 证明页面确实处在「被拒且看得见清单」的状态）
+PASS | 51 ⑥ 经接口逐条登记核验（`method` 必填：无依据的核验等于没核）⇒ 门槛转为通过 | pending 由 2 条 → 0 条；gate.ok=True
+PASS | 截图 51-3-同版本发布成功 | 26503B
+PASS | 51 ⑦ 核验之后**回界面重新点发布** ⇒ 同一版本发布成功，且与服务端发布记录**同源** | tap=True submit=True published=True；服务端同成果同版本发布记录 1 条（releaseId=2）
+PASS | 51 ⑧ 本章运行期零新增 console 报错 | console 报错 0 → 0
+
+================ 汇总 ================
+断言 17 项：**通过 17** / 未取得通过证据 0
+  分档：PASS=17 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0 | LIMITATION=0
+  归并（HO 五档）：PASS=17 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0
+
+  各章取单追踪（每章实际用到的委托 id —— 开了 `--chain` 时应**全部相同**）:
+    sec_51             aid=5
+    合计 1 个取单点 · aid 集合=['5'] · 同一张=是（未开 `--chain` ⇒ 各章自挑，不同是正常的）
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-065700
+[重跑关联] 同章节历史运行 2 次（首次结果**保留不覆盖**）：2026-09-18T11:59:31+0800=FAIL；2026-09-18T12:04:11+0800=PASS
+RESULT: PASS （全为 PASS）
+
+===== 走查 stderr =====
+(空)
