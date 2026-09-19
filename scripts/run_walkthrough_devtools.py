@@ -482,6 +482,12 @@ def _brief(obj: object) -> str:
             bits.append(f"{key}={str(obj[key])[:70]}")
     if obj.get("__raw__"):
         bits.append(f"raw={str(obj['__raw__'])[:90]}")
+    # ⭐ 性质与耗时**先**打：`channel_error`（IDE 内部 ≈11.5s 超时）与 `our_timeout`
+    #    （我们等到预算用尽）此前在日志里同形，是"看不出慢在哪"的直接原因（见 DR-0020）。
+    if obj.get("__kind__"):
+        bits.append(f"kind={obj['__kind__']}")
+    if obj.get("__elapsed__") is not None:
+        bits.append(f"elapsed={obj['__elapsed__']}s")
     return " ".join(bits)
 
 
@@ -509,6 +515,7 @@ def wait_ready(
     t0 = time.time()
     last: dict = {}
     dead = 0
+    win_ids: list[str] = []
     while time.time() - t0 < budget_s:
         t1 = time.time()
         try:
@@ -520,11 +527,22 @@ def wait_ready(
         t3 = time.time()
         last = receipt or {}
         hit = receipt if not receipt.get("ok") else win
+        # ⭐ 窗口标识：`type=open` 且 winId 递增 ⇒ 每轮都在**新开窗**（窗口堆积）；
+        #    `type=reuse` 且 winId 稳定 ⇒ 同一个窗口。取栈不带窗口参数，只能靠这个观测。
+        wid = f"{win.get('type')}/{win.get('winId')}"
+        if win.get("winId"):
+            win_ids.append(str(win["winId"]))
         log(
             f"    [{t3 - t0:6.1f}s] pageStack={str(stack)[:110]}"
             f"  (开窗 {t2 - t1:5.1f}s / 取栈 {t3 - t2:5.1f}s / IDE {len(ide_procs())} 个)"
-            f"  回执 {_brief(hit)}"
+            f"  窗={wid}  回执 {_brief(hit)}"
         )
+        if len(set(win_ids)) > 1:
+            log(
+                f"    ⚠️ 窗口标识在轮次间漂移：{[w for _, w in enumerate(win_ids)][:6]}"
+                f"（共 {len(set(win_ids))} 个不同 winId）"
+                " ⇒ 取栈不带窗口参数，**可能一直取的是别的窗口**（DR-0020 待证项）。"
+            )
         if stack:
             return True
         # ⚠️ **早退**：命中"automation runtime 未注册"的签名时，等满预算也不会好 ——
@@ -588,7 +606,19 @@ def wait_ready(
         else:
             dead = 0
         time.sleep(3)
-    log(f"    ✗ 闸门预算 {budget_s}s 用尽，页面栈仍为空。最后回执：{_brief(last)}")
+    log(
+        f"    ✗ 闸门预算 {budget_s}s 用尽，页面栈仍为空。最后回执：{_brief(last)}"
+        f"（kind={last.get('__kind__')}）"
+    )
+    if last.get("__kind__") == "channel_error":
+        log(
+            "      ⇒ 回执是 **IDE 自己**回的错（kind=channel_error），不是我们的预算不够："
+            "⛔ 不要再加预算，按「先只读探测 → 能复用就 --skip-ide → 不能才清场」处置。"
+        )
+    elif last.get("__kind__") == "our_timeout":
+        log("      ⇒ 是**我们**的预算用尽（kind=our_timeout）⇒ 可以调大探测预算后再试。")
+    elif last.get("__kind__") == "empty_stack":
+        log("      ⇒ 通道是**通的**（kind=empty_stack），只是窗口没进小程序页 ⇒ 查 IDE 窗口状态。")
     leftovers = residual_ide_pids()
     log(
         f"      诊断：前任实例（动手前就在跑） {len(leftovers)} 个"
