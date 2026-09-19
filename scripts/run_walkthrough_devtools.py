@@ -200,6 +200,25 @@ def ide_procs() -> list[str]:
 #: 只有这里面的进程才允许被本运行器杀掉；别人的窗口（可能是 HO 正在用的）一律不碰。
 OWNED_IDE_PIDS: set[int] = set()
 
+#: ⭐ **动手前的基线**：运行器做任何事之前就已经在跑的 IDE 进程。
+#:
+#: 为什么需要它（2026-09-19 实测的**误报**）：`OWNED_IDE_PIDS` 只在 `start_ide()` 返回后
+#: **几秒内**认领新出现的进程，而 Electron 的子进程是**之后 30–80 秒**才陆续起来的
+#: ⇒ 那十几个进程被算成"非本轮"，诊断于是说"**先怀疑残留实例**，去清这些 PID" ——
+#: 而它们其实是**本轮自己那个 IDE 的子进程**。⚠️ 照这条建议清进程＝白忙（当天真踩了）。
+#: ⇒ 残留的**正确判据**＝「动手**之前**就存在、且现在仍活着」，与"谁认领了 PID"无关
+#:   （后者在多进程应用上本来就不可靠）。
+BASELINE_IDE_PIDS: set[int] = set()
+
+#: 本轮是不是 `--skip-ide`（复用**别人已经在跑**的实例）。复用模式下，
+#: "动手前就有的实例"正是我们要用的那个 ⇒ 提示不能叫用户去清它们。
+REUSING_EXTERNAL_IDE = False
+
+
+def residual_ide_pids() -> list[int]:
+    """**动手前就存在**、且现在仍在跑的 IDE 进程（＝真正可能与本轮互抢的"前任实例"）。"""
+    return sorted({int(p) for p in ide_procs()} & BASELINE_IDE_PIDS)
+
 
 def kill_all_ide_procs(wait_s: int = 25) -> int:
     """杀掉机器上**所有** `微信开发者工具` 进程。
@@ -281,7 +300,7 @@ def start_ide(env: Env, wait_s: int = 60, kill_all: bool = False):
     else:
         # 只读观测：别人有几个实例我们**不动**，但要记下来，方便事后判断
         # "闸门不通是不是因为多实例互抢单实例锁"。
-        others = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+        others = residual_ide_pids()
         if others:
             log(f"    机器上已有 {len(others)} 个非本轮 IDE 进程 {others}（**不清理**，见 HO D2）")
             # ⚠️ 只说"不清理"是不够的 —— 实测（2026-09-18/19 各一次）残留实例会让
@@ -520,23 +539,44 @@ def wait_ready(
                     f"（{_brief(hit)}），且已等够 {AUTOMATION_DEAD_MIN_ELAPSED_S}s"
                     f" ⇒ 早退，不再等满 {budget_s}s 预算。"
                 )
-                log("      ⇒ 处置：① 只读探测**已在运行**的 IDE，能用就 `--skip-ide` 复用它；")
-                log("              ② 不能用再看 IDE 窗口是否有弹层/网络提示，然后清场重起；")
-                # ⭐ 2026-09-18/19 两次实测：这个签名的头号成因是**残留实例**
-                #    （上一次被中断的走查留下的，提示在「起 IDE」那一段）——
-                #    它们在时闸门恒不通，而报错长相是"页面打不开"。⇒ 这里点名列出。
-                leftovers = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+                log("      ⇒ 处置（按这个顺序）：")
+                if REUSING_EXTERNAL_IDE:
+                    log(
+                        "         ① **本轮是 `--skip-ide` 复用模式** ⇒ ⛔ 不要清实例（要复用的就是它）："
+                    )
+                    log("            · 先看**授权**：回执里若出现 `source=auth` 或")
+                    log(
+                        '              `taskType=auth / status=pending / "Waiting for user authorization."`'
+                    )
+                    log(
+                        "              ⇒ 那是**要人在 IDE 窗口里点一次「允许」**（新实例上 `alreadyTrusted`"
+                    )
+                    log(
+                        "              不作数；2026-09-19 实测：连跑四轮全卡这一步，点完立刻通过）。"
+                    )
+                    log(
+                        "            · 批准后**继续复用同一个实例**（别让运行器另起，新实例要重新批准）。"
+                    )
+                    log("            · 再看 IDE 窗口是否有弹层/网络提示。")
+                else:
+                    log("         ① 只读探测**已在运行**的 IDE，能用就 `--skip-ide` 复用它；")
+                    log("         ② 若回执是 `source=auth` ⇒ 要人在 IDE 窗口点一次「允许」；")
+                    log("            不能用的再看 IDE 窗口是否有弹层/网络提示，然后清场重起。")
+                # ⭐ 残留判据＝**动手前就存在**且现在仍活着的实例（不是"不是我的"）——
+                #    见 `BASELINE_IDE_PIDS`:用后者会把本轮 IDE 自己的子进程冤枉成残留。
+                leftovers = residual_ide_pids()
                 log(
-                    f"              ③ **先怀疑残留实例**：当前有 {len(leftovers)} 个非本轮 "
-                    f"IDE 进程 {leftovers[:8]}{'…' if len(leftovers) > 8 else ''}"
-                )
-                log(
-                    "                 清理（PowerShell，只清 IDE）："
-                    "Get-CimInstance Win32_Process -Filter \"name='微信开发者工具.exe'\" "
-                    "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+                    f"         ③ 前任实例（动手前就在跑、现在仍活着）：{len(leftovers)} 个 "
+                    f"{leftovers[:8]}{'…' if len(leftovers) > 8 else ''}"
                 )
                 if not leftovers:
-                    log("                 （当前为 0 ⇒ 不是残留实例，按 ①/② 排查）")
+                    log("            （为 0 ⇒ 不是「前任实例」的问题；按 ①② 排查）")
+                elif not REUSING_EXTERNAL_IDE:
+                    log(
+                        "            清理（PowerShell，只清 IDE）："
+                        "Get-CimInstance Win32_Process -Filter \"name='微信开发者工具.exe'\" "
+                        "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+                    )
                 return False
             if dead >= AUTOMATION_DEAD_MAX:
                 log(
@@ -548,13 +588,17 @@ def wait_ready(
             dead = 0
         time.sleep(3)
     log(f"    ✗ 闸门预算 {budget_s}s 用尽，页面栈仍为空。最后回执：{_brief(last)}")
-    leftovers = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+    leftovers = residual_ide_pids()
     log(
-        f"      诊断：非本轮 IDE 残留实例 {len(leftovers)} 个"
+        f"      诊断：前任实例（动手前就在跑） {len(leftovers)} 个"
         + (
-            "（**先清它们**再重跑；命令见上）"
-            if leftovers
-            else "（为 0 ⇒ 看 IDE 窗口是否有弹层/提示）"
+            "（复用模式下**别清它们**；按 ①② 排查授权/弹层）"
+            if REUSING_EXTERNAL_IDE
+            else (
+                "（**先清它们**再重跑；命令见上）"
+                if leftovers
+                else "（为 0 ⇒ 看 IDE 窗口是否有弹层/提示）"
+            )
         )
     )
     return False
@@ -696,6 +740,20 @@ def main(argv: list[str] | None = None) -> int:
     log(f"ide     : {env.ide}")
     log(f"python  : {env.python}")
 
+    # ⭐ 先记**动手前的基线** —— 这才是"前任实例"的正确判据（见 `BASELINE_IDE_PIDS` 的说明）：
+    #    `OWNED_IDE_PIDS` 只认领启动后几秒内出现的进程，而 Electron 的子进程是几十秒后才起来的
+    #    ⇒ 用"不是我的"当判据会把**自己的子进程**冤枉成残留（2026-09-19 实测踩到）。
+    global REUSING_EXTERNAL_IDE
+    BASELINE_IDE_PIDS.update(int(p) for p in ide_procs())
+    REUSING_EXTERNAL_IDE = bool(args.skip_ide)
+    if BASELINE_IDE_PIDS:
+        log(
+            f"启动前已有 IDE 实例 {sorted(BASELINE_IDE_PIDS)}（{len(BASELINE_IDE_PIDS)} 个）"
+            "—— 这些才是「前任」；本轮不清理它们（HO D2 边界）"
+        )
+    if REUSING_EXTERNAL_IDE:
+        log("本轮为 `--skip-ide` 复用模式：上面这些实例就是**要复用的那个**，⛔ 不会去清它。")
+
     ide = None
     reuse = bool(args.skip_ide)
     if not reuse:
@@ -724,7 +782,7 @@ def main(argv: list[str] | None = None) -> int:
             ide = start_ide(env, kill_all=False)
             ready = bool(ide) and wait_ready(env)
         if not ready:
-            others = sorted({int(p) for p in ide_procs()} - OWNED_IDE_PIDS)
+            others = residual_ide_pids()
             log("模拟器没就绪（pageStack 恒空）—— **环境阻塞（ENV_BLOCKED）**，不是业务结论")
             log("  处置顺序：① 只读探测**已在运行**的 IDE，能用就 --skip-ide 复用它；")
             log("            ② 不能用再看 IDE 窗口是否有弹层/网络提示；")
