@@ -11571,6 +11571,142 @@ def sec_54(w: Walker) -> None:
         w.rep.not_run("54 ⑨ 第 13 步（重进可见）", "没有齐备委托可用来做重进验证")
 
 
+def sec_55(w: Walker) -> None:
+    """第 9 步的**后半部分**：人工接管（合同 §10.1 第 9 步 / R9 / AC-16 的任务层落点）。
+
+    为什么单开一章
+    --------------
+    第 9 步原文是 `Complete required revalidation / renewed acceptance; A2 takes over a task`。
+    前半（复核 / 重新接受）已由 ㉛（应用变更 ⇒ 复核项）与 ㉜（成果页复核徽标）覆盖；
+    后半 **「接管一个任务」在走查里此前零覆盖** —— 全仓 grep「接管」在走查脚本里只命中
+    一条与代理有关的注释。而它是 R9 / AC-16 的判据落点，不能一直空着。
+
+    手段的诚实边界（沿用 O-1b 的既有裁定）
+    ------------------------------------
+    * **界面没有接管入口** —— 接管维持「经理经接口登记」的口径 ⇒ 接管**动作本身**
+      只能经接口取证，⛔ 不得写成「界面上可以接管」；本节反过来把「界面无入口」也断言出来；
+    * 但**后果**必须可断言，且要在服务端与界面两处都断言：
+      ① 接管推进执行代次（`lease_generation` +1、负责人改为接管人）⇒
+         **持旧代次的提交被拒**（409，且理由必须点名代次/接管）——
+         这就是"旧结果不得覆盖接管后的人工状态"；
+      ② 界面侧：委托详情页**没有**接管入口（0 命中），与 O-1b 的口径一致。
+    """
+    print("\n== 55 第 9 步后半 · 人工接管（经接口 ＋ 两处后果断言）==", flush=True)
+    tok_mgr = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    tok_shi = (api_login(CODE_SHIPPER) or {}).get("access_token") or ""
+    if not tok_mgr or not tok_shi:
+        w.rep.not_run(
+            "55 全部断言", "拿不到 seed-owner / seed-shipper 的 token（后端未起或种子未铺）"
+        )
+        return
+
+    def _task_of(resp: dict) -> dict:
+        """回执可能是任务本体、也可能是包一层的对象，两种都认（读不到就返回空）。"""
+        d = resp or {}
+        for cand in (d.get("task"), d):
+            if isinstance(cand, dict) and cand.get("lease_generation") is not None:
+                return cand
+        return {}
+
+    # ---- ① 载体：货主名下的一张已受理委托（与 52 章同口径：自己挑，不绑可选夹具）----
+    rows = (api_get("/entrust/assignments?view=owner&size=50", tok_shi) or {}).get("items") or []
+    claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
+    claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    aid = prefer_anchor(str((claimed[0] or {}).get("assignment_id") or "") if claimed else "")
+    w.rep.rec(
+        "55 前置 · 有一张已受理（claimed）委托可挂任务",
+        bool(aid),
+        f"aid={aid!r} claimed {len(claimed)} 张",
+    )
+    if not aid:
+        w.rep.not_run("55 接管剧本", "货主名下没有 claimed 委托 ⇒ 先铺 seed_entrust_demo")
+        return
+
+    # ---- ② 前置任务：经**接口**铺一个**不要求证据**的任务 -----------------------
+    #    ⛔ `required_evidence` 必须为空：否则第 ④ 步的 409 也可能是"证据未齐"，
+    #    两条成因分不开，判据就失去意义。
+    st_t, task = api_post(
+        f"/entrust/assignments/{aid}/tasks",
+        tok_mgr,
+        {"task_type": "handover", "title": "接管演练（55 章）", "required_evidence": []},
+        uuid.uuid4().hex,
+    )
+    tid = str((task or {}).get("task_id") or "")
+    w.rep.rec(
+        "55 ① 经**接口**铺一个「不要求证据」的任务"
+        "（界面建任务没有 required_evidence 入参，如实登记）",
+        bool(tid),
+        f"HTTP={st_t} task_id={tid!r}（空 required_evidence 是刻意的：让 409 只能来自代次）",
+    )
+    if not tid:
+        w.rep.not_run("55 接管剧本", "任务未建成")
+        return
+
+    before = _task_of(api_get(f"/entrust/tasks/{tid}", tok_mgr))
+    g0 = before.get("lease_generation")
+    a0 = before.get("assignee_user_id")
+    w.rep.rec(
+        "55 ② 接管前的读数（执行代次 / 负责人）—— 后面两条断言的基线",
+        g0 is not None,
+        f"lease_generation={g0} assignee_user_id={a0} status={before.get('status')}",
+    )
+    if g0 is None:
+        w.rep.not_run(
+            "55 接管剧本",
+            f"任务详情里读不到 lease_generation ⇒ 回执形状 {list(before)[:12]}",
+        )
+        return
+
+    # ---- ③ 经接口接管（如实登记：界面无入口）--------------------------------
+    st_k, kres = api_post(f"/entrust/tasks/{tid}/takeover", tok_mgr, {}, uuid.uuid4().hex)
+    after = _task_of(kres) or _task_of(api_get(f"/entrust/tasks/{tid}", tok_mgr))
+    g1 = after.get("lease_generation")
+    a1 = after.get("assignee_user_id")
+    w.rep.rec(
+        "55 ③ 经接口接管 ⇒ 执行代次 +1、负责人改为接管人"
+        "（界面无接管入口，⛔ 不写成界面上可以接管）",
+        st_k == 200 and g1 == (int(g0) + 1) and str(a1 or "") != "",
+        f"HTTP={st_k} lease_generation {g0}→{g1} assignee {a0}→{a1}",
+    )
+
+    # ---- ④ 旧代次提交被拒（"旧结果不得覆盖接管后的人工状态"）------------------
+    st_old, old_res = api_post(
+        f"/entrust/tasks/{tid}/complete",
+        tok_mgr,
+        {"expected_generation": int(g0)},
+        uuid.uuid4().hex,
+    )
+    detail = str((old_res or {}).get("detail") or (old_res or {}).get("message") or old_res)
+    # ⚠️ 判据必须**点名成因**：只判 `409` 会把"证据未齐 / 状态不允许"也算过。
+    named = any(k in detail for k in ("代次", "接管", "改派", "generation", "lease"))
+    w.rep.rec(
+        "55 ④ 持**旧代次**提交完成 ⇒ **被拒 409，且理由点名代次/接管**"
+        "（接管后旧结果不得覆盖人工状态）",
+        st_old == 409 and named,
+        f"HTTP={st_old} 点名成因={named} detail={detail[:120]!r}（旧代次 {g0} / 当前 {g1}）",
+    )
+
+    # ---- ⑤ 界面侧：委托详情页**没有**接管入口（与 O-1b 口径一致）--------------
+    if not w.open_workbench(CODE_OWNER, tag="55"):
+        w.rep.not_run("55 ⑤ 界面无接管入口", "未能进入经理工作台")
+        return
+    if not w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL):
+        w.rep.not_run("55 ⑤ 界面无接管入口", f"打不开委托详情页（aid={aid}）")
+        return
+    pd = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    # ⚠️ 必须用**带值**属性选择器：本工具链对裸属性选择器（`[data-act-x]`）
+    #    直接抛 ValueError（它会静默回 0，比报错更危险）。本项目的锚点约定就是
+    #    `data-act-<动作>="1"`，照它写即可。
+    n_take = w.c.count('[data-act-takeover="1"]') + w.c.count('[data-act-task-takeover="1"]')
+    w.shot("55-1-委托详情-无接管入口")
+    w.rep.rec(
+        "55 ⑤ 委托详情页正常渲染，且页内**没有**接管入口（0 命中）—— 与 O-1b 一致",
+        bool(pd.get("view")) and n_take == 0,
+        f"view={pd.get('view')!r} 接管锚点命中={n_take}",
+    )
+    _ = w.c.errors()
+
+
 SECTIONS = {
     "smoke": sec_smoke,
     "43": sec_43,
@@ -11623,6 +11759,10 @@ SECTIONS = {
     #: 54 = 十三步的产物链（**读侧**）：只断言"每一步的产物在不在、归属对不对"，
     #: ⛔ 它不是"13 步在同一张委托上连跑"的证明（后者见 S4-b 文档 §7.1）。
     "54": sec_54,
+    #: 55 = 第 9 步**后半**（人工接管）：此前走查里零覆盖。
+    #: ⚠️ 接管**动作**只能经接口（O-1b：界面无入口，本节把「无入口」也断言出来），
+    #:    但「代次 +1 ⇒ 旧代次提交被拒」与「界面无入口」两处后果都断言。
+    "55": sec_55,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -11773,6 +11913,9 @@ DEFAULT_ORDER = [
     # ⛔ 它不是"13 步在同一张委托上连跑"的证明（见 `S4-b-结案命令切片.md` §7.1）。
     # ⚠️ ⑤ 需要 ㊿ 章先跑过 —— 本表里 50 排在它前面，顺序不可打乱。
     "54",
+    # 55 = 第 9 步后半（人工接管）。⛔ 不登记进本表就属于"静默漏项"：
+    #    `--section all` 会漏掉它，而读数不会变红、`--help` 也列不到。
+    "55",
 ]
 
 
