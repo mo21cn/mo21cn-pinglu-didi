@@ -1,0 +1,10 @@
+# 证据文件必须**逐字节**入库。
+#
+# 为什么单独给这棵目录写一条：`DEMO-1-evidence-index.md` 里登记的
+# sha256 是"这份证据可核对"的唯一凭据。仓库根的 `.gitattributes` 是
+# `* text=auto eol=lf` —— 它会把 CRLF 归一化成 LF，于是**从 git 取出来的**
+# 文件哈希与索引里记的那一个对不上，可核对性当场断掉（本机实测：
+# `walk-chain-stdout.txt` 工作区 `a4e397b7…` vs 索引 blob `9ddf0b55…`）。
+#
+# `-text` ⇒ 对该目录下的文件**不做**任何行尾/编码转换，存取一致。
+* -text

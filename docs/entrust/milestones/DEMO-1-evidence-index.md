@@ -35,8 +35,14 @@
 
 | 文件 | 大小 | sha256(前 16) | 说明 |
 | --- | --- | --- | --- |
-| [`evidence/2026-09-19-walk-all/walk-all-stdout.txt`](evidence/2026-09-19-walk-all/walk-all-stdout.txt) | 141,738 B | `a60e1d3a46b8ab03` | 走查**完整 stdout**（含每步 `PASS/FAIL/NOT_RUN/LIMITATION` 与读数、汇总节、截图目录、重跑关联） |
-| [`evidence/2026-09-19-walk-all/backend-access.log`](evidence/2026-09-19-walk-all/backend-access.log) | 1,105,018 B | `cbb03f60aca21631` | 后端**访问日志**（uvicorn access log，按 `===== HH:MM:SS 起后端 =====` 分段）。⭐ 它是 `㊸` 上传链定位的第一手材料：该段（`assignments/38` 的 `submit` → `claim` → `session-context`）**没有** `POST /entrust/attachments` |
+| [`evidence/2026-09-19-walk-all/walk-all-stdout.txt`](evidence/2026-09-19-walk-all/walk-all-stdout.txt) | **140,636 B** | **`23ed84b331e499d9`** | 走查**完整 stdout**（含每步 `PASS/FAIL/NOT_RUN/LIMITATION` 与读数、汇总节、截图目录、重跑关联）。⚠️ 2026-09-20 **重记**：首次登记记的是**工作区 CRLF 原件的**体积/哈希（141,738 B / `a60e1d3a46b8ab03`），而根 `.gitattributes` 的 `* text=auto eol=lf` 把它归一化成 LF 入库 ⇒ **从 git 取出来的哈希与登记对不上**。现已给 `docs/entrust/evidence/` 加 `* -text` 并重存（见 `evidence/.gitattributes`），本行的数字是**当前入库字节**的实测值 |
+| ~~`evidence/2026-09-19-walk-all/backend-access.log`~~ | ~~1,105,018 B~~ | ~~`cbb03f60aca21631`~~ | ⛔ **已撤销登记 —— 该文件从未入库，且原件已不可取得**。见下方「§1 的缺口」 |
+
+### §1 的缺口（2026-09-20 复查发现，如实登记）
+
+| 项 | 情况 | 处置 |
+| --- | --- | --- |
+| 后端访问日志 `backend-access.log`（原记 1,105,018 B） | ⛔ **从未入库**；且 `miniapp-device-artifacts/_uvicorn.log` 是**每轮运行复用/截断**的同一个文件，现已被后续运行覆盖（当前 1,342,216 B，属 09-20 00:56 那轮）⇒ **原件不可再取得** | ① 撤销该行的"已入库"登记；② 它当年支撑的判断（"㊸ 那一段没有 `POST /entrust/attachments`"）已由 **§10.2.2** 的四个直接读数取代 —— 那是**更强**的证据形式（读数在产物文件里、可随 PR 复核），不必依赖这份日志；③ 后续运行若需要后端日志，应在当轮**另存**一份到 `evidence/<日期>/`，⛔ 不能只留 `_uvicorn.log` |
 
 ### 关键截图（已入库，取自 `walk-20260919-173445/`）
 
@@ -143,5 +149,6 @@
 | 1 | **E-B 的两份原始产物未入库** | 下一轮随主链 PR 一并入库（或按附条件引用） |
 | 2 | **本轮的"全量"不含 53/54** | 已修 `DEFAULT_ORDER`；**主链跑通后**做一次真正的全量回归（发包方裁定 P2） |
 | 3 | **合同 §12 另有两份交付物尚未建立** | `DEMO-1-walkthrough.md`（主脚本 / 角色 / 预期结果 / 诚实回退）与 `DEMO-1-acceptance.md`（D1 逐行结果 ＋ 候选 SHA ＋ CI ＋ 限制 ＋ HO 终裁）⇒ 待主链证据成形后一次写全，避免先写一份再推翻 |
-| 4 | **同一张新委托的 13 步主链** | ⛔ **尚无任何证据**。这是当前主任务，见 `DEMO-1-readiness.md` §10.2 的「本轮执行结果」栏 |
+| 4 | **同一张新委托的 13 步主链** | ⭐ 2026-09-20 **已有首份证据**（见 **§2.1**：步 1–11 ＋ 步 13 的一半，载体 `aid=6`）。**仍未覆盖**：第 9 步的接管（已由走查第 55 章单独补，见 `readiness` §10.3 的 D1-12）、第 12 步；**链上 2 条 `FAIL` 未定档** |
+| 5.5 | **证据文件的行尾归一化会毁掉可核对性** | 已修：`docs/entrust/evidence/.gitattributes` 加 `* -text`（该目录逐字节入库）；⛔ 新证据入库前要**复核「工作区哈希 == 索引 blob 哈希」** |
 | 5 | **密钥文件曾被本机删除故障永久删除** | 2026-09-19 核实发现 `backend/.env.local`（含**可用订阅 Key**）缺失、**回收站无记录**；已从 `_b_recon3.txt`（09-16 的 env 基线快照）找回并还原，`llm_key_doctor.py` **四步全绿**。⚠️ **untracked 文件不在护栏的恢复范围内** ⇒ 已扩展护栏（见 DR-0019 追加节） |
