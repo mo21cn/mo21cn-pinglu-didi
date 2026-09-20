@@ -1,0 +1,164 @@
+{
+  "sections": [
+    "chain4"
+  ],
+  "project": "E:\\pinglu-didi\\miniapp",
+  "startedAt": "2026-09-20T09:21:08+0800",
+  "finishedAt": "2026-09-20T09:23:11+0800",
+  "argv": [
+    "scripts\\verify_miniapp_devtools.py",
+    "--shots",
+    "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-092039",
+    "--section",
+    "chain4"
+  ],
+  "verdict": "PASS",
+  "tally": {
+    "PASS": 10,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0,
+    "LIMITATION": 0
+  },
+  "rollup": {
+    "PASS": 10,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0
+  },
+  "passed": 10,
+  "notPassed": 0,
+  "attempt": 4,
+  "previousRuns": [
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-091049",
+      "finishedAt": "2026-09-20T09:13:21+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-091049",
+        "--section",
+        "chain4"
+      ],
+      "verdict": "FAIL",
+      "passed": 7,
+      "notPassed": 3
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-091434",
+      "finishedAt": "2026-09-20T09:17:09+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-091434",
+        "--section",
+        "chain4"
+      ],
+      "verdict": "FAIL",
+      "passed": 7,
+      "notPassed": 3
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-091742",
+      "finishedAt": "2026-09-20T09:20:07+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-091742",
+        "--section",
+        "chain4"
+      ],
+      "verdict": "FAIL",
+      "passed": 8,
+      "notPassed": 2
+    }
+  ],
+  "results": [
+    {
+      "step": "chain4 前置 · 有可用的委托（第 4 步的载体；开 `--chain` 时＝**本链那一张**）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid='5' 队列 3 张（claimed/submitted 3 张） 取单来源=队列最新（未开 --chain）"
+    },
+    {
+      "step": "chain4 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "chain4 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "chain4 ① 写入口「加一段」在工作台可点 —— ⛔ 第 4 步不是「只读预置对象」",
+      "ok": true,
+      "kind": "PASS",
+      "note": "加一段=1 段行=3 服务端段=3 aid=5"
+    },
+    {
+      "step": "chain4 ② 经**界面**建出三段，且**就是 公路—内河—公路**（⛔ 链上不掺 `air`／铁路等负例段 —— 那些属于回归轮）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "输入接线=True 服务端段 3→6 末三段方式=['road', 'water', 'road'] 渲染段行=6"
+    },
+    {
+      "step": "chain4 ③ 任务与**前置关系**建起来了（⚠️ 经接口：界面**没有**建任务入口，也没有 `precondition_task_id` 入参 —— 如实登记，⛔ 不假装是界面点的）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=200 建出 task_id=['8', '9', '10'] 前置链=8 → 9 → 10"
+    },
+    {
+      "step": "截图 chain4-工作台-公路水路公路与任务前置",
+      "ok": true,
+      "kind": "PASS",
+      "note": "27502B"
+    },
+    {
+      "step": "chain4 ④ 工作台**逐行**列出本单的任务，且**每一条任务行都带一行前置说明**（「无固定前置」也要自己说话）—— 展示对象是**本单刚建的**，⛔ 不是预置对象",
+      "ok": true,
+      "kind": "PASS",
+      "note": "服务端任务=3 渲染任务行=3 前置行=3｜本轮新建=['8', '9', '10']"
+    },
+    {
+      "step": "chain4 ⑤ 前置关系在**服务端事实**里确实存在（⛔ 不只看页面上有没有那一行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "带前置的任务=2 条（共 3 条）｜本轮前置链=8 → 9 → 10"
+    },
+    {
+      "step": "chain4 ⑥ 本章运行期**无新增 console 报错**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "无"
+    }
+  ],
+  "console": {
+    "baselineCaptured": true,
+    "collectFailed": false,
+    "openPhaseWaived": [],
+    "openPhaseUnwaived": [],
+    "bizPhaseUnwaived": [],
+    "whitelist": [
+      {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": "open",
+        "evidence": "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+      },
+      {
+        "pattern": "routeDone with a webviewId",
+        "phase": "open",
+        "evidence": "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉（HO D1 明确点名这个范围过宽）"
+      }
+    ]
+  },
+  "consoleError": "",
+  "consoleErrorDetected": false,
+  "consoleNoiseCount": 0,
+  "consoleOtherCount": 0,
+  "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-092039"
+}

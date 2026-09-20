@@ -9551,6 +9551,237 @@ def sec_46(w: Walker) -> None:
     )
 
 
+def sec_chain4(w: Walker) -> None:
+    """第 4 步**在同一张委托上先建、再展示**：公路—内河—公路 ＋ 任务及其前置关系。
+
+    为什么单开一章（HO 2026-09-20 第五节）
+    ------------------------------------
+    链式日志虽然把各章绑到了同一张单（`aid=6`），但**混入了专章测试内容**：第 4 步读到的
+    服务端任务数是 0，而 `air`／铁路段来自 ㊻/㊼ 的**负例断言**（"未登记的方式必须原样回显"）。
+    那些测试检查通用功能有价值，**却不构成合同 §3.1 要求的「公路—水路—公路」业务演示**。
+    ⇒ 绑定同一个 ID 只解决"是否同单"，**还要解决"这张单是否按正确业务顺序推进"**。
+    本章补的正是这一步：**先在**本单上建出三段与任务前置，**再**在工作台上逐行展示。
+
+    与既有章节的分工
+    ----------------
+    * `㊻`（46）是**读侧**：段/任务/前置的渲染判据，但它不建对象（链上必然 0 任务）；
+    * `㊼`（47）是**写侧的负例通道**：故意用未登记的方式 `air` 验"未知取值原样回显"；
+    * 本章是**业务写侧**：三段就是 公路/内河/公路，⛔ 不掺 `air`/铁路。
+
+    诚实边界（都是被测事实，不是辩解）
+    ----------------------------------
+    * **段经界面建**：`[data-df="leg-mode"/leg-from/leg-to/leg-note]` ＋ `[data-act-leg-submit="1"]`，
+      与 ㊼ 同一套操作；
+    * **任务与前置经接口建** ⚠️：全仓只有 `POST /entrust/tasks` 与复核派生产生任务，
+      **界面没有建任务入口**，且详情页的"记录任务"表单**没有 `precondition_task_id` 入参**
+      ⇒ 本条如实写在读数里，⛔ 不假装是界面点的；
+    * 载体：开了 `--chain` 时＝本链那一张（`CHAIN_ASSIGNMENT`），否则＝队列里最新的一张。
+    """
+    print("\n-- chain4 第 4 步：先建公路—内河—公路三段与任务前置，再在工作台展示 --", flush=True)
+    err_base = w.c.errors()
+
+    code_mgr = CODE_OWNER
+    org_name = "演示经营主体·工作台"
+    tok = (api_login(code_mgr) or {}).get("access_token") or ""
+    if not tok:
+        w.rep.not_run("chain4 全部断言", "拿不到 seed-owner 的 token（后端未起或种子未铺）")
+        return
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == org_name:
+            org_id = str((r or {}).get("org_id") or "")
+    if not org_id:
+        w.rep.not_run("chain4 全部断言", f"seed-owner 的组织里没有「{org_name}」")
+        return
+
+    rows = (api_get(f"/entrust/assignments?view=org&org_id={org_id}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    ok_rows = [r for r in rows if str((r or {}).get("status") or "") in ("claimed", "submitted")]
+    ok_rows.sort(key=lambda r: int((r or {}).get("assignment_id") or 0), reverse=True)
+    aid = prefer_anchor(str((ok_rows[0] or {}).get("assignment_id") or "") if ok_rows else "")
+    anchored = bool(CHAIN_ASSIGNMENT or WALK_ANCHOR)
+    w.rep.rec(
+        "chain4 前置 · 有可用的委托（第 4 步的载体；开 `--chain` 时＝**本链那一张**）",
+        bool(aid),
+        f"aid={aid!r} 队列 {len(rows)} 张（claimed/submitted {len(ok_rows)} 张）"
+        f" 取单来源={'链式/显式锚点' if anchored else '队列最新（未开 --chain）'}",
+    )
+    if not aid:
+        w.rep.not_run("chain4 全部断言", "没有可用委托 ⇒ 无法演示第 4 步")
+        return
+
+    plan0 = api_get(f"/entrust/assignments/{aid}/plan", tok)
+    if not isinstance(plan0, dict) or not plan0:
+        w.rep.not_run("chain4 全部断言", f"读不到 aid={aid} 的运输计划（端点没回载荷）")
+        return
+    legs0 = plan0.get("legs") or []
+    tasks0 = plan0.get("tasks") or []
+    # ⚠️ 起点只**打印**、不做断言：它是"动手前的现场"，本身没有可失败的判据
+    #    （把它写成恒真断言就是真空通过）。
+    print(f"    [chain4 起点] aid={aid} 段={len(legs0)} 任务={len(tasks0)}", flush=True)
+
+    if not w.open_workbench(code_mgr, tag="chain4"):
+        w.rep.not_run("chain4 全部断言", "未能以 seed-owner 进入经理工作台")
+        return
+    # 组织显式钉住（`pickOrg` 的 `saved` 分支跨 IDE 重启保留）
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    w.wait_data(lambda x: x.get("plan") is not None, tries=60, gap=0.5)
+
+    n_open = w.c.count('[data-act-leg-open="1"]')
+    w.rep.rec(
+        "chain4 ① 写入口「加一段」在工作台可点 —— ⛔ 第 4 步不是「只读预置对象」",
+        n_open == 1,
+        f"加一段={n_open} 段行={w.c.count('.plan-leg')} 服务端段={len(legs0)} aid={aid}",
+    )
+    if n_open != 1:
+        w.rep.not_run("chain4 ②～⑤", "写入口不可用 ⇒ 无法在本单上建段")
+        return
+
+    #: 业务三段**刻意**就是 公路—内河—公路（合同 §3.1 的地理/航段要求）
+    plan_legs = [
+        ("road", "厂区（合成）", "南宁港（合成）", "第 1 段：公路提货"),
+        ("water", "南宁港（合成）", "贵港港（合成）", "第 2 段：内河运输（单船承运）"),
+        ("road", "贵港港（合成）", "卸货地（合成）", "第 3 段：公路送达"),
+    ]
+    wired = True
+    for idx, (mode, frm, to, note) in enumerate(plan_legs):
+        w.c.scroll_into('[data-act-leg-open="1"]')
+        w.c.tap('[data-act-leg-open="1"]')
+        w.wait_data(lambda x: x.get("legOpen") is True, tries=20, gap=0.3)
+        # ⚠️ `seq` **不键入**：它已预填「最大序号 + 1」，而 `input_text` 是**键入**（会追加）
+        #    ⇒ 硬打一遍会撞号 409，看起来像产品缺陷（㊼ 章踩过这个坑）。
+        wired = (
+            wired
+            and w.c.input_text('input[data-df="leg-mode"]', mode)
+            and w.c.input_text('input[data-df="leg-from"]', frm)
+            and w.c.input_text('input[data-df="leg-to"]', to)
+            and w.c.input_text('input[data-df="leg-note"]', note)
+        )
+        w.c.scroll_into('[data-act-leg-submit="1"]')
+        w.c.tap('[data-act-leg-submit="1"]')
+        # 提交成功后页面走整页 `load()` ⇒ 段数从**服务端**回来才算数（不数本地乐观插入）
+        target = len(legs0) + idx + 1
+        w.wait_data(
+            lambda x, _t=target: len((x.get("plan") or {}).get("legs") or []) >= _t,
+            tries=40,
+            gap=0.5,
+        )
+
+    srv_legs = (api_get(f"/entrust/assignments/{aid}/plan", tok) or {}).get("legs") or []
+    modes_srv = [str((x or {}).get("mode") or "") for x in srv_legs]
+    n_leg = w.c.count(".plan-leg")
+    w.rep.rec(
+        "chain4 ② 经**界面**建出三段，且**就是 公路—内河—公路**"
+        "（⛔ 链上不掺 `air`／铁路等负例段 —— 那些属于回归轮）",
+        wired
+        and len(srv_legs) == len(legs0) + 3
+        and modes_srv[-3:] == ["road", "water", "road"]
+        and n_leg == len(srv_legs),
+        f"输入接线={wired} 服务端段 {len(legs0)}→{len(srv_legs)} 末三段方式={modes_srv[-3:]} "
+        f"渲染段行={n_leg}",
+    )
+
+    # ── 任务与**前置关系**（经接口；界面无入口，如实登记）────────────────────
+    created: list[str] = []
+    prev = ""
+    last_st = 0
+    first_err = ""
+    for ttype, title in (
+        # ⚠️ `task_type` 是 **R1 固定取值域**（服务端 400 会把它原样列出来）：
+        #    `collect_documents / contract / execution / handover / purchase / quote / settlement`。
+        #    公路—内河—公路这条链上，装货与运输都属「执行」，卸货交接属「交接」。
+        #    ⛔ 自造 `pickup/transport/delivery` 会被 400 拒（本轮实测），看上去像接口坏了。
+        ("execution", "装货与公路提货"),
+        ("execution", "内河运输"),
+        ("handover", "卸货与交接（公路送达）"),
+    ):
+        payload = {  # type: dict
+            "task_type": ttype,
+            "title": f"chain4·{title}",
+            "required_evidence": [],
+        }
+        last_st, body = api_post(
+            f"/entrust/assignments/{aid}/tasks", tok, payload, uuid.uuid4().hex
+        )
+        tid = str((body or {}).get("task_id") or "")
+        if not tid:
+            # ⭐ 4xx **必须把服务端给的原因原样带出来** —— 只记 `HTTP=400` 等于没有读数
+            #    （本项目的老毛病：`detail` 被 `String()` 掉、或干脆只记状态码）。
+            if not first_err:
+                first_err = (
+                    f"建任务失败 HTTP={last_st} body={json.dumps(body, ensure_ascii=False)[:220]}"
+                )
+            continue
+        if prev:
+            # ⚠️ 固定前置**不是**创建时的入参：它有**专门的端点**
+            #    （`POST /entrust/tasks/{id}/precondition`，由服务端拒绝自依赖与循环），
+            #    且带乐观锁 `expected_revision`。用错路径的典型症状就是 405（本轮实测）。
+            st_pre, pre_body = api_post(
+                f"/entrust/tasks/{tid}/precondition",
+                tok,
+                {
+                    "expected_revision": int((body or {}).get("revision") or 1),
+                    "precondition_task_id": int(prev),
+                },
+                uuid.uuid4().hex,
+            )
+            if st_pre not in (200, 201) and not first_err:
+                first_err = (
+                    f"设前置失败 HTTP={st_pre} "
+                    f"body={json.dumps(pre_body, ensure_ascii=False)[:220]}"
+                )
+        created.append(tid)
+        prev = tid
+    w.rep.rec(
+        "chain4 ③ 任务与**前置关系**建起来了（⚠️ 经接口：界面**没有**建任务入口，"
+        "也没有 `precondition_task_id` 入参 —— 如实登记，⛔ 不假装是界面点的）",
+        len(created) == 3,
+        f"HTTP={last_st} 建出 task_id={created} 前置链={' → '.join(created) or None}"
+        + (f"｜{first_err}" if first_err else ""),
+    )
+
+    # ── 展示：回到工作台，**逐行**读本单刚建出来的那批 ───────────────────────
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("plan") is not None, tries=60, gap=0.5)
+    time.sleep(1.0)
+    w.shot("chain4-工作台-公路水路公路与任务前置")
+    # ⚠️ "服务端任务数"必须取自**权威列表端点**（`GET /entrust/tasks?assignment_id=`），
+    #    ⛔ 不是 plan 载荷里的某个键 —— 实测 `plan` 不回 `tasks`（读它会得到恒 0，
+    #    于是"页面 3 行 vs 服务端 0 条"看起来像页面多渲染了，其实是**读数取错字段**）。
+    tasks_srv = (api_get(f"/entrust/tasks?assignment_id={aid}&size=50", tok) or {}).get(
+        "items"
+    ) or []
+    n_task = w.c.count(".plan-task")
+    n_pre = w.c.count(".plan-task-pre")
+    w.rep.rec(
+        "chain4 ④ 工作台**逐行**列出本单的任务，且**每一条任务行都带一行前置说明**"
+        "（「无固定前置」也要自己说话）—— 展示对象是**本单刚建的**，⛔ 不是预置对象",
+        len(tasks_srv) >= 3 and n_task == len(tasks_srv) and n_pre == n_task,
+        f"服务端任务={len(tasks_srv)} 渲染任务行={n_task} 前置行={n_pre}｜本轮新建={created}",
+    )
+    pre_ids = [
+        str((x or {}).get("precondition_task_id") or "")
+        for x in tasks_srv
+        if (x or {}).get("precondition_task_id")
+    ]
+    w.rep.rec(
+        "chain4 ⑤ 前置关系在**服务端事实**里确实存在（⛔ 不只看页面上有没有那一行）",
+        len(pre_ids) >= 2,
+        f"带前置的任务={len(pre_ids)} 条（共 {len(tasks_srv)} 条）｜本轮前置链={' → '.join(created) or None}",
+    )
+
+    # ⛔ 有意的负例：本章**不掺** `air`/铁路等未登记方式 —— 那些是 ㊻/㊼ 的回归内容；
+    #    这里只做业务段。console 门禁按本轮增量判（与其它章同一口径）。
+    errs = w.new_errors(err_base)
+    w.rep.rec(
+        "chain4 ⑥ 本章运行期**无新增 console 报错**", not errs.strip(), errs.strip()[:300] or "无"
+    )
+
+
 def sec_47(w: Walker) -> None:
     """㊼ 航段命令的**写侧界面**（合同 §10.1 第 4 步）——设备侧运行取证。
 
@@ -12107,6 +12338,11 @@ SECTIONS = {
     #: ⚠️ 接管**动作**只能经接口（O-1b：界面无入口，本节把「无入口」也断言出来），
     #:    但「代次 +1 ⇒ 旧代次提交被拒」与「界面无入口」两处后果都断言。
     "55": sec_55,
+    # chain4 = 主演示**第 4 步**在**同一张委托**上"先建、再展示"（HO 2026-09-20 第五节）：
+    #    经界面建 **公路—内河—公路** 三段 ＋ 经接口建任务与前置关系，然后在工作台逐行展示。
+    #    ⚠️ 它**不是**回归章节：⛔ 不掺 `air`/铁路等负例段（那些留在 ㊻/㊼ 的回归轮里）。
+    #    排在序末：它会**写库**（建段、建任务），放前面会把按条数断言的章节搅乱。
+    "chain4": sec_chain4,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -12260,6 +12496,10 @@ DEFAULT_ORDER = [
     # 55 = 第 9 步后半（人工接管）。⛔ 不登记进本表就属于"静默漏项"：
     #    `--section all` 会漏掉它，而读数不会变红、`--help` 也列不到。
     "55",
+    # chain4 = 主演示第 4 步的**业务写侧**（先建公路—内河—公路与任务前置，再展示）。
+    #    ⚠️ 放**全量序列最末**：它会真写（建段 + 建任务），排在前面会让按条数断言的章节变脆。
+    #    开 `--chain` 时它落在**本链那一张**单上；未开时落在队列最新的一张 —— 两种都记在读数里。
+    "chain4",
 ]
 
 
