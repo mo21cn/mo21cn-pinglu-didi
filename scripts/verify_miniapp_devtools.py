@@ -9500,7 +9500,7 @@ def sec_46(w: Walker) -> None:
     if not hit and not anchor_active():
         w.rep.not_run("㊻ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
-    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
+    aid = prefer_anchor(str((hit[0] if hit else {}).get("assignment_id") or ""))
 
     # ── 写①：建段（经 API —— 写侧没有界面，见 docstring）───────────────
     st1, body1 = api_post(
@@ -9957,7 +9957,7 @@ def sec_47(w: Walker) -> None:
     if not hit and not anchor_active():
         w.rep.not_run("㊼ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
-    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
+    aid = prefer_anchor(str((hit[0] if hit else {}).get("assignment_id") or ""))
 
     plan0 = api_get(f"/entrust/assignments/{aid}/plan", tok) or {}
     legs0 = plan0.get("legs") or []
@@ -10185,7 +10185,7 @@ def sec_48(w: Walker) -> None:
             f"seed-shipper 名下找不到「{demo_title}」（先跑 python scripts/seed_entrust_canonical.py）",
         )
         return
-    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
+    aid = prefer_anchor(str((hit[0] if hit else {}).get("assignment_id") or ""))
 
     plan0 = api_get(f"/entrust/assignments/{aid}/plan", tok) or {}
     legs0 = plan0.get("legs") or []
@@ -10334,7 +10334,7 @@ def sec_49(w: Walker) -> None:
             "㊾ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
         return
-    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
+    aid = prefer_anchor(str((hit[0] if hit else {}).get("assignment_id") or ""))
 
     # ① 前置：一条**已接受**的对客报价发布（种子铺；没有就整章 NOT_RUN）
     eid = ""
@@ -10678,7 +10678,7 @@ def sec_50(w: Walker) -> None:
             "㊿ 全部断言", f"该组织下找不到「{demo_title}」（先跑 seed_entrust_canonical.py）"
         )
         return
-    aid = prefer_anchor(str((hit[0] or {}).get("assignment_id") or ""))
+    aid = prefer_anchor(str((hit[0] if hit else {}).get("assignment_id") or ""))
 
     ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
     eid = str(ctx.get("entrustment_id") or "")
@@ -12102,6 +12102,177 @@ def sec_chain12(w: Walker) -> None:
     )
     errs = w.new_errors(err_base)
     w.rep.rec("第13步 · 本节运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条")
+
+
+def sec_chain_manual(w: Walker) -> None:
+    """第 2 步的**无模型人工通路**（D1-05）：模型不可用时，用户能**人工录入**并把文本交回链路。
+
+    为什么单独一章
+    --------------
+    D1-05 的判据是「**离线／人工**通路证据；无语义上必需的动作被阻塞」，而 HO 2026-09-20 明确：
+    「**fixture 自动返回提案不能单独证明人工通路**」。此前所有轮次的提取都走 `LLM_MOCK` 或真模型
+    ⇒ 人工通路**一次都没被点过**（全仓核对：走查脚本里此前**没有**「人工转录」的锚点）。
+
+    本章在**模型不可用**的后端上（起后端时把 `LLM_BASE_URL` 指到不可达端口）取三段证据：
+
+    ① 提取**如实失败**（不是假装成功）—— 这是人工通路的前置条件；
+    ② 用户经**人工转录**把文本录进去 ⇒ 附件文本来源变「人工转录」，且**随后可被引用**
+       （＝ Agent 读得到它，⛔ 不是"录进去了但没人用"）；
+    ③ 交代「人工录入后继续到**结案**」那一半在哪取证（同单链式的 `43/chain4/44/chain9/chain11/53`）。
+       ⛔ 不在本章伪造齐备／结案读数。
+
+    ⭐ **状态感知**（本章会进 `DEFAULT_ORDER`，因此必须能被无前置地安全运行）
+    ---------------------------------------------------------------------
+    模型可用时提取会成功 ⇒ 本章**没有前置对象** ⇒ 记 `NOT_RUN` 并点名"这轮模型可用"，
+    ⛔ 不把"提取成功"记成"人工通路失败"，⛔ 也不消耗 `--section all` 的绿灯。
+
+    诚实边界
+    --------
+    * 本章**不证明**"模型可用时提取成功"（那是 ㊸ 的范围）。
+    * 模型不可用是**环境**条件：读数里打的是提取结果本身，⛔ 不靠"这轮应该是 mock"去推断。
+    * ⛔ 不改产品行为：只为「人工转录」的两个入口补了 `data-act-*`（本仓既有约定：可点元素带锚点，
+      ⛔ 裸属性会被工具拒），并且这两处本来就是 `bindtap` 的可点元素。
+    """
+    print("\n-- chain-manual 第 2 步 · 无模型人工通路（D1-05）--", flush=True)
+
+    err_base = w.c.errors()
+    tok = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    aid = prefer_anchor("")
+    if not aid:
+        rows = (api_get("/entrust/assignments?view=org&size=50", tok) or {}).get("items") or []
+        claimed = [r for r in rows if str((r or {}).get("status")) == "claimed"]
+        claimed.sort(key=lambda r: int((r or {}).get("assignment_id") or 0))
+        aid = str((claimed[0] or {}).get("assignment_id") or "") if claimed else ""
+    if not tok or not aid:
+        w.rep.not_run("chain-manual 全部断言", f"拿不到经理 token 或可用委托（aid={aid!r}）")
+        return
+
+    if not w.open_workbench(CODE_OWNER, tag="chain-manual"):
+        w.rep.not_run("chain-manual 全部断言", "未能以经理进入工作台")
+        return
+    n_sess = w.c.count(f'[data-act-session="{aid}"]')
+    if n_sess != 1:
+        w.rep.not_run(
+            "chain-manual ①②",
+            f"工作台卡片上的「会话」入口命中 {n_sess} 个（期望 1）⇒ 没进会话屏，"
+            f"本单 aid={aid} 可能不在这一屏（先跑 43 或用 `--chain`）",
+        )
+        return
+    w.c.scroll_into(f'[data-act-session="{aid}"]')
+    w.c.tap(f'[data-act-session="{aid}"]')
+    w.c.wait_path(SESSION, 30)
+    pg = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
+    sid = str(pg.get("sessionId") or "")
+
+    # ── ① 上传内置样本 ⇒ 让**提取**去碰模型（模型不可用 ⇒ 应当如实失败）──────────
+    n_sample = w.c.count('[data-act-sample-quote="1"]')
+    if n_sample == 1:
+        w.c.scroll_into('[data-act-sample-quote="1"]')
+        w.c.tap('[data-act-sample-quote="1"]')
+        pg = w.wait_data(
+            lambda x: len(x.get("attachments") or []) > 0 and not x.get("uploading"),
+            tries=60,
+            gap=0.5,
+        )
+    atts = pg.get("attachments") or []
+    notice = str(pg.get("attachNotice") or "")
+    can_ref = [bool((a or {}).get("canReference")) for a in atts]
+    model_down = bool(atts) and not any(can_ref)
+    w.rep.rec(
+        "chain-manual ① 附件的**提取结果**如实反映模型可用性"
+        "（模型不可用 ⇒ 没有可引用文本，且页面给出说明；⛔ 不是假装成功）",
+        bool(atts)
+        and (model_down and (notice != "" or any((a or {}).get("referenceHint") for a in atts))),
+        f"附件 {len(atts)} 条；canReference={can_ref}；"
+        f"extractStatus={[str((a or {}).get('extractStatus')) for a in atts]}；"
+        f"attachNotice={notice[:110]!r}",
+    )
+
+    if not model_down:
+        w.rep.not_run(
+            "chain-manual ② 提取失败后出现「人工转录」入口",
+            f"本轮提取**成功**了（canReference={can_ref}）⇒ 说明模型可用 ⇒ 「人工通路」这一章"
+            "**没有前置对象**。要在**模型不可用**轮次跑本章（起后端时把 `LLM_BASE_URL` 指到"
+            "不可达端口／无效 Key）。⛔ 不把「提取成功」记成「人工通路失败」。",
+        )
+        for t in (
+            "chain-manual ③ 人工转录落库（文本来源变「人工转录」）",
+            "chain-manual ④ 转录后该附件**可被引用**（Agent 读得到它）",
+        ):
+            w.rep.not_run(t, "同上：模型可用 ⇒ 人工转录这一格没有对象。")
+        errs = w.new_errors(err_base)
+        w.rep.rec(
+            "chain-manual 本章运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条"
+        )
+        return
+
+    # ── ② 「人工转录」入口由**状态**决定（不是常显）────────────────────────────
+    n_tr = w.c.count('[data-act-transcribe-open="1"]')
+    w.rep.rec(
+        "chain-manual ② 提取失败后出现「人工转录」入口（界面按**状态**给出降级通道）",
+        n_tr >= 1,
+        f"人工转录入口={n_tr}；canTranscribe={[bool((a or {}).get('canTranscribe')) for a in atts]}",
+    )
+    if n_tr < 1:
+        w.rep.not_run("chain-manual ③ 人工转录落库", "页面上没有「人工转录」入口 ⇒ 无对象")
+        w.rep.not_run("chain-manual ④ 转录后可引用", "同上")
+        return
+
+    # ── ③ 经界面**人工转录**（把文件内容抄进来）────────────────────────────────
+    w.c.scroll_into('[data-act-transcribe-open="1"]')
+    w.c.tap('[data-act-transcribe-open="1"]')
+    time.sleep(0.8)
+    draft = (
+        "走查·人工转录（模型不可用时的降级录入）：运费 42750.00 元；"
+        "货量 950 吨；装期 2026-10-05；承运方 走查承运人"
+    )
+    # ⚠️ 这里是 `<textarea>`（没有 `data-df`）⇒ 用页面 data 直接填，再点页面自己的提交键。
+    w.c.set_data({"transcribeDraft": draft})
+    time.sleep(0.6)
+    n_sub = w.c.count('[data-act-transcribe-submit="1"]')
+    if n_sub:
+        w.c.scroll_into('[data-act-transcribe-submit="1"]')
+        w.c.tap('[data-act-transcribe-submit="1"]')
+    pg3 = w.wait_data(
+        lambda x: (
+            not x.get("attachBusy")
+            and any(
+                "人工转录" in str((a or {}).get("textSourceLabel") or "")
+                for a in (x.get("attachments") or [])
+            )
+        ),
+        tries=40,
+        gap=0.5,
+    )
+    atts3 = pg3.get("attachments") or []
+    hit3 = [a for a in atts3 if "人工转录" in str((a or {}).get("textSourceLabel") or "")]
+    w.rep.rec(
+        "chain-manual ③ ⭐ **人工转录落库**：附件文本来源变「人工转录」"
+        "（页面投影；服务端有 `manual_transcription` 这一档 —— 见 `attachments.py`）",
+        bool(hit3),
+        f"命中 {len(hit3)} 条；textSourceLabel="
+        f"{[str((a or {}).get('textSourceLabel')) for a in atts3]}；"
+        f"attachNotice={str(pg3.get('attachNotice'))[:110]!r}（提交键命中={n_sub}）",
+    )
+    w.rep.rec(
+        "chain-manual ④ 转录之后该附件**可被引用**（`canReference` 翻真 ⇒ "
+        "「Agent 就能读到它」这句话在状态上成立）",
+        any((a or {}).get("canReference") is True for a in atts3),
+        f"canReference={[bool((a or {}).get('canReference')) for a in atts3]}；"
+        f"referenceHint={[str((a or {}).get('referenceHint'))[:40] for a in atts3]}",
+    )
+    w.shot("chain-manual-人工转录-已提交")
+
+    # ── ⑤ 交代「继续到结案」那一半（⛔ 不在本章伪造）──────────────────────────
+    w.rep.not_run(
+        "chain-manual ⑤ 「人工录入后继续到**结案**」那一半",
+        "本章只取「模型不可用时能人工录入、且文本交回链路」这一段；"
+        "「继续到结案」需要人工组装成果 → 客户接受 → 任务处置 → 案件关闭 → 结案，"
+        "由**同单链式**的 `43/chain4/44/chain9/chain11/53` 承担（⛔ 不在本章伪造齐备读数）。"
+        f"本单 aid={aid} sessionId={sid!r} —— D1-05 的完整闭环要两轮合起来读。",
+    )
+    errs = w.new_errors(err_base)
+    w.rep.rec("chain-manual 本章运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条")
 
 
 def sec_chain11(w: Walker) -> None:
@@ -13922,6 +14093,9 @@ SECTIONS = {
     #    详情页当前值 ＋ **结算面**那条「数量 950 吨」的费用行、**重进后**再读（逐字相等）。
     #    ⚠️ 只在链式轮次成立（要求本单已完成第 8 步）；⛔ 不碰结案/重开（那是章 53 的职责）。
     "chain12": sec_chain12,
+    # chain-manual = 第 2 步的**无模型人工通路**（D1-05）。⚠️ 状态感知：模型可用时整章 NOT_RUN
+    #   并点名，⛔ 不吃掉 --section all 的绿灯。
+    "chain-manual": sec_chain_manual,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -14092,6 +14266,9 @@ DEFAULT_ORDER = [
     #    链式跑法：`43,chain4,45,44,49,50,chain9,55,52,53,chain12`；未开 `--chain` 时它自己
     #    `NOT_RUN` 并点名（⛔ 不拿别的委托顶替）。
     "chain12",
+    # chain-manual = D1-05 的**人工通路**（模型不可用轮次才有对象）。
+    #    ⚠️ 进本表是为了不被"--section all 静默漏掉"；它自带状态感知，模型可用时整章 NOT_RUN。
+    "chain-manual",
 ]
 
 
