@@ -687,6 +687,42 @@ python scripts/verify_miniapp_devtools.py --section all
 
 ---
 
+### 8.7 ⭐ **模型模式口径**（2026-09-20 起必须写明；否则同一格会来回翻）
+
+走查后端有两种模型模式，**结论不可互相冒充**：
+
+| 模式 | 怎么起 | 能证什么 | ⛔ 不能证什么 |
+| --- | --- | --- | --- |
+| **真模型**（默认） | `--skip-ide --pay` | 端到端连通性 ＋ 页面/接口行为 | **链路规则** —— 提案集合由**模型输出**决定，缺一条提案 ≠ 链路缺陷 |
+| **fixture** | 加 **`--llm-mock`**（翻 `LLM_MOCK=true`） | **链路规则**（如"作业输入带 `amount` ⇒ 提案里有 `customer_quote`"） | **模型质量**，以及任何依赖模型判断的内容 |
+
+* 起后端时 runner **会打印本轮模式**；报告里必须带上那一行。
+* 依据（实测）：`ag02.py:310` 的「`amount` 非空 ⇒ 追加 `customer_quote`」写在 **`mock_content()` 里**
+  ⇒ 只在 fixture 模式执行 ⇒ 同一条断言在两种模式下来回翻（09-18/09-19 PASS、09-20 FAIL，
+  而输入里 `amount` 一直在、会话是自建 `agent_02`）。
+* 走查脚本已按投影里的 `mocked` **三态**分断：`True` **必须**成立／`False` 记 `NOT_RUN` 并点名
+  要 fixture／未知按**最严**判（⛔ 不静默放宽）。
+
+**两条固定命令**（评审要复现时照抄）：
+
+```bash
+# ① 第 6 步来源门槛（D1-07 / O-1b）：fixture 轮 —— 只证**链路规则**
+python scripts/run_walkthrough_devtools.py --skip-ide --pay --llm-mock \
+  --section 51 --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py
+#   期望：RESULT: PASS（全为 PASS）；② 的读数里 mocked=True
+
+# ② 主演示第 1–3 步（㊸）：真模型轮 —— 端到端 ＋ 页面行为
+python scripts/run_walkthrough_devtools.py --skip-ide --pay \
+  --section 43 --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py
+```
+
+⛔ **不要**用 fixture 轮的 `PASS` 去宣称"模型能力已验证"；也⛔ **不要**用真模型轮的 `FAIL`
+去宣称"链路坏了" —— 两者是**两种前提**下的读数。
+
+⚠️ 另有一条硬约束：**同一时刻只允许一个走查 runner**。两个 runner 都监听 8000 ⇒ 会互相接到
+对方的临时库，读数长出「拿不到 token」「入口命中 0」这类**像产品坏了**的假象。
+runner 已加**互斥闸门**：被占用即拒跑并点名持有者（退出码 2 ＝ 环境阻塞）。
+
 ## 9. 本切片（S1）未闭合的项
 
 1. **§6 隔离复位**：**最小版已完成**（`backend/scripts/reset_demo_env.py`，2026-09-16，DR-0018）；

@@ -1,0 +1,360 @@
+{
+  "sections": [
+    "43"
+  ],
+  "project": "E:\\pinglu-didi\\miniapp",
+  "startedAt": "2026-09-20T07:41:12+0800",
+  "finishedAt": "2026-09-20T07:46:00+0800",
+  "argv": [
+    "scripts\\verify_miniapp_devtools.py",
+    "--shots",
+    "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-074003",
+    "--section",
+    "43"
+  ],
+  "verdict": "FAIL",
+  "tally": {
+    "PASS": 43,
+    "FAIL": 1,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0,
+    "LIMITATION": 1
+  },
+  "rollup": {
+    "PASS": 43,
+    "FAIL": 1,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 1
+  },
+  "passed": 43,
+  "notPassed": 2,
+  "attempt": 3,
+  "previousRuns": [
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260919-235414",
+      "finishedAt": "2026-09-19T23:59:45+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260919-235414",
+        "--section",
+        "43"
+      ],
+      "verdict": "NOT_RUN",
+      "passed": 41,
+      "notPassed": 1
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-000954",
+      "finishedAt": "2026-09-20T00:12:24+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-000954",
+        "--section",
+        "43"
+      ],
+      "verdict": "FAIL",
+      "passed": 2,
+      "notPassed": 2
+    }
+  ],
+  "results": [
+    {
+      "step": "㊸ 前置 · 清掉按 `user_id` 推导的在途载荷（跨轮次残留会把'新建'变成'续接'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "entrust_intake_draft_<user_id> 已清（清两次）"
+    },
+    {
+      "step": "截图 43-1-受理屏",
+      "ok": true,
+      "kind": "PASS",
+      "note": "23974B"
+    },
+    {
+      "step": "㊸ 第1步 · 发布货源 → 受理屏（真实点击；货名/货量随草稿带过去）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "via=URL 直进（凸起锚点命中 0 个 —— 自定义 tabBar 是组件） cargo_page=True 锚点命中 1 reset=先到就绪 path=pages/entrust/intake/intake"
+    },
+    {
+      "step": "㊸ 第1步 · 受理屏的目标清单里有「演示经营主体·工作台」（客户 A 授权出去的组织 —— 不是「我所在的组织」，后者会给出能选但必然 403 的选项）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "targets=['演示经营主体·工作台']"
+    },
+    {
+      "step": "截图 43-2-提交后落详情",
+      "ok": true,
+      "kind": "PASS",
+      "note": "23174B"
+    },
+    {
+      "step": "㊸ 第1步 · 真实点击「提交委托」⇒ 落到该委托的详情页（不是停在原页、也不是落首页）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "org=1（锚点 1、tap=True）、submit=True、path=pages/entrust/detail/detail"
+    },
+    {
+      "step": "㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid=6 org=1（演示经营主体·工作台） ｜链式锚点=未开启（回归不被改写）"
+    },
+    {
+      "step": "㊸ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊸ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 43-3-工作台-待受理",
+      "ok": true,
+      "kind": "PASS",
+      "note": "33328B"
+    },
+    {
+      "step": "㊸ 第1步 · A1 在工作台看到这张**新提交**的委托，受理入口可被唯一命中",
+      "ok": true,
+      "kind": "PASS",
+      "note": "[data-act-claim=\"6\"] 命中 1"
+    },
+    {
+      "step": "截图 43-4-受理成功",
+      "ok": true,
+      "kind": "PASS",
+      "note": "33091B"
+    },
+    {
+      "step": "㊸ 第1步 · 真实点击受理 ⇒ 服务端 `submitted → claimed` 且 `claimed_by` 已落（**API 直证**，不只看界面）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "展开=True（确认条 1 个）提交=True status='claimed' claimed_by=2"
+    },
+    {
+      "step": "截图 43-5-专属会话屏",
+      "ok": true,
+      "kind": "PASS",
+      "note": "19350B"
+    },
+    {
+      "step": "㊸ 第2步 · 工作台卡片的「会话」入口真实点击 ⇒ 进该委托的专属会话屏",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/entrust/session/session sessionId='1'"
+    },
+    {
+      "step": "㊸ 第2步 · 「上传报价单（从系统里选文件）」",
+      "ok": false,
+      "kind": "LIMITATION",
+      "note": "入口可被唯一命中（1 个），但点击会打开 **OS 级原生文件选择器** —— 它是系统弹层、不在小程序渲染树里，走查工具够不着它的选择项（技能 miniapp-device-walkthrough 的负例清单实测过）。**不计入通过**。要拿到这一格的证据需要 OS 级输入通道（本项目 ⑧b/㊶ 用过），或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。"
+    },
+    {
+      "step": "截图 43-5b-样本按钮滚进视口",
+      "ok": true,
+      "kind": "PASS",
+      "note": "19350B"
+    },
+    {
+      "step": "㊸ 第2步 · 前置（可点击性）· 样本按钮**滚进视口内**（`bottom ≤ 窗高`）—— 没有这一条，「点了没反应」会被误读成产品坏",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "scroll_into=False box=top:None bottom:None left:None right:None winH=844.0 in_view=False"
+    },
+    {
+      "step": "截图 43-6-附件已上传并提取",
+      "ok": true,
+      "kind": "PASS",
+      "note": "27213B"
+    },
+    {
+      "step": "㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**（只有 done 的附件对 Agent 才是文本，否则它只是个文件名）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "锚点=1 tap=True uploading=False 重试(tap=None,uploading=None) sess='1' 清残留(删除上一轮样本文件)=False 样本文件 先=False 后=True(2674字节) att_before=0 attachments=1 done=1 notice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent'"
+    },
+    {
+      "step": "㊸ 第2步 · 「处理器是否真的执行」可判定（`uploading` 翻真 或 样本文件已写出）—— 两者全否 ⇒ 是**点击没落到处理器上**，而不是「上传失败」",
+      "ok": true,
+      "kind": "PASS",
+      "note": "handler_ran=True（依据 uploading=False/None、样本文件=True err=None、sess='1'（非空 ⇒ 不是「会话未就绪」那条早退））"
+    },
+    {
+      "step": "㊸ 第2步 · 提取结果被**如实报出**（不是合成一句'上传成功'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "attachNotice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent 已能读到这份报价单'"
+    },
+    {
+      "step": "截图 43-7-AG02-终态",
+      "ok": true,
+      "kind": "PASS",
+      "note": "29638B"
+    },
+    {
+      "step": "㊸ 第2步 · 真实点击「让 Agent 解析这份报价单」⇒ 作业跑到**终态**（不是只停在排队）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "status='succeeded' jobId='1'"
+    },
+    {
+      "step": "㊸ 第2步 · 作业产出**提案**并在页面上列出条数（提案 ≠ 成果，才需要人工采纳）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "proposalCount=1"
+    },
+    {
+      "step": "㊸ 第2步 · 作业来源里含 `attachment_text`（Agent 读的是**附件文本**，不是文件名）—— API 直证",
+      "ok": true,
+      "kind": "PASS",
+      "note": "kinds=['assignment', 'attachment_text'] jobId=1"
+    },
+    {
+      "step": "㊸ 第2步 · 没有未核验来源（来源核对覆盖 `findings` 内的嵌套引用，见 PR #131）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "unverified_sources=[]"
+    },
+    {
+      "step": "截图 43-8-采纳成成果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "29003B"
+    },
+    {
+      "step": "㊸ 第3步 · 真实点击「采纳为成果」→ 页内确认条 → 确认 ⇒ 提案变成成果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ask=True confirm=True（确认条 1 个）artifact_id=8"
+    },
+    {
+      "step": "截图 43-9-成果页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "18155B"
+    },
+    {
+      "step": "㊸ 第3步 · 从**会话屏的成果卡**真实点击进入成果页（同一份）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/entrust/artifact/artifact artifactId='8'（期望 8）"
+    },
+    {
+      "step": "截图 43-10-编辑态-已改一个字段",
+      "ok": true,
+      "kind": "PASS",
+      "note": "20799B"
+    },
+    {
+      "step": "㊸ 第3步 · 真实点击「编辑内容」→ **真实输入**改一个字段（页面识别到有未保存改动）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "字段#0 锚点 1 个 input=True '西江航运有限公司' → '西江航运有限公司（走查更正）' dirty=True"
+    },
+    {
+      "step": "㊸ 第3步 · 保存 ⇒ **追加一个新版本**（append-only，不是就地改掉旧版本）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "revisions 1 → 2 notice='已保存为 v2，生效版本仍是 v1（需确认才会切换）'"
+    },
+    {
+      "step": "截图 43-11-页内确认条",
+      "ok": true,
+      "kind": "PASS",
+      "note": "20691B"
+    },
+    {
+      "step": "㊸ 第3步 · 「设为生效版本」走**页内确认条**（原生弹层的确认键走查工具点不到 ⇒ 这条路径本来拿不到设备证据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口 1 个、确认条 1 个"
+    },
+    {
+      "step": "㊸ 第3步 · 确认切换生效版本 ⇒ **服务端**的生效版本号 == 页面刚保存的那一版（API 直证）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "刚保存 v2 / 服务端 v2 / saveNotice='生效版本已切换为 v2'"
+    },
+    {
+      "step": "㊸ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊸ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 43-12-详情页-成果槽位",
+      "ok": true,
+      "kind": "PASS",
+      "note": "24347B"
+    },
+    {
+      "step": "㊸ 第3步 · 工作台 → 委托卡 → 详情页（真实点击，经页面的 `go()` 决策）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/entrust/detail/detail slots=7"
+    },
+    {
+      "step": "截图 43-13-从工作台打开同一份成果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "18708B"
+    },
+    {
+      "step": "㊸ 第3步 · 槽位里的成果引用可点，且打开的是**被点的那一条**（同一 `artifact_id`，不是'打开最新一份'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "引用锚点 1 个、期望 aid=8、落页 artifactId='8'"
+    },
+    {
+      "step": "㊸ 第3步 · 工作台侧看到的是**更正后**的内容（D1-04「更正出现在所有共享视图」—— 这是本步唯一真正的判据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "期望页面字段值里含 '西江航运有限公司（走查更正）'；实际命中（字段 11 个，生效版本证据见上一条）"
+    },
+    {
+      "step": "㊸ 本章运行期 console 无未归因错误",
+      "ok": true,
+      "kind": "PASS",
+      "note": "增量 0 条"
+    }
+  ],
+  "console": {
+    "baselineCaptured": true,
+    "collectFailed": false,
+    "openPhaseWaived": [],
+    "openPhaseUnwaived": [],
+    "bizPhaseUnwaived": [],
+    "whitelist": [
+      {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": "open",
+        "evidence": "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+      },
+      {
+        "pattern": "routeDone with a webviewId",
+        "phase": "open",
+        "evidence": "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉（HO D1 明确点名这个范围过宽）"
+      }
+    ]
+  },
+  "consoleError": "",
+  "consoleErrorDetected": false,
+  "consoleNoiseCount": 0,
+  "consoleOtherCount": 0,
+  "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-074003"
+}
