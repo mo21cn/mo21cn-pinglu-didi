@@ -1,10 +1,28 @@
-"""F5 撮合引擎 Stage1 测试：硬约束过滤 + 多目标评分 + 双向撮合端点。"""
+"""F5 撮合引擎 Stage1 测试：硬约束过滤 + 多目标评分 + 双向撮合端点。
+
+⚠️ **日期一律相对"今天"算，⛔ 不写死日历日期。** 两条产品侧校验都用 `date.today()`：
+
+* `ship/schemas.py` ⇒ `cert_expiry < today` 时**备案被拒**；
+* `cargo/service.py` ⇒ `expect_date < today` 时**建货被拒**。
+
+写死的"今天"过一天就变成"昨天"，用例会以"建单直接失败"的形式烂掉
+（2026-09-21 实测：本文件的 `cert_expiry="2026-09-20"` 正是这么烂的 —— `KeyError: 'id'`）。
+日期**只在产品与"今天"比较时才需要相对化**：纯引擎用例（`test_engine_pure_functions`）
+的两端日期都在测试内、不涉及 `today`，保持字面量反而更可读。
+"""
 
 from __future__ import annotations
+
+from datetime import date, timedelta
 
 API_SHIP = "/api/v1/ship/registry"
 API_CARGO = "/api/v1/cargo/shipments"
 API_MATCH = "/api/v1/match"
+
+#: 货源装运日＝**今天 + 30 天**。⛔ 不写死：`engine.py` 判的是 `cert_expiry < expect_date`，
+#: 写死一个日历日期的话，过了那天"证书够不到装运日"这一档就再也造不出来（而且 `cargo/service.py`
+#: 还会先因为"装运日已过"把建货本身拒掉）。
+CARGO_EXPECT_DATE = (date.today() + timedelta(days=30)).isoformat()
 
 CARGO_PAYLOAD = {
     "cargo_name": "水泥熟料",
@@ -12,7 +30,7 @@ CARGO_PAYLOAD = {
     "weight_t": 1000,
     "origin_port": "NNG",
     "dest_port": "QNZ",
-    "expect_date": "2026-10-01",
+    "expect_date": CARGO_EXPECT_DATE,
     "publish_now": True,
 }
 
@@ -92,7 +110,11 @@ def test_match_cargo_hard_filters(owner, port_user, shipper, client):
         port_user,
         ship_name="证书过期",
         cert_no="C-EXP",
-        cert_expiry="2026-09-20",  # 覆盖今天但早于装货日
+        # 原意**不变**：证书**覆盖今天**（今天仍有效 ⇒ 能备案、能审核通过），
+        # 但**早于装货日** ⇒ 撮合时按「证书不足以覆盖装运日」过滤
+        # （`engine.py` 判 `cert_expiry < expect_date`）。
+        # ⛔ 不写死日历日期：那正是本用例 2026-09-21 烂掉的原因。
+        cert_expiry=date.today().isoformat(),
     )
     _make_verified_ship(
         client, owner, port_user, ship_name="小船", cert_no="C-SMALL", deadweight_t=500
