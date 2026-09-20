@@ -1,0 +1,172 @@
+{
+  "sections": [
+    "chain-manual"
+  ],
+  "project": "E:\\pinglu-didi\\miniapp",
+  "startedAt": "2026-09-20T23:49:06+0800",
+  "finishedAt": "2026-09-20T23:50:45+0800",
+  "argv": [
+    "scripts\\verify_miniapp_devtools.py",
+    "--shots",
+    "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-234839",
+    "--section",
+    "chain-manual"
+  ],
+  "verdict": "NOT_RUN",
+  "tally": {
+    "PASS": 7,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 2,
+    "LIMITATION": 0
+  },
+  "rollup": {
+    "PASS": 7,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 2
+  },
+  "passed": 7,
+  "notPassed": 2,
+  "attempt": 5,
+  "previousRuns": [
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-232151",
+      "finishedAt": "2026-09-20T23:25:41+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-232151",
+        "--section",
+        "chain-manual"
+      ],
+      "verdict": "FAIL",
+      "passed": 3,
+      "notPassed": 4
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-233315",
+      "finishedAt": "2026-09-20T23:35:13+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-233315",
+        "--section",
+        "chain-manual"
+      ],
+      "verdict": "FAIL",
+      "passed": 5,
+      "notPassed": 4
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-233633",
+      "finishedAt": "2026-09-20T23:41:07+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-233633",
+        "--section",
+        "chain-manual"
+      ],
+      "verdict": "FAIL",
+      "passed": 6,
+      "notPassed": 3
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-234257",
+      "finishedAt": "2026-09-20T23:45:12+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-234257",
+        "--section",
+        "chain-manual"
+      ],
+      "verdict": "NOT_RUN",
+      "passed": 6,
+      "notPassed": 3
+    }
+  ],
+  "results": [
+    {
+      "step": "chain-manual [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "chain-manual [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "chain-manual ⓪ 从工作台卡片进到该委托的**专属会话屏**（本章都在这一页上做）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True path=pages/entrust/session/session sessionId='1' aid=1"
+    },
+    {
+      "step": "chain-manual ① 上传样本 ⇒ **产出附件**（人工通路得有对象；⛔ 附件 0 条时后面几格没有对象）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "样本入口=1 tap=True 附件=1 条 extractStatus=['done'] canReference=[True] uploading=False attachNotice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent 已能读到这份报价单'"
+    },
+    {
+      "step": "chain-manual ①b **提取不依赖模型**（本型：纯文本样本 ⇒ 本地提取）—— 这条不是判据，是把 ②③ 的对象条件写清楚",
+      "ok": true,
+      "kind": "PASS",
+      "note": "extractStatus=['done'] canReference=[True]（含文本的附件＝可引用）"
+    },
+    {
+      "step": "chain-manual ② ⭐ **模型不可用时，Agent 那一步的错误被如实报出**（判据＝job 行带出 `errorKind`/`errorMessage`，或状态为 `failed`；⛔ 不假装成功）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "解析入口=1 页面 status='queued' 服务端 status='' errorKind='llm_network'/'' errorMessage='LLM 服务端错误 502' mocked=False 页面原文=''"
+    },
+    {
+      "step": "chain-manual ③ 「人工转录」按状态出现并落库",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "本轮**提取没有失败**（本型：纯文本样本 ⇒ 本地提取成功）⇒ 界面上按设计**不给**「人工转录」入口 ⇒ 这一格**没有对象**。要取证它需要一个**提取失败**的附件（图片／扫描件），⛔ 不用别的状态假装。"
+    },
+    {
+      "step": "chain-manual ④ 「人工组装成果 → 客户接受 → … → 结案」那一半",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "本章只取「模型不可用时：Agent 那一步如实报 ＋ 不依赖模型的人工录入通路可用」这一段；「**人工组装／直写成果**（来源 `manual`）」由 **㊹ 〇节**在同一张单上经界面完成，「继续到结案」由 `chain11/53` 完成（⛔ 不在本章伪造齐备读数）。本单 aid=1 sessionId='1'"
+    },
+    {
+      "step": "chain-manual 本章运行期无**新增** console 报错",
+      "ok": true,
+      "kind": "PASS",
+      "note": "增量 0 条"
+    }
+  ],
+  "console": {
+    "baselineCaptured": true,
+    "collectFailed": false,
+    "openPhaseWaived": [],
+    "openPhaseUnwaived": [],
+    "bizPhaseUnwaived": [],
+    "whitelist": [
+      {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": "open",
+        "evidence": "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+      },
+      {
+        "pattern": "routeDone with a webviewId",
+        "phase": "open",
+        "evidence": "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉（HO D1 明确点名这个范围过宽）"
+      }
+    ]
+  },
+  "consoleError": "",
+  "consoleErrorDetected": false,
+  "consoleNoiseCount": 0,
+  "consoleOtherCount": 0,
+  "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-234839"
+}

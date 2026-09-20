@@ -396,6 +396,117 @@
 另有**一条我自己的判据错**：结案五维的 `count` 数的是**缺项条数**，我写成 `count >= 1`
 （＝要求"这里有缺项"），**方向反了**；以及**一条裸下标**把整章打挂（②c 的 `mine[0]`）。
 
+## 3.9 E-2026-09-20-J — 固定候选上的**干净主链**（B1' 轮，`FAIL=0`）
+
+**目录**：`docs/entrust/evidence/2026-09-20-chain-1-13-fixed/`
+**候选**：`develop = 9addfe8`（PR #184 squash）＋ 本轮收尾提交；**实例**：新起（hold16），第 1 轮
+**命令**：
+
+```bash
+python -X utf8 scripts/run_walkthrough_devtools.py --skip-ide --pay --chain \
+  --min-keepalive-left 3600 \
+  --section 43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12 \
+  --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py,seed_entrust_completion_ready.py
+```
+
+| 文件 | 内容 | 字节 | sha256[:16] |
+| --- | --- | --- | --- |
+| `walk-b1-stdout.txt` | 整轮读数（`RESULT: NOT_RUN`，`NOT_RUN=7 / LIMITATION=1`，**`FAIL=0`**） | 69399 | `edb9e685cc92b288` |
+| `summary-b1.json` | 该轮 `verdict/tally/argv/sections` 元数据（可回答"这次明细是哪条命令、什么时候跑的"） | 88824 | `7e43ed37897012bd` |
+| `shots/chain11-结案被拦（前置不齐）.jpg` | **结案负例前置**（清理之前点结案被拦） | 31822 | `1186df2c66fb6e8e` |
+| `shots/chain12-1-案件页-变更前后记录.jpg` | D1-15 的**前后记录**（案件页 `quantityHistory`） | 21297 | `d17133cf9d59cce6` |
+| `shots/chain12-3-重进后-同一批记录仍在.jpg` | D1-15 的**重进后**那一面 | 21302 | `dfd9e4d0d3d8eacf` |
+| `shots/53-结案五维清单.jpg` | 结案五维清单（点数前先看得见清单） | 31930 | `c679e7ebc6aae9bb` |
+| `shots/53-结案后（留痕）.jpg` | 齐备 ⇒ 结案成功 ＋ 留痕 | 30228 | `489453cede05e3fd` |
+| `shots/53-重开后（退回已受理）.jpg` | 受控重开（退回 `claimed`） | 31976 | `861a4347081fee9c` |
+
+**判据读数（逐条可从 `walk-b1-stdout.txt` 复算）**
+
+| 项 | 读数 |
+| --- | --- |
+| 取单追踪 | **12 个取单点 · aid 集合 `['7']` · 同一张＝是** |
+| `chain11 ①b-a/b/c` | 界面先给缺项清单（3 项，与服务端**逐条一致**）｜点结案 => **被拦**，`completeHint='还不能结案（缺 3 项）：…'`｜被拦后 `status='claimed'`（页面＝服务端） |
+| `chain11 ②b` | 10 条任务逐条处置：全成功 |
+| `chain11 ③b` | 关案件 `已关 ['3(尝试1次)']`，`version 取自 ['3:detail.case.revision_no']` |
+| `chain11 ④` | `ready=False 缺 ['tasks_not_disposed','revalidation_open','cases_not_closed']` ⇒ `ready=True 缺 []` |
+| `53 ⑧-b/⑧-c/⑧-d` | `status='completed' completedAt='2026-09-20 15:18:13'`｜入口消失｜多出「结案时间」行 |
+| `53 ⑨-a…⑨-e` | 受控重开全 PASS（含"无撤回入口"**带正控**） |
+| `第13步 · ①a/①b/②a` | `(800.000, 950.000)`｜`changeText='800.000 吨 → 950.000 吨' source='来源变更案件 #3'`｜详情页 `quantity='950'` |
+| `第13步 · ②b` | 运力复核 `still_valid=False`、不过的规则 `['capacity']`（**只读** `recheck`） |
+| `第13步 · ③a/③b/③c/③e/③f` | 变更记录／货量／费用行签名／复核结论／缺项集合**重进后逐字相同** |
+| `第13步 · ④a` | **重载不改变业务数据**：不同的键＝**无** |
+| `第13步 · ④c` | **零写入正控**：脚本运行期 `/entrust/` 写请求＝**无** |
+| `㊿ ④a` | 计数通道 `新值=1 单位=1 依据=1` ＋ 正控数得动（⇒ X3 的"单位=0"定档为实例／探针侧） |
+| `㊿ ⑥` | `still_valid=False`、只有 `capacity` 不过 |
+
+**本轮之前的 B1（无 `--extra-seeds`）为何 19 条红** —— 一条根因、整轮连锁，⛔ 不许拆成 19 个缺陷：
+
+* `章 49 / 章 50 执行异常 IndexError`：`if not hit and not anchor_active(): NOT_RUN` 之后
+  **无保护地**取 `hit[0]`；开 `--chain` 时"缺夹具"恰好被允许 ⇒ 空列表照样取下标 ⇒ 崩。
+* ⇒ 第 8 步 `800→950` 从未应用 ⇒ `chain11` 不齐备 ⇒ `53 ⑧/⑨` 4 条红、`第13步` 前置 `quantity='800'`。
+* ✅ 已修（审计发现同类共 **5** 处：`9503/9960/10188/10337/10681`），修后本轮 **0 条 FAIL**。
+* ⚠️ **教训双份**：① `--extra-seeds` 不是可选项（三个夹具按标题供 49/50/53 的载体）；
+  ② "判据里不许有未加保护的下标"（本项目第 3 次，技能 §14.11(f)）。
+
+## 3.10 E-2026-09-20-K — 无模型人工通路（B2）＋ 隔离复位演练（B3）
+
+### 3.10.1 无模型轮（`chain-manual`，D1-05）
+
+**目录**：`docs/entrust/evidence/2026-09-20-manual-path/`
+**条件**（起后端时注入，已用最小手段验证**确实压过 `.env.local`**：`LLM_BASE_URL` → 不可达、
+`LLM_API_KEY=invalid`）：
+
+```bash
+LLM_MOCK=false LLM_BASE_URL=http://127.0.0.1:9 LLM_API_KEY=invalid \
+python -X utf8 scripts/run_walkthrough_devtools.py --skip-ide --min-keepalive-left 1800 \
+  --section chain-manual
+```
+
+| 文件 | 内容 | 字节 | sha256[:16] |
+| --- | --- | --- | --- |
+| `walk-b2-stdout.txt` | 该轮读数：`RESULT: NOT_RUN`（`PASS=6 / FAIL=0 / NOT_RUN=2`） | 4822 | `b30012dc3aea4700` |
+| `summary-b2.json` | `verdict/tally/argv` 元数据 | 7076 | `b1c4cb38bde524b6` |
+
+**关键读数**（逐条可从 `walk-b2-stdout.txt` 复算）
+
+| 断言 | 读数 |
+| --- | --- |
+| `⓪` 进会话屏 | `tap=True path=pages/entrust/session/session sessionId='1' aid=1` |
+| `①` 上传 ⇒ 产出附件 | `附件=1 extractStatus=['done'] canReference=[True]`，`attachNotice='…并提取 1228 字'` |
+| `①b` 提取**不依赖模型** | 同上 ⇒ 「人工转录」的入口条件是**提取失败**（图片/扫描件），⛔ 不是"模型不可用" |
+| `②` ⭐ 模型那一步**如实报错** | `status='queued'`、**`errorKind='llm_network'`**、**`errorMessage='LLM 服务端错误 502'`**、**`mocked=False`** |
+| `③` 人工转录 | `NOT_RUN`：本轮提取没失败 ⇒ 界面按设计不给入口（点名"需要一个提取失败的附件"） |
+| `④` 人工组装/结案 | `NOT_RUN`：交给 ㊹ 〇节 ＋ `chain11/53`（同单链式），⛔ 不在本章伪造 |
+
+⚠️ **本轮的两次自我纠错**（都进技能）：① 首版把"提取"当模型动作（实测**不是**）；
+② 第二版判 `attachNotice`（恒空串），真信号是 **job 行的 `errorKind`/`errorMessage`**。
+⇒ **D1-05 记 `部分`**：拿到"如实报错 ＋ 不依赖模型的那半"，
+
+### 3.10.2 隔离复位演练（D1-17）
+
+**目录**：`docs/entrust/evidence/2026-09-20-reset-drill/`
+**命令**（在 `backend/` 下）：
+
+```bash
+python -X utf8 scripts/reset_demo_env.py --db <仓库外隔离库>.db --selftest --report <报告>.json
+python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 复位后重铺，用于取标签
+```
+
+| 文件 | 内容 | 字节 | sha256[:16] |
+| --- | --- | --- | --- |
+| `reset-selftest-report.json` | `--selftest` 报告：安全闸 5/5 ＋ 五项判据 ＋ 两轮的 `removed/migrate` 明细 | 31228 | `18cc1d4677025cf3` |
+| `reset-drill-stdout.log` | 演练 stdout（**`RESET: OK`**） | 1036 | `23b241a4b67545c4` |
+| `reseed-stdout.log` | 复位后 `--seed` 的 stdout（四面结论含两处 `LIMITATION`/`NOT_APPLICABLE`） | 1165 | `624f397ac6d30cda` |
+| `assignment-labels.txt` | ⭐ **「来源可区分」读数**：4 张种子单的 `id/status/qty/title` | 598 | `26c98db8b6dfc14f` |
+
+**判据读数**
+
+* `RESET: OK`；五项判据**全 True**：①复位清除改动（两轮）`[True,True]`（改动后 `ent_` **42** ⇒ 复位后 **0**）｜②迁移记账一致｜③两轮种子后基线一致｜④两轮复位后指纹一致｜⑤两轮无环境错误。
+* 「来源可区分」：种子侧 = `演示委托·工作台样本`／`…（待受理）`／`演示委托·甲组织队列样本`／`演示委托·乙组织队列样本`（**走查按标题取**）；主链侧 = `走查·主演示第1-3步（钢材800吨）`（第 43 章经**界面真实提交**建出，**链锚点／本轮记下的 id** 取用）。
+* ⚠️ **首次演练失败如实登记**：`--selftest` 第 2 轮 `reset_db → p.unlink()` 抛 `PermissionError [WinError 32]`（文件被别的进程占用）；**换隔离目录后一次通过**。⛔ 不因"第二次过了"就把第一次写成"偶发无关"——它是**同一脚本在同一台机器上的真实行为**，值得后续收口（例如 round 之间等后端完全退出再 `unlink`）。
+
+---
+
 ---
 
 ## 4. 待补（本索引自己的缺口，如实登记）

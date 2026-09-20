@@ -1,0 +1,13 @@
+库： E:/_diag/b3r/reset.db
+ent_assignment         行=4
+ent_organization       行=3
+ent_entrustment        行=3
+_migration_history     行=44
+
+载体（ent_assignment）—— 用来区分「预置检查点」与「新建主链」：
+  id=  1 status=claimed    qty=1200 吨 title='演示委托·工作台样本'
+  id=  2 status=submitted  qty=800 吨 title='演示委托·工作台样本（待受理）'
+  id=  3 status=submitted  qty=120 吨 title='演示委托·甲组织队列样本'
+  id=  4 status=submitted  qty=120 吨 title='演示委托·乙组织队列样本'
+
+共 4 张

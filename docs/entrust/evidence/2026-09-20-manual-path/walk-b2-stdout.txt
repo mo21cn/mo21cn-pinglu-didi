@@ -1,0 +1,37 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-234839
+章节    ：chain-manual
+门禁    ：check_wechatide_status 未通过（MCP_TOOL_ERROR），已用「开窗 + 取页面栈」复检通过 ⇒ 降级放行
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   2.9s] pageStack=[{'pageId': 20, 'path': 'pages/mine/mine', 'query': {}, 'route': '/pages/mine/mine', 'title': '我的'}, {'pageId'  (探测   2.9s)
+模拟器  ：pageStack 非空
+
+-- chain-manual 第 2 步 · 无模型人工通路（D1-05）--
+PASS | chain-manual [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | chain-manual [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | chain-manual ⓪ 从工作台卡片进到该委托的**专属会话屏**（本章都在这一页上做） | tap=True path=pages/entrust/session/session sessionId='1' aid=1
+PASS | chain-manual ① 上传样本 ⇒ **产出附件**（人工通路得有对象；⛔ 附件 0 条时后面几格没有对象） | 样本入口=1 tap=True 附件=1 条 extractStatus=['done'] canReference=[True] uploading=False attachNotice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent 已能读到这份报价单'
+PASS | chain-manual ①b **提取不依赖模型**（本型：纯文本样本 ⇒ 本地提取）—— 这条不是判据，是把 ②③ 的对象条件写清楚 | extractStatus=['done'] canReference=[True]（含文本的附件＝可引用）
+PASS | chain-manual ② ⭐ **模型不可用时，Agent 那一步的错误被如实报出**（判据＝job 行带出 `errorKind`/`errorMessage`，或状态为 `failed`；⛔ 不假装成功） | 解析入口=1 页面 status='queued' 服务端 status='' errorKind='llm_network'/'' errorMessage='LLM 服务端错误 502' mocked=False 页面原文=''
+NOT_RUN | chain-manual ③ 「人工转录」按状态出现并落库 | 本轮**提取没有失败**（本型：纯文本样本 ⇒ 本地提取成功）⇒ 界面上按设计**不给**「人工转录」入口 ⇒ 这一格**没有对象**。要取证它需要一个**提取失败**的附件（图片／扫描件），⛔ 不用别的状态假装。
+NOT_RUN | chain-manual ④ 「人工组装成果 → 客户接受 → … → 结案」那一半 | 本章只取「模型不可用时：Agent 那一步如实报 ＋ 不依赖模型的人工录入通路可用」这一段；「**人工组装／直写成果**（来源 `manual`）」由 **㊹ 〇节**在同一张单上经界面完成，「继续到结案」由 `chain11/53` 完成（⛔ 不在本章伪造齐备读数）。本单 aid=1 sessionId='1'
+PASS | chain-manual 本章运行期无**新增** console 报错 | 增量 0 条
+
+================ 汇总 ================
+断言 9 项：**通过 7** / 未取得通过证据 2
+  分档：PASS=7 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=2 | LIMITATION=0
+  归并（HO 五档）：PASS=7 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=2
+  NOT_RUN: chain-manual ③ 「人工转录」按状态出现并落库 | 本轮**提取没有失败**（本型：纯文本样本 ⇒ 本地提取成功）⇒ 界面上按设计**不给**「人工转录」入口 ⇒ 这一格**没有对象**。要取证它需要一个**提取失败**的附件（图片／扫描件），⛔ 不用别的状态假装。
+  NOT_RUN: chain-manual ④ 「人工组装成果 → 客户接受 → … → 结案」那一半 | 本章只取「模型不可用时：Agent 那一步如实报 ＋ 不依赖模型的人工录入通路可用」这一段；「**人工组装／直写成果**（来源 `manual`）」由 **㊹ 〇节**在同一张单上经界面完成，「继续到结案」由 `chain11/53` 完成（⛔ 不在本章伪造齐备读数）。本单 aid=1 sessionId='1'
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-234839
+[重跑关联] 同章节历史运行 4 次（首次结果**保留不覆盖**）：2026-09-20T23:25:41+0800=FAIL；2026-09-20T23:35:13+0800=FAIL；2026-09-20T23:41:07+0800=FAIL；2026-09-20T23:45:12+0800=NOT_RUN
+RESULT: NOT_RUN （NOT_RUN=2）
+
+===== 走查 stderr =====
+(空)
