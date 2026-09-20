@@ -7698,6 +7698,33 @@ def sec_43(w: Walker) -> None:
     sess_before = str(d_before.get("sessionId") or "")
     f_before = sample_file()
 
+    # ⭐ 2026-09-20（㊸ 定档"点击没落到处理器"之后的第一步）：**可点击性前置**。
+    #    `tap=True`（工具接受了这次点击）＋ 处理器没执行，最常见的物理原因是**按钮不在可点位置**：
+    #    本页附件区在会话列表/对话区之下，元素级 `scrollTo` 没做时 `tap` 按元素中心坐标派发触摸，
+    #    落空**不报错** —— 读数里只看到"点了但没反应"，于是被误读成产品坏。
+    #    ⇒ 把可点击性做成**能失败**的读数：① 先 `scroll_into`；② 打元素盒子与窗高
+    #    （`bottom > winH` ⇒ 不在视口内）。这两格红了，后面那些 FAIL 就**不该算到产品头上**。
+    # ⚠️ 2026-09-20 记录一条**被证伪的假设**（⛔ 不做成断言 —— 见下）：
+    #    「点击被工具接受但处理器没执行」曾怀疑是**按钮不在视口内**（`tap` 按元素中心坐标派发，
+    #    落空不报错）。实测**证伪**：`rects()` 在这个元素上**取不到盒子**（`count()` 命中 1 个、
+    #    `scroll_into` 也返回 False），**而点击照旧落到处理器上**（E ／ F ／ G 三轮里
+    #    `attachments=1 done=1`、样本文件 `先=False 后=True`）。⇒ 无需滚动即可点到。
+    #    ⛔ 因此**不把"在视口内"做成断言**：它现在是"读不到几何"的常态，
+    #    留成断言只会把整章判成 `NOT_RUN`（"失效的判据不是保守，是报错的读数"）。
+    #    真正判定"处理器是否执行"的是下面 `handler_ran` 那条（依据 = `uploading` 翻真
+    #    或样本文件被**本轮**写出），它**能**失败。这里只留一行诊断输出。
+    sel_sample = '[data-act-sample-quote="1"]'
+    scrolled = w.c.scroll_into(sel_sample)
+    time.sleep(0.6)
+    boxes = w.c.rects(sel_sample) or []
+    box = boxes[0] if boxes else {}
+    print(
+        f"    [㊸ 诊断] scroll_into={scrolled} rects={len(boxes)} 个 "
+        f"box=top:{box.get('top')} bottom:{box.get('bottom')} winH={w.win_height()} "
+        f"（⛔ 不参与判定：取不到几何是常态，点击照旧成功）",
+        flush=True,
+    )
+
     def attempt(tag: str, tries: int) -> tuple[bool, bool, dict]:
         """点一次「用内置示例报价单」并等到 done。返回 (tap, saw_uploading, page_data)。"""
         t = w.c.tap('[data-act-sample-quote="1"]')
