@@ -1,0 +1,41 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20260921-032823
+章节    ：chain-manual
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.2s] pageStack=[{'pageId': 3, 'path': 'pages/shipper/shipper', 'query': {}, 'route': '/pages/shipper/shipper', 'title': '找船'}  (探测   1.2s)
+模拟器  ：pageStack 非空
+
+-- chain-manual 第 2 步 · 无模型人工通路（D1-05）--
+PASS | chain-manual [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | chain-manual [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | chain-manual ⓪ 从工作台卡片进到该委托的**专属会话屏**（本章都在这一页上做） | tap=True path=pages/entrust/session/session sessionId='1' aid=1
+PASS | chain-manual ① 会话屏给出**两条**扫描件入口：真机（拍照／调 OS 摄像头）＋页内（内置扫描件样本） | 拍照入口=1 内置样本入口=1（⛔ 只给真机入口的话，附件分支**永远拿不到设备证据** —— 摄像头是 OS 级弹层）
+LIMITATION | chain-manual ①-a 「拍照上传」**真机通路**：调起 OS 摄像头这一步走查够不着 | 入口在渲染树上（见 ①），但点击会打开**系统层摄像头** —— 不在小程序渲染树里 ⇒ 与小节 L-2／L-7 的「原生文件选择器」同族。⛔ 该格**不宣称通过**、⛔ 不为此扩建 OS 级输入通道；附件分支的断言改由**页内等价通路**（内置扫描件样本，走**同一条**上传/提取链）取得 —— 两条通路**分开记**。
+PASS | chain-manual ② 上传内置**扫描件**样本 ⇒ **产出附件**（人工通路得有对象） | 样本入口=1 tap=True 附件=1 条 name=['DEMO1-canonical-sample-quotation-scan.png'] contentType=['image/png'] uploading=False attachNotice='已上传「DEMO1-canonical-sample-quotation-scan.png」，但需人工转录。图片没有文本层，本服务不做 OCR；请人工转录后提交（Agent 暂时只能看到文件名）'
+PASS | chain-manual ③ ⭐ 提取**如实分档**：扫描件无机读文本层 ⇒ 服务端判 `needs_transcription`（判据＝**服务端** `extract_status`；⛔ 不拿界面文案当唯一依据） | 服务端 extract_status=['needs_transcription']（entrustmentId='1'）｜界面 extractStatus=['needs_transcription']｜canReference=[False]（**正控**：图片没有机读文本 ⇒ 这里必须是 False，不然「人工转录」就该是多余的）
+PASS | chain-manual ④ ⭐ 「人工转录」入口**按状态**出现（提取失败 ⇒ 界面才给这个按钮） | 入口命中=1（期望 1）｜依据＝服务端 extract_status=['needs_transcription']｜界面 referenceHint=['图片/扫描件须先人工转录，之后才能被引用']
+PASS | chain-manual ④b ⭐ **人工转录落库**：文本来源变「人工转录」且该附件**可被引用**（＝ Agent 读得到它）—— **服务端 + 界面**双读数 | 命中 1 条；界面 textSourceLabel=['人工转录']；服务端 text_source=['manual_transcription']；canReference=[True]；attachNotice='已人工转录 67 字并标记来源为「人工转录」—— Agent 已能读到，但重抽会先来问你一次（转录内容不可再生成）'（提交键命中=1）
+PASS | 截图 chain-manual-人工转录-已提交 | 40534B
+PASS | chain-manual ⑤ ⭐ **转录后可引用** ⇒ Agent 那一步跑起来了，且模型不可用时**错误被如实报出**（判据＝job 行带出 `errorKind`/`errorMessage`，或状态为 `failed`；⛔ 不假装成功） | 解析入口=1 页面 status='queued' 服务端 status='' errorKind='llm_network'/'' errorMessage='LLM 服务端错误 502' mocked=False 页面原文=''
+NOT_RUN | chain-manual ⑥ 「人工组装成果 → 客户接受 → … → 结案 → 重载」那一半 | 本章取的是**附件分支**（扫描件 ⇒ `needs_transcription` ⇒ 人工转录 ⇒ 可引用）；**业务分支**由**同一张单**上的 ㊹ 〇节（经界面人工组装 `customer_quote`，来源 `manual`）＋ `chain11/53/chain12`（结案与重载）承担 —— ⛔ 不在本章伪造齐备读数。本单 aid=1 entrustmentId='1' sessionId='1'
+PASS | chain-manual 本章运行期无**新增** console 报错 | 增量 0 条
+
+================ 汇总 ================
+断言 13 项：**通过 11** / 未取得通过证据 2
+  分档：PASS=11 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=1 | LIMITATION=1
+  归并（HO 五档）：PASS=11 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=2
+  LIMITATION: chain-manual ①-a 「拍照上传」**真机通路**：调起 OS 摄像头这一步走查够不着 | 入口在渲染树上（见 ①），但点击会打开**系统层摄像头** —— 不在小程序渲染树里 ⇒ 与小节 L-2／L-7 的「原生文件选择器」同族。⛔ 该格**不宣称通过**、⛔ 不为此扩建 OS 级输入通道；附件分支的断言改由**页内等价通路**（内置扫描件样本，走**同一条**上传/提取链）取得 —— 两条通路**分开记**。
+  NOT_RUN: chain-manual ⑥ 「人工组装成果 → 客户接受 → … → 结案 → 重载」那一半 | 本章取的是**附件分支**（扫描件 ⇒ `needs_transcription` ⇒ 人工转录 ⇒ 可引用）；**业务分支**由**同一张单**上的 ㊹ 〇节（经界面人工组装 `customer_quote`，来源 `manual`）＋ `chain11/53/chain12`（结案与重载）承担 —— ⛔ 不在本章伪造齐备读数。本单 aid=1 entrustmentId='1' sessionId='1'
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20260921-032823
+[重跑关联] 同章节历史运行 5 次（首次结果**保留不覆盖**）：2026-09-20T23:25:41+0800=FAIL；2026-09-20T23:35:13+0800=FAIL；2026-09-20T23:41:07+0800=FAIL；2026-09-20T23:45:12+0800=NOT_RUN；2026-09-20T23:50:45+0800=NOT_RUN
+RESULT: NOT_RUN （NOT_RUN=1 / LIMITATION=1）
+
+===== 走查 stderr =====
+(空)

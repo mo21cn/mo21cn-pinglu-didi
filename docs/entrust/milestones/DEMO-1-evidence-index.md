@@ -529,6 +529,47 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
    ⇒ 等待**只发生在该发生的那一半轮**里；`RESET: OK`、五项判据全 `True`、`rc=0`。
 4. ⚠️ **首次失败没有被抹掉**：2026-09-20 23:29 那次 `WinError 32` 的完整 traceback 仍在
    `docs/entrust/evidence/2026-09-20-reset-drill/reset-drill-stdout.log`；本节是"修后同路径通过"的对照。
+### 3.12 **无模型人工替代通路 · 段A（附件分支）**（2026-09-21 · P1）
+
+> 目录：`docs/entrust/evidence/2026-09-21-manual-substitute/`
+> 轮次：`walk-20260921-032823`（干净实例 `hold18`，认领 pid 6292）
+> 环境：**`LLM_MOCK=false` ＋ `LLM_BASE_URL=http://127.0.0.1:9`（不可达）＋ `LLM_API_KEY=invalid`**
+> 命令：`--skip-ide --min-keepalive-left 1800 --section chain-manual`
+> ⚠️ 该轮**未开 `--chain`**（只跑附件分支；业务分支见段B），因此本单 `aid=1` 是脚本按"队列里最新"挑的。
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-a-stdout.txt` | 权威逐条读数（`PASS 6 / LIMITATION 1 / NOT_RUN 1`，**`FAIL=0`**） | 6711 | `512f8b0136fd0ecc` |
+| `summary-a.json` | 该轮汇总 | 9528 | `628f343295445c36` |
+| `shots/chain-manual-人工转录-已提交.jpg` | 转录提交后的会话屏 | 40534 | `8bc73ae48c4d6830` |
+
+**逐条读数（可直接核对）**
+
+| # | 格 | 结果 | 关键读数 |
+| --- | --- | --- | --- |
+| ① | 会话屏给出**两条**扫描件入口 | ✅ PASS | 拍照入口=1、内置样本入口=1 |
+| ①-a | 「拍照上传」**真机通路**（调 OS 摄像头） | `LIMITATION` | 入口在渲染树上，但点击打开的是**系统层摄像头** ⇒ 走查够不着（与 L-2／L-7 同族）。⛔ **不宣称通过**、⛔ 不为它扩建 OS 输入通道 |
+| ② | 上传**内置扫描件样本** ⇒ 产出附件 | ✅ PASS | 附件 1 条，`contentType=image/png`；页面原文「**已上传…，但需人工转录。图片没有文本层，本服务不做 OCR**」 |
+| ③ | ⭐ 提取**如实分档** | ✅ PASS | **服务端** `extract_status=['needs_transcription']`（`entrustmentId='1'`）｜界面同值｜**正控** `canReference=[False]`（图片没有机读文本 ⇒ 这里必须是 False） |
+| ④ | ⭐ 「人工转录」入口**按状态**出现 | ✅ PASS | 入口命中=1；界面 `referenceHint='图片/扫描件须先人工转录，之后才能被引用'` |
+| ④b | ⭐ **人工转录落库**（服务端＋界面双读数） | ✅ PASS | 界面 `textSourceLabel=['人工转录']`｜**服务端** `text_source=['manual_transcription']`｜`canReference=[True]`｜页面「已人工转录 **67** 字」 |
+| ⑤ | ⭐ 转录后可引用 ⇒ 点「让 Agent 解析」⇒ 模型不可用时**如实报错** | ✅ PASS | job 行 `errorKind='llm_network'`、`errorMessage='LLM 服务端错误 502'`、**`mocked=False`** ⇒ 是真模型不可用，不是 fixture |
+| ⑥ | 业务分支（人工组装成果 → … → 结案 → 重载） | `NOT_RUN` | 本章只取附件分支；业务分支**由同单的 ㊹ 〇节 ＋ `chain11/53/chain12` 承担** —— ⛔ 不在本章伪造 |
+
+**这一段补上的是什么（对比 2026-09-20 的 B2 轮）**
+
+* B2 轮用**纯文本样本** ⇒ 提取成功 ⇒ 「人工转录」那一格**永远没有对象**（那一轮的 ③ 就是 `NOT_RUN`）；
+* 本轮用**真 PNG 字节流**（内置扫描件样本）⇒ 后端**魔数优先**（`extraction.sniff_media`，AC-18）
+  如实判 `needs_transcription` ⇒ 人工转录这一格**第一次拿到设备证据**。
+* ⛔ 两份读数**互不替代**：B2 证的是"提取不依赖模型"＋"模型那一步如实报错"；
+  本轮证的是"**提取失败 ⇒ 人工转录 ⇒ 可引用**"这条**附件分支**。
+
+**为什么"用图片当样本"不是骗过嗅探**：后端提取**魔数优先**、⛔ 不听信客户端声明的 MIME；
+一个真 PNG 字节流**本来就该**被判成图片。产品在页面上的原话也是「图片没有文本层，**本服务不做 OCR**」
+⇒ 判 `needs_transcription` 是**如实**行为，不是为走查造的假象。
+
+**两条通路分开记**（沿用 L-2 的既有纪律，⛔ 互不冒充）：
+① **真机 ＝ 调 OS 摄像头** ⇒ `LIMITATION`；② **内置扫描件样本** ⇒ 可断言的设备读数。
 ---
 
 ## 4. 待补（本索引自己的缺口，如实登记）
