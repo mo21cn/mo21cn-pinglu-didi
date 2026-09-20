@@ -1422,6 +1422,54 @@ python scripts/run_walkthrough_devtools.py --skip-ide --pay --chain \
 ⇒ 只作"页面已就绪"用，⛔ 不当作"已接受后的界面态"；接受事实以 **API 读数**为准。
 脚本已加"静置再截图"（下一轮生效）。
 
+### 10.2.8 第 10–13 步的收尾章节（`chain11`／`chain12`）与三个被读数挡住的门槛（2026-09-20 下午）
+
+命令（12 章，含新增的 `chain11`／`chain12`）：
+
+```bash
+python scripts/run_walkthrough_devtools.py --skip-ide --pay --chain \
+  --section 43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12 \
+  --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py,seed_entrust_completion_ready.py
+```
+
+**五轮（S/T/U/V/W），其中两轮作废**：
+
+| 轮 | 读数 | 判定 |
+| --- | --- | --- |
+| S | `FAIL=4 / NOT_RUN=6 / LIMITATION=2`（10 章同一 `aid=7`） | ⭐ **有效**：暴露"第 12 步在本单位差 3 项"：`tasks_not_disposed`／`revalidation_open`／`cases_not_closed` |
+| T | `FAIL=11` | 有效（但揭示我的两处**代码**缺陷）：任务列表路径写错 ⇒ 静默 0 条；负例字段名错 |
+| U | `FAIL=15` | 有效：`takeover` 会 **+1 代次** ⇒ 用旧代次 complete 全 409；案件 id 键取错 ⇒ 404「案件 0 不存在」 |
+| **V** | `FAIL=10 / NOT_RUN=9 / LIMITATION=1` | ⭐ **本轮权威**：见下 |
+| ~~W~~ | `FAIL=13 / NOT_RUN=13`，多处「未停在身份选择页（）」、路径空串 | ⛔ **整轮作废**：**上一轮保活到期把 IDE 带走**（与轮 Q 同一故障），后段是环境死 |
+
+**V 轮拿到的事实**：
+
+* **第 10–11 步（任务侧）**：`chain11 ②b` —— **10 条任务全部处置成功**
+  （`takeover` → `start` → `complete`，证据按 `required_evidence` 生成）
+  ⇒ 服务端缺项从 3 项变成 **1 项**（`tasks_not_disposed` 与 `revalidation_open` 都清掉）。
+  复核项绑在复核任务上（`revalidation.resolve_for_task`），完成任务它才 resolve —— 这一层被读数证实。
+* **D1-15（同一个值端到端）**：`chain12` 的四处读数
+  —— ①a 服务端 `800.000 → 950.000`｜②a 详情页 `quantity='950'`｜
+  ②c **结算面**渲染出 `数量 950.000 吨`（按 `chargeId` 唯一命中，⚠️ 数量**经接口**登记 ——
+  财务页表单没有该入参）｜③a/③c **重进后逐字相同**。
+* **仍未闭合**（如实登记）：①b「同一条记录在**界面上**」记 `NOT_RUN`
+  （页面 `quantityHistory` 读到 0 行，服务端有 1 条 —— 页面这一格没渲染出来，⛔ 不是"记录不存在"）；
+  `chain11 ④`／`53 ⑧` 卡在 `cases_not_closed`（处置取值域写错，**已修、未复验**）；
+  `chain12 ④` 维度匹配按"费用"（实际维度名是 结算／余额与争议，**已修、未复验**）。
+
+**⭐ 三条可复用的教训**（已写进技能）：
+
+1. **列表路径写错只会静默给 0**：任务是 `GET /entrust/tasks?assignment_id=…`、案件是
+   `GET /entrust/exceptions?assignment_id=…`（`/assignments/{id}/…` 那条是 **POST 创建**用）。
+   ⇒ 已加**矛盾守卫**：服务端说缺 A 而列表读到 0 条 ⇒ 直接 FAIL 并点名，不再"处置 0 条"还记 PASS。
+2. **`takeover` 自己就会把代次 +1**：后续 `start`/`complete` 必须用**回执里的新代次**，
+   否则一律 409「执行代次已过期」——10 条全红而根因只有一个。
+3. **匹配键别用文本**：渲染行的依据字段是 `basis`（不是 `basisText`）、最稳的键是 `chargeId`；
+   维度名是 **结算／余额与争议**（不叫"费用"）。用错键 ⇒ 恒 0 / 恒 None，看起来像"没有该项"。
+
+**⛔ 一条环境纪律（第二次踩）**：**多个保活进程附着同一个 IDE 实例时，任何一个到期都会把它拉走**。
+⇒ 长链跑之前必须确认"只有一个保活持有者"，并核对「保活到期 − 现在 ≥ 预计时长×1.5」。
+
 ### 10.3 D1-01 – D1-17（按合同 §9 台账逐行）
 
 > ⛔ **本节的逐行表与下方小计自 2026-09-20 起转为「历史记录」**（HO 裁定）。

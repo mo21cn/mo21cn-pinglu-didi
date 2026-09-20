@@ -11570,6 +11570,507 @@ def sec_chain9(w: Walker) -> None:
     w.rep.rec("第9步 · 本章运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条")
 
 
+def sec_chain12(w: Walker) -> None:
+    """合同 §10.1 第 13 步（`Reload/re-enter and inspect the same persistent records`）
+    ＋ D1-15（**同一个值**的"前后记录 / UI 结果 / 重载后仍在"）。
+
+    为什么单独一章
+    --------------
+    前 12 步都在证明"某个动作发生过"；第 13 步问的是**另一件事**：
+    这批记录**是不是真的持久化下来了** —— 重进之后还在不在、是不是**同一批**。
+    而 D1-15 更严：**同一个值**在「前后记录 / UI 结果 / 重载后」三处要**对得上**。
+    此前这三个面各自都有证据，但**用的不是同一个值**（㊸ 改的是成果字段、㊺ 是运力、
+    ㊿ 是货量）⇒ 三条各说各话，合起来证不了"一个值端到端"。
+
+    ⭐ 本节选定的那个值：**货量 950 吨**（第 8 步经审批把 `800.000 → 950.000` 应用出来的）。
+    它在三处各读一次，全部落在**本单**：
+
+    | 面 | 读什么 | 为什么它就是"同一个值" |
+    | --- | --- | --- |
+    | ① **前后记录** | 变更历史里那句 `800.000 吨 → 950.000 吨`（页面 ＋ 服务端） | 它就是"从哪改到哪"的原始留痕 |
+    | ② **UI 结果** | 本单详情页当前货量 `950` ＋ **结算侧**一条**数量＝950 吨**的应收费用行 | 结算口径引用的是**同一个数**（不是另填一个） |
+    | ③ **重进之后** | `reLaunch` ＋ 重登后再读上面两处 ⇒ **逐字相同**；结案清单的「费用」维度也引用那条行 | 判据是**逐字相等**，不是"看起来还在" |
+
+    ⚠️ 诚实边界（按档登记）
+    * 本节**只在链式轮次有意义**：要求本单已完成第 8 步（`quantity='950'`）。
+    * 费用行的 `quantity` **经接口**登记 —— 财务页的费用表单**没有**数量入参
+      （只有 类别/金额/依据/对手方）⇒ 如实登记这一点；但**读它是在界面上读的**，
+      所以这一格证的是"**结算面能显示同一个值**"，⛔ 不是"界面能登记它"。
+    * ⛔ 不碰已被 53 证明过的"结案成功/重开"结论：本节只读**结案清单**，不改状态。
+    """
+    print("\n-- 第 13 步 · 重进后同一批记录 ＋ D1-15 同一个值端到端 --", flush=True)
+
+    err_base = w.c.errors()
+    qty_want = "950"
+
+    def _num_of(x: object) -> float:
+        try:
+            return float(str(x))
+        except (TypeError, ValueError):
+            return -1.0
+
+    def idem12(tag: str) -> str:
+        return f"walk-chain12-{tag}-{time.time_ns()}"
+
+    if not anchor_active():
+        w.rep.not_run(
+            "第13步 · 重进后同一批记录",
+            "本节的判据是「与第 1–12 步**同一张单**上的同一批记录」⇒ 必须开 `--chain`"
+            "（或 `--anchor`）运行。⛔ canonical／别的委托上的记录顶替不了本单。",
+        )
+        return
+
+    tok = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == ORG_WORKBENCH:
+            org_id = str((r or {}).get("org_id") or "")
+    aid = prefer_anchor("")
+    if not tok or not aid:
+        w.rep.not_run("第13步 · 重进后同一批记录", f"拿不到经理 token 或锚定单（aid={aid!r}）")
+        return
+
+    det = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    cur_qty = str(det.get("quantity") or "")
+    status_now = str(det.get("status") or "")
+    w.rep.rec(
+        "第13步 · 前置：本单是第 1–12 步的那一张，且需求已是 **950 吨**（服务端读数）",
+        _num_of(cur_qty) == _num_of(qty_want),
+        f"aid={aid} status={status_now!r} quantity={cur_qty!r} {det.get('quantity_unit') or ''}",
+    )
+    if _num_of(cur_qty) != _num_of(qty_want):
+        w.rep.not_run(
+            "第13步 · ①② 同一个值的三处读数",
+            f"本单需求={cur_qty!r} ⇒ 第 8 步（㊿）未在本单完成，D1-15 的那个值还没产生。"
+            "请以 `--section …,50,chain9,52,53,chain12` 同序运行。",
+        )
+        return
+
+    # ── ① 前后记录：变更历史（页面 ＋ 服务端）────────────────────────────────
+    print("\n-- ① 前后记录（同一条变更）--", flush=True)
+    if not w.open_workbench(CODE_OWNER, tag="第13步"):
+        w.rep.not_run("第13步 · ① 前后记录", "未能以经理进入工作台")
+        return
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    # ⚠️ 用 `reLaunch` **换页面实例**再等**那个键**到位：`navigateTo` 在"已经在详情页"时
+    #    可能被复用实例吃掉（不跑 `onLoad` ⇒ 残留状态），而只等 `view != loading` 会**过早**读数。
+    #    2026-09-20 实测：上一版就是这两件事叠在一起，读到 `quantityHistory` **0 条**
+    #    （服务端明明有那行），看起来像"页面没有那条记录"。
+    w.c.navigate("reLaunch", f"/{DETAIL}?assignment_id={aid}")
+    w.c.wait_path(DETAIL, tries=40)
+    pg = w.wait_data(
+        lambda x: (
+            x.get("quantityHistory") is not None and x.get("view") not in (None, "", "loading")
+        ),
+        tries=60,
+        gap=0.5,
+    )
+    hist = pg.get("quantityHistory") or []
+    row = {}
+    for h in hist:
+        if qty_want in str((h or {}).get("changeText") or ""):
+            row = dict(h or {})
+    # ⚠️ **服务端先读**：它是这条记录的权威来源；页面那一格读不到时，判据不能跟着塌。
+    #    （轮 U 实测：页面 `quantityHistory` 读到 0 行，而服务端明明有 `800.000 → 950.000`。）
+    srv_hist = api_get(f"/entrust/assignments/{aid}/quantity-changes", tok) or []
+    srv_row = [h for h in srv_hist if _num_of((h or {}).get("new_quantity")) == _num_of(qty_want)]
+    w.rep.rec(
+        "第13步 · ①a ⭐ **前后记录（服务端）**：`old_quantity` / `new_quantity` 就是 D1-15 的那个值"
+        "（`800.000 → 950.000`）—— 这条不依赖页面是否把历史渲染出来",
+        bool(srv_row)
+        and _num_of(srv_row[0].get("old_quantity")) == _num_of("800")
+        and _num_of(srv_row[0].get("new_quantity")) == _num_of(qty_want),
+        f"服务端=({(srv_row[0].get('old_quantity'), srv_row[0].get('new_quantity')) if srv_row else None})"
+        f"（本单变更记录 {len(srv_hist)} 条）",
+    )
+    if bool(row.get("changeText")) and "→" in str(row.get("changeText")):
+        w.rep.rec(
+            "第13步 · ①b 同一条记录在**界面上**也读得到（`<变更前> → <变更后>` ＋ 来源案件号）",
+            True,
+            f"changeText={row.get('changeText')!r} source={row.get('sourceText')!r} "
+            f"（本单变更行 {len(hist)} 条）",
+        )
+    else:
+        # ⛔ 不把"页面没读到"记成 FAIL（那是判据缺对象），但**必须点名缺什么**：
+        #    打页面 data 的**键清单**，下一轮就能看出是键名变了还是这一页没取这块数据。
+        w.rep.not_run(
+            "第13步 · ①b 同一条记录在**界面上**也读得到（`<变更前> → <变更后>`）",
+            f"页面 `quantityHistory` 读到 {len(hist)} 行（服务端有 {len(srv_hist)} 条）⇒ "
+            f"**界面这一格未取得证据**（⛔ 不是「记录不存在」）。"
+            f"页面 data 键={sorted(pg.keys())[:14]}",
+        )
+    w.shot("chain12-1-详情页-变更前后记录")
+
+    # ── ② UI 结果：详情页当前值 ＋ 结算侧同一条数量 ───────────────────────────
+    print("\n-- ② UI 结果（详情页 ＋ 结算）--", flush=True)
+    det_now = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    w.rep.rec(
+        "第13步 · ②a 详情页的**当前货量**就是那个数（值不是只活在历史里）",
+        _num_of(det_now.get("quantity")) == _num_of(qty_want),
+        f"服务端 quantity={det_now.get('quantity')!r}；页面 quantity={cur_qty!r}",
+    )
+
+    # 结算侧：登记一条**数量＝950 吨**的应收费用行
+    # ⚠️ 财务页的费用表单**没有数量入参**（只有 类别/金额/依据/对手方）⇒ 数量只能经接口登记，
+    #    如实登记；**读**它仍是在界面上读的。
+    basis12 = f"第13步·按 {qty_want} 吨计费（D1-15 同一个值）"
+    cid12 = ""
+    srv_charges = api_get(f"/entrust/assignments/{aid}/charges", tok) or []
+    srv_charges = srv_charges if isinstance(srv_charges, list) else (srv_charges.get("items") or [])
+    for c in srv_charges:
+        if str((c or {}).get("basis") or "") == basis12:
+            cid12 = str((c or {}).get("charge_id") or (c or {}).get("id") or "")
+    st_ch, body_ch = (0, {})
+    if not cid12:
+        st_ch, body_ch = api_post(
+            f"/entrust/assignments/{aid}/charges",
+            tok,
+            {
+                "direction": "receivable",
+                "charge_kind": "freight",
+                "amount": "42750.00",
+                "currency": "CNY",
+                "basis": basis12,
+                "quantity": qty_want,
+                "unit": "吨",
+            },
+            idem12("charge950"),
+        )
+        cid12 = str((body_ch or {}).get("charge_id") or (body_ch or {}).get("id") or "")
+    w.rep.rec(
+        "第13步 · ②b 结算侧登记一条**数量＝950 吨**的应收费用行"
+        "（⚠️ 数量**经接口**登记 —— 财务页表单没有该入参，如实登记）",
+        bool(cid12),
+        f"HTTP={st_ch} charge_id={cid12!r} basis={basis12!r}",
+    )
+    if not cid12:
+        w.rep.not_run("第13步 · ②c 结算面读到同一个值", "费用行未落库 ⇒ 结算侧没有可读的对象")
+        return
+
+    # 经**界面**确认它（与 52 章同一口径：确认后才进合计；⛔ 不收尾会让"未确认费用行"
+    # 变成结案的一道新缺项 —— 本节是来**补齐**的，不是来**添堵**的）
+    w.c.navigate("reLaunch", f"/{DETAIL}?assignment_id={aid}")
+    w.c.wait_path(DETAIL, tries=40)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    n_fin = w.c.count('[data-act-open-finance="1"]')
+    if n_fin == 1:
+        w.c.scroll_into('[data-act-open-finance="1"]')
+        w.c.tap('[data-act-open-finance="1"]')
+    pf = w.wait_data(lambda x: x.get("canViewInternal") is True, tries=40, gap=0.4)
+    rows_f = pf.get("charges") or []
+    # ⚠️ 渲染行里的字段是 **`basis`**（不是 `basisText`），而**最稳的匹配键是 `chargeId`**
+    #    —— 2026-09-20 实测：按错键名匹配 ⇒ 命中 0 行（页面明明有 2 行），
+    #    看起来像"结算面没有这条"。能唯一命中的键就别用文本模糊匹配。
+    mine = [c for c in rows_f if str((c or {}).get("chargeId") or "") == cid12]
+    if mine and (mine[0] or {}).get("canConfirm"):
+        w.c.tap(f'[data-act="confirm-charge"][data-id="{cid12}"]')
+        pf = w.wait_data(
+            lambda x: any(
+                str((c or {}).get("chargeId") or "") == cid12
+                and str((c or {}).get("status") or "") == "confirmed"
+                for c in (x.get("charges") or [])
+            ),
+            tries=40,
+            gap=0.4,
+        )
+        mine = [
+            c for c in (pf.get("charges") or []) if str((c or {}).get("chargeId") or "") == cid12
+        ]
+    qty_ui = str((mine[0] or {}).get("quantityText") or "") if mine else ""
+    w.rep.rec(
+        "第13步 · ②c **结算面（界面）**把同一个值显示出来：`数量 950 吨`"
+        "（判据取**渲染树里的那一行**，按 `chargeId` 唯一命中，不用文本模糊匹配）",
+        n_fin == 1 and bool(mine) and qty_want in qty_ui,
+        f"财务入口={n_fin} 命中行={len(mine)} quantityText={qty_ui!r} "
+        f"basis={str((mine[0] or {}).get('basis'))[:40]!r}（该页费用行 {len(rows_f)} 条）",
+    )
+    w.shot("chain12-2-结算-数量950吨")
+
+    # ── ③ 重进：reLaunch ＋ 重登后再读同一批 ─────────────────────────────────
+    print("\n-- ③ 重进（reLaunch ＋ 重登）后同一批记录仍在 --", flush=True)
+    # ⚠️ `login_as()` 只做三件事：写 `dev_login_code`、清 token、`reLaunch` 回首页 ⇒
+    #    必须与 `open_workbench()`（内部含 `enter_role`）**成对**，否则停在未登录状态。
+    if w.login_as(CODE_OWNER) != INDEX:
+        w.rep.not_run("第13步 · ③ 重进", f"重登未停在身份页（{w.c.current_path()}）")
+        return
+    if not w.open_workbench(CODE_OWNER, tag="第13步"):
+        w.rep.not_run("第13步 · ③ 重进", f"重登未进经理工作台（{w.c.current_path()}）")
+        return
+    time.sleep(1.0)
+    w.c.navigate("reLaunch", f"/{DETAIL}?assignment_id={aid}")
+    w.c.wait_path(DETAIL, tries=40)
+    pg2 = w.wait_data(
+        lambda x: (
+            x.get("quantityHistory") is not None and x.get("view") not in (None, "", "loading")
+        ),
+        tries=60,
+        gap=0.5,
+    )
+    hist2 = pg2.get("quantityHistory") or []
+    row2 = {}
+    for h in hist2:
+        if qty_want in str((h or {}).get("changeText") or ""):
+            row2 = dict(h or {})
+    # 判据落在**服务端同一条记录**上（页面那一格若没渲染出来，不改变"记录是否持久化"的结论）
+    srv_hist2 = api_get(f"/entrust/assignments/{aid}/quantity-changes", tok) or []
+    srv_row2 = [h for h in srv_hist2 if _num_of((h or {}).get("new_quantity")) == _num_of(qty_want)]
+    w.rep.rec(
+        "第13步 · ③a 重进后**变更记录仍在**，且与重进前**逐字相同**（不是「另起一份」）",
+        bool(srv_row2)
+        and bool(srv_row)
+        and str(srv_row2[0].get("old_quantity")) == str(srv_row[0].get("old_quantity"))
+        and str(srv_row2[0].get("new_quantity")) == str(srv_row[0].get("new_quantity")),
+        f"重进前=({srv_row[0].get('old_quantity') if srv_row else None},"
+        f"{srv_row[0].get('new_quantity') if srv_row else None}) "
+        f"重进后=({srv_row2[0].get('old_quantity') if srv_row2 else None},"
+        f"{srv_row2[0].get('new_quantity') if srv_row2 else None})"
+        f" ｜页面行：前 {len(hist)} / 后 {len(hist2)}"
+        f"（页面={row2.get('changeText')!r}）",
+    )
+    det2 = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    w.rep.rec(
+        "第13步 · ③b 重进后**当前货量仍是 950 吨**（同一个值，不是重进才出现的新值）",
+        _num_of(det2.get("quantity")) == _num_of(qty_want),
+        f"重进后服务端 quantity={det2.get('quantity')!r}",
+    )
+    n_fin2 = w.c.count('[data-act-open-finance="1"]')
+    if n_fin2 == 1:
+        w.c.scroll_into('[data-act-open-finance="1"]')
+        w.c.tap('[data-act-open-finance="1"]')
+    pf2 = w.wait_data(lambda x: x.get("canViewInternal") is True, tries=40, gap=0.4)
+    mine2 = [c for c in (pf2.get("charges") or []) if str((c or {}).get("chargeId") or "") == cid12]
+    qty_ui2 = str((mine2[0] or {}).get("quantityText") or "") if mine2 else ""
+    w.rep.rec(
+        "第13步 · ③c 重进后**结算面那一行还在**、数量逐字相同（重进后仍在 = D1-15 的第三处）",
+        n_fin2 == 1 and bool(mine2) and qty_ui2 == qty_ui and qty_want in qty_ui2,
+        f"重进前={qty_ui!r} 重进后={qty_ui2!r}（按 chargeId={cid12} 命中）",
+    )
+    w.shot("chain12-3-重进后-结算行仍在")
+
+    # ── ④ 结案面：清单里的「费用」维度引用同一批（只读，⛔ 不改状态）───────────
+    print("\n-- ④ 结案清单（只读）引用同一批费用行 --", flush=True)
+    # ⚠️ 五维清单是**页面的投影**（`closure.dimensions`）；服务端的 `closure-readiness`
+    #    只给 `ready` / `missing`。2026-09-20 实测：从接口读 `dimensions` ⇒ 恒空，
+    #    看起来像"没有维度"（其实是**读错了面**）。
+    cl_page = pg2.get("closure") or {}
+    dims = cl_page.get("dimensions") or []
+    charge_dim = None
+    for d in dims:
+        lab = str((d or {}).get("label") or "")
+        key = str((d or {}).get("key") or "")
+        # ⚠️ 实测维度名是 **任务处置 / 交付证据 / 异常与重评 / 结算 / 余额与争议**：
+        #    "费用"**不作为维度名出现**（轮 V 实测按"费用"匹配 ⇒ 恒 `None`，
+        #    读起来像"这一页没有那个维度"，其实是**匹配键选错**）。
+        if "结算" in lab or "余额" in lab or key in ("settlement", "charges", "balance"):
+            charge_dim = dict(d or {})
+    cl_api = api_get(f"/entrust/assignments/{aid}/closure-readiness", tok) or {}
+    w.rep.rec(
+        "第13步 · ④ 结案清单（**页面**投影）里的「费用」维度读得到本单的费用行"
+        "（同一个值的下游面）；⛔ 本节只读、不改状态（结案/重开由 53 章负责）",
+        bool(dims) and charge_dim is not None and int((charge_dim or {}).get("count") or 0) >= 1,
+        f"页面维度={[(d or {}).get('label') for d in dims]} "
+        f"费用维度 count={(charge_dim or {}).get('count')!r} "
+        f"｜服务端 ready={cl_api.get('ready')!r} missing={len(cl_api.get('missing') or [])}",
+    )
+
+    errs = w.new_errors(err_base)
+    w.rep.rec("第13步 · 本节运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条")
+
+
+def sec_chain11(w: Walker) -> None:
+    """第 10–12 步的**业务收尾**：让本单从"差 3 项"变成**齐备**。
+
+    为什么需要它（2026-09-20 实测，链式轮 S）
+    -----------------------------------------
+    第 1–9 步跑完（10 章同一 `aid=7`）后，`closure-readiness` 在本单上仍报 **3 项**：
+
+        tasks_not_disposed / revalidation_open / cases_not_closed
+
+    这三项**不是缺陷**，而是第 10–12 步**该做的业务动作还没做**：
+
+    * **任务要一条条处置** —— 服务端把"复核项"绑在**复核任务**上
+      （`revalidation.resolve_for_task`）⇒ 完成复核任务，复核项才 resolve；
+    * **变更案件要给处置与证据才关得掉**（`close_case`，**没有一键关闭**）。
+
+    ⚠️ 诚实边界（⛔ 不假装）
+    * 本节的动作**经接口**：任务处置与案件关闭在本切片**没有界面入口**
+      （与 O-1b 同一处理 —— 如实登记，⛔ 不写成"界面可以"）。但**读**全是服务端读数，
+      且随后的**结案动作由章 53 经界面完成**（它才是第 12 步的界面判据）。
+    * 本节**只做"让它齐备"**：⛔ 不代替 53 的结案/重开，⛔ 不改任何既有记录（只推进状态机）。
+    * 前置不满足（本单没跑过第 8 步/第 5 步）⇒ `NOT_RUN` 并点名，⛔ 不假绿。
+    """
+    print("\n-- chain11 第 10–12 步收尾：处置任务 → 关变更案件（让本单齐备）--", flush=True)
+
+    err_base = w.c.errors()
+
+    def idem11(tag: str) -> str:
+        return f"walk-chain11-{tag}-{time.time_ns()}"
+
+    if not anchor_active():
+        w.rep.not_run(
+            "chain11 收尾（第 10–12 步）",
+            "本节在同一张单上推进状态机 ⇒ 必须开 `--chain`（或 `--anchor`）运行。",
+        )
+        return
+
+    tok = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    aid = prefer_anchor("")
+    if not tok or not aid:
+        w.rep.not_run("chain11 收尾（第 10–12 步）", f"拿不到经理 token 或锚定单（aid={aid!r}）")
+        return
+
+    # ── ① 处理前：服务端报缺什么（这就是"第 10–12 步还剩什么"的权威清单）──────
+    before = api_get(f"/entrust/assignments/{aid}/closure-readiness", tok) or {}
+    miss_before = [str((m or {}).get("code")) for m in (before.get("missing") or [])]
+    w.rep.rec(
+        "chain11 ① 收尾前先取**服务端**的缺项清单（⛔ 不靠猜；它同时是第 12 步的判据来源）",
+        isinstance(before.get("ready"), bool),
+        f"ready={before.get('ready')!r} 缺 {len(miss_before)} 项：{miss_before}",
+    )
+
+    # ── ② 处置任务（含复核任务 ⇒ 复核项随之 resolve）──────────────────────────
+    # ⚠️ 权威列表路径是 **`GET /entrust/tasks?assignment_id=…`**（⛔ **不是**
+    #    `/assignments/{id}/tasks` —— 那条是 POST 创建用的）。2026-09-20 实测：写成后者
+    #    得到**静默的 0 条** ⇒ "逐条处置"变成"处置 0 条"还记了 PASS（典型假绿）。
+    #    ⇒ 本节加**矛盾守卫**：服务端说缺 `tasks_not_disposed` 时，读到的条数不能是 0。
+    t_resp = api_get(f"/entrust/tasks?assignment_id={aid}&size=100", tok)
+    t_items = t_resp.get("items") if isinstance(t_resp, dict) else t_resp
+    rows = t_items if isinstance(t_items, list) else []
+    need_task_close = "tasks_not_disposed" in miss_before
+    w.rep.rec(
+        "chain11 ②a ⭐ 任务清单的**形状自洽**：服务端说缺任务处置时，读到的条数**不能是 0**"
+        "（路径 `/entrust/tasks?assignment_id=…`；写错路径只会静默给 0）",
+        bool(rows) or not need_task_close,
+        f"读到任务 {len(rows)} 条；缺项含 tasks_not_disposed={need_task_close}",
+    )
+    todo = [r for r in rows if str((r or {}).get("status") or "") not in ("completed", "cancelled")]
+    todo.sort(key=lambda r: int((r or {}).get("task_id") or 0))
+    done_ids: list[str] = []
+    blocked: list[str] = []
+    for r in todo:
+        tid = int((r or {}).get("task_id") or 0)
+        gen = int((r or {}).get("lease_generation") or 0)
+        # 先**接管到自己**（章 55 可能把某条任务交给了别人 ⇒ 不接管就 complete 不了），
+        # 再 start → complete。
+        # ⚠️ `takeover` **自己就会把代次 +1** ⇒ 后面两步必须用**回执里的新代次**。
+        #    2026-09-20 实测：拿着旧代次（0）去 complete ⇒ **409「执行代次已过期」**
+        #    （提交代次 0 / 当前 1）—— 10 条全红，根因只有一个。
+        st_t, to_body = api_post(
+            f"/entrust/tasks/{tid}/takeover", tok, {"expected_generation": gen}, idem11(f"to{tid}")
+        )
+        gen_now = gen
+        if st_t == 200 and isinstance(to_body, dict):
+            gen_now = int(to_body.get("lease_generation") or gen)
+        api_post(
+            f"/entrust/tasks/{tid}/start", tok, {"expected_generation": gen_now}, idem11("start")
+        )
+        kinds = [str(x) for x in ((r or {}).get("required_evidence") or [])]
+        refs = [
+            {
+                "kind": k,
+                "ref": f"走查·任务{tid}处置证据（{k}）",
+                "occurred_at": "2026-09-20T09:00:00",
+            }
+            for k in kinds
+        ]
+        st_c, body_c = api_post(
+            f"/entrust/tasks/{tid}/complete",
+            tok,
+            {"evidence_refs": refs, "expected_generation": gen_now},
+            idem11(f"complete{tid}"),
+        )
+        if st_c == 200:
+            done_ids.append(str(tid))
+        else:
+            blocked.append(f"{tid}:HTTP{st_c} {str((body_c or {}).get('detail'))[:70]}")
+    w.rep.rec(
+        "chain11 ②b 本单任务**逐条处置**（`takeover` → `start` → `complete`，证据按 "
+        "`required_evidence` 生成）—— 复核项绑在复核任务上，完成任务它才 resolve",
+        not blocked and len(done_ids) == len(todo) and (bool(todo) or not need_task_close),
+        f"处理 {len(todo)} 条 ⇒ 完成 {done_ids}；失败 {blocked or '无'}（任务共 {len(rows)} 条）",
+    )
+
+    # ── ③ 关闭变更案件（必须给处置与证据；没有一键关闭）────────────────────────
+    # ⚠️ 权威列表路径同样是 **`GET /entrust/exceptions?assignment_id=…`**（POST 那条才挂在
+    #    `/assignments/{id}/exceptions` 下）—— 与 ② 同一个坑，同一个矛盾守卫。
+    exs = api_get(f"/entrust/exceptions?assignment_id={aid}&size=100", tok)
+    ex_rows = exs.get("items") if isinstance(exs, dict) else exs
+    ex_rows = ex_rows or []
+    need_case_close = "cases_not_closed" in miss_before
+    open_ex = [
+        e for e in ex_rows if str((e or {}).get("status") or "") not in ("closed", "cancelled")
+    ]
+    w.rep.rec(
+        "chain11 ③a ⭐ 案件清单的**形状自洽**：服务端说缺案件关闭时，读到的宗数**不能是 0**",
+        bool(ex_rows) or not need_case_close,
+        f"读到案件 {len(ex_rows)} 宗（待关 {len(open_ex)}）；缺项含 cases_not_closed="
+        f"{need_case_close}",
+    )
+    closed_ids: list[str] = []
+    ex_fail: list[str] = []
+    for e in open_ex:
+        # ⚠️ 案件列表的 id 键**不是** `exception_id`（实测读到 0 ⇒ 关案件 404「案件 0 不存在」）。
+        #    防御式按候选键取，并对 0 直接记失败 —— 静默拿 0 去请求，看起来像"案件不存在"。
+        eid_x = 0
+        for k_id in ("id", "case_id", "exception_id"):
+            if (e or {}).get(k_id) not in (None, "", 0):
+                eid_x = int((e or {}).get(k_id))
+                break
+        if not eid_x:
+            ex_fail.append(f"id 键缺失：row_keys={sorted((e or {}).keys())[:8]}")
+            continue
+        st_x, body_x = api_post(
+            f"/entrust/exceptions/{eid_x}/close",
+            tok,
+            {
+                "expected_revision": int((e or {}).get("revision") or 1),
+                "closure_disposition": "resolved",
+                "evidence_ref": f"走查·案件{eid_x}处置证据（变更后复核与交接记录）",
+                "resolution_note": "走查：按审核后的口径完成处置并留证",
+            },
+            idem11(f"close{eid_x}"),
+        )
+        if st_x == 200:
+            closed_ids.append(str(eid_x))
+        else:
+            ex_fail.append(f"{eid_x}:HTTP{st_x} {str((body_x or {}).get('detail'))[:70]}")
+    w.rep.rec(
+        "chain11 ③b 变更案件经**服务端命令**关闭（`closure_disposition` ＋ `evidence_ref` 必填 —— "
+        "没有一键关闭；⛔ 界面在本切片没有这个入口，如实登记为**经接口**）",
+        not ex_fail and len(closed_ids) == len(open_ex) and (bool(open_ex) or not need_case_close),
+        f"待关 {len(open_ex)} 宗（本单案件共 {len(ex_rows)} 宗）⇒ 已关 {closed_ids}；"
+        f"失败 {ex_fail or '无'}",
+    )
+
+    # ── ④ 处理后：齐备（这就是 53 章「齐备 ⇒ 结案成功」的前提）────────────────
+    after = api_get(f"/entrust/assignments/{aid}/closure-readiness", tok) or {}
+    miss_after = [str((m or {}).get("code")) for m in (after.get("missing") or [])]
+    w.rep.rec(
+        "chain11 ④ ⭐ 收尾后本单**齐备**：`ready=True` 且缺项清空（对照收尾前的清单）"
+        "—— 这是第 12 步（结案）的**可执行前提**，⛔ 不是「为了让 53 变绿」改出来的",
+        after.get("ready") is True and not miss_after,
+        f"收尾前 ready={before.get('ready')!r} 缺 {miss_before} ⇒ "
+        f"收尾后 ready={after.get('ready')!r} 缺 {miss_after}",
+    )
+    if after.get("ready") is not True:
+        w.rep.not_run(
+            "chain11 ⑤ 齐备后由 53 章经界面结案",
+            f"仍未齐备：{miss_after} ⇒ 结案会被服务端拦（那是**正确**行为）。"
+            "⛔ 不在这里伪造齐备读数。",
+        )
+        return
+    w.rep.rec(
+        "chain11 ⑤ 齐备状态**已就绪，交章 53 经界面结案**"
+        "（本节只推进状态机，⛔ 不代替第 12 步的界面判据）",
+        True,
+        f"aid={aid} ready=True；下一步 `--section …,chain11,53`",
+    )
+
+    errs = w.new_errors(err_base)
+    w.rep.rec("chain11 运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条")
+
+
 def sec_51(w: Walker) -> None:
     """第 6 步**来源门槛的被拒剧本**：AG-02 载体 ⇒ 被拒 ⇒ 逐条核验 ⇒ 同版本发布成功。
 
@@ -12985,6 +13486,17 @@ SECTIONS = {
     #    ⚠️ A2 接管那一半在章 55（同锚同单），两章合起来才是第 9 步的完整证据。
     #    排在序末：它会**写库**（替换候选 + 确认 + 一份新成果 + 一次新发布 + 客户响应）。
     "chain9": sec_chain9,
+    # chain11 = 第 10–12 步的**业务收尾**：处置本单任务（复核项绑在复核任务上，完成它才 resolve）
+    #    ＋ 关闭变更案件（`closure_disposition` ＋ `evidence_ref` 必填，没有一键关闭），
+    #    使本单从"差 3 项"变成 **`closure-readiness.ready=True`** ⇒ 章 53 才能经界面结案。
+    #    ⚠️ 动作**经接口**（本切片界面无这些入口，如实登记）；⛔ 不代替 53 的结案/重开。
+    "chain11": sec_chain11,
+    # chain12 = 主演示**第 13 步**（`Reload/re-enter and inspect the same persistent records`）
+    #    ＋ **D1-15**（同一个值：前后记录 / UI 结果 / 重载后仍在）。
+    #    ⭐ 选定的值是**货量 950 吨**（第 8 步应用出来的），三处各读一次：变更历史（页面＋服务端）、
+    #    详情页当前值 ＋ **结算面**那条「数量 950 吨」的费用行、**重进后**再读（逐字相等）。
+    #    ⚠️ 只在链式轮次成立（要求本单已完成第 8 步）；⛔ 不碰结案/重开（那是章 53 的职责）。
+    "chain12": sec_chain12,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -13147,6 +13659,14 @@ DEFAULT_ORDER = [
     #    的 800→950）。⇒ 链式跑法请按 `43,chain4,45,44,49,50,chain9` 的顺序；
     #    未开 `--chain` 时它会自己 `NOT_RUN` 并点名（不会拿别的委托顶替）。
     "chain9",
+    # chain11 = 第 10–12 步的业务收尾（让本单齐备）⇒ **必须排在 `53` 前**（53 证"齐备⇒结案成功"）。
+    #    ⚠️ 它依赖本链状态：`50`（变更已应用）＋ `52`（费用/结算/客户确认已在本单完成）。
+    "chain11",
+    # chain12 = 主演示第 13 步 ＋ D1-15（同一个值端到端）。
+    #    ⚠️ 依赖**本链**上的状态：50（第 8 步的 800→950）与 52/53（结算/结案在本单跑过）。
+    #    链式跑法：`43,chain4,45,44,49,50,chain9,55,52,53,chain12`；未开 `--chain` 时它自己
+    #    `NOT_RUN` 并点名（⛔ 不拿别的委托顶替）。
+    "chain12",
 ]
 
 
