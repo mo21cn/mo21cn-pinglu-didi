@@ -12105,33 +12105,33 @@ def sec_chain12(w: Walker) -> None:
 
 
 def sec_chain_manual(w: Walker) -> None:
-    """第 2 步的**无模型人工通路**（D1-05）：模型不可用时，用户能**人工录入**并把文本交回链路。
+    """D1-05 的**无模型人工通路**：模型不可用时，界面**如实报**、且**不依赖模型的那一半照走**。
 
-    为什么单独一章
-    --------------
-    D1-05 的判据是「**离线／人工**通路证据；无语义上必需的动作被阻塞」，而 HO 2026-09-20 明确：
-    「**fixture 自动返回提案不能单独证明人工通路**」。此前所有轮次的提取都走 `LLM_MOCK` 或真模型
-    ⇒ 人工通路**一次都没被点过**（全仓核对：走查脚本里此前**没有**「人工转录」的锚点）。
+    ⚠️ 两口实测把这一章的**前提**改正了（2026-09-20 B2 轮，`LLM_MOCK=false` ＋
+    `LLM_BASE_URL` 指到不可达端口）
+    ------------------------------------------------------------------------------
+    1. **「附件提取」不调模型**：纯文本样本的提取是**本地**动作 —— 实测 `extractStatus='done'`、
+       `已上传…并提取 1228 字`、`canReference=True`，**在模型不可用时照样成立**。
+       ⇒ 「人工转录」入口的条件是**提取失败**（图片／扫描件那一档），⛔ **不是**"模型不可用"。
+       上一版把两者混为一谈，于是拿"提取成功"去推断"模型可用"，**判据方向错了**。
+    2. 所以「模型不可用」这件事要**直接看模型那一步**（让 Agent 解析／建 job）的读数，
+       ⛔ 不能用附件状态代替。
 
-    本章在**模型不可用**的后端上（起后端时把 `LLM_BASE_URL` 指到不可达端口）取三段证据：
+    ⇒ 本章据此取三段证据：
+    * ① 上传 ⇒ **产出附件**（人工/离线通路要有对象）；
+    * ② **模型不可用时，Agent 那一步的读数被如实报出**（把页面原文打进读数，⛔ 不假装成功）；
+    * ③ 「人工转录」**按状态**取：有入口就做实并断言落库；没有（提取没失败）就 `NOT_RUN` 并点名 ——
+      这正是"人工**录入**"这条通路在界面上的形态；
+    * ④ 「人工组装／直写成果」那一半由 **㊹ 〇节**（经界面组装 `customer_quote`，来源 `manual`）
+      在同单链式上承担；「继续到结案」由 `chain11/53` 承担 —— ⛔ 不在本章重造。
 
-    ① 提取**如实失败**（不是假装成功）—— 这是人工通路的前置条件；
-    ② 用户经**人工转录**把文本录进去 ⇒ 附件文本来源变「人工转录」，且**随后可被引用**
-       （＝ Agent 读得到它，⛔ 不是"录进去了但没人用"）；
-    ③ 交代「人工录入后继续到**结案**」那一半在哪取证（同单链式的 `43/chain4/44/chain9/chain11/53`）。
-       ⛔ 不在本章伪造齐备／结案读数。
-
-    ⭐ **状态感知**（本章会进 `DEFAULT_ORDER`，因此必须能被无前置地安全运行）
-    ---------------------------------------------------------------------
-    模型可用时提取会成功 ⇒ 本章**没有前置对象** ⇒ 记 `NOT_RUN` 并点名"这轮模型可用"，
-    ⛔ 不把"提取成功"记成"人工通路失败"，⛔ 也不消耗 `--section all` 的绿灯。
+    ⭐ **状态感知**：本章进 `DEFAULT_ORDER`，模型可用／提取成功时各格记 `NOT_RUN` 并点名，⛔ 不吃掉
+    `--section all` 的绿灯。
 
     诚实边界
     --------
     * 本章**不证明**"模型可用时提取成功"（那是 ㊸ 的范围）。
-    * 模型不可用是**环境**条件：读数里打的是提取结果本身，⛔ 不靠"这轮应该是 mock"去推断。
-    * ⛔ 不改产品行为：只为「人工转录」的两个入口补了 `data-act-*`（本仓既有约定：可点元素带锚点，
-      ⛔ 裸属性会被工具拒），并且这两处本来就是 `bindtap` 的可点元素。
+    * ⛔ 不改产品行为：只为「人工转录」两个入口补了 `data-act-*`（本仓既有约定：可点元素带锚点）。
     """
     print("\n-- chain-manual 第 2 步 · 无模型人工通路（D1-05）--", flush=True)
 
@@ -12153,123 +12153,205 @@ def sec_chain_manual(w: Walker) -> None:
     n_sess = w.c.count(f'[data-act-session="{aid}"]')
     if n_sess != 1:
         w.rep.not_run(
-            "chain-manual ①②",
+            "chain-manual ⓪",
             f"工作台卡片上的「会话」入口命中 {n_sess} 个（期望 1）⇒ 没进会话屏，"
             f"本单 aid={aid} 可能不在这一屏（先跑 43 或用 `--chain`）",
         )
         return
     w.c.scroll_into(f'[data-act-session="{aid}"]')
-    w.c.tap(f'[data-act-session="{aid}"]')
-    w.c.wait_path(SESSION, 30)
+    t_sess = w.c.tap(f'[data-act-session="{aid}"]')
+    ok_sess = w.c.wait_path(SESSION, 30)
+    time.sleep(1.5)
     pg = w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=40, gap=0.5)
     sid = str(pg.get("sessionId") or "")
-
-    # ── ① 上传内置样本 ⇒ 让**提取**去碰模型（模型不可用 ⇒ 应当如实失败）──────────
-    n_sample = w.c.count('[data-act-sample-quote="1"]')
-    if n_sample == 1:
-        w.c.scroll_into('[data-act-sample-quote="1"]')
-        w.c.tap('[data-act-sample-quote="1"]')
-        pg = w.wait_data(
-            lambda x: len(x.get("attachments") or []) > 0 and not x.get("uploading"),
-            tries=60,
-            gap=0.5,
-        )
-    atts = pg.get("attachments") or []
-    notice = str(pg.get("attachNotice") or "")
-    can_ref = [bool((a or {}).get("canReference")) for a in atts]
-    model_down = bool(atts) and not any(can_ref)
     w.rep.rec(
-        "chain-manual ① 附件的**提取结果**如实反映模型可用性"
-        "（模型不可用 ⇒ 没有可引用文本，且页面给出说明；⛔ 不是假装成功）",
-        bool(atts)
-        and (model_down and (notice != "" or any((a or {}).get("referenceHint") for a in atts))),
-        f"附件 {len(atts)} 条；canReference={can_ref}；"
-        f"extractStatus={[str((a or {}).get('extractStatus')) for a in atts]}；"
-        f"attachNotice={notice[:110]!r}",
+        "chain-manual ⓪ 从工作台卡片进到该委托的**专属会话屏**（本章都在这一页上做）",
+        bool(t_sess and ok_sess) and w.c.current_path() == SESSION,
+        f"tap={t_sess} path={w.c.current_path()} sessionId={sid!r} aid={aid}",
     )
-
-    if not model_down:
-        w.rep.not_run(
-            "chain-manual ② 提取失败后出现「人工转录」入口",
-            f"本轮提取**成功**了（canReference={can_ref}）⇒ 说明模型可用 ⇒ 「人工通路」这一章"
-            "**没有前置对象**。要在**模型不可用**轮次跑本章（起后端时把 `LLM_BASE_URL` 指到"
-            "不可达端口／无效 Key）。⛔ 不把「提取成功」记成「人工通路失败」。",
-        )
-        for t in (
-            "chain-manual ③ 人工转录落库（文本来源变「人工转录」）",
-            "chain-manual ④ 转录后该附件**可被引用**（Agent 读得到它）",
+    if not (ok_sess and w.c.current_path() == SESSION):
+        for _t in (
+            "chain-manual ① 上传样本 ⇒ 产出附件",
+            "chain-manual ② 模型不可用时 Agent 那一步的读数被如实报出",
+            "chain-manual ③ 「人工转录」按状态出现并落库",
         ):
-            w.rep.not_run(t, "同上：模型可用 ⇒ 人工转录这一格没有对象。")
+            w.rep.not_run(_t, f"没进到会话屏（path={w.c.current_path()}）⇒ 这几格没有对象")
         errs = w.new_errors(err_base)
         w.rep.rec(
             "chain-manual 本章运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条"
         )
         return
 
-    # ── ② 「人工转录」入口由**状态**决定（不是常显）────────────────────────────
-    n_tr = w.c.count('[data-act-transcribe-open="1"]')
-    w.rep.rec(
-        "chain-manual ② 提取失败后出现「人工转录」入口（界面按**状态**给出降级通道）",
-        n_tr >= 1,
-        f"人工转录入口={n_tr}；canTranscribe={[bool((a or {}).get('canTranscribe')) for a in atts]}",
+    # ── ① 上传内置样本 ⇒ **产出附件**（人工/离线通路要有对象）────────────────────
+    # ⚠️ 「按钮在不在」要**轮询等**：会话屏异步取数，`view` 就绪 ≠ 附件区渲染完。
+    #    2026-09-20 首跑实测：直接 `count` 读到 0 就跳过上传，最后只剩「附件 0 条」，
+    #    **定档时无读数可看** ⇒ 这一版把每个中间量都打进读数。
+    n_sample = 0
+    for _ in range(24):
+        n_sample = w.c.count('[data-act-sample-quote="1"]')
+        if n_sample:
+            break
+        time.sleep(0.5)
+    t_up = False
+    if n_sample == 1:
+        w.c.scroll_into('[data-act-sample-quote="1"]')
+        t_up = bool(w.c.tap('[data-act-sample-quote="1"]'))
+    pg2 = (
+        w.wait_data(lambda x: len(x.get("attachments") or []) > 0, tries=60, gap=0.5)
+        if t_up
+        else pg
     )
-    if n_tr < 1:
-        w.rep.not_run("chain-manual ③ 人工转录落库", "页面上没有「人工转录」入口 ⇒ 无对象")
-        w.rep.not_run("chain-manual ④ 转录后可引用", "同上")
+    atts = pg2.get("attachments") or []
+    notice = str(pg2.get("attachNotice") or "")
+    can_ref = [bool((a or {}).get("canReference")) for a in atts]
+    w.rep.rec(
+        "chain-manual ① 上传样本 ⇒ **产出附件**（人工通路得有对象；⛔ 附件 0 条时后面几格没有对象）",
+        bool(atts),
+        f"样本入口={n_sample} tap={t_up} 附件={len(atts)} 条 "
+        f"extractStatus={[str((a or {}).get('extractStatus')) for a in atts]} "
+        f"canReference={can_ref} uploading={pg2.get('uploading')!r} "
+        f"attachNotice={notice[:100]!r}",
+    )
+    if not atts:
+        for _t in (
+            "chain-manual ② 模型不可用时 Agent 那一步的读数被如实报出",
+            "chain-manual ③ 「人工转录」按状态出现并落库",
+        ):
+            w.rep.not_run(_t, "附件 0 条 ⇒ 上传没有产出对象，本格无对象（见 ① 的中间量）")
+        errs = w.new_errors(err_base)
+        w.rep.rec(
+            "chain-manual 本章运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条"
+        )
         return
 
-    # ── ③ 经界面**人工转录**（把文件内容抄进来）────────────────────────────────
-    w.c.scroll_into('[data-act-transcribe-open="1"]')
-    w.c.tap('[data-act-transcribe-open="1"]')
-    time.sleep(0.8)
-    draft = (
-        "走查·人工转录（模型不可用时的降级录入）：运费 42750.00 元；"
-        "货量 950 吨；装期 2026-10-05；承运方 走查承运人"
-    )
-    # ⚠️ 这里是 `<textarea>`（没有 `data-df`）⇒ 用页面 data 直接填，再点页面自己的提交键。
-    w.c.set_data({"transcribeDraft": draft})
-    time.sleep(0.6)
-    n_sub = w.c.count('[data-act-transcribe-submit="1"]')
-    if n_sub:
-        w.c.scroll_into('[data-act-transcribe-submit="1"]')
-        w.c.tap('[data-act-transcribe-submit="1"]')
-    pg3 = w.wait_data(
-        lambda x: (
-            not x.get("attachBusy")
-            and any(
-                "人工转录" in str((a or {}).get("textSourceLabel") or "")
-                for a in (x.get("attachments") or [])
-            )
-        ),
-        tries=40,
-        gap=0.5,
-    )
-    atts3 = pg3.get("attachments") or []
-    hit3 = [a for a in atts3 if "人工转录" in str((a or {}).get("textSourceLabel") or "")]
+    # ⭐ 如实登记"提取成功"这一型：它**不依赖模型**（本轮实测），所以它同时说明
+    #    "人工转录这一格在纯文本载体上没有对象"。
     w.rep.rec(
-        "chain-manual ③ ⭐ **人工转录落库**：附件文本来源变「人工转录」"
-        "（页面投影；服务端有 `manual_transcription` 这一档 —— 见 `attachments.py`）",
-        bool(hit3),
-        f"命中 {len(hit3)} 条；textSourceLabel="
-        f"{[str((a or {}).get('textSourceLabel')) for a in atts3]}；"
-        f"attachNotice={str(pg3.get('attachNotice'))[:110]!r}（提交键命中={n_sub}）",
+        "chain-manual ①b **提取不依赖模型**（本型：纯文本样本 ⇒ 本地提取）"
+        "—— 这条不是判据，是把 ②③ 的对象条件写清楚",
+        True,
+        f"extractStatus={[str((a or {}).get('extractStatus')) for a in atts]} "
+        f"canReference={can_ref}（含文本的附件＝可引用）",
     )
-    w.rep.rec(
-        "chain-manual ④ 转录之后该附件**可被引用**（`canReference` 翻真 ⇒ "
-        "「Agent 就能读到它」这句话在状态上成立）",
-        any((a or {}).get("canReference") is True for a in atts3),
-        f"canReference={[bool((a or {}).get('canReference')) for a in atts3]}；"
-        f"referenceHint={[str((a or {}).get('referenceHint'))[:40] for a in atts3]}",
-    )
-    w.shot("chain-manual-人工转录-已提交")
 
-    # ── ⑤ 交代「继续到结案」那一半（⛔ 不在本章伪造）──────────────────────────
+    # ── ② 模型那一步：让 Agent 解析 ⇒ 读数必须**如实**（本轮＝模型不可用）──────────
+    # ⚠️ 判据**不能看 `attachNotice`**（2026-09-20 实测：页面原文一直是空串，而 job 已经建出来了）
+    #    —— 那一版的 FAIL 是**我自己看错了字段**。真信号是 **job 的状态**：
+    #    `failed` ⇒ 模型不可用被如实报出；`succeeded` ⇒ 模型可用（本章没有对象）；
+    #    `queued/running` ⇒ 还没被推进（⚠️ 本仓**没有常驻 worker**，`POST /agent/jobs/{jid}/run`
+    #    才是"推进一次"的显式入口）⇒ 记 `NOT_RUN` 并点名，⛔ 不记成产品失败。
+    n_use = w.c.count('[data-act-use-attachment="1"]')
+    jobs3: list = []
+    jstat = jstat_api = ""
+    jerr = jerr_api = jerrmsg = ""
+    jmocked: object = None
+    note3 = ""
+    if n_use >= 1:
+        w.c.scroll_into('[data-act-use-attachment="1"]')
+        w.c.tap('[data-act-use-attachment="1"]')
+        pg3 = w.wait_data(
+            lambda x: len(x.get("jobs") or []) > 0 or not x.get("referencing"),
+            tries=60,
+            gap=0.5,
+        )
+        jobs3 = pg3.get("jobs") or []
+        note3 = str(pg3.get("attachNotice") or "")
+        job0 = dict(jobs3[0]) if jobs3 else {}
+        jid = str(job0.get("jobId") or job0.get("job_id") or "")
+        jstat = str(job0.get("status") or "")
+        jerr = str(job0.get("errorKind") or "")
+        jerrmsg = str(job0.get("errorMessage") or "")
+        jmocked = job0.get("mocked")
+        if jid:
+            api_job = api_get(f"/entrust/agent/jobs/{jid}", tok) or {}
+            jstat_api = str((api_job or {}).get("status") or "")
+            jerr_api = str(
+                (api_job or {}).get("error_kind") or (api_job or {}).get("errorKind") or ""
+            )
+    # ⭐ 判据（2026-09-20 第三轮实测定型）：模型不可用时，job 行会带出
+    #    **`errorKind` / `errorMessage`**（实测 `errorKind='llm_network'`、
+    #    `errorMessage='LLM 服务端错误 502'`、**`mocked=False`**）——
+    #    这几项就是"模型这一步失败了、而且不是 fixture"的直接证据。
+    #    ⚠️ `status` 可能仍是 `queued`（本仓没有常驻 worker，要 `POST …/run` 才推进）：
+    #    如实登记"状态与错误信息并存"，⛔ 不替产品美化，也不因此判它失败。
+    if jstat == "failed" or jstat_api == "failed" or jerr != "" or jerr_api != "":
+        w.rep.rec(
+            "chain-manual ② ⭐ **模型不可用时，Agent 那一步的错误被如实报出**"
+            "（判据＝job 行带出 `errorKind`/`errorMessage`，或状态为 `failed`；⛔ 不假装成功）",
+            True,
+            f"解析入口={n_use} 页面 status={jstat!r} 服务端 status={jstat_api!r} "
+            f"errorKind={jerr!r}/{jerr_api!r} errorMessage={jerrmsg!r} mocked={jmocked!r} "
+            f"页面原文={note3[:80]!r}",
+        )
+    elif jstat == "succeeded" or jstat_api == "succeeded":
+        w.rep.not_run(
+            "chain-manual ② 模型不可用时 Agent 那一步如实失败",
+            f"本轮 job **succeeded**（页面={jstat!r} 服务端={jstat_api!r}）⇒ 模型其实可用 ⇒"
+            " 这一格**没有对象**。要在**模型不可用**轮次跑本章（起后端时把 `LLM_BASE_URL` 指到"
+            "不可达端口／无效 Key）。⛔ 不把「成功」记成「人工通路失败」。",
+        )
+    else:
+        w.rep.not_run(
+            "chain-manual ② 模型不可用时 Agent 那一步如实失败",
+            f"job 还没被推进到终态：解析入口={n_use} 页面状态={jstat!r} 服务端状态={jstat_api!r}"
+            f"（本仓**没有常驻 worker**，`POST /agent/jobs/{{jid}}/run` 才推进一次）"
+            f"｜jobs={str(jobs3)[:200]} ⇒ 本格**未取得证据**（⛔ 不记成产品失败）。",
+        )
+    # ── ③ 「人工转录」**按状态**取（提取失败才有）────────────────────────────
+    n_tr = w.c.count('[data-act-transcribe-open="1"]')
+    if n_tr < 1:
+        w.rep.not_run(
+            "chain-manual ③ 「人工转录」按状态出现并落库",
+            "本轮**提取没有失败**（本型：纯文本样本 ⇒ 本地提取成功）⇒ 界面上按设计**不给**"
+            "「人工转录」入口 ⇒ 这一格**没有对象**。要取证它需要一个**提取失败**的附件"
+            "（图片／扫描件），⛔ 不用别的状态假装。",
+        )
+    else:
+        w.c.scroll_into('[data-act-transcribe-open="1"]')
+        w.c.tap('[data-act-transcribe-open="1"]')
+        time.sleep(0.8)
+        draft = (
+            "走查·人工转录（模型不可用时的降级录入）：运费 42750.00 元；"
+            "货量 950 吨；装期 2026-10-05；承运方 走查承运人"
+        )
+        # ⚠️ 这里是 `<textarea>`（没有 `data-df`）⇒ 用页面 data 直接填，再点页面自己的提交键。
+        w.c.set_data({"transcribeDraft": draft})
+        time.sleep(0.6)
+        n_sub = w.c.count('[data-act-transcribe-submit="1"]')
+        if n_sub:
+            w.c.scroll_into('[data-act-transcribe-submit="1"]')
+            w.c.tap('[data-act-transcribe-submit="1"]')
+        pg4 = w.wait_data(
+            lambda x: (
+                not x.get("attachBusy")
+                and any(
+                    "人工转录" in str((a or {}).get("textSourceLabel") or "")
+                    for a in (x.get("attachments") or [])
+                )
+            ),
+            tries=40,
+            gap=0.5,
+        )
+        atts4 = pg4.get("attachments") or []
+        hit4 = [a for a in atts4 if "人工转录" in str((a or {}).get("textSourceLabel") or "")]
+        w.rep.rec(
+            "chain-manual ③ ⭐ **人工转录落库**：附件文本来源变「人工转录」，且该附件**可被引用**"
+            "（＝ Agent 读得到它）",
+            bool(hit4) and any((a or {}).get("canReference") is True for a in atts4),
+            f"命中 {len(hit4)} 条；textSourceLabel="
+            f"{[str((a or {}).get('textSourceLabel')) for a in atts4]}；"
+            f"canReference={[bool((a or {}).get('canReference')) for a in atts4]}；"
+            f"attachNotice={str(pg4.get('attachNotice'))[:110]!r}（提交键命中={n_sub}）",
+        )
+        w.shot("chain-manual-人工转录-已提交")
+
+    # ── ④ 交代剩下两半（⛔ 不在本章伪造）──────────────────────────────────────
     w.rep.not_run(
-        "chain-manual ⑤ 「人工录入后继续到**结案**」那一半",
-        "本章只取「模型不可用时能人工录入、且文本交回链路」这一段；"
-        "「继续到结案」需要人工组装成果 → 客户接受 → 任务处置 → 案件关闭 → 结案，"
-        "由**同单链式**的 `43/chain4/44/chain9/chain11/53` 承担（⛔ 不在本章伪造齐备读数）。"
-        f"本单 aid={aid} sessionId={sid!r} —— D1-05 的完整闭环要两轮合起来读。",
+        "chain-manual ④ 「人工组装成果 → 客户接受 → … → 结案」那一半",
+        "本章只取「模型不可用时：Agent 那一步如实报 ＋ 不依赖模型的人工录入通路可用」这一段；"
+        "「**人工组装／直写成果**（来源 `manual`）」由 **㊹ 〇节**在同一张单上经界面完成，"
+        "「继续到结案」由 `chain11/53` 完成（⛔ 不在本章伪造齐备读数）。"
+        f"本单 aid={aid} sessionId={sid!r}",
     )
     errs = w.new_errors(err_base)
     w.rep.rec("chain-manual 本章运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条")
