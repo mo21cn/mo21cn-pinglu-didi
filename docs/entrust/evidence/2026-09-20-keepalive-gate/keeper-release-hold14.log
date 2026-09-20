@@ -1,0 +1,28 @@
+########## 2026-09-20 17:15:46 起干净实例 ＋ 认领（保活 10800s）##########
+repo    : E:\pinglu-didi
+work    : E:\pinglu-didi\miniapp-device-artifacts
+shots   : E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-171547
+ide     : D:\Program Files (x86)\Tencent\微信web开发者工具\微信开发者工具.exe
+python  : E:\pinglu-didi\.venv\Scripts\python.exe
+探测现成实例：✗ 不能用 —— 没有正在运行的 IDE 进程
+⇒ 起一个新实例（摘掉 ELECTRON_RUN_AS_NODE、不传沙箱代理）
+    ⚠️ --kill-all-ide：将按进程名清理**所有**微信开发者工具实例
+       （会一并关掉人工打开的窗口；仅在你确认没有正在用的窗口时这样做）
+    全局清理后剩 0
+    pid 14776
+    [3s] IDE 进程 1 个（本轮拥有 1 个）
+    ⏸ 起手静默 35s 再开始探测（实测：刚起来就连探会把通道从「通」打成「堵」，且堵后本轮不可自愈）
+    [  55.0s] pageStack=[]  (开窗  42.8s / 取栈  12.2s / IDE 18 个)  窗=reuse/s0  回执 ok=False errorType=MCP_TOOL_ERROR message=timeout waiting for automator response kind=channel_error elapsed=12.21s
+    [  85.8s] pageStack=[]  (开窗   3.2s / 取栈  11.9s / IDE 19 个)  窗=reuse/s0  回执 ok=False errorType=MCP_TOOL_ERROR message=timeout waiting for automator response kind=channel_error elapsed=11.9s
+    [ 112.1s] pageStack=[{'pageId': 5, 'path': 'pages/shipper/shipper', 'query': {}, 'route': '/pages/shipper/shipper', 'title': '找船'}  (开窗   6.3s / 取栈   3.5s / IDE 22 个)  窗=reuse/s0  回执 ok=True
+✅ 模拟器已就绪
+
+下一步用这条（⛔ 不要另起实例）：
+  python scripts/run_walkthrough_devtools.py --skip-ide --section all
+本进程已**认领**为保活持有者：E:\pinglu-didi\miniapp-device-artifacts\_ide_keepalive.json（pid=10940）
+    ⛔ 期间另起的 `--prepare-ide` 会读到它并**拒跑**（这是刻意的）。
+保活 10800s —— 期间请勿关闭本进程：IDE 随本进程一起存活。
+    到期时刻 20:18:22（＋10800s）
+已撤销保活认领记录：是
+keeper rc=0
+########## 结束 2026-09-20 20:18:23 ##########

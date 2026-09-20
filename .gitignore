@@ -59,6 +59,10 @@ miniapp/project.private.config.json
 # ===== 日志与临时文件 =====
 *.log
 logs/
+# ⛔ 例外：**证据目录**里的 `.log` 必须入库 —— 它是原始件。
+# 不加这条，`git add` 会静默跳过（"清单里说归档了、仓库里找不到" 正是本项目反复吃过的
+# 那种静默漏项；本机实测：`keeper-release-hold14.log` 先被 `*.log` 吃掉）。
+!docs/entrust/evidence/**/*.log
 tmp/
 temp/
 *.tmp
