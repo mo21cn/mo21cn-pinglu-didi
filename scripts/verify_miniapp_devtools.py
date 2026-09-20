@@ -8910,6 +8910,32 @@ def sec_45(w: Walker) -> None:
         w.rep.not_run("㊺ 全部断言", f"该组织下找不到「{title_main}」（种子未铺？）")
         return
 
+    # ⭐ **主链固定前提**（HO 2026-09-20 裁定，见 `DEMO-1-walkthrough.md` §2）：
+    #    本单初始需求 **800 吨**、**不允许拆批**；第 5 步要确认的是一条 **900 吨**候选
+    #    （900 ≥ 800 ⇒ 此时**有效**）。第 8 步把需求改成 950 吨后，这条确认必须
+    #    **失效**（`completion_ready` 之外的判据由 ㊿ 章取）。
+    #    ⛔ 只在链式轮次改口径：非链式轮次验的是"通用登记/确认功能"（含允许拆批），
+    #    把口径一起改掉就等于**改写回归**——`--chain` 才是裁剪开关。
+    #    ⚠️ 装载口径是**两个按钮**（`data-act-cap-partial="0"` / `="1"`），表单默认 `false`；
+    #    ⌨️ 必须**显式点「不允许」**，不能靠"不点它就是 false"——那样这个前提就没有证据。
+    single_load = bool(CHAIN_ASSIGNMENT or WALK_ANCHOR)
+    det0 = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    need_qty = str(det0.get("quantity") or "")
+    need_unit = str(det0.get("quantity_unit") or "吨")
+    w.rep.rec(
+        "㊺ ⓪ 本单**当前需求**（服务端读数）—— 候选是否「适用」要对着它判，"
+        "不是对着登记表单自己填的吨位判",
+        bool(need_qty) if single_load else True,
+        f"本单 quantity={need_qty!r} {need_unit}；装载口径="
+        f"{'不允许拆批（主链固定前提）' if single_load else '允许拆批（非链式轮次，口径不变）'}",
+    )
+    if not need_qty and single_load:
+        w.rep.not_run(
+            "㊺ ③④ 确认链路（容量判定）",
+            f"读不到本单需求货量（`quantity={need_qty!r}`）⇒ 无法判定候选是否有效",
+        )
+        return
+
     if not w.open_workbench(code_mgr, tag="㊺"):
         w.rep.not_run("㊺ 全部断言", "未能以 seed-owner 进入经理工作台")
         return
@@ -8953,8 +8979,14 @@ def sec_45(w: Walker) -> None:
     future = (today_utc + _dt.timedelta(days=90)).isoformat()
     past = (today_utc - _dt.timedelta(days=90)).isoformat()
 
-    def _fill(carrier: str, valid: str) -> bool:
-        """按登记表单的字段顺序真机打字。返回到目前为止的输入是否都成功。"""
+    def _fill(carrier: str, valid: str, partial: bool = True) -> bool:
+        """按登记表单的字段顺序真机打字。返回到目前为止的输入是否都成功。
+
+        `partial`：装载口径。主链（`single_load`）**必须**点「不允许拆批」那一侧 ——
+        它是第 8 步「900 吨候选择在 950 吨需求下不再适用」的**唯一成因**，
+        默认值恰好也是 `false`，所以"不点"与"点了那一侧"在本页上**结果相同、
+        证据不同**：前者证明不了经理真的选过它。
+        """
         pairs = (
             ('[data-df="cap-carrier"]', carrier),
             ('[data-df="cap-vessel"]', "㊺-6688"),
@@ -8974,12 +9006,14 @@ def sec_45(w: Walker) -> None:
             if not w.c.input_text(sel, val):
                 ok_all = False
         # 装载口径与证据类别是**按钮**不是输入框（`data-act-cap-partial` / `-kind`）
-        w.c.tap('[data-act-cap-partial="1"]')
+        ok_all = w.c.tap(f'[data-act-cap-partial="{"1" if partial else "0"}"]') and ok_all
         w.c.tap('[data-act-cap-kind="document"]')
         time.sleep(0.8)
         return ok_all
 
-    typed_ok = _fill(carrier_ok, future)
+    # 期望的装载口径：主链＝**不允许拆批**（`False`），非链式＝沿用原口径（允许）
+    expect_partial = not single_load
+    typed_ok = _fill(carrier_ok, future, partial=expect_partial)
     typed_ok = w.c.count(cand_sel) == 1 and typed_ok
     f = w.c.page_data().get("capForm") or {}
     ok_typed = (
@@ -8988,7 +9022,7 @@ def sec_45(w: Walker) -> None:
         and str(f.get("capacityTonnes") or "") == "900"
         and str(f.get("validUntil") or "") == future
         and str(f.get("evidenceKind") or "") == "document"
-        and f.get("allowsPartialLoad") is True
+        and f.get("allowsPartialLoad") is expect_partial
     )
     w.rep.rec(
         "㊺ ②b 真机打的字**真的进了页面 data**（判据是 capForm 里有值，不是"
@@ -8997,7 +9031,8 @@ def sec_45(w: Walker) -> None:
         ok_typed,
         f"carrier={f.get('carrier')!r} 吨位={f.get('capacityTonnes')!r} "
         f"有效期={f.get('validUntil')!r} 类别={f.get('evidenceKind')!r} "
-        f"拆批={f.get('allowsPartialLoad')!r} 输入回执={typed_ok}",
+        f"拆批={f.get('allowsPartialLoad')!r}(期望 {expect_partial}) "
+        f"本单需求={need_qty!r}{need_unit} 输入回执={typed_ok}",
     )
     w.shot("45-2-登记表单-已打字")
 
@@ -9025,7 +9060,30 @@ def sec_45(w: Walker) -> None:
         "㊺ ②c 真实点击「登记候选运力」⇒ 候选**真的落库**（API 直证；页面 toast 不算证据）",
         ok_cand,
         f"tap={t_submit} candidate_id={got_cand.get('candidate_id')!r} "
-        f"status={got_cand.get('status')!r}",
+        f"status={got_cand.get('status')!r} "
+        f"容量={got_cand.get('capacity_tonnes')!r} "
+        f"拆批={got_cand.get('allows_partial_load')!r}",
+    )
+    # ⭐ 「候选是否**适用**」的第一半：容量判定对着**本单需求**（服务端读数）判，
+    #    不是对着表单里刚打的数字判。第 8 步把需求 800→950 之后，同一条事实会翻成
+    #    「容量不足且不允许拆批 ⇒ 不再适用」—— 那正是 D1-09 要的**对照**，
+    #    而它是"同一套规则、同一个候选、换了一个需求"，不是两条不同的规则。
+    cap_of_cand = str(got_cand.get("capacity_tonnes") or "")
+    cand_partial = bool(got_cand.get("allows_partial_load"))
+
+    def _num(x: str) -> float:
+        try:
+            return float(str(x))
+        except (TypeError, ValueError):
+            return -1.0
+
+    w.rep.rec(
+        "㊺ ②d 该候选在**登记当时是适用的**（容量 ≥ 本单需求，或经理选了允许拆批）"
+        "——判据取**服务端**的候选容量与本单需求，不看表单里刚打的字",
+        _num(cap_of_cand) >= _num(need_qty) or cand_partial,
+        f"候选容量={cap_of_cand!r} 允许拆批={cand_partial} "
+        f"本单需求={need_qty!r}{need_unit} → "
+        f"{'容量够' if _num(cap_of_cand) >= _num(need_qty) else '容量不够，靠拆批兜'}",
     )
     w.shot("45-3-候选已登记")
     if not ok_cand:
@@ -9038,7 +9096,7 @@ def sec_45(w: Walker) -> None:
     print("\n-- 三、409 分流（规则不过）--", flush=True)
     w.c.tap('[data-act-cap-open="1"]')  # 表单可能已被提交后收起
     time.sleep(1.0)
-    _fill(carrier_exp, past)
+    _fill(carrier_exp, past, partial=expect_partial)
     w.c.tap('[data-act-cap-submit="1"]')
     got_exp: dict = {}
     for _ in range(20):
@@ -10586,7 +10644,8 @@ def sec_50(w: Walker) -> None:
     cur = Decimal(str(cur_raw))
     fresh = cur == Decimal("800")
     w.rep.rec(
-        "㊿ 前置 · canonical 夹具的货量就是 800.000 吨（D1-09 的起点）"
+        "㊿ 前置 · 本单货量是 **800.000 吨**（D1-09 的起点）"
+        "—— 链式轮次里「本单」＝第 1 步新建的那一张（`--chain`）；非链式＝canonical 夹具"
         + (
             ""
             if fresh
@@ -10937,6 +10996,578 @@ def _same_dec(raw: object, want: str) -> bool:
 def _idem(tag: str) -> str:
     """走查用的幂等键：每次唯一（同键重放会命中幂等记录、返回首次响应）。"""
     return f"walk-{tag}-{time.time_ns()}"
+
+
+def sec_chain9(w: Walker) -> None:
+    """合同 §10.1 第 9 步：**必需的复核 / 重新接受**（A2 接管那一半在章 55）。
+
+    合同原文（一字不改）：
+
+        Complete required revalidation/renewed acceptance; A2 takes over a task.
+
+    为什么单独一章
+    --------------
+    第 8 步（㊿）把本单需求 800→950 应用之后，这条链上出现**两件必须被处理的事**，
+    而此前只有半条证据 —— ㊿ 证明了「旧运力不再适用」，**没有人证明有人处理了它**：
+
+    ① **复核**：旧运力确认（900 吨、**不允许拆批**）已不适用。这个结论必须来自
+       「用**当前事实**重跑**同一套规则**」（只读复算），⛔ 不是谁去把那行状态改掉；
+    ② **重新接受**：对客报价是**按旧需求**发布、并被客户接受过的；需求变了就必须
+       **重新发布一版**并请**客户本人**重新接受。⛔ 第 6 步那次接受绑在旧版本上，
+       顶替不了本步（后端 `UNIQUE(release_id)` 只保证「同一次发布只能响应一次」）。
+
+    覆盖
+    ----
+    ① 前置（服务端读数）：本单需求已是 **950 吨**（第 8 步在本单完成）；
+    ② **复核**：旧确认只读复算 ⇒ `still_valid=false`，且**不过的规则点名 `capacity`**
+       （900 < 950 且不允许拆批 ⇒ 根因可分辨，不是笼统的「不适用」）；
+    ③ **重新确认**：经界面登记一条**替换候选**（1000 吨、**同一口径**不允许拆批）并确认
+       ⇒ 新确认 `still_valid=true`。两条并存，才叫「复核完成了」；
+    ④ **客户重新接受**：经界面**组装一份新成果**（新 `customer_quote`）→ **重新发布** →
+       客户（**本单货主本人**）经真实入口看到**新那一版**并真实点击接受 ⇒ 服务端响应落在
+       **那一次** `release_id` 上；并复核**旧的那条接受仍在**（永久保留）。
+    ⑤ **两条负例**：ⓐ 已被客户接受的那一版**不可撤回/不可取代 ⇒ 409**
+       （`offers._assert_not_responded`）—— 这正是「重新接受必须换**新成果**」的原因，
+       ⛔ 不是缺陷；ⓑ 经理替客户响应 ⇒ **403**（「重新接受」必须由客户做）；
+    ⑥ A2 接管**不在这里**：它在章 55（同锚同单）。两章合起来才是第 9 步的完整证据
+       ⇒ 建议 `--section …,50,chain9,55` 同跑。
+
+    ⚠️ 诚实边界
+    * 本章**只在链式轮次有意义**：要求「本单已完成第 8 步」。未开 `--chain` 或前置未完成
+      ⇒ 整章 `NOT_RUN` 并点名缺什么（⛔ 不假绿、⛔ 不换一张单取通过）。
+    * 成果页优先走**真实点击**（工作台 → 委托卡 → 详情 → 成果槽位）；槽位里没有该成果时才
+      退回 `navigateTo` 带 `artifact_id` 直进，且**读数里标注走了哪条**。
+    * 发布确认条里的「授权附件」输入框**没有专属锚点** ⇒ 与 ㊹ 同一条做法用 `set_data`
+      注值（输入路径被跳过，提交链路是真的）。
+    * ⛔ **不**给已被接受的那份成果追加版本再发布：首次实跑（2026-09-20）实测该路径
+      **409**，并按读数把剧本改成「换新成果」—— 判据先于剧本。
+    """
+    print("\n-- 第 9 步 · 复核 / 重新确认 / 客户重新接受（同单）--", flush=True)
+
+    import datetime as _dt
+
+    err_base = w.c.errors()
+
+    def _num_of(x: object) -> float:
+        try:
+            return float(str(x))
+        except (TypeError, ValueError):
+            return -1.0
+
+    def _art_in(items: list) -> str:
+        """客户可见载体的 id（**防御式**取值：先按类型挑，再按候选键取）。"""
+        for it in items or []:
+            if str((it or {}).get("artifact_type") or "") == "customer_quote":
+                for k in ("artifact_id", "id", "artifactId"):
+                    v = (it or {}).get(k)
+                    if v not in (None, "", 0):
+                        return str(v)
+        return ""
+
+    def idem9(tag: str) -> str:
+        return f"walk-chain9-{tag}-{time.time_ns()}"
+
+    if not anchor_active():
+        w.rep.not_run(
+            "第9步 · 复核与客户重新接受",
+            "本章判据是「与第 1–8 步**同一张单**上的连续事实」⇒ 必须开 `--chain`"
+            "（或 `--anchor`）运行。⛔ canonical／别的委托上的 `PASS` 顶替不了本单结果。",
+        )
+        return
+
+    tok = (api_login(CODE_OWNER) or {}).get("access_token") or ""
+    org_id = ""
+    for r in (api_get("/entrust/my-orgs", tok) or {}).get("items") or []:
+        if str((r or {}).get("name") or "") == ORG_WORKBENCH:
+            org_id = str((r or {}).get("org_id") or "")
+    aid = prefer_anchor("")
+    if not tok or not aid:
+        w.rep.not_run("第9步 · 复核与客户重新接受", f"拿不到经理 token 或锚定单（aid={aid!r}）")
+        return
+    ctx = api_get(f"/entrust/assignments/{aid}/session-context", tok) or {}
+    eid = str(ctx.get("entrustment_id") or "")
+    det = api_get(f"/entrust/assignments/{aid}", tok) or {}
+    cur_qty = str(det.get("quantity") or "")
+    w.rep.rec(
+        "第9步 · 前置：本单需求**已由第 8 步改为 950 吨**（服务端读数 —— ⛔ 不拿页面"
+        "或 toast 当证据，⛔ 也不拿「夹具声明 800」当证据）",
+        bool(eid) and cur_qty.startswith("950"),
+        f"aid={aid} entrustment_id={eid!r} quantity={cur_qty!r} {det.get('quantity_unit') or ''}",
+    )
+    if not eid or not cur_qty.startswith("950"):
+        w.rep.not_run(
+            "第9步 · ①② 复核与重新确认",
+            f"本单需求={cur_qty!r} ⇒ 第 8 步（㊿：审批 → 应用 800→950）**未在本单完成**，"
+            "复核没有对象。请以 `--section …,44,49,50,chain9` 同序运行。",
+        )
+        return
+
+    # ── ① 复核：旧确认在 950 吨下**不再适用**（只读复算，不改任何行）──────────
+    print("\n-- ① 复核（只读复算）--", flush=True)
+    confs = api_get(f"/entrust/assignments/{aid}/capacity-confirmations", tok) or []
+    crows = confs if isinstance(confs, list) else (confs.get("items") or [])
+    old: dict = {}
+    for r in crows:
+        if _same_dec((r or {}).get("capacity_tonnes"), "900.000"):
+            old = dict(r or {})
+    w.rep.rec(
+        "第9步 · ①a 本单上有第 5 步（㊺）**经界面**登记并确认过的那条 900 吨候选"
+        "（复核要有对象 —— 对象不存在时下面两条无从谈起）",
+        bool(old),
+        f"确认行 {len(crows)} 条；900 吨那条="
+        f"{(old.get('confirmation_id'), old.get('capacity_tonnes'), old.get('allows_partial_load')) if old else None}",
+    )
+    if not old:
+        w.rep.not_run(
+            "第9步 · ①b 复核旧运力确认",
+            "本单下没有 900 吨的运力确认 ⇒ 第 5 步（㊺）未在本单确认过。"
+            "请以 `--section 43,chain4,45,…,chain9` 同序运行（第 5 步在前）。",
+        )
+        return
+    cid_old = str(old.get("confirmation_id") or "")
+    rc_old = api_get(f"/entrust/capacity-confirmations/{cid_old}/recheck", tok) or {}
+    fails_old = [
+        str((r or {}).get("rule_code") or "")
+        for r in (rc_old.get("rule_checks") or [])
+        if str((r or {}).get("outcome") or "") == "fail"
+    ]
+    w.rep.rec(
+        "第9步 · ①b 复核（只读复算）：900 吨、不允许拆批的旧确认在 **950 吨**需求下"
+        "**不再适用**，且**根因点名 `capacity`** —— 判据是「用当前事实重跑同一套规则」，"
+        "不是谁把状态改掉",
+        rc_old.get("still_valid") is False and "capacity" in fails_old,
+        f"confirmation={cid_old} 候选容量={old.get('capacity_tonnes')!r} "
+        f"拆批={old.get('allows_partial_load')!r} 需求={cur_qty!r} "
+        f"still_valid={rc_old.get('still_valid')!r} 不过的规则={fails_old} "
+        f"changed_fields={rc_old.get('changed_fields')!r}",
+    )
+    w.shot("chain9-1-旧确认复核-不再适用")
+
+    # ── ② 重新确认：经界面登记**替换候选**（1000 吨、同一口径）并确认 ─────────
+    print("\n-- ② 重新确认（替换候选，经界面）--", flush=True)
+    if not w.open_workbench(CODE_OWNER, tag="第9步"):
+        w.rep.not_run("第9步 · ② 重新确认", "未能以经理进入工作台")
+        return
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+
+    stamp = time.strftime("%m%d-%H%M%S")
+    carrier_new = "第9步 替换承运 " + stamp
+    # ⚠️ 基准日用 **UTC 日期**：与后端 `capacity.today_utc()` 同一口径（差一天会在有效期
+    #    边界上从「通过」变「过期」，而本节要判的是容量而不是有效期）。
+    future = (_dt.datetime.now(_dt.UTC).date() + _dt.timedelta(days=120)).isoformat()
+    n_open = w.c.count('[data-act-cap-open="1"]')
+    w.rep.rec(
+        "第9步 · ②a 经理侧详情页的「登记候选运力」入口**唯一可点**",
+        n_open == 1,
+        f"入口命中={n_open}",
+    )
+    if n_open != 1:
+        w.rep.not_run("第9步 · ② 重新确认", f"登记入口命中 {n_open} 个（期望 1）")
+        return
+    w.c.scroll_into('[data-act-cap-open="1"]')
+    w.c.tap('[data-act-cap-open="1"]')
+    w.wait_data(lambda x: x.get("capOpen") is True, tries=20, gap=0.3)
+    for sel, val in (
+        ('input[data-df="cap-carrier"]', carrier_new),
+        ('input[data-df="cap-vessel"]', "第9步-9520"),
+        ('input[data-df="cap-tonnes"]', "1000"),
+        ('input[data-df="cap-vessels"]', "1"),
+        ('input[data-df="cap-rate"]', "45"),
+        ('input[data-df="cap-valid"]', future),
+        ('input[data-df="cap-evidence-ref"]', "att:451"),
+    ):
+        # ⚠️ `input_text` **不滚动**，只回 `ok=false` ⇒ 长页面里必须显式滚进视口
+        w.scroll_into(sel)
+        w.c.input_text(sel, val)
+    # 装载口径与第 5 步**同一条**（不允许拆批）⇒ 复核只换了容量，没换口径
+    w.c.tap('[data-act-cap-partial="0"]')
+    w.c.tap('[data-act-cap-kind="document"]')
+    time.sleep(0.8)
+    f2 = w.c.page_data().get("capForm") or {}
+    w.rep.rec(
+        "第9步 · ②b 替换候选经**真实输入**登记：1000 吨、**不允许拆批**"
+        "（与第 5 步同口径 —— 变的只有容量，这样 ① 与 ③ 的对照才有意义）",
+        str(f2.get("capacityTonnes") or "") == "1000"
+        and f2.get("allowsPartialLoad") is False
+        and str(f2.get("carrier") or "") == carrier_new,
+        f"carrier={f2.get('carrier')!r} 吨位={f2.get('capacityTonnes')!r} "
+        f"拆批={f2.get('allowsPartialLoad')!r} 有效期={f2.get('validUntil')!r}",
+    )
+    w.c.scroll_into('[data-act-cap-submit="1"]')
+    w.c.tap('[data-act-cap-submit="1"]')
+    new_cand: dict = {}
+
+    def _cand_new() -> dict:
+        new_cand.clear()
+        rows2 = api_get(f"/entrust/assignments/{aid}/capacity-candidates", tok) or []
+        rows2 = rows2 if isinstance(rows2, list) else (rows2.get("items") or [])
+        for r in rows2:
+            if str((r or {}).get("carrier") or "") == carrier_new:
+                new_cand.update(r or {})
+        return new_cand
+
+    got_new = False
+    for _ in range(24):
+        time.sleep(0.5)
+        if _cand_new():
+            got_new = True
+            break
+    w.rep.rec(
+        "第9步 · ②c 替换候选**真的落库**（API 直证；页面 toast 不算证据）",
+        got_new,
+        f"candidate_id={new_cand.get('candidate_id')!r} "
+        f"容量={new_cand.get('capacity_tonnes')!r} "
+        f"拆批={new_cand.get('allows_partial_load')!r}",
+    )
+    if not got_new:
+        w.rep.not_run("第9步 · ②d 重新确认", "替换候选未落库 ⇒ 没有可确认的对象")
+        return
+    cid_new = str(new_cand.get("candidate_id") or "")
+    t_open = w.c.tap(f'[data-act-cap-confirm-open="{cid_new}"]')
+    time.sleep(1.0)
+    w.scroll_into('[data-df="cap-scope"]')
+    i_scope = w.c.input_text('[data-df="cap-scope"]', "第9步 复核后重新确认（1000 吨舱位）")
+    w.scroll_into(f'[data-act-cap-confirm-submit="{cid_new}"]')
+    t_csub = w.c.tap(f'[data-act-cap-confirm-submit="{cid_new}"]')
+    conf_new: dict = {}
+
+    def _conf_new() -> dict:
+        conf_new.clear()
+        rows3 = api_get(f"/entrust/assignments/{aid}/capacity-confirmations", tok) or []
+        rows3 = rows3 if isinstance(rows3, list) else (rows3.get("items") or [])
+        for r in rows3:
+            if str((r or {}).get("candidate_id") or "") == cid_new:
+                conf_new.update(r or {})
+        return conf_new
+
+    ok_new = False
+    for _ in range(24):
+        time.sleep(0.5)
+        if _conf_new():
+            ok_new = True
+            break
+    rc_new = (
+        api_get(f"/entrust/capacity-confirmations/{conf_new.get('confirmation_id')}/recheck", tok)
+        or {}
+        if ok_new
+        else {}
+    )
+    w.rep.rec(
+        "第9步 · ②d 重新确认**成功**：新候选的确认在 **950 吨**需求下**适用**"
+        "（与 ①b 的「旧确认不适用」并列 ⇒ 复核这件事真的完成了，"
+        "而不是只留下一个「不适用」的结论）",
+        ok_new
+        and rc_new.get("still_valid") is True
+        and _num_of(new_cand.get("capacity_tonnes")) >= _num_of(cur_qty),
+        f"打开 tap={t_open} 范围输入回执={i_scope} 提交 tap={t_csub} "
+        f"confirmation={conf_new.get('confirmation_id')!r} "
+        f"候选容量={new_cand.get('capacity_tonnes')!r} 需求={cur_qty!r} "
+        f"still_valid={rc_new.get('still_valid')!r}",
+    )
+    w.shot("chain9-2-替换候选已确认")
+
+    # ── ③ 客户重新接受：**新成果** → 发布 → 客户本人接受 ─────────────────────
+    # ⭐ 为什么是"新成果"而不是"给旧成果加一版"（2026-09-20 实测 + 代码定位）：
+    #    `offers.release_offer` 在发布前会把**同一成果**此前 `released` 的记录置为
+    #    `superseded`，但对**已有客户响应**的那条会 `_assert_not_responded` ⇒ **409**
+    #    「发布 N 已被客户响应，不能撤回或取代（已接受的版本永久保留，后续变更要新的客户确认）」。
+    #    首次实跑就是死在这里（`release_id=''`，后端日志 `POST …/offer-releases` ⇒ **409**）。
+    #    ⇒ 这不是缺陷，是**接受事实不可覆盖**那条机制；也正因为它，"重新接受"必须换一份
+    #      **新成果**（`onSubmitQuote` 走的是 `createArtifact` ⇒ 新 `artifact_id`）。
+    print("\n-- ③ 客户重新接受（新成果 → 重新发布 → 客户本人接受）--", flush=True)
+    rels_all = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok) or {}).get(
+        "items"
+    ) or []
+    old_rel: dict = {}
+    for r in rels_all:
+        rr = r or {}
+        if (
+            str(rr.get("artifact_type") or "") == "customer_quote"
+            and str((rr.get("response") or {}).get("decision") or "") == "accept"
+        ) and int(rr.get("release_id") or 0) > int(old_rel.get("release_id") or 0):
+            old_rel = dict(rr)
+    aid_old = str(old_rel.get("artifact_id") or "")
+    rid_old = str(old_rel.get("release_id") or "")
+    w.rep.rec(
+        "第9步 · ③a 本单上有**第 6 步那份已被客户接受**的对客报价 —— 它既是「要重新接受」"
+        "的起点，也是「旧接受事实必须留着」的对照物",
+        bool(aid_old and rid_old),
+        f"artifact_id={aid_old!r} release_id={rid_old!r} "
+        f"v{old_rel.get('revision_no')}（本单发布共 {len(rels_all)} 条）",
+    )
+    if not aid_old or not rid_old:
+        w.rep.not_run(
+            "第9步 · ③ 客户重新接受",
+            "本单上没有「客户已接受的对客报价发布」⇒ 第 6 步（㊹）未在本单完成。"
+            "请以 `--section 43,chain4,45,44,49,50,chain9` 同序运行。",
+        )
+        return
+
+    # ③b 负例：**已接受的事实不可被取代**（这正是「重新接受要换新成果」的原因）
+    # ⚠️ 请求体字段是 **`reason`**（`OfferWithdrawIn.reason`，理由必填、留痕）——
+    #    2026-09-20 实测：写成 `note` 会得到 **422 missing body.reason**，
+    #    那**不是**「服务端拒绝了这次撤回」，而是这次负例**根本没执行**；
+    #    两者长得像（都不是 2xx），所以字段名也要能失败才算证据。
+    st_wd, body_wd = api_post(
+        f"/entrust/offer-releases/{rid_old}/withdraw",
+        tok,
+        {"reason": "走查负例：已被客户接受的一版能否被取代"},
+        idem9("withdraw"),
+    )
+    detail_wd = str((body_wd or {}).get("detail") or "")
+    w.rep.rec(
+        "第9步 · ③b **负例**：已被客户接受的那一版**不可撤回 / 不可取代** ⇒ **409**，"
+        "且理由点明「已被客户响应」—— 这不是缺陷，是**接受事实永久保留**那条机制；"
+        "也正因为它，「重新接受」只能换一份**新成果**（下一步）",
+        st_wd == 409 and ("客户响应" in detail_wd or "取代" in detail_wd),
+        f"POST /offer-releases/{rid_old}/withdraw ⇒ HTTP {st_wd}；detail={detail_wd[:170]!r}",
+    )
+
+    # ③c 经界面组装**一份新成果**（反映变更后的需求）
+    if not w.open_workbench(CODE_OWNER, tag="第9步"):
+        w.rep.not_run("第9步 · ③ 客户重新接受", "未能进入经理工作台")
+        return
+    w.c.remove_storage(ORG_STORAGE_KEY)
+    w.c.set_storage(ORG_STORAGE_KEY, org_id)
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+    n_qopen = w.c.count('[data-act-quote-open="1"]')
+    w.rep.rec(
+        "第9步 · ③c 详情页仍有「组装对客报价」入口（需求变了要出**新报价**；"
+        "它是**新成果**，不是给已被接受的那份再加一版）",
+        n_qopen == 1,
+        f"入口命中={n_qopen}",
+    )
+    if n_qopen != 1:
+        w.rep.not_run("第9步 · ③ 客户重新接受", f"组装入口命中 {n_qopen} 个（期望 1）")
+        return
+    w.c.scroll_into('[data-act-quote-open="1"]')
+    w.c.tap('[data-act-quote-open="1"]')
+    d_q2 = w.wait_data(lambda x: x.get("quoteOpen") is True, tries=20, gap=0.3)
+    # ⚠️ `currency` 已预填 `CNY` ⇒ 一个字符都不打（打了会得到 `CNYCNY`）
+    typed_q2 = (
+        w.c.input_text('input[data-df="amount"]', "43700")
+        and w.c.input_text('input[data-df="includes"]', "船舶运输、装船、卸船（按 950 吨）")
+        and w.c.input_text('input[data-df="validUntil"]', "2027-03-31")
+    )
+    w.rep.rec(
+        "第9步 · ③c 新报价表单经**真实输入**填好（金额按变更后的 950 吨口径）",
+        d_q2.get("quoteOpen") is True and typed_q2,
+        f"quoteOpen={d_q2.get('quoteOpen')!r} 三个输入框回执={typed_q2}",
+    )
+    w.c.scroll_into('[data-act-quote-submit="1"]')
+    w.c.tap('[data-act-quote-submit="1"]')
+    time.sleep(2.0)
+    arts2 = api_get(f"/entrust/assignments/{aid}/artifacts?size=50", tok) or {}
+    typed2: list[tuple[str, str]] = []
+    for it in arts2.get("items") or []:
+        v = ""
+        for k in ("artifact_id", "id", "artifactId"):
+            if (it or {}).get(k) not in (None, "", 0):
+                v = str((it or {}).get(k))
+                break
+        typed2.append((v, str((it or {}).get("artifact_type") or "")))
+    qids = [x[0] for x in typed2 if x[1] == "customer_quote"]
+    aid_new = next((x for x in qids if x and x != aid_old), "")
+    w.rep.rec(
+        "第9步 · ③c 经界面组装出**一份新成果**（客户可见类型，且 `artifact_id` 与第 6 步那份不同）"
+        "—— 判据取**服务端成果清单**，不看页面 toast",
+        bool(aid_new),
+        f"新 artifact_id={aid_new!r}（旧 {aid_old}）；本单 customer_quote={qids}",
+    )
+    if not aid_new:
+        w.rep.not_run("第9步 · ③d 重新发布", "没有新的客户可见成果 ⇒ 没有可发布的载体")
+        return
+
+    # ③d 打开**新成果**并发布它（优先真实点击；槽位里没有才直进，且标注走了哪条）
+    via_art2 = ""
+    w.c.nav("navigateTo", f"/{DETAIL}?assignment_id={aid}", DETAIL)
+    w.wait_data(lambda x: bool(x.get("slots")), tries=40, gap=0.5)
+    sel_ref2 = f'[data-kind="artifact"][data-id="{aid_new}"]'
+    w.c.scroll_into(sel_ref2)
+    n_ref2 = w.c.count(sel_ref2)
+    if n_ref2 == 1 and w.c.tap(sel_ref2):
+        w.c.wait_path(ARTIFACT, 30)
+        via_art2 = "真实点击（工作台 → 详情 → 成果槽位）"
+    else:
+        w.c.nav("navigateTo", f"/{ARTIFACT}?artifact_id={aid_new}", ARTIFACT)
+        via_art2 = f"URL 直进（槽位锚点命中 {n_ref2} 个）"
+    time.sleep(1.5)
+    pg_new = w.wait_data(lambda x: x.get("artifact") is not None, tries=40, gap=0.5)
+    revs_new = [int((r or {}).get("revisionNo") or 0) for r in (pg_new.get("revisions") or [])]
+    rev_pub = max(revs_new) if revs_new else 0
+    w.shot("chain9-3-新成果页")
+    w.rep.rec(
+        "第9步 · ③d 打开**新成果**的成果页（新成果 v1，**尚未发布过** —— 已接受的那份才不可再发）",
+        str(pg_new.get("artifactId")) == aid_new and rev_pub == 1,
+        f"via={via_art2} 落页={pg_new.get('artifactId')!r}（期望 {aid_new}）版本={revs_new}",
+    )
+    if rev_pub <= 0:
+        w.rep.not_run("第9步 · ③d 重新发布", "新成果页读不到版本 ⇒ 没有可发布的版本")
+        return
+    sel_rel2 = f'[data-act-release="1"][data-no="{rev_pub}"]'
+    w.c.scroll_into(sel_rel2)
+    n_rel2 = w.c.count(sel_rel2)
+    t_rel2 = w.c.tap(sel_rel2)
+    time.sleep(0.5)
+    n_strip2 = w.c.count('[data-act-release-submit="1"]')
+    w.rep.rec(
+        "第9步 · ③d 「发布这一版给客户」在**新成果**上可点（页内确认条）",
+        n_rel2 == 1 and bool(t_rel2) and n_strip2 == 1,
+        f"v{rev_pub} 行锚点={n_rel2} 确认条={n_strip2}",
+    )
+    if not (n_rel2 == 1 and t_rel2 and n_strip2 == 1):
+        w.rep.not_run("第9步 · ③e 客户重新接受", "发布入口或确认条未就位")
+        return
+    att_items2 = (api_get(f"/entrust/artifacts/{aid_new}/attachments", tok) or {}).get(
+        "items"
+    ) or []
+    auth_ids2 = [str(a.get("attachment_id") or a.get("id") or "") for a in att_items2 if a]
+    auth_ids2 = [x for x in auth_ids2 if x]
+    w.c.set_data({"releaseAtts": ",".join(auth_ids2)})
+    time.sleep(0.4)
+    t_sub_rel2 = w.c.tap('[data-act-release-submit="1"]')
+    rel2: dict = {}
+    for _ in range(24):
+        time.sleep(0.5)
+        rows_r = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok) or {}).get(
+            "items"
+        ) or []
+        hit2 = [
+            r
+            for r in rows_r
+            if str((r or {}).get("artifact_id")) == aid_new
+            and int((r or {}).get("revision_no") or 0) == rev_pub
+            and str((r or {}).get("status")) == "released"
+        ]
+        if hit2:
+            rel2 = dict(hit2[0] or {})
+            break
+    rid_new = str(rel2.get("release_id") or "")
+    w.rep.rec(
+        "第9步 · ③d 重新发布**真的落库**，且服务端记录指向**精确的新成果版本**"
+        "（API 直证 —— 页面说成功不算数）",
+        bool(t_sub_rel2) and bool(rid_new),
+        f"提交 tap={t_sub_rel2} release_id={rid_new!r} artifact={aid_new} v{rev_pub}",
+    )
+    if not rid_new:
+        w.rep.not_run("第9步 · ③e 客户重新接受", "重新发布未落库 ⇒ 客户没有可接受的新版本")
+        return
+
+    # ③e 负例：经理替客户响应 ⇒ 403（必须在客户本人接受**之前**取）
+    st_mgr, _ = api_post(
+        f"/entrust/offer-releases/{rid_new}/responses",
+        tok,
+        {"decision": "accept", "note": "走查负例：经理不得冒充货主做重新接受"},
+        idem9("mgrresp"),
+    )
+    w.rep.rec(
+        "第9步 · ③e **负例**：经理替客户响应这次重新发布 ⇒ **403**"
+        "（看得见、无权 —— 「重新接受」必须由**客户本人**做）",
+        st_mgr == 403,
+        f"HTTP={st_mgr}（期望 403）release={rid_new}",
+    )
+
+    # ③f 客户本人：真实入口链 我的 → 我的委托 → 本单 → 详情 → 接受**新版本**
+    if w.login_as(CODE_SHIPPER) != INDEX:
+        w.rep.not_run("第9步 · ③f 客户重新接受", f"未停在身份页（{w.c.current_path()}）")
+        return
+    if not w.enter_role("shipper", SHIPPER):
+        w.rep.not_run("第9步 · ③f 客户重新接受", f"未进货主工作台（{w.c.current_path()}）")
+        return
+    time.sleep(1.2)
+    tok_cust = (api_login(CODE_SHIPPER) or {}).get("access_token") or ""
+    w.c.nav("switchTab", "/" + MINE, MINE)
+    time.sleep(1.0)
+    # ⚠️ 列表页路径在脚本里**没有**模块级常量（㊹ 也是就地取名）⇒ 本节同样就地定义
+    assignments_page = "pages/entrust/assignments/assignments"
+    n_mine = w.c.count('[data-act-mine-entrust="1"]')
+    t_mine = w.c.tap('[data-act-mine-entrust="1"]') if n_mine == 1 else False
+    ok_asg = w.c.wait_path(assignments_page, 30) if t_mine else False
+    via_asg = "真实点击「我的委托」"
+    if not ok_asg:
+        w.c.nav("navigateTo", "/" + assignments_page, assignments_page)
+        ok_asg = w.c.wait_path(assignments_page, 30)
+        via_asg = f"URL 直进（「我的委托」入口命中 {n_mine} 个）"
+    time.sleep(1.2)
+    w.c.scroll_into(f'[data-mine-id="{aid}"]')
+    n_card = w.c.count(f'[data-mine-id="{aid}"]')
+    t_card = w.c.tap(f'[data-mine-id="{aid}"]') if n_card == 1 else False
+    ok_dt = w.c.wait_path(DETAIL, 30) if t_card else False
+    time.sleep(1.4)
+    pg_cust = w.wait_data(lambda x: x.get("offer") is not None, tries=40, gap=0.5)
+    off = pg_cust.get("offer") or {}
+    w.shot("chain9-4-客户侧-新报价")
+    w.rep.rec(
+        "第9步 · ③f 客户经**真实入口**（我的 → 我的委托 → 本单）进入详情页，"
+        "看到的是**新发布的那一版**（精确版本号与服务端发布记录逐字相等）",
+        bool(ok_asg and t_card and ok_dt)
+        and int(off.get("revisionNo") or 0) == rev_pub
+        and str(off.get("releaseId") or "") == rid_new,
+        f"via={via_asg} 列表页={ok_asg} 本单卡={n_card} detail={ok_dt} "
+        f"页面 v{off.get('revisionNo')}/发布#{off.get('releaseId')}；"
+        f"服务端 v{rev_pub}/发布#{rid_new}",
+    )
+    t_acc = w.c.tap('[data-act-offer-accept="1"]')
+    time.sleep(0.5)
+    n_sub = w.c.count('[data-act-offer-submit="1"]')
+    w.rep.rec(
+        "第9步 · ③g 「接受这一版」走**页内展开条**（不是原生弹层 —— 原生弹层的确认键"
+        "走查工具点不到，那条路径拿不到设备证据）",
+        bool(t_acc) and n_sub == 1,
+        f"tap={t_acc} 提交锚点={n_sub}",
+    )
+    t_sub = w.c.tap('[data-act-offer-submit="1"]')
+    pg_done = w.wait_data(
+        lambda x: (x.get("offer") or {}).get("decided") is True, tries=60, gap=0.5
+    )
+    off2 = pg_done.get("offer") or {}
+    # ⚠️ 先静置再截图：`decided=True` 是**数据**到了，画面重渲染可能还差一帧。
+    #    轮 R 实测：不等这一下，这一张与上一张（客户侧-新报价）**逐字节相同**
+    #    ⇒ 截图就成了重复件，看起来像"接受前后一模一样"。接受事实以 API 读数为准，
+    #    但**截图也要能看出差别**，否则它证明不了"页面确实转到已响应态"。
+    time.sleep(1.2)
+    w.shot("chain9-5-客户已重新接受")
+    w.rep.rec(
+        "第9步 · ③g 真实点击「确认提交」⇒ 页面转为**已响应**态（决定＝接受）",
+        bool(t_sub) and off2.get("decided") is True,
+        f"submit={t_sub} decided={off2.get('decided')!r} "
+        f"decisionLabel={off2.get('decisionLabel')!r} respondedAt={off2.get('respondedAt')!r}",
+    )
+    my_rels = (api_get("/entrust/my-offer-releases", tok_cust) or {}).get("items") or []
+    mine_my = [r for r in my_rels if str((r or {}).get("release_id")) == rid_new]
+    resp_my = ((mine_my[0] or {}).get("response") or {}) if mine_my else {}
+    w.rep.rec(
+        "第9步 · ③h ⭐ 结论：客户**本人**的重新接受**已落库**，且绑定在**新成果的那一次发布**上"
+        "（⛔ 不是第 6 步那次旧接受）",
+        str(resp_my.get("decision")) == "accept"
+        and int((mine_my[0] or {}).get("revision_no") or 0) == rev_pub,
+        f"HTTP 载荷：release={rid_new} revision={rev_pub} "
+        f"decision={resp_my.get('decision')!r} responded_at={resp_my.get('responded_at')!r}",
+    )
+
+    # ③i 复核：**旧的那条接受仍在**（永久保留，没有被新发布顶掉）
+    rels_after = (api_get(f"/entrust/entrustments/{eid}/offer-releases", tok) or {}).get(
+        "items"
+    ) or []
+    keep = [r for r in rels_after if str((r or {}).get("release_id")) == rid_old]
+    keep_resp = ((keep[0] or {}).get("response") or {}) if keep else {}
+    w.rep.rec(
+        "第9步 · ③i 复核：**旧的那条接受仍在**（状态 `released`、响应未被抹掉、版本未被取代）"
+        "—— 「接受事实永久保留」是六机制之一：新一次接受不能把旧一次顶掉",
+        bool(keep)
+        and str((keep[0] or {}).get("status")) == "released"
+        and str(keep_resp.get("decision")) == "accept"
+        and int((keep[0] or {}).get("revision_no") or 0) == int(old_rel.get("revision_no") or 0),
+        f"旧 release={rid_old} status={(keep[0] or {}).get('status')!r} "
+        f"decision={keep_resp.get('decision')!r} v{(keep[0] or {}).get('revision_no')}",
+    )
+
+    errs = w.new_errors(err_base)
+    w.rep.rec("第9步 · 本章运行期无**新增** console 报错", not errs, f"增量 {len(errs)} 条")
 
 
 def sec_51(w: Walker) -> None:
@@ -12343,6 +12974,17 @@ SECTIONS = {
     #    ⚠️ 它**不是**回归章节：⛔ 不掺 `air`/铁路等负例段（那些留在 ㊻/㊼ 的回归轮里）。
     #    排在序末：它会**写库**（建段、建任务），放前面会把按条数断言的章节搅乱。
     "chain4": sec_chain4,
+    # chain9 = 主演示**第 9 步**的**业务写侧**（合同 §10.1：`revalidation/renewed acceptance`）：
+    #    ① 只读复算旧确认（900 吨无拆批 ⇒ 950 吨需求下不再适用）；
+    #    ② 经界面登记**替换候选**并确认（1000 吨、同口径）；
+    #    ③ 组装一份**新成果** → **重新发布** → **客户本人**重新接受（并复核旧接受仍在）；
+    #    ④ 两条负例：已被接受的那一版**不可取代 ⇒ 409**（∴「重新接受」必须换新成果）；
+    #       经理替客户响应 ⇒ **403**。⛔ 两者都不是缺陷，是机制。
+    #    ⚠️ **只在链式轮次成立**：它要求"本单已完成第 8 步（需求 950 吨）"⇒ 未开 `--chain`
+    #    或前置未完成时整章 `NOT_RUN` 并点名缺什么（⛔ 不假绿、⛔ 不换一张单取通过）。
+    #    ⚠️ A2 接管那一半在章 55（同锚同单），两章合起来才是第 9 步的完整证据。
+    #    排在序末：它会**写库**（替换候选 + 确认 + 一份新成果 + 一次新发布 + 客户响应）。
+    "chain9": sec_chain9,
 }
 
 # 默认执行顺序：冒烟先跑（最快暴露白屏类缺陷），再逐章
@@ -12500,6 +13142,11 @@ DEFAULT_ORDER = [
     #    ⚠️ 放**全量序列最末**：它会真写（建段 + 建任务），排在前面会让按条数断言的章节变脆。
     #    开 `--chain` 时它落在**本链那一张**单上；未开时落在队列最新的一张 —— 两种都记在读数里。
     "chain4",
+    # chain9 = 主演示第 9 步的**业务写侧**（复核 / 重新确认 / 客户重新接受）。
+    #    ⚠️ 它依赖**本链**上前面几章留下的状态：45（第 5 步的 900 吨确认）与 50（第 8 步
+    #    的 800→950）。⇒ 链式跑法请按 `43,chain4,45,44,49,50,chain9` 的顺序；
+    #    未开 `--chain` 时它会自己 `NOT_RUN` 并点名（不会拿别的委托顶替）。
+    "chain9",
 ]
 
 
