@@ -10,8 +10,8 @@
 
 | 项 | 值 |
 | --- | --- |
-| **固定候选 SHA** | **`26f8a2996625b47e21cb1d0d7fd2d35a4a1a6b4b`**（分支 `s7e-manual-path-and-delivery`，**PR #185 的 HEAD**；本轮**全部设备证据都在它上面取得**）。**基线**＝`9addfe8`（`develop`，PR #184 squash）。⚠️ 合并后以 squash 得到的 `develop` sha 为准并同步本行＋`acceptance` §1 |
-| **CI** | **`26f8a299…` 上 6/6 job SUCCESS**：后端 lint+test／迁移 SQLite／迁移 MySQL 8.0／并发集成 MySQL／前端静态契约／前端端到端。⚠️ **CI 绿 ≠ 走查绿**：设备主链同轮汇总行是 `RESULT: NOT_RUN`（见 §6 与 `acceptance` §7） |
+| **候选（合并对象）** | **PR #185 的 HEAD** —— ⛔ 不写死 sha（写死必然落后于候选，已发生 2 次）；合并前台权威值以 `git rev-parse HEAD` 为准，**CI 须在该 sha 上 6/6 全绿**。⭐ 本轮全部设备证据所在提交＝`26f8a2996625b47e21cb1d0d7fd2d35a4a1a6b4b`；**基线**＝`9addfe8`（`develop`，PR #184 squash） |
+| **CI** | **PR HEAD 上 6/6 job SUCCESS**（`26f8a299…` 那一轮已 6/6）：后端 lint+test／迁移 SQLite／迁移 MySQL 8.0／并发集成 MySQL／前端静态契约／前端端到端。⚠️ **CI 绿 ≠ 走查绿**：设备主链同轮汇总行是 `RESULT: NOT_RUN`（见 §6 与 `acceptance` §7） |
 | **本机门禁** | `python -X utf8 scripts/verify_local_gates.py` ⇒ `{"total": 16, "failed": 0}` |
 | **后端单测** | pytest **1015** 项（通过 998／跳过 17／失败 0／错误 0） |
 | **证据入口** | `docs/entrust/evidence/`（`* -text` 逐字节入库；「工作区 sha256 == 索引 blob」已复核） |

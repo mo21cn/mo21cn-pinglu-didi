@@ -17,7 +17,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| **候选 SHA** | **`26f8a2996625b47e21cb1d0d7fd2d35a4a1a6b4b`**（分支 `s7e-manual-path-and-delivery`，**PR #185 的 HEAD** —— 本轮**全部设备证据都在它上面取得**，CI 6/6 跑的就是它）。<br>**基线**＝`9addfe8`（`develop`，PR #184 的 squash）。<br>⚠️ **合并后以 squash 得到的 `develop` sha 为准**，届时本行与 `DEMO-1-delivery-package.md` §1 **同步更新**；<br>⚠️ 上一版写的是「`9addfe8` ＋ 本分支收尾提交」—— **"本分支收尾提交"不可检出**（2026-09-21 HO 抽指出），已改为可检出 sha；再上一版写 `337599d`／`83ccb3f`／PR #180，后者曾**落后 2 个候选**。 |
+| **候选（合并对象）** | **PR #185 的 HEAD** —— ⛔ **本行不写死 sha**：合并前的权威值以 `git rev-parse HEAD`／PR 页面为准，**CI 必须在该 sha 上 6/6 全绿**。<br>⭐ **本轮全部设备证据（B1' 主链／B2 无模型轮／B3 复位演练）所在提交**＝`26f8a2996625b47e21cb1d0d7fd2d35a4a1a6b4b`；**基线**＝`9addfe8`（`develop`，PR #184 squash）。<br>⚠️ 本行改成"不写死"是有原因的：**写死 sha 已连续两次落后于候选**（`83ccb3f`／PR #180 落后 2 个候选；`9addfe8`＋"本分支收尾提交"甚至**不可检出**）—— 取证提交一多，写死的值必然过期。合并后以 squash 得到的 `develop` sha 为准。 |
 | **CI** | **`26f8a299…` 上 6/6 job SUCCESS**（后端 lint+test／迁移 SQLite／迁移 MySQL 8.0／并发集成 MySQL／前端静态契约／前端端到端）。⚠️ CI 绿 **≠** 走查绿：主链走查同轮的汇总行是 `RESULT: NOT_RUN`（见 §7 第 1 条） |
 | **本机门禁** | `python -X utf8 scripts/verify_local_gates.py` ⇒ `{"total": 16, "failed": 0}` |
 | **后端单测** | pytest **1015** 项（通过 998／跳过 17／失败 0／错误 0），其中 MySQL 并发/幂等一组见 `backend/tests/test_mysql_integration.py` |
