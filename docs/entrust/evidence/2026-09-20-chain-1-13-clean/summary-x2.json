@@ -1,0 +1,1721 @@
+{
+  "sections": [
+    "43",
+    "chain4",
+    "45",
+    "44",
+    "49",
+    "50",
+    "chain9",
+    "55",
+    "52",
+    "chain11",
+    "53",
+    "chain12"
+  ],
+  "project": "E:\\pinglu-didi\\miniapp",
+  "startedAt": "2026-09-20T18:02:12+0800",
+  "finishedAt": "2026-09-20T18:38:48+0800",
+  "argv": [
+    "scripts\\verify_miniapp_devtools.py",
+    "--shots",
+    "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-180125",
+    "--section",
+    "43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12"
+  ],
+  "verdict": "FAIL",
+  "tally": {
+    "PASS": 248,
+    "FAIL": 7,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 7,
+    "LIMITATION": 1
+  },
+  "rollup": {
+    "PASS": 248,
+    "FAIL": 7,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 8
+  },
+  "passed": 248,
+  "notPassed": 15,
+  "attempt": 6,
+  "previousRuns": [
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-133908",
+      "finishedAt": "2026-09-20T14:15:00+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-133908",
+        "--section",
+        "43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12"
+      ],
+      "verdict": "FAIL",
+      "passed": 241,
+      "notPassed": 19
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-141842",
+      "finishedAt": "2026-09-20T14:59:36+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-141842",
+        "--section",
+        "43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12"
+      ],
+      "verdict": "FAIL",
+      "passed": 216,
+      "notPassed": 24
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-150553",
+      "finishedAt": "2026-09-20T15:44:08+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-150553",
+        "--section",
+        "43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12"
+      ],
+      "verdict": "FAIL",
+      "passed": 220,
+      "notPassed": 20
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-155208",
+      "finishedAt": "2026-09-20T16:15:16+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-155208",
+        "--section",
+        "43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12"
+      ],
+      "verdict": "FAIL",
+      "passed": 36,
+      "notPassed": 27
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-172039",
+      "finishedAt": "2026-09-20T17:57:48+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-172039",
+        "--section",
+        "43,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12"
+      ],
+      "verdict": "FAIL",
+      "passed": 248,
+      "notPassed": 15
+    }
+  ],
+  "results": [
+    {
+      "step": "㊸ 前置 · 清掉按 `user_id` 推导的在途载荷（跨轮次残留会把'新建'变成'续接'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "entrust_intake_draft_<user_id> 已清（清两次）"
+    },
+    {
+      "step": "截图 43-1-受理屏",
+      "ok": true,
+      "kind": "PASS",
+      "note": "29754B"
+    },
+    {
+      "step": "㊸ 第1步 · 发布货源 → 受理屏（真实点击；货名/货量随草稿带过去）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "via=URL 直进（凸起锚点命中 0 个 —— 自定义 tabBar 是组件） cargo_page=True 锚点命中 1 reset=先到就绪 path=pages/entrust/intake/intake"
+    },
+    {
+      "step": "㊸ 第1步 · 受理屏的目标清单里有「演示经营主体·工作台」（客户 A 授权出去的组织 —— 不是「我所在的组织」，后者会给出能选但必然 403 的选项）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "targets=['演示经营主体·工作台']"
+    },
+    {
+      "step": "截图 43-2-提交后落详情",
+      "ok": true,
+      "kind": "PASS",
+      "note": "29213B"
+    },
+    {
+      "step": "㊸ 第1步 · 真实点击「提交委托」⇒ 落到该委托的详情页（不是停在原页、也不是落首页）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "org=1（锚点 1、tap=True）、submit=True、path=pages/entrust/detail/detail"
+    },
+    {
+      "step": "㊸ 第1步 · 该委托**已在库里**且是 `submitted`（按标题唯一命中，API 直证）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid=7 org=1（演示经营主体·工作台） ｜链式锚点=未开启（回归不被改写）"
+    },
+    {
+      "step": "㊸ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊸ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 43-3-工作台-待受理",
+      "ok": true,
+      "kind": "PASS",
+      "note": "41117B"
+    },
+    {
+      "step": "㊸ 第1步 · A1 在工作台看到这张**新提交**的委托，受理入口可被唯一命中",
+      "ok": true,
+      "kind": "PASS",
+      "note": "[data-act-claim=\"7\"] 命中 1"
+    },
+    {
+      "step": "截图 43-4-受理成功",
+      "ok": true,
+      "kind": "PASS",
+      "note": "40813B"
+    },
+    {
+      "step": "㊸ 第1步 · 真实点击受理 ⇒ 服务端 `submitted → claimed` 且 `claimed_by` 已落（**API 直证**，不只看界面）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "展开=True（确认条 1 个）提交=True status='claimed' claimed_by=2"
+    },
+    {
+      "step": "截图 43-5-专属会话屏",
+      "ok": true,
+      "kind": "PASS",
+      "note": "25071B"
+    },
+    {
+      "step": "㊸ 第2步 · 工作台卡片的「会话」入口真实点击 ⇒ 进该委托的专属会话屏",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/entrust/session/session sessionId='1'"
+    },
+    {
+      "step": "㊸ 第2步 · 「上传报价单（从系统里选文件）」",
+      "ok": false,
+      "kind": "LIMITATION",
+      "note": "入口可被唯一命中（1 个），但点击会打开 **OS 级原生文件选择器** —— 它是系统弹层、不在小程序渲染树里，走查工具够不着它的选择项（技能 miniapp-device-walkthrough 的负例清单实测过）。**不计入通过**。要拿到这一格的证据需要 OS 级输入通道（本项目 ⑧b/㊶ 用过），或让界面另给一条内置样本通路 —— 本章走的是后者（下一格）。"
+    },
+    {
+      "step": "截图 43-6-附件已上传并提取",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35276B"
+    },
+    {
+      "step": "㊸ 第2步 · 真实点击「用内置示例报价单」⇒ 上传 + **提取完成**（只有 done 的附件对 Agent 才是文本，否则它只是个文件名）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "锚点=1 tap=True uploading=False 重试(tap=None,uploading=None) sess='1' 清残留(删除上一轮样本文件)=True 样本文件 先=False 后=True(2674字节) att_before=0 attachments=1 done=1 notice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent'"
+    },
+    {
+      "step": "㊸ 第2步 · 「处理器是否真的执行」可判定（`uploading` 翻真 或 样本文件已写出）—— 两者全否 ⇒ 是**点击没落到处理器上**，而不是「上传失败」",
+      "ok": true,
+      "kind": "PASS",
+      "note": "handler_ran=True（依据 uploading=False/None、样本文件=True err=None、sess='1'（非空 ⇒ 不是「会话未就绪」那条早退））"
+    },
+    {
+      "step": "㊸ 第2步 · 提取结果被**如实报出**（不是合成一句'上传成功'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "attachNotice='已上传「DEMO1-canonical-sample-quotation.txt」并提取 1228 字 —— Agent 已能读到这份报价单'"
+    },
+    {
+      "step": "截图 43-7-AG02-终态",
+      "ok": true,
+      "kind": "PASS",
+      "note": "37217B"
+    },
+    {
+      "step": "㊸ 第2步 · 真实点击「让 Agent 解析这份报价单」⇒ 作业跑到**终态**（不是只停在排队）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "status='succeeded' jobId='1'"
+    },
+    {
+      "step": "㊸ 第2步 · 作业产出**提案**并在页面上列出条数（提案 ≠ 成果，才需要人工采纳）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "proposalCount=1"
+    },
+    {
+      "step": "㊸ 第2步 · 作业来源里含 `attachment_text`（Agent 读的是**附件文本**，不是文件名）—— API 直证",
+      "ok": true,
+      "kind": "PASS",
+      "note": "kinds=['attachment_text', 'assignment'] jobId=1"
+    },
+    {
+      "step": "㊸ 第2步 · 没有未核验来源（来源核对覆盖 `findings` 内的嵌套引用，见 PR #131）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "unverified_sources=[]"
+    },
+    {
+      "step": "截图 43-8-采纳成成果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "36637B"
+    },
+    {
+      "step": "㊸ 第3步 · 真实点击「采纳为成果」→ 页内确认条 → 确认 ⇒ 提案变成成果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ask=True confirm=True（确认条 1 个）artifact_id=8"
+    },
+    {
+      "step": "截图 43-9-成果页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "22596B"
+    },
+    {
+      "step": "㊸ 第3步 · 从**会话屏的成果卡**真实点击进入成果页（同一份）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/entrust/artifact/artifact artifactId='8'（期望 8）"
+    },
+    {
+      "step": "截图 43-10-编辑态-已改一个字段",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26521B"
+    },
+    {
+      "step": "㊸ 第3步 · 真实点击「编辑内容」→ **真实输入**改一个字段（页面识别到有未保存改动）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "字段#0 锚点 1 个 input=True '西江航运有限公司' → '西江航运有限公司（走查更正）' dirty=True"
+    },
+    {
+      "step": "㊸ 第3步 · 保存 ⇒ **追加一个新版本**（append-only，不是就地改掉旧版本）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "revisions 1 → 2 notice='已保存为 v2，生效版本仍是 v1（需确认才会切换）'"
+    },
+    {
+      "step": "截图 43-11-页内确认条",
+      "ok": true,
+      "kind": "PASS",
+      "note": "25067B"
+    },
+    {
+      "step": "㊸ 第3步 · 「设为生效版本」走**页内确认条**（原生弹层的确认键走查工具点不到 ⇒ 这条路径本来拿不到设备证据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口 1 个、确认条 1 个"
+    },
+    {
+      "step": "㊸ 第3步 · 确认切换生效版本 ⇒ **服务端**的生效版本号 == 页面刚保存的那一版（API 直证）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "刚保存 v2 / 服务端 v2 / saveNotice='生效版本已切换为 v2'"
+    },
+    {
+      "step": "㊸ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊸ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 43-12-详情页-成果槽位",
+      "ok": true,
+      "kind": "PASS",
+      "note": "30716B"
+    },
+    {
+      "step": "㊸ 第3步 · 工作台 → 委托卡 → 详情页（真实点击，经页面的 `go()` 决策）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/entrust/detail/detail slots=7"
+    },
+    {
+      "step": "截图 43-13-从工作台打开同一份成果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "23242B"
+    },
+    {
+      "step": "㊸ 第3步 · 槽位里的成果引用可点，且打开的是**被点的那一条**（同一 `artifact_id`，不是'打开最新一份'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "引用锚点 1 个、期望 aid=8、落页 artifactId='8'"
+    },
+    {
+      "step": "㊸ 第3步 · 工作台侧看到的是**更正后**的内容（D1-04「更正出现在所有共享视图」—— 这是本步唯一真正的判据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "期望页面字段值里含 '西江航运有限公司（走查更正）'；实际命中（字段 11 个，生效版本证据见上一条）"
+    },
+    {
+      "step": "㊸ 本章运行期 console 无未归因错误",
+      "ok": true,
+      "kind": "PASS",
+      "note": "增量 0 条"
+    },
+    {
+      "step": "chain4 前置 · 有可用的委托（第 4 步的载体；开 `--chain` 时＝**本链那一张**）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid='7' 队列 5 张（claimed/submitted 5 张） 取单来源=链式/显式锚点"
+    },
+    {
+      "step": "chain4 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "chain4 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "chain4 ① 写入口「加一段」在工作台可点 —— ⛔ 第 4 步不是「只读预置对象」",
+      "ok": true,
+      "kind": "PASS",
+      "note": "加一段=1 段行=0 服务端段=0 aid=7"
+    },
+    {
+      "step": "chain4 ② 经**界面**建出三段，且**就是 公路—内河—公路**（⛔ 链上不掺 `air`／铁路等负例段 —— 那些属于回归轮）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "输入接线=True 服务端段 0→3 末三段方式=['road', 'water', 'road'] 渲染段行=3"
+    },
+    {
+      "step": "chain4 ③ 任务与**前置关系**建起来了（⚠️ 经接口：界面**没有**建任务入口，也没有 `precondition_task_id` 入参 —— 如实登记，⛔ 不假装是界面点的）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=200 建出 task_id=['9', '10', '11'] 前置链=9 → 10 → 11"
+    },
+    {
+      "step": "截图 chain4-工作台-公路水路公路与任务前置",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35208B"
+    },
+    {
+      "step": "chain4 ④ 工作台**逐行**列出本单的任务，且**每一条任务行都带一行前置说明**（「无固定前置」也要自己说话）—— 展示对象是**本单刚建的**，⛔ 不是预置对象",
+      "ok": true,
+      "kind": "PASS",
+      "note": "服务端任务=3 渲染任务行=3 前置行=3｜本轮新建=['9', '10', '11']"
+    },
+    {
+      "step": "chain4 ⑤ 前置关系在**服务端事实**里确实存在（⛔ 不只看页面上有没有那一行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "带前置的任务=2 条（共 3 条）｜本轮前置链=9 → 10 → 11"
+    },
+    {
+      "step": "chain4 ⑥ 本章运行期**无新增 console 报错**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "无"
+    },
+    {
+      "step": "㊺ ⓪ 本单**当前需求**（服务端读数）—— 候选是否「适用」要对着它判，不是对着登记表单自己填的吨位判",
+      "ok": true,
+      "kind": "PASS",
+      "note": "本单 quantity='800' 吨；装载口径=不允许拆批（主链固定前提）"
+    },
+    {
+      "step": "㊺ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊺ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "㊺ ① 经理侧详情页真的渲染出运力块：**登记入口唯一可点**。没有它，后面三条（可输入 / 409 分流 / 确认成功）全部无从谈起",
+      "ok": true,
+      "kind": "PASS",
+      "note": "canViewCapacity=True 入口命中=1"
+    },
+    {
+      "step": "截图 45-1-运力块-登记入口",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35174B"
+    },
+    {
+      "step": "㊺ ②a 点「登记候选运力」⇒ 表单在**页内**展开（提交 / 取消同时可点）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True capOpen=True submit=1 cancel=1"
+    },
+    {
+      "step": "㊺ ②b 真机打的字**真的进了页面 data**（判据是 capForm 里有值，不是「输入框看得见」）—— 本切片那个只在真机上暴露的缺陷（`data-df` 在 handler 的映射表里没有对应项 ⇒ `bindinput` 照常触发、查表查不到就静默空转）正是死在这一条上",
+      "ok": true,
+      "kind": "PASS",
+      "note": "carrier='㊺ 甲承运 0920-181104' 吨位='900' 有效期='2026-12-19' 类别='document' 拆批=False(期望 False) 本单需求='800'吨 输入回执=True"
+    },
+    {
+      "step": "截图 45-2-登记表单-已打字",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35178B"
+    },
+    {
+      "step": "㊺ ②c 真实点击「登记候选运力」⇒ 候选**真的落库**（API 直证；页面 toast 不算证据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True candidate_id=4 status='candidate' 容量='900.000' 拆批=False"
+    },
+    {
+      "step": "㊺ ②d 该候选在**登记当时是适用的**（容量 ≥ 本单需求，或经理选了允许拆批）——判据取**服务端**的候选容量与本单需求，不看表单里刚打的字",
+      "ok": true,
+      "kind": "PASS",
+      "note": "候选容量='900.000' 允许拆批=False 本单需求='800'吨 → 容量够"
+    },
+    {
+      "step": "截图 45-3-候选已登记",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35168B"
+    },
+    {
+      "step": "㊺ ③a 点「确认这一条」⇒ 确认条在**页内**展开（范围 / 备注可输入 + 提交可点） —— 判据取**渲染树**：三个可点/可输入锚点各命中一次，不看内部状态键（它条都没渲染时也照样被置上）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True capConfirmKey='5' 期望='5' 范围框=1 备注框=1 提交键=1"
+    },
+    {
+      "step": "㊺ ③b 规则不过 ⇒ 页面把**逐条**判定照实显示（四条规则全在，**含通过项** —— 后端特意全给，前端不得过滤）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "判定行=4 codes=['demand_known', 'evidence', 'validity', 'capacity'] 提交键 tap=True 范围输入回执=True 页内提示=''"
+    },
+    {
+      "step": "㊺ ③c 过期候选**只在有效期上**不通过（根因要分得出来：「这一条为什么不行」与「这些规则都跑了」是两件事）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "通过项=['demand_known', 'evidence', 'capacity'] 未过项=['validity']"
+    },
+    {
+      "step": "截图 45-4-规则不过的逐条判定",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35161B"
+    },
+    {
+      "step": "㊺ ④a 真实点击「确认运力」⇒ 确认**真的落库**（API 直证：服务端读得回来） —— 一条候选只能确认一次是库上的唯一约束，不是先查后写",
+      "ok": true,
+      "kind": "PASS",
+      "note": "confirmation_id=1 artifact_id=9 rules=4 范围框=1 打开 tap=True 提交 tap=True 范围输入回执=True 提交后页内提示=''"
+    },
+    {
+      "step": "㊺ ④b 确认产出**采购确认成果**且逐规则判定落库（4 条；少一条＝有规则没跑）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "artifact=9 rules=4 ruleset='v1'"
+    },
+    {
+      "step": "㊺ ④c 确认成功后页面**重取并渲染**出确认卡（条数 +1），而不是前端往数组里塞一行 —— 候选状态也从 confirmed 回来",
+      "ok": true,
+      "kind": "PASS",
+      "note": "确认前=0 确认后=1"
+    },
+    {
+      "step": "㊺ ④d 确认卡上的「只读复算」入口可被**唯一命中**（D1-09 的可点形态：用当前事实重跑同一套规则，不改任何行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "data-act-cap-recheck 命中=1"
+    },
+    {
+      "step": "㊺ ④e 点「复算这条确认」⇒ **判定表真的渲染出来**（结果锚点唯一命中），而不是「请求发了、页面什么都没多出来」—— 「点了没反应」与「算出来不成立」在截图上长得一样，只有渲染树分得开",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True 判定表锚点=1 validLabel='按当前事实仍然成立' 基准日='2026-09-20' 变化='判定读到的列没有变化（结论变化来自别处，请报障）'"
+    },
+    {
+      "step": "㊺ ④f 复算**不改任何行**（D1-09 的「只读」）：复算前后确认行逐字相同 —— 「不再成立」是**按当时事实重跑**得出的结论，不是把这条确认作废掉",
+      "ok": true,
+      "kind": "PASS",
+      "note": "不同的键=[] confirmation_id=1 artifact_id=9 rules=4"
+    },
+    {
+      "step": "截图 45-5-确认成功",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35173B"
+    },
+    {
+      "step": "㊺ ⑤ 同一候选二次确认 ⇒ **409**，且 `detail.existing_confirmation_id` 指回已存在的那条确认（客户端据此去读它，而不是拿一句「已经确认过了」把用户拦住） —— 界面对这一种要**刷新**，与「规则不过⇒不刷新」处置相反；混在一起会把用户送进死循环。注：界面侧的这条分支驱动不到（候选确认后 `confirmable=false`，确认条不再出现）⇒ 前端那一支由静态门禁守",
+      "ok": true,
+      "kind": "PASS",
+      "note": "status=409 顶层keys=['detail'] detail.message='候选运力 4 已经确认过（确认记录 #1，成果 #9）—— 一条候选只能确认一次；要改资源或改结论，登记新的候选再确认（已作出的确认不能被覆盖）' existing_confirmation_id=1 existing_artifact_id=9 （本次确认 id=1）"
+    },
+    {
+      "step": "㊺ 本章运行期 console 无未归因错误",
+      "ok": true,
+      "kind": "PASS",
+      "note": "增量 0 条"
+    },
+    {
+      "step": "㊹ 前置 · 定位 ㊸ 建的那张委托（标题匹配取**最大** assignment_id，不限状态）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid=7 org=1（演示经营主体·工作台）token=已切到 owner"
+    },
+    {
+      "step": "㊹ 前置 · 该委托下有**成果**（㊸ 的产出）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "成果 2 份：[('9', 'procurement_confirm'), ('8', 'quote_parsed')]；未归属 1 份（只统计归属恰好等于本委托的）"
+    },
+    {
+      "step": "㊹ 前置 · 该委托下有**客户可见**的成果（第 6 步只能发布客户可见类型）",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "客户可见白名单=['contract_review', 'customer_quote']；命中类型=无 id=无。依据：`offers.release_offer` 要求 `registry.project_for_customer(...)` 非空 —— 内部成果（如 `quote_parsed` 船东报价）一律 400，这是**设计**而非缺陷。⇒ 前置不成立（不是行为违反预期），故记 `NOT_RUN` 而不是 `FAIL`。"
+    },
+    {
+      "step": "㊹ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊹ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "㊹ 〇 经理在该委托详情页有「组装对客报价」入口（判据＝授权可唯一定位 ∧ 所在组织内有 `entrust:quote:create`）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口数=1"
+    },
+    {
+      "step": "㊹ 〇 表单渲染出来且三个输入框真的接上 `bindinput`（`data-df` 认领表；币种已预填故不键入）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "三个输入框都键入成功"
+    },
+    {
+      "step": "㊹ 〇 经**界面**组装出的对客报价出现在服务端成果清单里，且类型在客户可见白名单内",
+      "ok": true,
+      "kind": "PASS",
+      "note": "成果清单：[('10', 'customer_quote'), ('9', 'procurement_confirm'), ('8', 'quote_parsed')]；命中 customer_quote id=10"
+    },
+    {
+      "step": "截图 44-0-组装对客报价",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35163B"
+    },
+    {
+      "step": "㊹ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊹ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 44-1-成果页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26024B"
+    },
+    {
+      "step": "㊹ 第6步 · 工作台 → 委托卡 → 详情 → 成果引用 → 成果页（全程真实点击，经页面的 `go()` 决策）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "card=True detail=True 引用锚点 1 个 ref=True artifact=True 落页 artifactId='10'（期望 10）"
+    },
+    {
+      "step": "㊹ 第6步 · 成果页列出可发布的版本，且选出的目标版本**未发布过**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "版本 1 个：[1]；目标 v1（isCurrent=True published=False）"
+    },
+    {
+      "step": "㊹ 第6步 · 发布前先取**服务端**的门槛结论（它决定下面走哪条剧本）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "gate.ok=True declared=0 pending=0 ⇒ 人工直写：无待核验声明，一次发布即成功"
+    },
+    {
+      "step": "截图 44-2-发布确认条",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26035B"
+    },
+    {
+      "step": "㊹ 第6步 · 「发布这一版给客户」入口走**页内确认条**（发布会被客户与审计看到，确认动作必须可被真机验证，不用原生弹层）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "版本行锚点 1 个（`v1` 唯一）、tap=True、确认条 1 个"
+    },
+    {
+      "step": "截图 44-3-发布结果",
+      "ok": true,
+      "kind": "PASS",
+      "note": "27177B"
+    },
+    {
+      "step": "㊹ 第6步 · 发布前**来源门槛**生效：未核验的来源不得作为已发布依据 —— 被拒时页面把**待核验清单**显示出来（只说'不能发布'是没法干活的）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "submit=True published(页面)=True released(服务端)=True 门槛预读=True 漂移=False releaseHint=''（人工直写的载体不在门槛下 ⇒ 预期是一次发布即成功）"
+    },
+    {
+      "step": "㊹ 第6步 · 门槛状态经 **API 直证**（页面判定与后端同源）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "gate.ok=True declared=0 pending=0 missing_declaration=False ⇒ 页面 published=True / 服务端 released=True"
+    },
+    {
+      "step": "㊹ 第6步 · 界面提供登记「来源核验」的入口（把待核验项变成已核验，才能发布）",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。"
+    },
+    {
+      "step": "㊹ 第6步 · 【替代通路】经 API 逐条登记核验后，门槛转为通过",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。"
+    },
+    {
+      "step": "㊹ 第6步 · 门槛通过后**重新真实点击**发布 ⇒ 该版本变为已发布",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "本轮载体是**经界面人工组装**的对客报价（`aid=10`，来源 `manual`）⇒ 服务端没有待核验的模型声明（`gate.ok=True`、`pending` 0 条）⇒ 门槛一次就过，「被拒 ⇒ 逐条核验 ⇒ 再发布」这条剧本**没有可跑的对象**。⚠️ 上一轮本格记的是 `FAIL`，并据此报了「界面无核验入口」这个缺口 —— **那是误读**：当时把页面的投影延迟（`published=False`）当成了服务端拒绝，于是走进被拒分支、拿着 `pending=0` 去断言『页面上没有核验入口』。缺口**尚未在任何真实场景下被观察到**；它要由 AG-02 产出的载体（来源为模型声明 ⇒ 首次发布应被拒）来证伪或证实，见 `DEMO-1-readiness.md` §10.4 的 O-1。"
+    },
+    {
+      "step": "截图 44-4-已发布",
+      "ok": true,
+      "kind": "PASS",
+      "note": "27187B"
+    },
+    {
+      "step": "㊹ 第6步 · 版本行上出现**发布号与状态**，且该版本不再给发布入口（重复发布同一版只会把客户手上那份取代掉，没有收益）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "releaseId='2' 该版本的发布入口剩余 0 个"
+    },
+    {
+      "step": "㊹ 第6步 · 服务端的发布记录指向**精确 revision**，且冻结了客户快照（`customer_snapshot.payload` 非空 —— 空快照是本切片踩过的静默降级）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "该版本发布 1 条（其中 released 1 条）；快照键=['artifact_type', 'content_source', 'data_origin', 'payload', 'revision_no', 'signature_mode'] payload 字段数=4"
+    },
+    {
+      "step": "㊹ 第6步 · 授权下载清单**冻结在发布记录上**（不是「同属一条委托就全开」）",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "本轮载体 `artifact#10` **没有附件**（授权清单两侧都是空）⇒ 断言会**真空通过**（`[] == []` 恒真）⇒ 记 `NOT_RUN`。要取证这条，需让载体本身带附件；本章 〇 节组装的对客报价是没有附件的（㊸ 上传的附件挂在**会话**上，不在成果上）。"
+    },
+    {
+      "step": "㊹ 第6步 · 经理响应客户发布 ⇒ **403**（看得见、无权；冒充货主不是 404 而是明确拒绝）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=403（期望 403）"
+    },
+    {
+      "step": "截图 44-5-客户侧-对客报价",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35150B"
+    },
+    {
+      "step": "㊹ 第6步 · 客户经**真实入口**（我的 → 我的委托 → 该单）进详情页，并在页面上看到「对客报价」卡",
+      "ok": true,
+      "kind": "PASS",
+      "note": "via=真实点击「我的委托」 我的委托入口 1 个 列表页=True 本单卡 1 个 detail=True path=pages/entrust/detail/detail"
+    },
+    {
+      "step": "㊹ 第6步 · 客户看到的是**发布时那一版**（版本号与服务端发布记录逐字相等）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页面 v1/发布#2；服务端 v1/发布#2"
+    },
+    {
+      "step": "㊹ 第6步 · 内容是**发布时冻结**的那份（客户侧渲染出的字段非空）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "contentRows=4 contentEmpty=False"
+    },
+    {
+      "step": "㊹ 第6步 · 数据来源标注常驻显示（`unknown` 照实说'来源未标注'，不折成人工录入）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "mode='manual' label='人工录入' 锚点 1 个"
+    },
+    {
+      "step": "㊹ 第6步 · 签署模式如实标注（不写这一句，'已接受'会被读成一份已生效的法律签署）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "signatureMode='labeled_sample' hint='本次客户确认按演示口径记录为「样本签署」，不作为已生效的法律签署'"
+    },
+    {
+      "step": "㊹ 第6步 · 客户**可以**响应（`canRespond=True` 且还没响应过）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "canRespond=True decided=False"
+    },
+    {
+      "step": "截图 44-6-客户响应页内展开条",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35150B"
+    },
+    {
+      "step": "㊹ 第6步 · 「接受这一版」走**页内展开条**（不是原生弹层）——这是唯一会改变业务事实、且后端用 `UNIQUE(release_id)` 钉死'只能响应一次'的动作",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True offerForm='accept' 提交锚点 1 个"
+    },
+    {
+      "step": "截图 44-7-客户已接受",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35170B"
+    },
+    {
+      "step": "㊹ 第6步 · 真实点击「确认提交」⇒ 页面转为**已响应**态并显示决定与时间",
+      "ok": true,
+      "kind": "PASS",
+      "note": "submit=True decided=True decisionLabel='接受' respondedAt='2026-09-20 10:16:38'"
+    },
+    {
+      "step": "㊹ 第6步 · 已响应后**不再给响应表单**（响应不可修改，与后端'只能响应一次'一致）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "接受入口 0 个、提交入口 0 个"
+    },
+    {
+      "step": "㊹ 第6步 · 客户响应**已落库**（API 直证，页面自述不算数）：客户在「我收到的发布」里能看到自己的决定与备注",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP 载荷：release=2 revision=1 decision='accept' responded_at='2026-09-20 10:16:38'"
+    },
+    {
+      "step": "㊹ 第6步 · 经理通道看到的**是同一条**发布与同一条响应（两条投影对得上）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "经理侧：v1 decision='accept'；客户侧：v1 decision='accept'"
+    },
+    {
+      "step": "㊹ 第6步 · 同一次发布二次响应 ⇒ **409**（判据是 `UNIQUE(release_id)`，不是前端拦）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=409（期望 409）"
+    },
+    {
+      "step": "㊹ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊹ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 44-8-经理侧-撤回入口消失",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26013B"
+    },
+    {
+      "step": "㊹ 第6步 · 有客户响应的发布**不给撤回入口**（后端本来就 409；摆一个必然失败的按钮等于把业务规则说成'随机失败'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "detail=True artifact=True 撤回入口 0 个；版本行客户决定='接受'"
+    },
+    {
+      "step": "㊹ 本章运行期 console 无未归因错误",
+      "ok": true,
+      "kind": "PASS",
+      "note": "增量 0 条"
+    },
+    {
+      "step": "㊾ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊾ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "㊾ ② 未派生时页面有「生成合同核对稿」入口，且它**不带**任何业务入参（合同内容只能来自已接受事实，界面不该能填金额）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口数=1"
+    },
+    {
+      "step": "㊾ ③ 经**界面**派生成功：页面拿到的合同与服务端**同一个成果同一版本**（报价版本与合同版本各自精确）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页面='11' 服务端='11' 报价版本=1"
+    },
+    {
+      "step": "㊾ ④ 逐字段来源表渲染出来，行数 = 服务端来源行数（D1-08 要的是「能检查它怎么来的」，不是「有一份合同」）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页面行数=18 服务端=18"
+    },
+    {
+      "step": "㊾ ⑤ 「这份合同少写了什么」如实列出（有缺失项时页面上必须写得出\"未提供\"）—— 列出来而不是编默认值，这是派生与编造的分界",
+      "ok": true,
+      "kind": "PASS",
+      "note": "服务端缺失项=[] 卡片文本='<view class=\"card slot-card contract-card\"><view class=\"row-between slot-head\"><text class=\"slot-title\">合同核对稿</text><tex'"
+    },
+    {
+      "step": "㊾ ⑥ 合同卡上有「记一条签署证据」入口",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口数=1"
+    },
+    {
+      "step": "㊾ ⑦ 证据表单的输入接上了 `bindinput`（`data-df=\"sig-note\"` 被认领）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "kind='sample_scan' 键入=True"
+    },
+    {
+      "step": "㊾ ⑧ 经**界面**记一条签署证据：页面出现一行，且**绑的是版本**（「第 1 版」）+ 形态 + 样件标注；与服务端同源",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页面=1 服务端=1 行=1 首行='<view class=\"sig-row\" data-sig-row=\"#1\"><text class=\"sig-rev\">第 1 版</text><text class=\"sig-kind\">样件扫描件</text><text class=\"sig-mode\">样件标注（不构成实时电子签署）</text><text '"
+    },
+    {
+      "step": "㊾ ⑨ 同一版同一形态**再记一次** ⇒ 页内说清「已经记过」（服务端 409 的语义，不是静默失败，也没有记成两条互相打架的证据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "sigHint='证据未记录：合同第 1 版已经记过一条「样件扫描件」证据 —— 同一版同一形态只记一条（这是重放/双击被唯一约束挡住，不是业务冲突）' 条数 1 → 1 表单展开=True（点了 1 次）提交键有落点=True"
+    },
+    {
+      "step": "㊾ ⑩ 常驻声明真的渲染出来（「不构成实时电子签署」）—— 合同 §3.2 / D1-08 要求证据与状态不得等同于实时电子签；页面上没写就会被读成「签过了」",
+      "ok": true,
+      "kind": "PASS",
+      "note": "卡片文本=<view class=\"card slot-card contract-card\"><view class=\"row-between slot-head\"><text class=\"slot-title\">合同核对稿</text><text class=\"slot-note\">第 1 版</text></view><view class=\"contract-line\">\n            "
+    },
+    {
+      "step": "截图 ㊾-合同派生与签署证据",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35154B"
+    },
+    {
+      "step": "㊾ ⑪ 本章运行期**无新增 console 报错**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "无"
+    },
+    {
+      "step": "㊿ 前置 · 本单货量是 **800.000 吨**（D1-09 的起点）—— 链式轮次里「本单」＝第 1 步新建的那一张（`--chain`）；非链式＝canonical 夹具",
+      "ok": true,
+      "kind": "PASS",
+      "note": "quantity=800 unit=吨（夹具声明 800.000 吨：一致）"
+    },
+    {
+      "step": "㊿ ② 变更前 · 900 吨候选的运力确认**成立**（基线：确认在 800 吨需求下判过）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "still_valid=True 候选容量=900.000 当前需求=800 全部规则=[demand_known=pass, evidence=pass, validity=pass, capacity=pass] 确认字段=['agreed_scope', 'allows_partial_load', 'artifact_id', 'artifact_revision_id', 'artifact_revision_no', 'as_of_date', 'assignment_id', 'candidate_id', 'capacity_tonnes', 'carrier', 'confirmation_id', 'confirmed_at']"
+    },
+    {
+      "step": "㊿ [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "㊿ [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "㊿ ③ 案件页有「变更类别」选择条，点它能把类别补登成「货物数量与品类」（没有这个入口，变更请求在界面上根本应用不了：应用要求类别已登记）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "选择项数=1（页面上 categoryOptions=5）"
+    },
+    {
+      "step": "㊿ ③b 选中类别后它真的落进了页面表单（补登的类别会随这次决定一起回传）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "qty 输入框数=0 单位=0"
+    },
+    {
+      "step": "㊿ ③c 经界面进入复核（`open → approved` 不是合法转移，服务端会 409）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "status='in_review' hint=''"
+    },
+    {
+      "step": "㊿ ④a 选「已批准」后三只货量输入框**渲染出来了**（内部状态键对了不算数）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "渲染树计数：新值=1 单位=1 依据=1｜showQuantityChange=True｜decideForm.to=''｜quantityTargetId='7'"
+    },
+    {
+      "step": "㊿ ④b 三只输入框真的把值写进了页面 data",
+      "ok": true,
+      "kind": "PASS",
+      "note": "quantityForm={'quantity': '950', 'unit': '吨', 'basis': '走查 货量变更（D1-09）'}"
+    },
+    {
+      "step": "㊿ ④c 经界面批准落库（批准内容随这次请求进快照，`apply` 只认快照）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "status='approved' hint=''"
+    },
+    {
+      "step": "㊿ ④d 应用确认条上能看到 `当前 → 将改为`（apply 不接受改写，不给对照就是盲操作）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "quantityChangeText='将改为 950.000 吨（当前 800.000 吨）'"
+    },
+    {
+      "step": "㊿ ⑤ 经界面应用后**货量真的落库**（800 → 950）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "服务端 quantity='950'（期望 950）· 页面 status='applied'"
+    },
+    {
+      "step": "㊿ ⑤b 页面上出现那条对照（`<变更前> → <变更后>`，且来源案件号对得上）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "changeText='800.000 吨 → 950.000 吨' source='来源变更案件 #3' basis='走查 货量变更（D1-09）'（历史共 1 行）"
+    },
+    {
+      "step": "㊿ ⑤c ⭐ D1-09 的**精确那对值**：`800.000 吨 → 950.000 吨`，且页面与服务端同源",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页面='800.000 吨 → 950.000 吨' 服务端=('800.000', '950.000')"
+    },
+    {
+      "step": "㊿ ⑥ 变更后 · 同一条运力确认**不再成立**，且**只有** `capacity` 不过（其余三条照旧通过 —— 否则「900 吨候选不适用」是一句无从定位的话）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "still_valid=False 不过的规则=['capacity'] 候选容量=900.000 允许拆批=False 承运船数=1 变更后需求=950 全部规则=[demand_known=pass, evidence=pass, validity=pass, capacity=fail] changed_fields=['demand_tonnes']"
+    },
+    {
+      "step": "㊿ ⑦ 页面上出现复核传播，含「船型、运力及货物适配」（＝复核与重新确认的落点）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "复核区域=['船型、运力及货物适配', '采购范围与成本', '交接数量、单位及作业安排', '报价复核', '合同复核']"
+    },
+    {
+      "step": "㊿ ⑧ 本章运行期无新增 console 报错",
+      "ok": true,
+      "kind": "PASS",
+      "note": "(空)"
+    },
+    {
+      "step": "第9步 · 前置：本单需求**已由第 8 步改为 950 吨**（服务端读数 —— ⛔ 不拿页面或 toast 当证据，⛔ 也不拿「夹具声明 800」当证据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid=7 entrustment_id='1' quantity='950' 吨"
+    },
+    {
+      "step": "第9步 · ①a 本单上有第 5 步（㊺）**经界面**登记并确认过的那条 900 吨候选（复核要有对象 —— 对象不存在时下面两条无从谈起）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "确认行 1 条；900 吨那条=(1, '900.000', False)"
+    },
+    {
+      "step": "第9步 · ①b 复核（只读复算）：900 吨、不允许拆批的旧确认在 **950 吨**需求下**不再适用**，且**根因点名 `capacity`** —— 判据是「用当前事实重跑同一套规则」，不是谁把状态改掉",
+      "ok": true,
+      "kind": "PASS",
+      "note": "confirmation=1 候选容量='900.000' 拆批=False 需求='950' still_valid=False 不过的规则=['capacity'] changed_fields=['demand_tonnes']"
+    },
+    {
+      "step": "截图 chain9-1-旧确认复核-不再适用",
+      "ok": true,
+      "kind": "PASS",
+      "note": "23800B"
+    },
+    {
+      "step": "第9步 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "第9步 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "第9步 · ②a 经理侧详情页的「登记候选运力」入口**唯一可点**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口命中=1"
+    },
+    {
+      "step": "第9步 · ②b 替换候选经**真实输入**登记：1000 吨、**不允许拆批**（与第 5 步同口径 —— 变的只有容量，这样 ① 与 ③ 的对照才有意义）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "carrier='第9步 替换承运 0920-182525' 吨位='1000' 拆批=False 有效期='2027-01-18'"
+    },
+    {
+      "step": "第9步 · ②c 替换候选**真的落库**（API 直证；页面 toast 不算证据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "candidate_id=6 容量='1000.000' 拆批=False"
+    },
+    {
+      "step": "第9步 · ②d 重新确认**成功**：新候选的确认在 **950 吨**需求下**适用**（与 ①b 的「旧确认不适用」并列 ⇒ 复核这件事真的完成了，而不是只留下一个「不适用」的结论）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "打开 tap=True 范围输入回执=True 提交 tap=True confirmation=2 候选容量='1000.000' 需求='950' still_valid=True"
+    },
+    {
+      "step": "截图 chain9-2-替换候选已确认",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35150B"
+    },
+    {
+      "step": "第9步 · ③a 本单上有**第 6 步那份已被客户接受**的对客报价 —— 它既是「要重新接受」的起点，也是「旧接受事实必须留着」的对照物",
+      "ok": true,
+      "kind": "PASS",
+      "note": "artifact_id='10' release_id='2' v1（本单发布共 2 条）"
+    },
+    {
+      "step": "第9步 · ③b **负例**：已被客户接受的那一版**不可撤回 / 不可取代** ⇒ **409**，且理由点明「已被客户响应」—— 这不是缺陷，是**接受事实永久保留**那条机制；也正因为它，「重新接受」只能换一份**新成果**（下一步）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "POST /offer-releases/2/withdraw ⇒ HTTP 409；detail='发布 2 已被客户响应，不能撤回或取代（已接受的版本永久保留，后续变更要新的客户确认）'"
+    },
+    {
+      "step": "第9步 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "第9步 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "第9步 · ③c 详情页仍有「组装对客报价」入口（需求变了要出**新报价**；它是**新成果**，不是给已被接受的那份再加一版）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口命中=1"
+    },
+    {
+      "step": "第9步 · ③c 新报价表单经**真实输入**填好（金额按变更后的 950 吨口径）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "quoteOpen=True 三个输入框回执=True"
+    },
+    {
+      "step": "第9步 · ③c 经界面组装出**一份新成果**（客户可见类型，且 `artifact_id` 与第 6 步那份不同）—— 判据取**服务端成果清单**，不看页面 toast",
+      "ok": true,
+      "kind": "PASS",
+      "note": "新 artifact_id='13'（旧 10）；本单 customer_quote=['13', '10']"
+    },
+    {
+      "step": "截图 chain9-3-新成果页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "26416B"
+    },
+    {
+      "step": "第9步 · ③d 打开**新成果**的成果页（新成果 v1，**尚未发布过** —— 已接受的那份才不可再发）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "via=真实点击（工作台 → 详情 → 成果槽位） 落页='13'（期望 13）版本=[1]"
+    },
+    {
+      "step": "第9步 · ③d 「发布这一版给客户」在**新成果**上可点（页内确认条）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "v1 行锚点=1 确认条=1"
+    },
+    {
+      "step": "第9步 · ③d 重新发布**真的落库**，且服务端记录指向**精确的新成果版本**（API 直证 —— 页面说成功不算数）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "提交 tap=True release_id='3' artifact=13 v1"
+    },
+    {
+      "step": "第9步 · ③e **负例**：经理替客户响应这次重新发布 ⇒ **403**（看得见、无权 —— 「重新接受」必须由**客户本人**做）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=403（期望 403）release=3"
+    },
+    {
+      "step": "截图 chain9-4-客户侧-新报价",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35157B"
+    },
+    {
+      "step": "第9步 · ③f 客户经**真实入口**（我的 → 我的委托 → 本单）进入详情页，看到的是**新发布的那一版**（精确版本号与服务端发布记录逐字相等）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "via=真实点击「我的委托」 列表页=True 本单卡=1 detail=True 页面 v1/发布#3；服务端 v1/发布#3"
+    },
+    {
+      "step": "第9步 · ③g 「接受这一版」走**页内展开条**（不是原生弹层 —— 原生弹层的确认键走查工具点不到，那条路径拿不到设备证据）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "tap=True 提交锚点=1"
+    },
+    {
+      "step": "截图 chain9-5-客户已重新接受",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35157B"
+    },
+    {
+      "step": "第9步 · ③g 真实点击「确认提交」⇒ 页面转为**已响应**态（决定＝接受）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "submit=True decided=True decisionLabel='接受' respondedAt='2026-09-20 10:28:23'"
+    },
+    {
+      "step": "第9步 · ③h ⭐ 结论：客户**本人**的重新接受**已落库**，且绑定在**新成果的那一次发布**上（⛔ 不是第 6 步那次旧接受）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP 载荷：release=3 revision=1 decision='accept' responded_at='2026-09-20 10:28:23'"
+    },
+    {
+      "step": "第9步 · ③i 复核：**旧的那条接受仍在**（状态 `released`、响应未被抹掉、版本未被取代）—— 「接受事实永久保留」是六机制之一：新一次接受不能把旧一次顶掉",
+      "ok": true,
+      "kind": "PASS",
+      "note": "旧 release=2 status='released' decision='accept' v1"
+    },
+    {
+      "step": "第9步 · 本章运行期无**新增** console 报错",
+      "ok": true,
+      "kind": "PASS",
+      "note": "增量 0 条"
+    },
+    {
+      "step": "55 前置 · 有一张已受理（claimed）委托可挂任务",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid='7' claimed 4 张"
+    },
+    {
+      "step": "55 ① 经**接口**铺一个「不要求证据」的任务（界面建任务没有 required_evidence 入参，如实登记）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=200 task_id='17'（空 required_evidence 是刻意的：让 409 只能来自代次）"
+    },
+    {
+      "step": "55 ② 接管前的读数（执行代次 / 负责人）—— 后面两条断言的基线",
+      "ok": true,
+      "kind": "PASS",
+      "note": "lease_generation=0 assignee_user_id=None status=pending"
+    },
+    {
+      "step": "55 ③ 经接口接管 ⇒ 执行代次 +1、负责人改为接管人（界面无接管入口，⛔ 不写成界面上可以接管）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=200 lease_generation 0→1 assignee None→2"
+    },
+    {
+      "step": "55 ④ 持**旧代次**提交完成 ⇒ **被拒 409，且理由点名代次/接管**（接管后旧结果不得覆盖人工状态）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=409 点名成因=True detail='执行代次已过期：任务当前代次 1，提交代次 0（人工已接管或任务被改派）'（旧代次 0 / 当前 1）"
+    },
+    {
+      "step": "55 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "55 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "截图 55-1-委托详情-无接管入口",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35171B"
+    },
+    {
+      "step": "55 ⑤ 委托详情页正常渲染，且页内**没有**接管入口（0 命中）—— 与 O-1b 一致",
+      "ok": true,
+      "kind": "PASS",
+      "note": "view='ready' 接管锚点命中=0"
+    },
+    {
+      "step": "52 前置 · 货主名下有一张已受理（claimed）委托 —— 本章自己挑一张，不绑可选夹具",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid='7' claimed 4 张 / 名下共 5 张"
+    },
+    {
+      "step": "52 前置 · 经**接口**铺一个「要求照片证据」的任务（界面建任务没有 required_evidence 入参，如实登记）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "task_id='18'"
+    },
+    {
+      "step": "52 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "52 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "52 ① 委托详情页上有「财务与结算」入口，且点得进 —— 这是第 10–11 步在**现有界面**上的入口",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口=True 落地=pages/entrust/finance/finance"
+    },
+    {
+      "step": "52 ② 经理视角取到**内部**读数（费用 / 缺件 / 结算 / 财务状态四块都由这一页取）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "canViewInternal=True 费用 0 条"
+    },
+    {
+      "step": "52 ③ 界面上登记出**草稿**费用行，且**草稿不进合计**（合同 S4 段第 9 条的确认前状态）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "草稿 1 条｜计入条数 0 → 0"
+    },
+    {
+      "step": "52 ④ 界面确认后该行进合计（合计金额由服务端算，页面只显示它给的字符串）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "计入 1 条，合计='100000.0000'"
+    },
+    {
+      "step": "52 ⑤ 提争议后该行**退出合计**（合同 S4 段第 10 条：争议不进已确认总额）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "争议 1 条｜计入条数回落 → 0"
+    },
+    {
+      "step": "52 ⑥ 处置时**显式选「计入」并给最终金额** ⇒ 合计按最终金额走（裁定 Q2=B：「已解决」一词决定不了是否计入）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "已解决 1 条｜「计入」选项在=True｜合计='88000.0000'"
+    },
+    {
+      "step": "52 ⑦-a 缺件视图把「还缺什么」算出来（派生，不新建实体）—— 夹具任务要求照片",
+      "ok": true,
+      "kind": "PASS",
+      "note": "#18 缺 'photo'"
+    },
+    {
+      "step": "52 ⑦-b 在**原任务**上补录一条证据 ⇒ 该任务的缺项消失（业务发生时间界面上必填）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "缺项清空=True 页内提示='已补录 —— 这个任务的必需证据齐了'"
+    },
+    {
+      "step": "52 ⑧ 界面上生成结算**版本** v1（快照当时的费用事实；旧版本不改）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "版本数=1 v1 状态='待内部确认'"
+    },
+    {
+      "step": "52 ⑨ 内部确认（draft → approved）—— 只有适用版本能被确认",
+      "ok": true,
+      "kind": "PASS",
+      "note": "状态=['已内部确认']"
+    },
+    {
+      "step": "52 ⑩ 财务状态在客户确认之前**不是**已结清，且把原因说出来（不是只给一个状态码）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "状态=未结清｜blockers=['客户尚未确认适用结算版本', '有未关闭的案件', '未结余额非零']"
+    },
+    {
+      "step": "52 ⑪ 记一条收付依据：页内明说它是**合成样本**（不接真实支付、不宣称资金到账）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页内提示='已记一条收付依据（labeled_sample：合成样本，不代表真实到账）'"
+    },
+    {
+      "step": "52 ⑫-a 货主侧走**对客通道**：看得到待确认的是哪一版，且**看不到内部成本**（截图留存；页面本就不渲染 internal_total）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "customerMode=True 版本='v1' 待确认=True"
+    },
+    {
+      "step": "52 ⑫-b **客户本人**点了「确认这一版」⇒ 确认绑定在这一版上（旧确认替不了新版本过关是结构保证的）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "待确认=False 页内提示='客户已接受这一版'"
+    },
+    {
+      "step": "52 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "52 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "52 ⑬ 客户确认之后，「客户尚未确认适用结算版本」这条未结成因**消失**；其余未结成因页面与派生端点两处同结论（不假装已结清）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页面状态='未结清' 页面未结成因=['有未关闭的案件'] ／派生 status='open' codes=['open_cases']"
+    },
+    {
+      "step": "截图 52-财务与结算",
+      "ok": true,
+      "kind": "PASS",
+      "note": "37212B"
+    },
+    {
+      "step": "52 ⑭ 本章运行期**无新增 console 报错**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "无"
+    },
+    {
+      "step": "chain11 ① 收尾前先取**服务端**的缺项清单（⛔ 不靠猜；它同时是第 12 步的判据来源）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ready=False 缺 3 项：['tasks_not_disposed', 'revalidation_open', 'cases_not_closed']"
+    },
+    {
+      "step": "chain11 ②a 任务清单 —— **形状自洽**：服务端 `closure-readiness` 缺 `tasks_not_disposed`（＝本单确实有未处置任务） ⇒ 读到的条数**不能是 0**（写错路径/键名只会静默给 0，而那种 0 会让整节退化成空转）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "读到 10；权威读数：服务端 `closure-readiness` 缺 `tasks_not_disposed`（＝本单确实有未处置任务）；本条路径=GET /entrust/tasks?assignment_id=7&size=100；原始形状=['assignee_user_id', 'assignment_id', 'cancelled_at', 'completed_at', 'created_at', 'created_by', 'due_at', 'evidence_refs', 'last_reopen_reason', 'lease_genera"
+    },
+    {
+      "step": "chain11 ②b 本单任务**逐条处置**（`takeover` → `start` → `complete`，证据按 `required_evidence` 生成）—— 复核项绑在复核任务上，完成任务它才 resolve",
+      "ok": true,
+      "kind": "PASS",
+      "note": "处理 10 条 ⇒ 完成 ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18']；失败 无（任务共 10 条）"
+    },
+    {
+      "step": "chain11 ③a 案件清单 —— **形状自洽**：服务端 `closure-readiness` 缺 `cases_not_closed`（＝本单确实有未关案件） ⇒ 读到的条数**不能是 0**（写错路径/键名只会静默给 0，而那种 0 会让整节退化成空转）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "读到 1；权威读数：服务端 `closure-readiness` 缺 `cases_not_closed`（＝本单确实有未关案件）；本条路径=GET /entrust/exceptions?assignment_id=7&size=100；原始形状=['affected', 'assignment_id', 'blocking', 'case_id', 'cause', 'change_category', 'closure', 'created_at', 'decision', 'due_at', 'impact_kind', 'kind', 'org_id',"
+    },
+    {
+      "step": "chain11 ③b 变更案件经**服务端命令**关闭（`closure_disposition` ＋ `evidence_ref` 必填 —— 没有一键关闭；⛔ 界面在本切片没有这个入口，如实登记为**经接口**）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "待关 1 宗（本单案件共 1 宗）⇒ 已关 []；失败 ['3:HTTP409 案件 3 的 expected_revision=1 已过期（他人已修改，请重新读取后重试）']；乐观锁 version 取自 ['3:**回退默认 1（有风险）**', '3:**回退默认 1（有风险）**(重试)']"
+    },
+    {
+      "step": "chain11 ④ ⭐ 收尾后本单**齐备**：`ready=True` 且缺项清空（对照收尾前的清单）—— 这是第 12 步（结案）的**可执行前提**，⛔ 不是「为了让 53 变绿」改出来的",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "收尾前 ready=False 缺 ['tasks_not_disposed', 'revalidation_open', 'cases_not_closed'] ⇒ 收尾后 ready=False 缺 ['cases_not_closed']"
+    },
+    {
+      "step": "chain11 ⑤ 齐备后由 53 章经界面结案",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "仍未齐备：['cases_not_closed'] ⇒ 结案会被服务端拦（那是**正确**行为）。⛔ 不在这里伪造齐备读数。"
+    },
+    {
+      "step": "53 前置 · 队列里有一张已受理（claimed）委托 —— 本章自选一张，不绑按需夹具",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid='7' claimed 4 张 / 队列共 5 张"
+    },
+    {
+      "step": "53 ① 后端读端点可用：能结案的人拿到 missing[]（与结案命令**同一把锁**）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ready=False missing=1 codes=['cases_not_closed']"
+    },
+    {
+      "step": "53 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "53 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "53 ② 详情页出现「结案」入口，且缺项清单**先于**点按钮就给出（不可逆动作要先看得见清单）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "入口=True canComplete=True summary='还差 1 项：cases_not_closed'"
+    },
+    {
+      "step": "53 ③ 五格恒出五格：界面按「五个维度」画，缺项为 0 的维度也在（否则像没人管）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "dimensions=任务处置=0,交付证据=0,异常与重评=1,结算=0,余额与争议=0"
+    },
+    {
+      "step": "53 ④ **两处同结论**：界面列出的缺项 code 与服务端读端点逐条一致（界面不自己编）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "界面=['cases_not_closed'] 服务端=['cases_not_closed']"
+    },
+    {
+      "step": "截图 53-结案五维清单",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35162B"
+    },
+    {
+      "step": "53 ⑤ 「结案」是**页内确认条**（不是原生弹层 —— 弹层不在渲染树里，走查点不到它的确认键）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "确认条出现=True"
+    },
+    {
+      "step": "53 ⑥ 前置不齐时点结案 ⇒ 被服务端拦，且页面把**缺项**摆出来（不是一句「失败」）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "completeHint='还不能结案（缺 1 项）：有 1 条案件未关闭 —— 残留必须**显式处置**（关闭时必填 `closure_disposition`，由案件关闭命令强制；非关键残留可用 accepted_residual，但要给决定与处置说明）'"
+    },
+    {
+      "step": "53 ⑦ 被拦之后委托**没有**被改状态（不可逆动作不能半途生效）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "页面 detail.status='claimed'"
+    },
+    {
+      "step": "53 ⑧-a 齐备的委托上，界面直接说「可以结案」（缺项清单为空）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "ready=False 缺项=1 summary='还差 1 项：cases_not_closed'"
+    },
+    {
+      "step": "截图 53-结案前（可结案）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35231B"
+    },
+    {
+      "step": "53 ⑧-b **齐备 ⇒ 结案成功**：状态变 completed 且写下结案时间（不是「点了没反应」）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "status='claimed' completedAt=''"
+    },
+    {
+      "step": "53 ⑧-c 结案之后入口**消失**（已结案的单不该再显示「可以结案」）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "结案入口数=0"
+    },
+    {
+      "step": "53 ⑧-d 「保留历史」可查验：详情页多出「结案时间」一行（第 12 步 inspect retained history 的界面形态）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "字段行=委托编号,归属,提交时间,数据版本"
+    },
+    {
+      "step": "截图 53-结案后（留痕）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "35197B"
+    },
+    {
+      "step": "53 ⑨-a 已结案的委托上出现「重开」入口（判据＝completed ∧ entrust:assignment:reopen）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "入口=False canReopen=False"
+    },
+    {
+      "step": "53 ⑨ 受控重开剧本",
+      "ok": false,
+      "kind": "NOT_RUN",
+      "note": "重开入口未出现（权限或状态判据不满足）⇒ 后续三步无从演示"
+    },
+    {
+      "step": "第13步 · 前置：本单是第 1–12 步的那一张，且需求已是 **950 吨**（服务端读数）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "aid=7 status='claimed' quantity='950' 吨"
+    },
+    {
+      "step": "第13步 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "第13步 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "第13步 · ①a ⭐ **前后记录（服务端）**：`old_quantity` / `new_quantity` 就是 D1-15 的那个值（`800.000 → 950.000`）—— 这条不依赖页面是否把历史渲染出来",
+      "ok": true,
+      "kind": "PASS",
+      "note": "服务端=(('800.000', '950.000'))（本单变更记录 1 条）"
+    },
+    {
+      "step": "第13步 · ①b 同一条记录在**界面上**也读得到（`<变更前> → <变更后>` ＋ 来源案件号）—— ⭐ 读的是**案件页**（`quantityHistory` 长在那一页上，详情页没有这个键）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "changeText='800.000 吨 → 950.000 吨' source='来源变更案件 #3' caseId='3'（该页变更行 1 条）"
+    },
+    {
+      "step": "截图 chain12-1-案件页-变更前后记录",
+      "ok": true,
+      "kind": "PASS",
+      "note": "23612B"
+    },
+    {
+      "step": "第13步 · ②a 详情页的**当前货量**就是那个数（值不是只活在历史里）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "服务端 quantity='950'；页面 quantity='950'"
+    },
+    {
+      "step": "第13步 · ②b 结算侧登记一条**数量＝950 吨**的应收费用行（⚠️ 数量**经接口**登记 —— 财务页表单没有该入参，如实登记）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "HTTP=200 charge_id='3' basis='第13步·按 950 吨计费（D1-15 同一个值）'"
+    },
+    {
+      "step": "第13步 · ②c **结算面（界面）**把同一个值显示出来：`数量 950 吨`（判据取**渲染树里的那一行**，按 `chargeId` 唯一命中，不用文本模糊匹配）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "财务入口=1 命中行=1 quantityText='950.000 吨' basis='第13步·按 950 吨计费（D1-15 同一个值）'（该页费用行 2 条）"
+    },
+    {
+      "step": "截图 chain12-2-结算-数量950吨",
+      "ok": true,
+      "kind": "PASS",
+      "note": "36966B"
+    },
+    {
+      "step": "第13步 [seed-owner] 「我的」页委托入口可见（服务端放行）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']"
+    },
+    {
+      "step": "第13步 [seed-owner] 点击入口进入经理工作台",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']"
+    },
+    {
+      "step": "第13步 · ③a 重进后**变更记录仍在**，且与重进前**逐字相同**（不是「另起一份」）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "重进前=(800.000,950.000) 重进后=(800.000,950.000) ｜变更行数：前 1 / 后 1"
+    },
+    {
+      "step": "第13步 · ③d 重进后**界面上那一行仍在**，且与重进前**逐字相同**（⛔ 不是「另起一份」，也不是「重进才出现」）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "重进前='800.000 吨 → 950.000 吨' 重进后='800.000 吨 → 950.000 吨'"
+    },
+    {
+      "step": "第13步 · ③b 重进后**当前货量仍是 950 吨**（同一个值，不是重进才出现的新值）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "重进后服务端 quantity='950'"
+    },
+    {
+      "step": "第13步 · ③c 重进后**结算面那一行还在**、数量逐字相同（重进后仍在 = D1-15 的第三处）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "重进前='950.000 吨' 重进后='950.000 吨'（按 chargeId=3 命中）"
+    },
+    {
+      "step": "截图 chain12-3-重进后-结算行仍在",
+      "ok": true,
+      "kind": "PASS",
+      "note": "36952B"
+    },
+    {
+      "step": "第13步 · ④ 结案清单（**页面**五维投影）：「结算」与「余额与争议」两格**缺项为 0**（判据＝`ok`，⛔ 不是「count ≥ 1」—— 那个 `count` 数的是**缺项条数**，写反方向就变成「要求这里有缺项」）⇒ ②b/②c 那条 950 吨费用行**没有**把这两个维度打回缺项；⛔ 本节只读、不改状态（结案/重开由 53 章负责）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "五格=['任务处置', '交付证据', '异常与重评', '结算', '余额与争议'] settlement={ok:False,count:1} balance={ok:True,count:0} ｜服务端 ready=False missing=['cases_not_closed', 'settlement_stale']（结算/余额族命中=['settlement_stale']）｜⚠️ 总 `ready` 可能因**与本值无关**的项为假（如未关案件）⇒ 本条只判这条值相关的两格"
+    },
+    {
+      "step": "第13步 · 本节运行期无**新增** console 报错",
+      "ok": true,
+      "kind": "PASS",
+      "note": "增量 0 条"
+    }
+  ],
+  "console": {
+    "baselineCaptured": true,
+    "collectFailed": false,
+    "openPhaseWaived": [],
+    "openPhaseUnwaived": [],
+    "bizPhaseUnwaived": [],
+    "whitelist": [
+      {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": "open",
+        "evidence": "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+      },
+      {
+        "pattern": "routeDone with a webviewId",
+        "phase": "open",
+        "evidence": "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉（HO D1 明确点名这个范围过宽）"
+      }
+    ]
+  },
+  "consoleError": "",
+  "consoleErrorDetected": false,
+  "consoleNoiseCount": 0,
+  "consoleOtherCount": 0,
+  "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20260920-180125"
+}

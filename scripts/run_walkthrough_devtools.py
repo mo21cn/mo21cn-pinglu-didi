@@ -87,6 +87,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import subprocess
 import sys
@@ -264,6 +265,124 @@ def kill_owned_ide_procs(wait_s: int = 25) -> int:
         time.sleep(1)
     left = {int(p) for p in ide_procs()} & OWNED_IDE_PIDS
     return len(left)
+
+
+# ── 保活持有者闸门（2026-09-20）──────────────────────────────────────────────
+#: 保活进程的**认领记录**（pid ＋ 到期时刻）。
+#:
+#: 为什么需要它：IDE 是本进程的**子进程** ⇒ 谁在 `--keepalive`，谁就"持有"机器上
+#: 那一批实例。两个保活同时活着时，**任何一个到期都会把 IDE 一起带走**，于是另一轮
+#: 的后段读数会长出「页面数据键 0 个／路径为空／处理器不执行」这类**像产品坏了**的假象
+#: —— 2026-09-20 当天因此**整轮作废两次**（轮 Q、轮 W），而且两轮的 `RESULT` 都只是
+#: 普通的 `FAIL`，⛔ 完全看不出是被"保活换手"污染的。
+#: ⇒ 起实例前先读它：已有**活着的、不是自己的**持有者就**拒跑并点名**（退出码 2）。
+KEEPALIVE_FILENAME = "_ide_keepalive.json"
+
+
+def keepalive_path(work) -> Path:
+    return Path(work) / KEEPALIVE_FILENAME
+
+
+def pid_alive(pid: int) -> bool:
+    """**只读**判断进程是否还在。
+
+    ⛔ 不用 `os.kill(pid, 0)`：Windows 上 `os.kill` 走的是 `TerminateProcess`
+    ⇒ 拿它当"探活"会把被探的进程**杀掉**（这是本脚本里最不能犯的一类错）。
+    """
+    if int(pid) <= 0:
+        return False
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            encoding="gbk",
+            errors="replace",
+            timeout=20,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    # 命中时输出一行 `"python.exe","1234",...`；未命中是中文提示（GBK）⇒ 认 pid 子串
+    return f'"{int(pid)}"' in out
+
+
+def read_keepalive(work) -> dict:
+    try:
+        raw = keepalive_path(work).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_keepalive(work, hold_s: int, section: str) -> dict:
+    rec = {
+        "pid": os.getpid(),
+        "started_at": int(time.time()),
+        "hold_s": int(hold_s),
+        "expires_at": int(time.time()) + int(hold_s),
+        "section": str(section),
+        "host": os.environ.get("COMPUTERNAME") or "",
+    }
+    path = keepalive_path(work)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    return rec
+
+
+def _unlink_keepalive(work) -> bool:
+    """无条件删掉认领记录（仅用于**已判定陈旧**的场合，见 `keepalive_owner`）。
+
+    ⚠️ 「本来就没有」算**成功**：调用方的意图是"让记录消失"，
+    而 `FileNotFoundError` 会让"重复调用"和"删除失败"长得一样（同一个坑本日已踩过）。
+    """
+    try:
+        keepalive_path(work).unlink()
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def release_keepalive(work) -> bool:
+    """撤掉**自己**的认领记录；记录里不是自己的 pid 就**不动它**。
+
+    ⚠️ 刻意**不复用** `_unlink_keepalive`：这里的语义是"我只撤自己的"，而陈旧记录的
+    清理属于 `keepalive_owner`（它已经确认过那个 pid 不在）—— 两件事混用会让
+    "撤自己"变成"可能删掉别人的认领"。
+    """
+    cur = read_keepalive(work)
+    if cur and int(cur.get("pid") or 0) != os.getpid():
+        return False
+    return _unlink_keepalive(work)
+
+
+def keepalive_owner(work) -> tuple[dict, str]:
+    """返回 `(活着的持有者, 一句话原因)`。
+
+    * 没有记录 ⇒ `({}, "无认领记录")`；
+    * 记录里的进程**已经死了** ⇒ 顺手清掉陈旧记录，返回 `({}, "…已退出（陈旧记录已清除）")`；
+    * 进程还在 ⇒ 返回它，并带上 `left_s`（到期剩余秒；≤0 表示**已到期、正在退出**，
+      此时它随时会收走 IDE ⇒ 同样算持有者，⛔ 不当作"可以起）。
+    """
+    rec = read_keepalive(work)
+    if not rec:
+        return {}, "无认领记录"
+    pid = int(rec.get("pid") or 0)
+    if not pid_alive(pid):
+        # 陈旧记录**直接删**（不用 `release_keepalive` —— 那个只撤自己的，会拒绝删）
+        _unlink_keepalive(work)
+        return {}, f"记录里的 pid={pid} 已不在（陈旧记录已清除）"
+    left = int(rec.get("expires_at") or 0) - int(time.time())
+    out = dict(rec)
+    out["left_s"] = left
+    if left <= 0:
+        return out, f"pid={pid} 的保活**已到期**（{-left}s 前）⇒ 它正在退出，IDE 随时被收走"
+    return out, f"pid={pid} 的保活还剩 {left}s"
 
 
 def port_open(port: int = 8000) -> bool:
@@ -864,7 +983,24 @@ def hold_ide_channel(env: Env, args: argparse.Namespace) -> int:
 
     ⚠️ 保活必须**盖过整轮**：IDE 是本进程的子进程，本进程一退出它就被收走，
        下一轮又会拿到一个**未批准**的新实例（这是实测踩过的那条）。
+
+    ⭐ **唯一性硬闸门**（2026-09-20 加）：已有**别的**保活持有者时**拒跑并点名**。
+       两个保活并存 ⇒ 任何一个到期都会带走 IDE，另一轮的后段读数会静默变成
+       「页面数据键 0 个／路径为空」—— 当天两次整轮作废就是这么来的。
     """
+    owner, why = keepalive_owner(env.work)
+    if owner:
+        log(f"⛔ 已有一个**保活持有者**：{why}")
+        log("   它起的实例与 IDE **同生共死** ⇒ 两个保活并存时，任何一个到期都会把 IDE")
+        log("   一起带走，另一轮的后段读数会变成「页面数据键 0 个／路径为空／处理器不执行」")
+        log("   —— 那类轮次必须**整轮作废**（2026-09-20 因此废掉轮 Q 与轮 W）。")
+        log("   ⇒ **拒绝再起第二个保活**。二选一：")
+        log("     ① 直接用那个持有者（`--skip-ide` 跑走查，⛔ 不要另起实例）；")
+        log("     ② 或等它到期退出（剩余秒数见上）后重跑本命令。")
+        log("   ⛔ 不给「忽略」开关：并发的代价是整轮读作废，而读数上看不出来。")
+        log("  退出码 2（环境阻塞）：这条不代表任何业务结论，也不计入通过。")
+        return 2
+
     ok, why = probe_existing_ide(env)
     log(f"探测现成实例：{'✅ 能用' if ok else '✗ 不能用'} —— {why}")
     if ok:
@@ -895,6 +1031,10 @@ def hold_ide_channel(env: Env, args: argparse.Namespace) -> int:
             kill_owned_ide_procs()
             return 2
         log("✅ 模拟器已就绪")
+    # ⭐ 到这一步才**认领**（⛔ 不在开头就写）：认领记录代表"我持有这些实例"，
+    #    闸门没过就不该持有它 —— 否则一次失败的 `--prepare-ide` 会留下一份**幽灵认领**，
+    #    把下一轮正确地拦下来（"读到的持有者其实早就没了"）。
+    rec = write_keepalive(env.work, int(getattr(args, "keepalive", 0) or 0), env.section)
     log("")
     log("下一步用这条（⛔ 不要另起实例）：")
     extra_cli = f" --extra-seeds {env.extra_seeds}" if env.extra_seeds else ""
@@ -904,11 +1044,22 @@ def hold_ide_channel(env: Env, args: argparse.Namespace) -> int:
         f"{extra_cli}{anchor_cli}"
     )
     hold = int(getattr(args, "keepalive", 0) or 0)
-    if hold > 0:
-        log(f"保活 {hold}s —— 期间请勿关闭本进程：IDE 随本进程一起存活。")
-        time.sleep(hold)
-    else:
-        log("未给 --keepalive ⇒ 立即退出，IDE 会随本进程被收走。")
+    log(f"本进程已**认领**为保活持有者：{keepalive_path(env.work)}（pid={rec['pid']}）")
+    log("    ⛔ 期间另起的 `--prepare-ide` 会读到它并**拒跑**（这是刻意的）。")
+    try:
+        if hold > 0:
+            log(f"保活 {hold}s —— 期间请勿关闭本进程：IDE 随本进程一起存活。")
+            log(
+                f"    到期时刻 {time.strftime('%H:%M:%S', time.localtime(rec['expires_at']))}"
+                f"（＋{hold}s）"
+            )
+            time.sleep(hold)
+        else:
+            log("未给 --keepalive ⇒ 立即退出，IDE 会随本进程被收走。")
+    finally:
+        # 无论正常到期还是被 Ctrl-C，都要撤掉自己的认领。
+        got = release_keepalive(env.work)
+        log(f"已撤销保活认领记录：{'是' if got else '否（记录已不属于本进程，未动它）'}")
     return 0
 
 
@@ -989,6 +1140,15 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="配合 --prepare-ide：保活秒数（建议 ≥ 整轮耗时，如 3600）",
     )
+    parser.add_argument(
+        "--min-keepalive-left",
+        type=int,
+        default=0,
+        help=(
+            "起跑前要求保活持有者**至少还剩**这么多秒（0 ＝ 只报告不拒跑）。"
+            "保活到期会连带收走 IDE ⇒ 建议 ≥ 预计整轮耗时×1.5"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if os.name != "nt":
@@ -1022,6 +1182,23 @@ def main(argv: list[str] | None = None) -> int:
     #    日志里连一句"等人工批准"都没打出来）。
     if args.prepare_ide:
         return hold_ide_channel(env, args)
+
+    # ⭐ **保活剩余额度**的只读报告 ＋（可选）硬闸门（2026-09-20）。
+    #    纪律原文是「起跑前核『保活到期 − 现在 ≥ 预计时长×1.5』」—— 当天被违反两次
+    #    （轮 Q、轮 W 各整轮作废）⇒ 把它做成**机械判据**：给了 `--min-keepalive-left`
+    #    且剩余不足就**拒跑**。默认只报告（0），⛔ 不替使用者设一个会误伤的阈值。
+    kp_owner, kp_why = keepalive_owner(env.work)
+    log(f"保活持有者：{kp_why}")
+    need_left = int(getattr(args, "min_keepalive_left", 0) or 0)
+    if kp_owner and need_left and int(kp_owner.get("left_s") or 0) < need_left:
+        log(
+            f"    ⛔ 剩余 {int(kp_owner.get('left_s') or 0)}s < 要求的 {need_left}s ⇒ **拒绝起跑**。"
+        )
+        log("       保活到期会**连带收走 IDE** ⇒ 后段读数会静默变成「页面数据键 0 个／")
+        log("       路径为空／处理器不执行」，那种轮次必须**整轮作废**（09-20 两次）。")
+        log("       处置：等持有者退出后 `--prepare-ide --keepalive <够长的值>` 再跑。")
+        log("  退出码 2（环境阻塞）：这条不代表任何业务结论，也不计入通过。")
+        return 2
 
     ide = None
     reuse = bool(args.skip_ide)
