@@ -7865,34 +7865,67 @@ def sec_43(w: Walker) -> None:
     jobs = pg_job.get("jobs") or []
     j0 = jobs[0] if jobs else {}
     w.shot("43-7-AG02-终态")
-    w.rep.rec(
-        "㊸ 第2步 · 真实点击「让 Agent 解析这份报价单」⇒ 作业跑到**终态**（不是只停在排队）",
-        bool(t_use) and str(j0.get("status")) == "succeeded",
-        f"status={j0.get('status')!r} jobId={j0.get('jobId')!r}",
-    )
-    w.rep.rec(
-        "㊸ 第2步 · 作业产出**提案**并在页面上列出条数（提案 ≠ 成果，才需要人工采纳）",
-        int(j0.get("proposalCount") or 0) >= 1,
-        f"proposalCount={j0.get('proposalCount')}",
-    )
 
-    jid = str(j0.get("jobId") or "")
-    jrow = (api_get(f"/entrust/agent/jobs/{jid}", tok_owner) or {}).get("job") or {} if jid else {}
-    env = jrow.get("envelope") if isinstance(jrow, dict) else None
-    env = env if isinstance(env, dict) else {}
-    kinds = [str((r or {}).get("kind")) for r in (env.get("source_refs") or [])]
-    unsrc = env.get("unverified_sources") or []
-    w.rep.rec(
-        "㊸ 第2步 · 作业来源里含 `attachment_text`（Agent 读的是**附件文本**，不是文件名）"
-        "—— API 直证",
-        "attachment_text" in kinds,
-        f"kinds={kinds} jobId={jid}",
+    # ⭐ **状态感知**（2026-09-21 实测定型）：模型**不可用**时，job 行会带出 `errorKind`
+    #    （实测 `llm_network`／`errorMessage='LLM 服务端错误 502'`／`mocked=False`），
+    #    而页面 `status` 会停在 `queued`（⚠️ 本仓**没有常驻 worker**，`POST …/run` 才推进一次）。
+    #    此时下面四格是**模型步骤的产出**，**没有对象** —— 而 D1-05 明确
+    #    「⛔ 不要求 AG-02 成功」。⇒ 记 `NOT_RUN` 并点名（⛔ **不记成产品失败**，
+    #    也⛔ **不当作通过**）；**有模型轮次时照旧逐条断言**（不改宽任何判据）。
+    jid0 = str(j0.get("jobId") or j0.get("job_id") or "")
+    jrow0: dict = {}
+    if jid0:
+        jrow0 = (api_get(f"/entrust/agent/jobs/{jid0}", tok_owner) or {}).get("job") or {}
+    err0 = str(j0.get("errorKind") or "") or str(
+        jrow0.get("error_kind") or jrow0.get("errorKind") or ""
     )
-    w.rep.rec(
-        "㊸ 第2步 · 没有未核验来源（来源核对覆盖 `findings` 内的嵌套引用，见 PR #131）",
-        len(unsrc) == 0,
-        f"unverified_sources={str(unsrc[:3])[:160]}",
+    model_down = bool(err0)
+    why_down = (
+        f"模型不可用：job `errorKind={err0!r}`（`mocked={j0.get('mocked')!r}`）"
+        f"｜页面 status={str(j0.get('status'))!r} 服务端 status={str(jrow0.get('status'))!r}"
+        "（本仓没有常驻 worker ⇒ 停在 `queued`）⇒ 第 2 步的**模型产出不存在**，"
+        "本格**没有对象**。⚠️ 这是**运行条件**而非产品缺陷：D1-05 明确「⛔ 不要求 AG-02 成功」，"
+        "无模型路径由**人工**建立成果（㊹ 〇节经界面组装，来源 `manual`）。⛔ 不记成 FAIL。"
     )
+    if model_down:
+        for _t in (
+            "㊸ 第2步 · 作业跑到**终态**",
+            "㊸ 第2步 · 作业产出**提案**并在页面上列出条数",
+            "㊸ 第2步 · 作业来源里含 `attachment_text`",
+            "㊸ 第2步 · 没有未核验来源",
+        ):
+            w.rep.not_run(_t, why_down)
+    else:
+        w.rep.rec(
+            "㊸ 第2步 · 真实点击「让 Agent 解析这份报价单」⇒ 作业跑到**终态**（不是只停在排队）",
+            bool(t_use) and str(j0.get("status")) == "succeeded",
+            f"status={j0.get('status')!r} jobId={j0.get('jobId')!r} errorKind={err0!r}",
+        )
+        w.rep.rec(
+            "㊸ 第2步 · 作业产出**提案**并在页面上列出条数（提案 ≠ 成果，才需要人工采纳）",
+            int(j0.get("proposalCount") or 0) >= 1,
+            f"proposalCount={j0.get('proposalCount')}",
+        )
+
+        jid = str(j0.get("jobId") or "")
+        jrow = (
+            (api_get(f"/entrust/agent/jobs/{jid}", tok_owner) or {}).get("job") or {} if jid else {}
+        )
+        env = jrow.get("envelope") if isinstance(jrow, dict) else None
+        env = env if isinstance(env, dict) else {}
+        kinds = [str((r or {}).get("kind")) for r in (env.get("source_refs") or [])]
+        unsrc = env.get("unverified_sources") or []
+        w.rep.rec(
+            "㊸ 第2步 · 作业来源里含 `attachment_text`（Agent 读的是**附件文本**，不是文件名）"
+            "—— API 直证",
+            "attachment_text" in kinds,
+            f"kinds={kinds} jobId={jid}",
+        )
+        w.rep.rec(
+            "㊸ 第2步 · 没有未核验来源（来源核对覆盖 `findings` 内的嵌套引用，见 PR #131）",
+            len(unsrc) == 0,
+            f"unverified_sources={str(unsrc[:3])[:160]}",
+        )
 
     # ==================== 三、第 3 步：更正一个字段 + 跨视图同一份 ====================
     print("\n-- 三、第 3 步 · 采纳 → 更正一个字段 → 从工作台打开同一份成果 --", flush=True)
@@ -12256,18 +12289,25 @@ def sec_chain_manual(w: Walker) -> None:
     # ⭐ 判据取**服务端**字段（`extract_status`），⛔ 不只看界面文案 —— 界面文案是投影，
     #    投影错了会把"产品没做对"和"页面没显示对"混成一条。
     eid = str(pg2.get("entrustmentId") or "")
-    srv_status: list[str] = []
+    rows_srv: list = []
     if eid:
         srv = api_get(f"/entrust/entrustments/{eid}/attachments", tok)
-        rows_srv = srv.get("items") if isinstance(srv, dict) else srv
-        srv_status = [str((r or {}).get("extract_status") or "") for r in (rows_srv or [])]
-    ui_status = [str((a or {}).get("extractStatus") or "") for a in atts]
-    can_ref = [bool((a or {}).get("canReference")) for a in atts]
+        rows_srv = (srv.get("items") if isinstance(srv, dict) else srv) or []
+    # ⚠️ **只认本章自己的载体（图片附件）**：同一个委托下可能已经有别的附件 ——
+    #    链式轮次里 `㊸` 先上传过**纯文本**样本，那条是 `done`。
+    #    2026-09-21 实测：按"本委托全部附件"断言会把两条混在一起、把本章判成 FAIL
+    #    ⇒ 这是**判据太宽**（我的错），已收窄到 `content_type` 以 `image/` 开头的那一条。
+    srv_img = [r for r in rows_srv if str((r or {}).get("content_type") or "").startswith("image/")]
+    ui_img = [a for a in atts if str((a or {}).get("contentType") or "").startswith("image/")]
+    srv_status = [str((r or {}).get("extract_status") or "") for r in srv_img]
+    ui_status = [str((a or {}).get("extractStatus") or "") for a in ui_img]
+    can_ref = [bool((a or {}).get("canReference")) for a in ui_img]
     w.rep.rec(
         "chain-manual ③ ⭐ 提取**如实分档**：扫描件无机读文本层 ⇒ 服务端判 `needs_transcription`"
-        "（判据＝**服务端** `extract_status`；⛔ 不拿界面文案当唯一依据）",
+        "（判据＝**服务端** `extract_status`，且**只认本章上传的图片附件**；⛔ 不拿界面文案当唯一依据）",
         bool(srv_status) and all(s == "needs_transcription" for s in srv_status),
-        f"服务端 extract_status={srv_status}（entrustmentId={eid!r}）｜界面 extractStatus={ui_status}"
+        f"服务端·图片附件 extract_status={srv_status}（entrustmentId={eid!r}；本章图片 {len(srv_img)} 条"
+        f"／本委托附件共 {len(rows_srv)} 条）｜界面 extractStatus={ui_status}"
         f"｜canReference={can_ref}（**正控**：图片没有机读文本 ⇒ 这里必须是 False，"
         f"不然「人工转录」就该是多余的）",
     )
@@ -12316,8 +12356,13 @@ def sec_chain_manual(w: Walker) -> None:
         src_srv: list[str] = []
         if eid:
             srv2 = api_get(f"/entrust/entrustments/{eid}/attachments", tok)
-            rows2 = srv2.get("items") if isinstance(srv2, dict) else srv2
-            src_srv = [str((r or {}).get("text_source") or "") for r in (rows2 or [])]
+            rows2 = (srv2.get("items") if isinstance(srv2, dict) else srv2) or []
+            # 同上：只认**图片附件**（本章的载体），⛔ 不把同委托下的纯文本附件混进来
+            src_srv = [
+                str((r or {}).get("text_source") or "")
+                for r in rows2
+                if str((r or {}).get("content_type") or "").startswith("image/")
+            ]
         w.rep.rec(
             "chain-manual ④b ⭐ **人工转录落库**：文本来源变「人工转录」且该附件**可被引用**"
             "（＝ Agent 读得到它）—— **服务端 + 界面**双读数",
