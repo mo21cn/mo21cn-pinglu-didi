@@ -10,8 +10,8 @@
 
 | 项 | 值 |
 | --- | --- |
-| **固定候选 SHA** | `9addfe8`（`develop`，PR #184 squash）＋ 本轮收尾提交（见 §7 变更记录） |
-| **CI** | 候选上 **6/6 job SUCCESS**：后端 lint+test／迁移 SQLite／迁移 MySQL 8.0／并发集成 MySQL／前端静态契约／前端端到端 |
+| **固定候选 SHA** | **`26f8a2996625b47e21cb1d0d7fd2d35a4a1a6b4b`**（分支 `s7e-manual-path-and-delivery`，**PR #185 的 HEAD**；本轮**全部设备证据都在它上面取得**）。**基线**＝`9addfe8`（`develop`，PR #184 squash）。⚠️ 合并后以 squash 得到的 `develop` sha 为准并同步本行＋`acceptance` §1 |
+| **CI** | **`26f8a299…` 上 6/6 job SUCCESS**：后端 lint+test／迁移 SQLite／迁移 MySQL 8.0／并发集成 MySQL／前端静态契约／前端端到端。⚠️ **CI 绿 ≠ 走查绿**：设备主链同轮汇总行是 `RESULT: NOT_RUN`（见 §6 与 `acceptance` §7） |
 | **本机门禁** | `python -X utf8 scripts/verify_local_gates.py` ⇒ `{"total": 16, "failed": 0}` |
 | **后端单测** | pytest **1015** 项（通过 998／跳过 17／失败 0／错误 0） |
 | **证据入口** | `docs/entrust/evidence/`（`* -text` 逐字节入库；「工作区 sha256 == 索引 blob」已复核） |
@@ -43,6 +43,12 @@ python -X utf8 scripts/reset_demo_env.py --db <隔离库绝对路径>.db --selft
 * ⚠️ **附件一致性与客户端身份缓存**两面的结论是 `LIMITATION` / `NOT_APPLICABLE`（不是 PASS）——
   原文在 runbook §6.3，⛔ 不在这里美化。
 * ⭐ **「新建主链」与「预置检查点」来源可区分**：见 §5.3 的读数。
+* ⭐ **2026-09-21 修掉了 `--selftest` 的一个真实缺陷**：第 2 轮 `unlink` 撞
+  `PermissionError [WinError 32]`（**本脚本自己起的后端**在 `wait()` 返回后仍短暂持库句柄）。
+  修法＝`unlink_with_wait()` 有界重试 ＋ 把**实际等待毫秒数**写进报告；
+  在**同一路径**上复验 `RESET: OK`（读数 `reset_1`＝0 ms、`reset_2`＝250／273 ms ⇒ 等待只发生在该发生的半轮）。
+  证据：`DEMO-1-evidence-index.md` **§3.11**。⛔ 首次失败未被抹掉，仍在
+  `docs/entrust/evidence/2026-09-20-reset-drill/reset-drill-stdout.log`。
 
 ## 4. 13 步现场脚本（主链）
 
@@ -57,9 +63,15 @@ python -X utf8 scripts/run_walkthrough_devtools.py --skip-ide --pay --chain \
   --extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py,seed_entrust_completion_ready.py
 ```
 
-⚠️ **`--extra-seeds` 不是可选项**：`49`（合同派生）、`50`（货量变更的 900 吨候选基线）、
-`53` 的「齐备⇒结案成功」都按标题找**夹具单**。2026-09-20 实测：漏掉它会连带触发两处
-脚本缺陷（已修，见 §7），并且 49/50 找不到载体。
+⚠️ **`--extra-seeds` 不是可选项**。两类章节**取单方式不同**，必须分开看：
+
+* **独立章节**（`43`／`49`／`50`／`53` 这类单独跑时）：按**标题**找**夹具单** ⇒ 缺夹具则**找不到载体**。
+* **`--chain` 模式**（本行命令用的就是它）：各章**锚定链上同一张单**（`CHAIN_ASSIGNMENT`），
+  **不换夹具、不换单** —— 这也是"13 步落在同一张委托"的实现方式。
+
+2026-09-20 实测：漏掉 `--extra-seeds` 会连带触发两处脚本缺陷（已修，见 §7），并且独立跑时 49/50 无载体。
+⛔ 反过来说：**在 `--chain` 模式下"缺夹具"是被允许的**，那时的 `NOT_RUN` 分支不拦 —— 这正是当时
+`IndexError`（未加保护的下标）得以发生的原因。
 
 **为什么必须是这个顺序**：每一步都是下一步的**业务**前提（表见 `DEMO-1-runbook.md` §8.9）。
 `chain9`／`chain11`／`chain12` ⛔ 不能单独跑或提前跑（要求本单已完成前序步骤）。

@@ -507,6 +507,28 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 
 ---
 
+### 3.11 `reset_demo_env.py` 的 `unlink` 占用修复 ＋ 定向复验（2026-09-21 · P2）
+
+> 目录：`docs/entrust/evidence/2026-09-21-reset-unlink-fix/`（逐字节入库）
+> 代码：`backend/scripts/reset_demo_env.py`（本轮 ＋74／−5 行）
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `probe-3rounds.log` | **根因复现**：3/3 轮「立刻删必 `WinError 32`、**+1s 必成功（0–1 ms）**」 | 1159 | `f58c2fe23fd26b18` |
+| `probe-script.py` | 复现探针（**仓库外**运行；起后端→terminate+wait→立刻 unlink） | 4437 | `f1067104df0b2593` |
+| `verify-stdout.log` | **定向复验**：在**当初失败的那个路径**重跑 `--selftest` ⇒ `RESET: OK` | 1404 | `659c3f3436f2d3a7` |
+| `verify-report.json` | 复验报告（含 `handle_release_ms` 读数） | 31794 | `095bd4313f5c6a44` |
+
+**结论（可核对）**：
+
+1. **占用来源＝本脚本自己起的那个后端**：`Popen.wait()` 返回 **≠** 它打开的文件句柄已释放；
+   释放窗口在**亚秒级**。⛔ 不是永久占用、⛔ 不是"换目录"能绕过的缺陷。
+2. **修复**：`unlink_with_wait()` 有界重试（40 × 0.25s ≈ 10s）＋ **不吞错**（到上限抛出并写明重试次数与耗时）；
+   `reset_db()` 把**实际等待毫秒数**作为读数返回；`stop_backend()` 的 `kill()` 分支补 `wait()`。
+3. ⭐ **读数印证诊断位置**：`reset_1`＝**0 ms**、`reset_2`（紧跟 `stop_backend`）＝**250 / 273 ms**
+   ⇒ 等待**只发生在该发生的那一半轮**里；`RESET: OK`、五项判据全 `True`、`rc=0`。
+4. ⚠️ **首次失败没有被抹掉**：2026-09-20 23:29 那次 `WinError 32` 的完整 traceback 仍在
+   `docs/entrust/evidence/2026-09-20-reset-drill/reset-drill-stdout.log`；本节是"修后同路径通过"的对照。
 ---
 
 ## 4. 待补（本索引自己的缺口，如实登记）
