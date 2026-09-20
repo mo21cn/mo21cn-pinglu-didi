@@ -1,0 +1,13 @@
+repo    : E:\pinglu-didi
+work    : E:\pinglu-didi\miniapp-device-artifacts
+shots   : E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-172018
+ide     : D:\Program Files (x86)\Tencent\微信web开发者工具\微信开发者工具.exe
+python  : E:\pinglu-didi\.venv\Scripts\python.exe
+启动前已有 IDE 实例 [2704, 4376, 5780, 8248, 8936, 9784, 10648, 11736, 12336, 12468, 12908, 13732, 14776, 16040, 17320, 18228, 19200, 20388, 21372, 21816, 22300]（21 个）—— 这些才是「前任」；本轮不清理它们（HO D2 边界）
+本轮为 `--skip-ide` 复用模式：上面这些实例就是**要复用的那个**，⛔ 不会去清它。
+保活持有者：pid=10940 的保活还剩 10683s
+    ⛔ 剩余 10683s < 要求的 99999s ⇒ **拒绝起跑**。
+       保活到期会**连带收走 IDE** ⇒ 后段读数会静默变成「页面数据键 0 个／
+       路径为空／处理器不执行」，那种轮次必须**整轮作废**（09-20 两次）。
+       处置：等持有者退出后 `--prepare-ide --keepalive <够长的值>` 再跑。
+  退出码 2（环境阻塞）：这条不代表任何业务结论，也不计入通过。

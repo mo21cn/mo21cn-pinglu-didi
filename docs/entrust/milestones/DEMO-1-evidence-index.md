@@ -341,6 +341,60 @@
 
 ---
 
+## 3.8 E-2026-09-20-I — 保活**闸门**的注入验证 ＋ 第 1–13 步干净复验（设备侧；含一条根因连锁）
+
+**目录**：`docs/entrust/evidence/2026-09-20-keepalive-gate/`（闸门注入验证）＋
+`docs/entrust/evidence/2026-09-20-chain-1-13-clean/`（轮 X／X2／X3）。
+
+### 3.8.1 闸门注入验证（HO 建议 5 ＋ §10.2.9）
+| 文件 | 内容 | 字节 | sha256[:16] |
+| --- | --- | --- | --- |
+| `inject-a-second-prepare-ide.txt` | 已有持有者时再起 `--prepare-ide` ⇒ `rc=2`、点名 `pid=10940 还剩 10686s`、**IDE 实例数 21 → 21** | 1347 | `c73ce8a01a0e61b3` |
+| `inject-b-min-keepalive-left.txt` | `--min-keepalive-left 99999` ⇒ `rc=2`「剩余 10683s < 要求的 99999s」 | 1168 | `5444995706303a86` |
+| `keepalive-claim.json` | 认领记录（pid/到期时刻/章节） | 149 | `ec40c2c2e498e4f0` |
+
+### 3.8.2 主链第 1–13 步（12 章同一张单）
+**每轮取单追踪均显示 12/12 全为同一 `aid`**（轮 X/X2/X3 载体为 `aid=7`）。
+
+| 轮 | 命令要点 | `RESULT` | 关键读数 |
+| --- | --- | --- | --- |
+| **X** | `--chain`，干净实例，`--min-keepalive-left 3600` | `FAIL=7 / NOT_RUN=7 / LIMITATION=1` | 关案件 `409 expected_revision=1 已过期`（**一条根因**）；`chain11 ②b` 10 条任务逐条处置**全成功** |
+| **X2** | 修字段名（`revisionNo`）＋ chain12 ④ 判据方向 | 同上 | ⭐ **`①b`/`③d` 双双 PASS**：`changeText='800.000 吨 → 950.000 吨'`、`source='来源变更案件 #3'`；③b 仍 409（详情的 version 在**包裹层**里，未取到） |
+| **X3** | 按 `detail.case.revision_no` 取乐观锁 | `FAIL=9 / NOT_RUN=6 / LIMITATION=1` | ⭐ **第 10–13 步全链跑通**：`③b` → `已关 ['3(尝试1次)']；version 取自 ['3:detail.case.revision_no']`；`④ ready=True 缺 []`；`53 ⑧-b status='completed' completedAt='2026-09-20 11:15:26'`；`⑨-b/⑨-c/⑨-d/⑨-e` 全 PASS（重开：理由必填、`completed_at` 清空、入口复现、无「撤回」入口且**带正控**）。⚠️ 同时暴露 **9 条 FAIL**，成因见下 |
+
+**X3 的 9 条 `FAIL` 逐条定档**（⛔ 不挑绿灯）：
+
+| 条目 | 定档 |
+| --- | --- |
+| ㊸ ×3 FAIL ＋ ㊸ ×1 NOT_RUN | **实例退化**：样本文件探针 `err='Error: accessSy…'`、`uploading=False/False` ⇒ 处理器没执行（同一实例第 3 轮；与「复用轮数」假说一致）。⛔ 不是产品回归 |
+| `53 ①` ／ `⑥` ／ `⑦` | **章节的起点假设过期**：它们假设"本章起点一定不齐备"（⑥⑦ 要演示"被拦"）。链式轮次里 **`chain11` 先把同一张单收尾成齐备** ⇒ ⑥ 的点击**真的结案成功**，⑦ 于是读到 `completed`、⑧ 的"齐备⇒结案成功"**失去对象**（⑧-a 读到 `closure` 空、`ready=None`）。⇒ 已把这三条改成**状态感知**（齐备时 `NOT_RUN` 并点名，且**不**在该处点提交）|
+| `53 ⑧-a` | 同上（被 ⑥ 提前结掉）⇒ 改后应恢复 |
+| `章节 chain12 执行异常 IndexError` | **我的判据里的裸下标**：②c 的读数里写 `mine[0]`，命中 0 行时整章崩溃且**一条读数都不留**。⇒ 已修（改为先取 `first`），并给章节兜底**加 traceback 现场** |
+
+**文件**（逐件 sha256）
+| 文件 | 字节 | sha256[:16] |
+| --- | --- | --- |
+| `walk-x-stdout.txt` | 66219 | `7dc2fd526c8dece9` |
+| `walk-x2-stdout.txt` | 67334 | `afffd59d63ca7abc` |
+| `walk-x3-stdout.txt` | 60652 | `ebb725568905f5b6` |
+| `summary-x.json`／`summary-x2.json`／`summary-x3.json` | 81166／82166／74887 | `e532b9286d35ce6b`／`2a28ae7ea05fc631`／`58b676361922323f` |
+| `shots/x2-chain12-1-案件页-变更前后记录.jpg` | 23612 | `9df7e1c8b9fdb8a7` |
+| `shots/x2-chain12-2-结算-数量950吨.jpg` | 36966 | `0ae9e0866b1f2abe` |
+| `shots/x2-chain12-3-重进后-结算行仍在.jpg` | 36952 | `e3f009df2fa83aba` |
+| `shots/x2-53-结案五维清单.jpg` | 35162 | `7fefd6379a6711ca` |
+| `shots/x3-53-结案五维清单.jpg` | 35198 | `21ae8a25cd99a55e` |
+| `shots/x3-53-结案后（留痕）.jpg` | 33970 | `b3e1f7fd364735c9` |
+| `shots/x3-53-重开-理由必填.jpg` | 34007 | `eec88f10e1804b3f` |
+
+⭐ **本轮最重要的一条**：`chain11 ③b` 的 409 是**一条根因、6 条下游**
+（`chain11 ④`／`53 ⑧-a`／`⑧-b`／`⑧-d`／`⑨-a`／`第13步 ④`），
+⛔ 报告里不许写成 6 个独立缺陷；根因是**乐观锁取错层级**（`row.revision` → 真实位置
+`GET /entrust/exceptions/{id}` 的 `case.revision_no`，见 `schemas.ExceptionCaseDetailOut`）。
+另有**一条我自己的判据错**：结案五维的 `count` 数的是**缺项条数**，我写成 `count >= 1`
+（＝要求"这里有缺项"），**方向反了**；以及**一条裸下标**把整章打挂（②c 的 `mine[0]`）。
+
+---
+
 ## 4. 待补（本索引自己的缺口，如实登记）
 
 | # | 缺口 | 处置 |
