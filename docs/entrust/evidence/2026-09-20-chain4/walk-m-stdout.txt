@@ -1,0 +1,41 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-092039
+章节    ：chain4
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.2s] pageStack=[{'pageId': 117, 'path': 'pages/mine/mine', 'query': {}, 'route': '/pages/mine/mine', 'title': '我的'}, {'pageId  (探测   1.2s)
+模拟器  ：pageStack 非空
+
+-- chain4 第 4 步：先建公路—内河—公路三段与任务前置，再在工作台展示 --
+PASS | chain4 前置 · 有可用的委托（第 4 步的载体；开 `--chain` 时＝**本链那一张**） | aid='5' 队列 3 张（claimed/submitted 3 张） 取单来源=队列最新（未开 --chain）
+    [chain4 起点] aid=5 段=3 任务=0
+PASS | chain4 [seed-owner] 「我的」页委托入口可见（服务端放行） | showEntrust=True path=pages/mine/mine 页面数据键 12 个['__webviewId__', 'currentRole', 'entrustHint', 'functions', 'phoneText', 'roleLabel', 'roleList', 'showEntrust', 'showMineEntrust', 'statusBarHeight', 'userInitials', 'userName']
+PASS | chain4 [seed-owner] 点击入口进入经理工作台 | path='pages/entrust/workbench/workbench' 读到过=['pages/mine/mine', 'pages/entrust/workbench/workbench']
+PASS | chain4 ① 写入口「加一段」在工作台可点 —— ⛔ 第 4 步不是「只读预置对象」 | 加一段=1 段行=3 服务端段=3 aid=5
+PASS | chain4 ② 经**界面**建出三段，且**就是 公路—内河—公路**（⛔ 链上不掺 `air`／铁路等负例段 —— 那些属于回归轮） | 输入接线=True 服务端段 3→6 末三段方式=['road', 'water', 'road'] 渲染段行=6
+PASS | chain4 ③ 任务与**前置关系**建起来了（⚠️ 经接口：界面**没有**建任务入口，也没有 `precondition_task_id` 入参 —— 如实登记，⛔ 不假装是界面点的） | HTTP=200 建出 task_id=['8', '9', '10'] 前置链=8 → 9 → 10
+PASS | 截图 chain4-工作台-公路水路公路与任务前置 | 27502B
+PASS | chain4 ④ 工作台**逐行**列出本单的任务，且**每一条任务行都带一行前置说明**（「无固定前置」也要自己说话）—— 展示对象是**本单刚建的**，⛔ 不是预置对象 | 服务端任务=3 渲染任务行=3 前置行=3｜本轮新建=['8', '9', '10']
+PASS | chain4 ⑤ 前置关系在**服务端事实**里确实存在（⛔ 不只看页面上有没有那一行） | 带前置的任务=2 条（共 3 条）｜本轮前置链=8 → 9 → 10
+PASS | chain4 ⑥ 本章运行期**无新增 console 报错** | 无
+
+================ 汇总 ================
+断言 10 项：**通过 10** / 未取得通过证据 0
+  分档：PASS=10 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0 | LIMITATION=0
+  归并（HO 五档）：PASS=10 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0
+
+  各章取单追踪（每章实际用到的委托 id —— 开了 `--chain` 时应**全部相同**）:
+    sec_chain4         aid=5
+    合计 1 个取单点 · aid 集合=['5'] · 同一张=是（未开 `--chain` ⇒ 各章自挑，不同是正常的）
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20260920-092039
+[重跑关联] 同章节历史运行 3 次（首次结果**保留不覆盖**）：2026-09-20T09:13:21+0800=FAIL；2026-09-20T09:17:09+0800=FAIL；2026-09-20T09:20:07+0800=FAIL
+RESULT: PASS （全为 PASS）
+
+===== 走查 stderr =====
+(空)
