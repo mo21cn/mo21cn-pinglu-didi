@@ -1,0 +1,22 @@
+########## 2026-09-21 02:41:59 P2 复现实验（3 轮）##########
+=== 第 1 轮 ===
+   后端 就绪 pid=3088；python 进程数=4
+   terminate→wait() 返回 rc = 1
+   [立刻] => FAIL | probe.db **PermissionError** [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'E:\\_diag\\p2probe\\probe.db'
+   [+1s] => OK | probe.db ok(0ms)
+   当时 python 进程数=2
+=== 第 2 轮 ===
+   后端 就绪 pid=17100；python 进程数=4
+   terminate→wait() 返回 rc = 1
+   [立刻] => FAIL | probe.db **PermissionError** [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'E:\\_diag\\p2probe\\probe.db'
+   [+1s] => OK | probe.db ok(0ms)
+   当时 python 进程数=2
+=== 第 3 轮 ===
+   后端 就绪 pid=22472；python 进程数=4
+   terminate→wait() 返回 rc = 1
+   [立刻] => FAIL | probe.db **PermissionError** [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'E:\\_diag\\p2probe\\probe.db'
+   [+1s] => OK | probe.db ok(1ms)
+   当时 python 进程数=2
+=== 结束：立刻删除失败 3/3 轮 ===
+probe rc=0
+########## 结束 2026-09-21 02:42:20 ##########

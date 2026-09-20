@@ -1,0 +1,470 @@
+{
+  "mode": "selftest",
+  "db": "E:\\_diag\\b3r\\reset.db",
+  "gates": [
+    {
+      "gate": "① 显式指定 --db",
+      "ok": true,
+      "detail": "E:\\_diag\\b3r\\reset.db"
+    },
+    {
+      "gate": "② 目标是 SQLite 文件（.db）",
+      "ok": true,
+      "detail": "suffix=.db"
+    },
+    {
+      "gate": "③ 不是开发 / 测试主库",
+      "ok": true,
+      "detail": "开发主库与测试库一律拒绝，且**不可解除**"
+    },
+    {
+      "gate": "④ 不是生产环境",
+      "ok": true,
+      "detail": "APP_ENV=development"
+    },
+    {
+      "gate": "⑤ 不在仓库工作树内",
+      "ok": true,
+      "detail": "目标在仓库外（隔离目录）"
+    }
+  ],
+  "criterion": "DR-0018 §6：基线 → 改变状态 → 复位 → 再取基线，两轮比对一致",
+  "rounds": [
+    {
+      "round": 1,
+      "backend_note": "本进程起（pid=2848），稍后由本进程 stop()",
+      "env_error": false,
+      "reset_1": {
+        "removed": [],
+        "migrate": {
+          "rc": 0,
+          "out": "可空证据引用列 evidence_ref （BP-03 第 3 条的 identified evidence：只有类别不构成「identified」）\n→ ent_contract:1 创建合同派生记录表 ent_contract_derivation（绑定**已接受的那一条发布**+精确报价版本+产出的合同版本；UNIQUE(release_id) 让'一份已接受事实只派生一份合同'落在数据库约束上，而不是先查后写）\n→ ent_contract:2 创建合同字段来源表 ent_contract_field_source（逐字段可核对的来源 —— D1-08 要的是'能检查它怎么来的'，不是'有一份合同'）\n→ ent_contract_signature:1 创建合同签署证据表 ent_contract_signature_evidence（绑到合同的**具体版本**，mode 只接受 labeled_sample，与 offers.SIGNATURE_MODE_LABELED_SAMPLE 同一常量）\n→ ent_exception:1 创建异常与变更案件表 ent_exception（归属 assignment_id 必填、org_id 服务端派生、阻断只认 impact_kind）\n→ ent_exception:2 创建受影响项表 ent_exception_link（任务/成果，唯一约束防重复登记；applied_revision_id 是精确版本引用）\n→ ent_exception:3 创建最小案件事件表 ent_exception_event（append-only，与状态变更同事务；重开的两轮历史由此可判定）\n→ ent_extract:1 创建附件提取文本表 ent_attachment_text（1:1、来源可分、截断显式、可重抽覆盖）\n→ ent_extract:2 对齐 ent_attachment.extract_status 的 MySQL 列注释取值域（新增 needs_transcription；SQLite 无列注释，占位保持方言成对）\n→ ent_idempotency:1 创建幂等操作记录表 ent_idempotency\n→ ent_leg_revision:1 创建航段版本表 ent_leg_revision（append-only：每建/改一次航段写一行，承载「改段留版本」；当前状态仍在 ent_leg，其唯一键不动）\n→ ent_offer_source:1 创建来源核验台账 ent_offer_source_check（声明来自作业信封，核验留对象+记录；发布前门槛按它判定，不靠布尔勾选）\n→ ent_offer_source:2 创建成果版本的数据来源标注 ent_artifact_origin（live / synthetic / manual，由服务端按作业行的 mocked 事实推导；不采信调用方自述）\n→ ent_org_access:1 创建组织表 ent_organization\n→ ent_org_access:2 创建组织成员表 ent_org_member\n→ ent_org_access:3 创建委托授权表 ent_entrustment\n→ ent_revalidation:1 案件表 ent_exception 补可空列 change_category（DR-0016 五类变更的机器可核对载体；历史行保持 NULL，不猜测回填）\n→ ent_revalidation:2 创建变更复核表 ent_revalidation（一行 = 一个待复核项；结构化关联含来源变更/目标对象/目标版本/复核区域；review_key 幂等）\n→ ent_revalidation:3 对齐 ent_exception_event.event_kind 的 MySQL 列注释取值域（新增 revalidation_planned；SQLite 无列注释，占位保持方言成对）\n→ ent_settlement:1 创建结算版本表 ent_settlement（版本号单调递增 + 费用行快照 + 内部确认 + 客户对该精确版本的确认；确认挂在这一行上 ⇒ 旧确认结构上替不了新版本过关）\n→ ent_settlement:2 创建收付依据表 ent_settlement_payment（append-only；mode 恒为 labeled_sample —— 不接真实支付、不宣称资金到账）\n→ ent_task:1 创建工作流任务表 ent_workflow_task（固定前置条件 + 所需证据 + 执行代次）\n✓ 44 条迁移全部就位，sqlite 方言 checks 通过"
+        }
+      },
+      "seeds": [
+        {
+          "seed": "seed_demo.py",
+          "rc": 0,
+          "tail": "「船东」自动登 seed-owner（见 miniapp/utils/auth.js 的 DEV_ROLE_CODE）。\n  如需港口方等其它联调身份，再在开发者工具 Storage 面板设 dev_login_code：\n  seed-shipper → 货主端 · seed-owner → 船东端 · seed-port → 港口方\n演示锚点：\n  订单/支付：已完成 #1 · 待支付 #2 · 已退款 #3 · 面议 #4\n  泊位档期：# 1 NNG-DEMO-01（满档演示）· #2 GGU-DEMO-02（空档演示）\n  预约审核：#1(confirmed), #2(confirmed), #3(pending), #4(confirmed)\n===================================================================="
+        },
+        {
+          "seed": "seed_entrust_demo.py",
+          "rc": 0,
+          "tail": "ote#3, contract_review#4, settlement_draft#5\n      （settlement_draft 刻意缺必填 receivable_lines → 期望「信息缺失」）\n  委托 #2 「演示委托·工作台样本（待受理）」 → submitted\n      → 详情页应给出「受理委托」入口\n  无归属历史成果 #6 → unassigned_artifact_total 应 >= 1\n  案件 2 宗（组织级队列 view=org 的非空载荷）：\n      案件 #1 [exception] → open · blocking=True · 受影响 1 项\n      案件 #2 [change_request] → open · blocking=False · 受影响 0 项\n      （第 2 宗刻意不挂受影响项 → 期望「未登记受影响项」）"
+        },
+        {
+          "seed": "seed_entrust_orgpicker.py",
+          "rc": 0,
+          "tail": "er / B=member\n      → 期望 pickOrg 分支 ambiguous（顶栏出现选择器且不预选）\n  seed-mgr-single  user_id=5  A=manager\n      → 期望 pickOrg 分支 only（顶栏不出现选择器）\n  seed-mgr-only-b  user_id=7  B=manager（**不属于 A**）\n      → 出口判据 ④：队列里只有乙组织委托，且甲组织的委托详情 404\n  seed-mgr-none  user_id=6  无组织\n      → 期望 pickOrg 分支 none（提示还没有加入经营主体）\n  seed-shipper-orgpicker  user_id=8  A/B 各有授权\n  委托：甲组织 id=3 / 乙组织 id=4\n      两张标题不同 —— 切换组织后队列条目应随之变化"
+        }
+      ],
+      "seeded": {
+        "exists": true,
+        "counts": {
+          "_migration_history": 44,
+          "agent_calls": 0,
+          "berth_appts": 4,
+          "berths": 2,
+          "cargo": 4,
+          "ent_agent_job": 0,
+          "ent_agent_job_attempt": 0,
+          "ent_artifact": 6,
+          "ent_artifact_attachment": 0,
+          "ent_artifact_origin": 0,
+          "ent_artifact_revision": 6,
+          "ent_assignment": 4,
+          "ent_assignment_quantity_change": 0,
+          "ent_assignment_reopen": 0,
+          "ent_attachment": 0,
+          "ent_attachment_text": 0,
+          "ent_capacity_candidate": 0,
+          "ent_capacity_confirmation": 0,
+          "ent_capacity_rule_check": 0,
+          "ent_charge": 0,
+          "ent_contract_derivation": 0,
+          "ent_contract_field_source": 0,
+          "ent_contract_signature_evidence": 0,
+          "ent_entrustment": 3,
+          "ent_exception": 2,
+          "ent_exception_event": 3,
+          "ent_exception_link": 1,
+          "ent_idempotency": 0,
+          "ent_leg": 0,
+          "ent_leg_revision": 0,
+          "ent_offer_release": 0,
+          "ent_offer_response": 0,
+          "ent_offer_source_check": 0,
+          "ent_org_member": 5,
+          "ent_organization": 3,
+          "ent_revalidation": 0,
+          "ent_session": 0,
+          "ent_session_message": 0,
+          "ent_settlement": 0,
+          "ent_settlement_payment": 0,
+          "ent_workflow_task": 7,
+          "orders": 4,
+          "payments": 3,
+          "ships": 3,
+          "sqlite_sequence": 11,
+          "users": 8
+        },
+        "tables": 46,
+        "ent_rows": 40,
+        "migration_history": 44
+      },
+      "mutation": {
+        "steps": [
+          {
+            "step": "login",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "step": "create_assignment",
+            "status": 200,
+            "ok": true,
+            "assignment_id": 5
+          }
+        ],
+        "ok": true
+      },
+      "mutated": {
+        "exists": true,
+        "counts": {
+          "_migration_history": 44,
+          "agent_calls": 0,
+          "berth_appts": 4,
+          "berths": 2,
+          "cargo": 4,
+          "ent_agent_job": 0,
+          "ent_agent_job_attempt": 0,
+          "ent_artifact": 6,
+          "ent_artifact_attachment": 0,
+          "ent_artifact_origin": 0,
+          "ent_artifact_revision": 6,
+          "ent_assignment": 5,
+          "ent_assignment_quantity_change": 0,
+          "ent_assignment_reopen": 0,
+          "ent_attachment": 0,
+          "ent_attachment_text": 0,
+          "ent_capacity_candidate": 0,
+          "ent_capacity_confirmation": 0,
+          "ent_capacity_rule_check": 0,
+          "ent_charge": 0,
+          "ent_contract_derivation": 0,
+          "ent_contract_field_source": 0,
+          "ent_contract_signature_evidence": 0,
+          "ent_entrustment": 3,
+          "ent_exception": 2,
+          "ent_exception_event": 3,
+          "ent_exception_link": 1,
+          "ent_idempotency": 1,
+          "ent_leg": 0,
+          "ent_leg_revision": 0,
+          "ent_offer_release": 0,
+          "ent_offer_response": 0,
+          "ent_offer_source_check": 0,
+          "ent_org_member": 5,
+          "ent_organization": 3,
+          "ent_revalidation": 0,
+          "ent_session": 0,
+          "ent_session_message": 0,
+          "ent_settlement": 0,
+          "ent_settlement_payment": 0,
+          "ent_workflow_task": 7,
+          "orders": 4,
+          "payments": 3,
+          "ships": 3,
+          "sqlite_sequence": 12,
+          "users": 9
+        },
+        "tables": 46,
+        "ent_rows": 42,
+        "migration_history": 44
+      },
+      "reset_2": {
+        "removed": [
+          "reset.db"
+        ],
+        "migrate": {
+          "rc": 0,
+          "out": "可空证据引用列 evidence_ref （BP-03 第 3 条的 identified evidence：只有类别不构成「identified」）\n→ ent_contract:1 创建合同派生记录表 ent_contract_derivation（绑定**已接受的那一条发布**+精确报价版本+产出的合同版本；UNIQUE(release_id) 让'一份已接受事实只派生一份合同'落在数据库约束上，而不是先查后写）\n→ ent_contract:2 创建合同字段来源表 ent_contract_field_source（逐字段可核对的来源 —— D1-08 要的是'能检查它怎么来的'，不是'有一份合同'）\n→ ent_contract_signature:1 创建合同签署证据表 ent_contract_signature_evidence（绑到合同的**具体版本**，mode 只接受 labeled_sample，与 offers.SIGNATURE_MODE_LABELED_SAMPLE 同一常量）\n→ ent_exception:1 创建异常与变更案件表 ent_exception（归属 assignment_id 必填、org_id 服务端派生、阻断只认 impact_kind）\n→ ent_exception:2 创建受影响项表 ent_exception_link（任务/成果，唯一约束防重复登记；applied_revision_id 是精确版本引用）\n→ ent_exception:3 创建最小案件事件表 ent_exception_event（append-only，与状态变更同事务；重开的两轮历史由此可判定）\n→ ent_extract:1 创建附件提取文本表 ent_attachment_text（1:1、来源可分、截断显式、可重抽覆盖）\n→ ent_extract:2 对齐 ent_attachment.extract_status 的 MySQL 列注释取值域（新增 needs_transcription；SQLite 无列注释，占位保持方言成对）\n→ ent_idempotency:1 创建幂等操作记录表 ent_idempotency\n→ ent_leg_revision:1 创建航段版本表 ent_leg_revision（append-only：每建/改一次航段写一行，承载「改段留版本」；当前状态仍在 ent_leg，其唯一键不动）\n→ ent_offer_source:1 创建来源核验台账 ent_offer_source_check（声明来自作业信封，核验留对象+记录；发布前门槛按它判定，不靠布尔勾选）\n→ ent_offer_source:2 创建成果版本的数据来源标注 ent_artifact_origin（live / synthetic / manual，由服务端按作业行的 mocked 事实推导；不采信调用方自述）\n→ ent_org_access:1 创建组织表 ent_organization\n→ ent_org_access:2 创建组织成员表 ent_org_member\n→ ent_org_access:3 创建委托授权表 ent_entrustment\n→ ent_revalidation:1 案件表 ent_exception 补可空列 change_category（DR-0016 五类变更的机器可核对载体；历史行保持 NULL，不猜测回填）\n→ ent_revalidation:2 创建变更复核表 ent_revalidation（一行 = 一个待复核项；结构化关联含来源变更/目标对象/目标版本/复核区域；review_key 幂等）\n→ ent_revalidation:3 对齐 ent_exception_event.event_kind 的 MySQL 列注释取值域（新增 revalidation_planned；SQLite 无列注释，占位保持方言成对）\n→ ent_settlement:1 创建结算版本表 ent_settlement（版本号单调递增 + 费用行快照 + 内部确认 + 客户对该精确版本的确认；确认挂在这一行上 ⇒ 旧确认结构上替不了新版本过关）\n→ ent_settlement:2 创建收付依据表 ent_settlement_payment（append-only；mode 恒为 labeled_sample —— 不接真实支付、不宣称资金到账）\n→ ent_task:1 创建工作流任务表 ent_workflow_task（固定前置条件 + 所需证据 + 执行代次）\n✓ 44 条迁移全部就位，sqlite 方言 checks 通过"
+        }
+      },
+      "after_reset": {
+        "exists": true,
+        "counts": {
+          "_migration_history": 44,
+          "ent_agent_job": 0,
+          "ent_agent_job_attempt": 0,
+          "ent_artifact": 0,
+          "ent_artifact_attachment": 0,
+          "ent_artifact_origin": 0,
+          "ent_artifact_revision": 0,
+          "ent_assignment": 0,
+          "ent_assignment_quantity_change": 0,
+          "ent_assignment_reopen": 0,
+          "ent_attachment": 0,
+          "ent_attachment_text": 0,
+          "ent_capacity_candidate": 0,
+          "ent_capacity_confirmation": 0,
+          "ent_capacity_rule_check": 0,
+          "ent_charge": 0,
+          "ent_contract_derivation": 0,
+          "ent_contract_field_source": 0,
+          "ent_contract_signature_evidence": 0,
+          "ent_entrustment": 0,
+          "ent_exception": 0,
+          "ent_exception_event": 0,
+          "ent_exception_link": 0,
+          "ent_idempotency": 0,
+          "ent_leg": 0,
+          "ent_leg_revision": 0,
+          "ent_offer_release": 0,
+          "ent_offer_response": 0,
+          "ent_offer_source_check": 0,
+          "ent_org_member": 0,
+          "ent_organization": 0,
+          "ent_revalidation": 0,
+          "ent_session": 0,
+          "ent_session_message": 0,
+          "ent_settlement": 0,
+          "ent_settlement_payment": 0,
+          "ent_workflow_task": 0,
+          "sqlite_sequence": 1
+        },
+        "tables": 38,
+        "ent_rows": 0,
+        "migration_history": 44
+      },
+      "check_mutation_erased": true,
+      "check_migration_history_match": true
+    },
+    {
+      "round": 2,
+      "backend_note": "本进程起（pid=17380），稍后由本进程 stop()",
+      "env_error": false,
+      "reset_1": {
+        "removed": [
+          "reset.db"
+        ],
+        "migrate": {
+          "rc": 0,
+          "out": "可空证据引用列 evidence_ref （BP-03 第 3 条的 identified evidence：只有类别不构成「identified」）\n→ ent_contract:1 创建合同派生记录表 ent_contract_derivation（绑定**已接受的那一条发布**+精确报价版本+产出的合同版本；UNIQUE(release_id) 让'一份已接受事实只派生一份合同'落在数据库约束上，而不是先查后写）\n→ ent_contract:2 创建合同字段来源表 ent_contract_field_source（逐字段可核对的来源 —— D1-08 要的是'能检查它怎么来的'，不是'有一份合同'）\n→ ent_contract_signature:1 创建合同签署证据表 ent_contract_signature_evidence（绑到合同的**具体版本**，mode 只接受 labeled_sample，与 offers.SIGNATURE_MODE_LABELED_SAMPLE 同一常量）\n→ ent_exception:1 创建异常与变更案件表 ent_exception（归属 assignment_id 必填、org_id 服务端派生、阻断只认 impact_kind）\n→ ent_exception:2 创建受影响项表 ent_exception_link（任务/成果，唯一约束防重复登记；applied_revision_id 是精确版本引用）\n→ ent_exception:3 创建最小案件事件表 ent_exception_event（append-only，与状态变更同事务；重开的两轮历史由此可判定）\n→ ent_extract:1 创建附件提取文本表 ent_attachment_text（1:1、来源可分、截断显式、可重抽覆盖）\n→ ent_extract:2 对齐 ent_attachment.extract_status 的 MySQL 列注释取值域（新增 needs_transcription；SQLite 无列注释，占位保持方言成对）\n→ ent_idempotency:1 创建幂等操作记录表 ent_idempotency\n→ ent_leg_revision:1 创建航段版本表 ent_leg_revision（append-only：每建/改一次航段写一行，承载「改段留版本」；当前状态仍在 ent_leg，其唯一键不动）\n→ ent_offer_source:1 创建来源核验台账 ent_offer_source_check（声明来自作业信封，核验留对象+记录；发布前门槛按它判定，不靠布尔勾选）\n→ ent_offer_source:2 创建成果版本的数据来源标注 ent_artifact_origin（live / synthetic / manual，由服务端按作业行的 mocked 事实推导；不采信调用方自述）\n→ ent_org_access:1 创建组织表 ent_organization\n→ ent_org_access:2 创建组织成员表 ent_org_member\n→ ent_org_access:3 创建委托授权表 ent_entrustment\n→ ent_revalidation:1 案件表 ent_exception 补可空列 change_category（DR-0016 五类变更的机器可核对载体；历史行保持 NULL，不猜测回填）\n→ ent_revalidation:2 创建变更复核表 ent_revalidation（一行 = 一个待复核项；结构化关联含来源变更/目标对象/目标版本/复核区域；review_key 幂等）\n→ ent_revalidation:3 对齐 ent_exception_event.event_kind 的 MySQL 列注释取值域（新增 revalidation_planned；SQLite 无列注释，占位保持方言成对）\n→ ent_settlement:1 创建结算版本表 ent_settlement（版本号单调递增 + 费用行快照 + 内部确认 + 客户对该精确版本的确认；确认挂在这一行上 ⇒ 旧确认结构上替不了新版本过关）\n→ ent_settlement:2 创建收付依据表 ent_settlement_payment（append-only；mode 恒为 labeled_sample —— 不接真实支付、不宣称资金到账）\n→ ent_task:1 创建工作流任务表 ent_workflow_task（固定前置条件 + 所需证据 + 执行代次）\n✓ 44 条迁移全部就位，sqlite 方言 checks 通过"
+        }
+      },
+      "seeds": [
+        {
+          "seed": "seed_demo.py",
+          "rc": 0,
+          "tail": "「船东」自动登 seed-owner（见 miniapp/utils/auth.js 的 DEV_ROLE_CODE）。\n  如需港口方等其它联调身份，再在开发者工具 Storage 面板设 dev_login_code：\n  seed-shipper → 货主端 · seed-owner → 船东端 · seed-port → 港口方\n演示锚点：\n  订单/支付：已完成 #1 · 待支付 #2 · 已退款 #3 · 面议 #4\n  泊位档期：# 1 NNG-DEMO-01（满档演示）· #2 GGU-DEMO-02（空档演示）\n  预约审核：#1(confirmed), #2(confirmed), #3(pending), #4(confirmed)\n===================================================================="
+        },
+        {
+          "seed": "seed_entrust_demo.py",
+          "rc": 0,
+          "tail": "ote#3, contract_review#4, settlement_draft#5\n      （settlement_draft 刻意缺必填 receivable_lines → 期望「信息缺失」）\n  委托 #2 「演示委托·工作台样本（待受理）」 → submitted\n      → 详情页应给出「受理委托」入口\n  无归属历史成果 #6 → unassigned_artifact_total 应 >= 1\n  案件 2 宗（组织级队列 view=org 的非空载荷）：\n      案件 #1 [exception] → open · blocking=True · 受影响 1 项\n      案件 #2 [change_request] → open · blocking=False · 受影响 0 项\n      （第 2 宗刻意不挂受影响项 → 期望「未登记受影响项」）"
+        },
+        {
+          "seed": "seed_entrust_orgpicker.py",
+          "rc": 0,
+          "tail": "er / B=member\n      → 期望 pickOrg 分支 ambiguous（顶栏出现选择器且不预选）\n  seed-mgr-single  user_id=5  A=manager\n      → 期望 pickOrg 分支 only（顶栏不出现选择器）\n  seed-mgr-only-b  user_id=7  B=manager（**不属于 A**）\n      → 出口判据 ④：队列里只有乙组织委托，且甲组织的委托详情 404\n  seed-mgr-none  user_id=6  无组织\n      → 期望 pickOrg 分支 none（提示还没有加入经营主体）\n  seed-shipper-orgpicker  user_id=8  A/B 各有授权\n  委托：甲组织 id=3 / 乙组织 id=4\n      两张标题不同 —— 切换组织后队列条目应随之变化"
+        }
+      ],
+      "seeded": {
+        "exists": true,
+        "counts": {
+          "_migration_history": 44,
+          "agent_calls": 0,
+          "berth_appts": 4,
+          "berths": 2,
+          "cargo": 4,
+          "ent_agent_job": 0,
+          "ent_agent_job_attempt": 0,
+          "ent_artifact": 6,
+          "ent_artifact_attachment": 0,
+          "ent_artifact_origin": 0,
+          "ent_artifact_revision": 6,
+          "ent_assignment": 4,
+          "ent_assignment_quantity_change": 0,
+          "ent_assignment_reopen": 0,
+          "ent_attachment": 0,
+          "ent_attachment_text": 0,
+          "ent_capacity_candidate": 0,
+          "ent_capacity_confirmation": 0,
+          "ent_capacity_rule_check": 0,
+          "ent_charge": 0,
+          "ent_contract_derivation": 0,
+          "ent_contract_field_source": 0,
+          "ent_contract_signature_evidence": 0,
+          "ent_entrustment": 3,
+          "ent_exception": 2,
+          "ent_exception_event": 3,
+          "ent_exception_link": 1,
+          "ent_idempotency": 0,
+          "ent_leg": 0,
+          "ent_leg_revision": 0,
+          "ent_offer_release": 0,
+          "ent_offer_response": 0,
+          "ent_offer_source_check": 0,
+          "ent_org_member": 5,
+          "ent_organization": 3,
+          "ent_revalidation": 0,
+          "ent_session": 0,
+          "ent_session_message": 0,
+          "ent_settlement": 0,
+          "ent_settlement_payment": 0,
+          "ent_workflow_task": 7,
+          "orders": 4,
+          "payments": 3,
+          "ships": 3,
+          "sqlite_sequence": 11,
+          "users": 8
+        },
+        "tables": 46,
+        "ent_rows": 40,
+        "migration_history": 44
+      },
+      "mutation": {
+        "steps": [
+          {
+            "step": "login",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "step": "create_assignment",
+            "status": 200,
+            "ok": true,
+            "assignment_id": 5
+          }
+        ],
+        "ok": true
+      },
+      "mutated": {
+        "exists": true,
+        "counts": {
+          "_migration_history": 44,
+          "agent_calls": 0,
+          "berth_appts": 4,
+          "berths": 2,
+          "cargo": 4,
+          "ent_agent_job": 0,
+          "ent_agent_job_attempt": 0,
+          "ent_artifact": 6,
+          "ent_artifact_attachment": 0,
+          "ent_artifact_origin": 0,
+          "ent_artifact_revision": 6,
+          "ent_assignment": 5,
+          "ent_assignment_quantity_change": 0,
+          "ent_assignment_reopen": 0,
+          "ent_attachment": 0,
+          "ent_attachment_text": 0,
+          "ent_capacity_candidate": 0,
+          "ent_capacity_confirmation": 0,
+          "ent_capacity_rule_check": 0,
+          "ent_charge": 0,
+          "ent_contract_derivation": 0,
+          "ent_contract_field_source": 0,
+          "ent_contract_signature_evidence": 0,
+          "ent_entrustment": 3,
+          "ent_exception": 2,
+          "ent_exception_event": 3,
+          "ent_exception_link": 1,
+          "ent_idempotency": 1,
+          "ent_leg": 0,
+          "ent_leg_revision": 0,
+          "ent_offer_release": 0,
+          "ent_offer_response": 0,
+          "ent_offer_source_check": 0,
+          "ent_org_member": 5,
+          "ent_organization": 3,
+          "ent_revalidation": 0,
+          "ent_session": 0,
+          "ent_session_message": 0,
+          "ent_settlement": 0,
+          "ent_settlement_payment": 0,
+          "ent_workflow_task": 7,
+          "orders": 4,
+          "payments": 3,
+          "ships": 3,
+          "sqlite_sequence": 12,
+          "users": 9
+        },
+        "tables": 46,
+        "ent_rows": 42,
+        "migration_history": 44
+      },
+      "reset_2": {
+        "removed": [
+          "reset.db"
+        ],
+        "migrate": {
+          "rc": 0,
+          "out": "可空证据引用列 evidence_ref （BP-03 第 3 条的 identified evidence：只有类别不构成「identified」）\n→ ent_contract:1 创建合同派生记录表 ent_contract_derivation（绑定**已接受的那一条发布**+精确报价版本+产出的合同版本；UNIQUE(release_id) 让'一份已接受事实只派生一份合同'落在数据库约束上，而不是先查后写）\n→ ent_contract:2 创建合同字段来源表 ent_contract_field_source（逐字段可核对的来源 —— D1-08 要的是'能检查它怎么来的'，不是'有一份合同'）\n→ ent_contract_signature:1 创建合同签署证据表 ent_contract_signature_evidence（绑到合同的**具体版本**，mode 只接受 labeled_sample，与 offers.SIGNATURE_MODE_LABELED_SAMPLE 同一常量）\n→ ent_exception:1 创建异常与变更案件表 ent_exception（归属 assignment_id 必填、org_id 服务端派生、阻断只认 impact_kind）\n→ ent_exception:2 创建受影响项表 ent_exception_link（任务/成果，唯一约束防重复登记；applied_revision_id 是精确版本引用）\n→ ent_exception:3 创建最小案件事件表 ent_exception_event（append-only，与状态变更同事务；重开的两轮历史由此可判定）\n→ ent_extract:1 创建附件提取文本表 ent_attachment_text（1:1、来源可分、截断显式、可重抽覆盖）\n→ ent_extract:2 对齐 ent_attachment.extract_status 的 MySQL 列注释取值域（新增 needs_transcription；SQLite 无列注释，占位保持方言成对）\n→ ent_idempotency:1 创建幂等操作记录表 ent_idempotency\n→ ent_leg_revision:1 创建航段版本表 ent_leg_revision（append-only：每建/改一次航段写一行，承载「改段留版本」；当前状态仍在 ent_leg，其唯一键不动）\n→ ent_offer_source:1 创建来源核验台账 ent_offer_source_check（声明来自作业信封，核验留对象+记录；发布前门槛按它判定，不靠布尔勾选）\n→ ent_offer_source:2 创建成果版本的数据来源标注 ent_artifact_origin（live / synthetic / manual，由服务端按作业行的 mocked 事实推导；不采信调用方自述）\n→ ent_org_access:1 创建组织表 ent_organization\n→ ent_org_access:2 创建组织成员表 ent_org_member\n→ ent_org_access:3 创建委托授权表 ent_entrustment\n→ ent_revalidation:1 案件表 ent_exception 补可空列 change_category（DR-0016 五类变更的机器可核对载体；历史行保持 NULL，不猜测回填）\n→ ent_revalidation:2 创建变更复核表 ent_revalidation（一行 = 一个待复核项；结构化关联含来源变更/目标对象/目标版本/复核区域；review_key 幂等）\n→ ent_revalidation:3 对齐 ent_exception_event.event_kind 的 MySQL 列注释取值域（新增 revalidation_planned；SQLite 无列注释，占位保持方言成对）\n→ ent_settlement:1 创建结算版本表 ent_settlement（版本号单调递增 + 费用行快照 + 内部确认 + 客户对该精确版本的确认；确认挂在这一行上 ⇒ 旧确认结构上替不了新版本过关）\n→ ent_settlement:2 创建收付依据表 ent_settlement_payment（append-only；mode 恒为 labeled_sample —— 不接真实支付、不宣称资金到账）\n→ ent_task:1 创建工作流任务表 ent_workflow_task（固定前置条件 + 所需证据 + 执行代次）\n✓ 44 条迁移全部就位，sqlite 方言 checks 通过"
+        }
+      },
+      "after_reset": {
+        "exists": true,
+        "counts": {
+          "_migration_history": 44,
+          "ent_agent_job": 0,
+          "ent_agent_job_attempt": 0,
+          "ent_artifact": 0,
+          "ent_artifact_attachment": 0,
+          "ent_artifact_origin": 0,
+          "ent_artifact_revision": 0,
+          "ent_assignment": 0,
+          "ent_assignment_quantity_change": 0,
+          "ent_assignment_reopen": 0,
+          "ent_attachment": 0,
+          "ent_attachment_text": 0,
+          "ent_capacity_candidate": 0,
+          "ent_capacity_confirmation": 0,
+          "ent_capacity_rule_check": 0,
+          "ent_charge": 0,
+          "ent_contract_derivation": 0,
+          "ent_contract_field_source": 0,
+          "ent_contract_signature_evidence": 0,
+          "ent_entrustment": 0,
+          "ent_exception": 0,
+          "ent_exception_event": 0,
+          "ent_exception_link": 0,
+          "ent_idempotency": 0,
+          "ent_leg": 0,
+          "ent_leg_revision": 0,
+          "ent_offer_release": 0,
+          "ent_offer_response": 0,
+          "ent_offer_source_check": 0,
+          "ent_org_member": 0,
+          "ent_organization": 0,
+          "ent_revalidation": 0,
+          "ent_session": 0,
+          "ent_session_message": 0,
+          "ent_settlement": 0,
+          "ent_settlement_payment": 0,
+          "ent_workflow_task": 0,
+          "sqlite_sequence": 1
+        },
+        "tables": 38,
+        "ent_rows": 0,
+        "migration_history": 44
+      },
+      "check_mutation_erased": true,
+      "check_migration_history_match": true
+    }
+  ],
+  "checks": {
+    "① 复位清除改动（两轮）": [
+      true,
+      true
+    ],
+    "② 迁移记账复位后与种子后一致（两轮）": [
+      true,
+      true
+    ],
+    "③ 两轮种子后基线一致": true,
+    "④ 两轮复位后指纹一致": true,
+    "⑤ 两轮均无环境错误": true
+  },
+  "result": "OK"
+}

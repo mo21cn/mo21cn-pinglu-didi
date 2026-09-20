@@ -1,0 +1,13 @@
+-- 安全闸 --
+   [✓] ① 显式指定 --db：E:\_diag\b3r\reset.db
+   [✓] ② 目标是 SQLite 文件（.db）：suffix=.db
+   [✓] ③ 不是开发 / 测试主库：开发主库与测试库一律拒绝，且**不可解除**
+   [✓] ④ 不是生产环境：APP_ENV=development
+   [✓] ⑤ 不在仓库工作树内：目标在仓库外（隔离目录）
+-- 四条一致性 --
+   数据库：PASS —— migrate.py --verify rc=0；表数=38、迁移记账=44
+   附件：LIMITATION —— 共享默认目录且未被 ATTACHMENT_STORAGE_DIR 覆盖 ⇒ 不清理（会波及其它环境）。本库重建后 ent_attachment 为空，附件一致性成立；要连文件一起清请传 --attachments-dir
+   后台作业：PASS —— 无未释放租约
+   身份与授权：PASS —— 身份 / 成员 / 授权三张表均按种子重铺
+   客户端身份缓存：NOT_APPLICABLE —— 小程序 storage（dev_login_code / current_role / 在途草稿）属**客户端**状态，后端脚本够不着。走查侧的处理方式在 DEMO-1-runbook.md §6.1 第四条：每轮用全新 IDE 实例（全新 storage），不靠「清缓存」
+RESET: OK

@@ -109,6 +109,7 @@
             <view
               wx:if="{{item.canTranscribe}}"
               class="att-btn"
+              data-act-transcribe-open="1"
               data-attachment_id="{{item.attachmentId}}"
               hover-class="hover-dim"
               bindtap="onTranscribeOpen"
@@ -135,7 +136,11 @@
             />
             <view class="confirm-actions">
               <view class="confirm-cancel" bindtap="onTranscribeCancel">取消</view>
-              <view class="confirm-ok" bindtap="onTranscribeSubmit">提交转录</view>
+              <view
+                class="confirm-ok"
+                data-act-transcribe-submit="1"
+                bindtap="onTranscribeSubmit"
+              >提交转录</view>
             </view>
           </view>
         </view>

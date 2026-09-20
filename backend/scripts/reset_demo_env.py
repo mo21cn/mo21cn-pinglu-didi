@@ -232,23 +232,67 @@ def gates_ok(gates: list[dict[str, Any]]) -> bool:
 # ------------------------------------------------------------------ 复位动作
 
 
+#: `unlink` 的**有界重试**参数。
+#:
+#: 实测（2026-09-21，`E:\_diag\p2probe`，3/3 轮确定复现）：被 `stop_backend` 杀掉的那一个
+#: —— **本脚本自己起的后端** —— 在 `Popen.wait()` 返回之后，仍会**短暂持有库文件句柄**：
+#: 立刻 `unlink` **必**抛 `PermissionError [WinError 32]`，**+1s 后必成功（0–1 ms）**。
+#: ⇒ 这既不是永久占用、也不是"换个目录"能绕过的缺陷：正确做法是**有界等待 + 重试**，
+#: 并把**实际等待时长**写进读数（这样"等过"与"没等过"在证据里可区分）。
+UNLINK_TRIES = 40
+UNLINK_GAP_S = 0.25  # 上限约 10s
+
+
+def unlink_with_wait(p: Path) -> int:
+    """删除单个文件；遇 Windows 句柄未释放**有界重试**。返回实际等待的毫秒数。
+
+    ⛔ **不吞错**：到上限仍失败就抛，并带上"重试了几次、等了多久"——
+    那时它就不是释放竞态，而是有进程**长期持有**该文件。
+    """
+    t0 = time.time()
+    for attempt in range(UNLINK_TRIES):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        except PermissionError as err:
+            if attempt + 1 >= UNLINK_TRIES:
+                raise PermissionError(
+                    f"{p}：重试 {UNLINK_TRIES} 次（约 {UNLINK_TRIES * UNLINK_GAP_S:.1f}s）仍被占用 "
+                    f"⇒ 存在**长期持有**该文件的进程，不是句柄释放竞态。原始错误：{err}"
+                ) from err
+            time.sleep(UNLINK_GAP_S)
+            continue
+        return int((time.time() - t0) * 1000)
+    return int((time.time() - t0) * 1000)  # pragma: no cover
+
+
 def reset_db(db: Path, *, dry_run: bool) -> dict[str, Any]:
     """① 删除库文件（含 `-wal` / `-shm` / `-journal`）② 重跑 `migrate.py --verify`。"""
     removed: list[str] = []
+    release_ms: dict[str, int] = {}
     for suffix in ("", "-wal", "-shm", "-journal"):
         p = Path(str(db) + suffix)
         if p.is_file():
             removed.append(p.name)
             if not dry_run:
-                p.unlink()
+                release_ms[p.name] = unlink_with_wait(p)
     if not dry_run:
         db.parent.mkdir(parents=True, exist_ok=True)
 
     if dry_run:
-        return {"removed": removed, "migrate": {"rc": None, "out": "（--dry-run 未执行）"}}
+        return {
+            "removed": removed,
+            "handle_release_ms": release_ms,
+            "migrate": {"rc": None, "out": "（--dry-run 未执行）"},
+        }
 
     rc, out = _run([_py(), "migrate.py", "--verify"], env=env_for(db))
-    return {"removed": removed, "migrate": {"rc": rc, "out": out[-2000:]}}
+    return {
+        "removed": removed,
+        "handle_release_ms": release_ms,
+        "migrate": {"rc": rc, "out": out[-2000:]},
+    }
 
 
 def attachments_face(*, explicit_dir: str | None, dry_run: bool) -> dict[str, Any]:
@@ -293,7 +337,7 @@ def attachments_face(*, explicit_dir: str | None, dry_run: bool) -> dict[str, An
             if f.is_file():
                 fired += 1
                 if not dry_run:
-                    f.unlink()
+                    unlink_with_wait(f)  # 同一族的句柄释放竞态，用同一套有界重试
     return {"verdict": "PASS", "dir": str(d), "source": source, "removed_files": fired}
 
 
@@ -422,7 +466,13 @@ def start_backend(db: Path, wait_s: int = 60, *, need_own: bool = True) -> tuple
 
 
 def stop_backend(proc: subprocess.Popen | None) -> None:
-    """只回收**本进程起的**那一个（DR-0018 / HO D2：不按进程名清光全场）。"""
+    """只回收**本进程起的**那一个（DR-0018 / HO D2：不按进程名清光全场）。
+
+    ⚠️ `kill()` 之后**必须**再 `wait()`：只发信号不回收的话，进程对象与它打开的
+    文件句柄都可能还没放掉 —— 紧接着 `reset_db()` 的 `unlink` 就会撞
+    `PermissionError [WinError 32]`（实测 3/3 轮复现）。真正的兜底在
+    `unlink_with_wait()` 的有界重试，这里的 `wait()` 只是把窗口缩到最小。
+    """
     if proc is None:
         return
     with contextlib.suppress(Exception):
@@ -431,6 +481,7 @@ def stop_backend(proc: subprocess.Popen | None) -> None:
         return
     with contextlib.suppress(Exception):
         proc.kill()
+        proc.wait(timeout=10)
 
 
 # ------------------------------------------------------------------ 种子与改状态
@@ -665,6 +716,16 @@ def cmd_selftest(args: argparse.Namespace) -> int:
         "gates": gates,
         "criterion": "DR-0018 §6：基线 → 改变状态 → 复位 → 再取基线，两轮比对一致",
         "rounds": rounds,
+        # ⭐ 读数（不是装饰）：`unlink` 前**实际等了多久**才拿到句柄。
+        # 实测（2026-09-21）：被杀掉的后端仍短暂持库 ⇒ 立刻删必失败、+1s 必成功。
+        # 把等待写下来，才能区分"本来就没占用"与"等到了释放"。
+        "handle_release_ms": {
+            f"round{c['round']}": {
+                "reset_1": c["reset_1"].get("handle_release_ms", {}),
+                "reset_2": c["reset_2"].get("handle_release_ms", {}),
+            }
+            for c in rounds
+        },
         "checks": {
             "① 复位清除改动（两轮）": [c["check_mutation_erased"] for c in rounds],
             "② 迁移记账复位后与种子后一致（两轮）": [
@@ -686,6 +747,14 @@ def cmd_selftest(args: argparse.Namespace) -> int:
     )
     delta = int(r1["mutated"].get("ent_rows", 0)) - int(r1["seeded"].get("ent_rows", 0))
     print(f"   round1 改动后 ent_rows={r1['mutated'].get('ent_rows')}（较种子后 +{delta}）")
+    for c in rounds:
+        for half in ("reset_1", "reset_2"):
+            ms = c[half].get("handle_release_ms") or {}
+            worst = max(ms.values()) if ms else 0
+            print(
+                f"   round{c['round']} {half} 删库前等待句柄释放：最长 {worst} ms"
+                f"{'（含等待 ⇒ 见 UNLINK_TRIES 注释）' if worst else '（无等待）'}"
+            )
     if args.report:
         Path(args.report).write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
