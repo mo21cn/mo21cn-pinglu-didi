@@ -114,6 +114,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 import uuid
@@ -1130,6 +1131,46 @@ class Walker:
         """
         self.c.scroll_into(selector)
         time.sleep(0.4)
+
+    def guard_shape(
+        self,
+        step: str,
+        *,
+        read: int,
+        authority: str,
+        path: str = "",
+        sample: object = None,
+    ) -> bool:
+        """**形状自洽守卫**：另一条权威读数说"这里应该有东西"，本条读到的 0 就**不是**"没有"。
+
+        为什么要有它（2026-09-20，同一天踩到两次）
+        ------------------------------------------
+        集合读数一旦**路径/键写错**，返回的是**静默的 0**，不是报错：
+
+        * 任务列表写成 `/entrust/assignments/{id}/tasks`（那是 POST 创建用的）
+          ⇒ 读到 0 条 ⇒ "逐条处置"退化成"处置 0 条"，而断言照样 `PASS`；
+        * 案件列表同理；页面侧还有过"读错了页"（`quantityHistory` 长在案件页，
+          在详情页上读它恒 0）。
+
+        这类**假绿**比 `FAIL` 危险：`FAIL` 至少有信号，静默的 0 会让整节空转却报通过。
+        ⇒ 用法固定成一句：**先拿权威读数**（如服务端 `missing` 清单），再问这里"读到几条"；
+        两者矛盾就 `FAIL`，并把**本条路径**与**原始形状**一起打进读数 —— 下一轮不用再猜是
+        路径写错、键名变了，还是这一格根本不在这页上。
+
+        `read`：本条实际读到的条数；`authority`：那句权威读数的原文；
+        `path`：本条用的接口/页面路径；`sample`：可选，打一行原始形状（键清单等）。
+        """
+        detail = f"读到 {int(read)}；权威读数：{authority}"
+        if path:
+            detail += f"；本条路径={path}"
+        if sample is not None:
+            detail += f"；原始形状={str(sample)[:160]}"
+        return self.rep.rec(
+            f"{step} —— **形状自洽**：{authority} ⇒ 读到的条数**不能是 0**"
+            "（写错路径/键名只会静默给 0，而那种 0 会让整节退化成空转）",
+            int(read) > 0,
+            detail,
+        )
 
     def tap_order_act(self, order_id: int, act: str, tries: int = 2) -> bool:
         """点某张订单卡里的行内动作（`act` ∈ pay / contract / detail / …）。
@@ -11612,6 +11653,39 @@ def sec_chain12(w: Walker) -> None:
     def idem12(tag: str) -> str:
         return f"walk-chain12-{tag}-{time.time_ns()}"
 
+    def read_case_history(case_id: str) -> tuple[list, dict, str, dict]:
+        """进**案件页**读该委托的货量变更历史：返回 `(全部行, 命中行, hint, 页面 data)`。
+
+        ⭐ 为什么是案件页而不是委托详情页（2026-09-20 定档，改前的两轮都读成"没有记录"）
+        --------------------------------------------------------------------------
+        `quantityHistory` 是 `pages/entrust/case/case` 的 data 键
+        （`loadQuantityHistory()` 取它，`assignmentId` 由案件详情带出），
+        **委托详情页根本没有这个键** ⇒ 在详情页上等它、读它，恒为 0 行。
+        前两版把"读到 0 行"记成 `NOT_RUN` 并猜"键名变了" —— 真正的根因是**章节读错了页**。
+        ⇒ 现在按服务端给的 `exception_id` 进案件页，并把页面的 `quantityHistoryHint`
+        一起读出来：页面自己就把「读失败」与「真没改过」分成两态，照抄它即可。
+        """
+        if not case_id:
+            return [], {}, "案件号为空 ⇒ 未进案件页", {}
+        w.c.navigate("reLaunch", f"/{CASE}?case_id={case_id}")
+        w.c.wait_path(CASE, tries=40)
+        pg_case = w.wait_data(
+            lambda x: (
+                x.get("quantityHistory") is not None
+                and str(x.get("view") or "") not in ("", "loading")
+            ),
+            tries=60,
+            gap=0.5,
+        )
+        all_rows = pg_case.get("quantityHistory") or []
+        hit: dict = {}
+        for h in all_rows:
+            if _num_of((h or {}).get("newQuantity")) == _num_of(qty_want) or qty_want in str(
+                (h or {}).get("changeText") or ""
+            ):
+                hit = dict(h or {})
+        return all_rows, hit, str(pg_case.get("quantityHistoryHint") or ""), pg_case
+
     if not anchor_active():
         w.rep.not_run(
             "第13步 · 重进后同一批记录",
@@ -11659,20 +11733,11 @@ def sec_chain12(w: Walker) -> None:
     #    （服务端明明有那行），看起来像"页面没有那条记录"。
     w.c.navigate("reLaunch", f"/{DETAIL}?assignment_id={aid}")
     w.c.wait_path(DETAIL, tries=40)
-    pg = w.wait_data(
-        lambda x: (
-            x.get("quantityHistory") is not None and x.get("view") not in (None, "", "loading")
-        ),
-        tries=60,
-        gap=0.5,
-    )
-    hist = pg.get("quantityHistory") or []
-    row = {}
-    for h in hist:
-        if qty_want in str((h or {}).get("changeText") or ""):
-            row = dict(h or {})
+    # ⚠️ 这里**只等详情页就绪**（`view`）。⛔ 不再等 `quantityHistory` —— 那个键属于**案件页**
+    #    （见 `read_case_history`）。上一版在详情页等它，等于每次都白等 30s 再读到 0 行。
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
+
     # ⚠️ **服务端先读**：它是这条记录的权威来源；页面那一格读不到时，判据不能跟着塌。
-    #    （轮 U 实测：页面 `quantityHistory` 读到 0 行，而服务端明明有 `800.000 → 950.000`。）
     srv_hist = api_get(f"/entrust/assignments/{aid}/quantity-changes", tok) or []
     srv_row = [h for h in srv_hist if _num_of((h or {}).get("new_quantity")) == _num_of(qty_want)]
     w.rep.rec(
@@ -11684,23 +11749,34 @@ def sec_chain12(w: Walker) -> None:
         f"服务端=({(srv_row[0].get('old_quantity'), srv_row[0].get('new_quantity')) if srv_row else None})"
         f"（本单变更记录 {len(srv_hist)} 条）",
     )
-    if bool(row.get("changeText")) and "→" in str(row.get("changeText")):
+
+    # ⭐ ①b 的**页面面是案件页**。案件号直接取服务端给的那个 `exception_id`
+    #    （变更行自带，⛔ 不靠"猜哪一宗"）。
+    case_id = str((srv_row[0] or {}).get("exception_id") or "") if srv_row else ""
+    hist, row, hist_hint, pg_case = read_case_history(case_id)
+    if row.get("changeText") and "→" in str(row.get("changeText")):
         w.rep.rec(
-            "第13步 · ①b 同一条记录在**界面上**也读得到（`<变更前> → <变更后>` ＋ 来源案件号）",
-            True,
+            "第13步 · ①b 同一条记录在**界面上**也读得到（`<变更前> → <变更后>` ＋ 来源案件号）"
+            "—— ⭐ 读的是**案件页**（`quantityHistory` 长在那一页上，详情页没有这个键）",
+            _num_of(row.get("newQuantity")) == _num_of(qty_want),
             f"changeText={row.get('changeText')!r} source={row.get('sourceText')!r} "
-            f"（本单变更行 {len(hist)} 条）",
+            f"caseId={row.get('exceptionId')!r}（该页变更行 {len(hist)} 条）",
         )
-    else:
-        # ⛔ 不把"页面没读到"记成 FAIL（那是判据缺对象），但**必须点名缺什么**：
-        #    打页面 data 的**键清单**，下一轮就能看出是键名变了还是这一页没取这块数据。
+    elif hist_hint:
+        # 页面自己把"读失败"与"真没改过"分成两态（`quantityHistoryHint`）⇒ 照抄它，
+        # ⛔ 不把"读失败"读成"记录不存在"。
         w.rep.not_run(
             "第13步 · ①b 同一条记录在**界面上**也读得到（`<变更前> → <变更后>`）",
-            f"页面 `quantityHistory` 读到 {len(hist)} 行（服务端有 {len(srv_hist)} 条）⇒ "
-            f"**界面这一格未取得证据**（⛔ 不是「记录不存在」）。"
-            f"页面 data 键={sorted(pg.keys())[:14]}",
+            f"案件页自己报**读失败**：{hist_hint!r}（⛔ 不是「记录不存在」）。case_id={case_id!r}",
         )
-    w.shot("chain12-1-详情页-变更前后记录")
+    else:
+        w.rep.not_run(
+            "第13步 · ①b 同一条记录在**界面上**也读得到（`<变更前> → <变更后>`）",
+            f"案件页 `quantityHistory` {len(hist)} 行（服务端 {len(srv_hist)} 条）、hint 为空 "
+            f"⇒ **界面这一格未取得证据**（⛔ 不是「记录不存在」）。"
+            f"case_id={case_id!r} 页面 data 键={sorted(pg_case.keys())[:16]}",
+        )
+    w.shot("chain12-1-案件页-变更前后记录")
 
     # ── ② UI 结果：详情页当前值 ＋ 结算侧同一条数量 ───────────────────────────
     print("\n-- ② UI 结果（详情页 ＋ 结算）--", flush=True)
@@ -11777,13 +11853,17 @@ def sec_chain12(w: Walker) -> None:
         mine = [
             c for c in (pf.get("charges") or []) if str((c or {}).get("chargeId") or "") == cid12
         ]
-    qty_ui = str((mine[0] or {}).get("quantityText") or "") if mine else ""
+    first = dict(mine[0]) if mine else {}
+    qty_ui = str(first.get("quantityText") or "")
     w.rep.rec(
         "第13步 · ②c **结算面（界面）**把同一个值显示出来：`数量 950 吨`"
         "（判据取**渲染树里的那一行**，按 `chargeId` 唯一命中，不用文本模糊匹配）",
         n_fin == 1 and bool(mine) and qty_want in qty_ui,
+        # ⚠️ **读数里不许出现未加保护的下标**：这里原来写 `mine[0]`，命中 0 行时
+        #    `IndexError` 直接把整章打挂（轮 X3 实测：`章节 chain12 执行异常 | IndexError`），
+        #    而那一章的 PASS/FAIL 一条都没落 —— 崩溃比 FAIL 更难查，因为它不留读数。
         f"财务入口={n_fin} 命中行={len(mine)} quantityText={qty_ui!r} "
-        f"basis={str((mine[0] or {}).get('basis'))[:40]!r}（该页费用行 {len(rows_f)} 条）",
+        f"basis={str(first.get('basis'))[:40]!r}（该页费用行 {len(rows_f)} 条）",
     )
     w.shot("chain12-2-结算-数量950吨")
 
@@ -11800,18 +11880,13 @@ def sec_chain12(w: Walker) -> None:
     time.sleep(1.0)
     w.c.navigate("reLaunch", f"/{DETAIL}?assignment_id={aid}")
     w.c.wait_path(DETAIL, tries=40)
+    # ⚠️ 只等**详情页就绪 ＋ `closure` 到位**（④ 要用它的五维投影 ⇒ 等 `view` 会在
+    #    `closure` 还没回来时过早读，那时 `dimensions` 是空的，看起来像"没有维度"）。
     pg2 = w.wait_data(
-        lambda x: (
-            x.get("quantityHistory") is not None and x.get("view") not in (None, "", "loading")
-        ),
+        lambda x: x.get("view") not in (None, "", "loading") and x.get("closure") is not None,
         tries=60,
         gap=0.5,
     )
-    hist2 = pg2.get("quantityHistory") or []
-    row2 = {}
-    for h in hist2:
-        if qty_want in str((h or {}).get("changeText") or ""):
-            row2 = dict(h or {})
     # 判据落在**服务端同一条记录**上（页面那一格若没渲染出来，不改变"记录是否持久化"的结论）
     srv_hist2 = api_get(f"/entrust/assignments/{aid}/quantity-changes", tok) or []
     srv_row2 = [h for h in srv_hist2 if _num_of((h or {}).get("new_quantity")) == _num_of(qty_want)]
@@ -11825,15 +11900,40 @@ def sec_chain12(w: Walker) -> None:
         f"{srv_row[0].get('new_quantity') if srv_row else None}) "
         f"重进后=({srv_row2[0].get('old_quantity') if srv_row2 else None},"
         f"{srv_row2[0].get('new_quantity') if srv_row2 else None})"
-        f" ｜页面行：前 {len(hist)} / 后 {len(hist2)}"
-        f"（页面={row2.get('changeText')!r}）",
+        f" ｜变更行数：前 {len(srv_hist)} / 后 {len(srv_hist2)}",
     )
+    # ③d 页面侧的重进对照 —— 同样必须在**案件页**上读（见 `read_case_history`）
+    hist2, row2, hint2, _pg_case2 = read_case_history(case_id)
+    if row2.get("changeText"):
+        w.rep.rec(
+            "第13步 · ③d 重进后**界面上那一行仍在**，且与重进前**逐字相同**"
+            "（⛔ 不是「另起一份」，也不是「重进才出现」）",
+            str(row2.get("changeText")) == str(row.get("changeText"))
+            and bool(row.get("changeText")),
+            f"重进前={row.get('changeText')!r} 重进后={row2.get('changeText')!r}",
+        )
+    elif hint2:
+        w.rep.not_run(
+            "第13步 · ③d 重进后界面上那一行仍在",
+            f"案件页自己报**读失败**：{hint2!r}（⛔ 不是「记录不存在」）",
+        )
+    else:
+        w.rep.not_run(
+            "第13步 · ③d 重进后界面上那一行仍在",
+            f"案件页读到 {len(hist2)} 行、hint 为空 ⇒ 界面这一格未取得证据（⛔ 不是「记录不存在」）；"
+            f"①b 那一格：{len(hist)} 行",
+        )
     det2 = api_get(f"/entrust/assignments/{aid}", tok) or {}
     w.rep.rec(
         "第13步 · ③b 重进后**当前货量仍是 950 吨**（同一个值，不是重进才出现的新值）",
         _num_of(det2.get("quantity")) == _num_of(qty_want),
         f"重进后服务端 quantity={det2.get('quantity')!r}",
     )
+    # ⚠️ ③c 的财务入口 `data-act-open-finance` 长在**详情页**上 ⇒ ③d 进过案件页之后，
+    #    必须先**回到详情页**再找它（否则锚点命中 0，看起来像"入口没了"）。
+    w.c.navigate("reLaunch", f"/{DETAIL}?assignment_id={aid}")
+    w.c.wait_path(DETAIL, tries=40)
+    w.wait_data(lambda x: x.get("view") not in (None, "", "loading"), tries=60, gap=0.5)
     n_fin2 = w.c.count('[data-act-open-finance="1"]')
     if n_fin2 == 1:
         w.c.scroll_into('[data-act-open-finance="1"]')
@@ -11855,23 +11955,39 @@ def sec_chain12(w: Walker) -> None:
     #    看起来像"没有维度"（其实是**读错了面**）。
     cl_page = pg2.get("closure") or {}
     dims = cl_page.get("dimensions") or []
-    charge_dim = None
-    for d in dims:
-        lab = str((d or {}).get("label") or "")
-        key = str((d or {}).get("key") or "")
-        # ⚠️ 实测维度名是 **任务处置 / 交付证据 / 异常与重评 / 结算 / 余额与争议**：
-        #    "费用"**不作为维度名出现**（轮 V 实测按"费用"匹配 ⇒ 恒 `None`，
-        #    读起来像"这一页没有那个维度"，其实是**匹配键选错**）。
-        if "结算" in lab or "余额" in lab or key in ("settlement", "charges", "balance"):
-            charge_dim = dict(d or {})
+    by_key = {str((d or {}).get("key") or ""): dict(d or {}) for d in dims}
     cl_api = api_get(f"/entrust/assignments/{aid}/closure-readiness", tok) or {}
+    codes_api = [str((m or {}).get("code")) for m in (cl_api.get("missing") or [])]
+    # ⚠️⚠️ `count` 的语义在**这一格**上读过一次反（轮 X 自误）：
+    #     它数的是「该维度的**缺项条数**」，`ok = count === 0`
+    #     （见 `entrust.js` 的 `decorateClosureReadiness`）。原断言写成 `count >= 1`
+    #     ⇒ 那等于在要求"这一维度**有**缺项"，**方向反了**；它碰巧在真有缺失时通过，
+    #     属于"判据缺正控"的又一例（本题已在 §14 累积 6 例）。
+    #     ✅ 正确读法：**该维度不缺项**（`ok` 为真）⇒ 说明 ②b/②c 登记并确认的那条
+    #     950 吨费用行**没有**把结算/余额打回缺项；同时服务端的 `code` 里不含结算/余额族。
+    fam_settle = {
+        "unsettled_charges",
+        "balance_unsettled",
+        "financial_not_started",
+        "settlement_missing",
+        "settlement_not_approved",
+        "customer_not_confirmed",
+        "settlement_stale",
+    }
+    set_d = by_key.get("settlement") or {}
+    bal_d = by_key.get("balance") or {}
+    hit_fam = sorted(set(codes_api) & fam_settle)
     w.rep.rec(
-        "第13步 · ④ 结案清单（**页面**投影）里的「费用」维度读得到本单的费用行"
-        "（同一个值的下游面）；⛔ 本节只读、不改状态（结案/重开由 53 章负责）",
-        bool(dims) and charge_dim is not None and int((charge_dim or {}).get("count") or 0) >= 1,
-        f"页面维度={[(d or {}).get('label') for d in dims]} "
-        f"费用维度 count={(charge_dim or {}).get('count')!r} "
-        f"｜服务端 ready={cl_api.get('ready')!r} missing={len(cl_api.get('missing') or [])}",
+        "第13步 · ④ 结案清单（**页面**五维投影）：「结算」与「余额与争议」两格**缺项为 0**"
+        "（判据＝`ok`，⛔ 不是「count ≥ 1」—— 那个 `count` 数的是**缺项条数**，写反方向就变成"
+        "「要求这里有缺项」）⇒ ②b/②c 那条 950 吨费用行**没有**把这两个维度打回缺项；"
+        "⛔ 本节只读、不改状态（结案/重开由 53 章负责）",
+        len(dims) == 5 and set_d.get("ok") is True and bal_d.get("ok") is True and not hit_fam,
+        f"五格={[(d or {}).get('label') for d in dims]} "
+        f"settlement={{ok:{set_d.get('ok')!r},count:{set_d.get('count')!r}}} "
+        f"balance={{ok:{bal_d.get('ok')!r},count:{bal_d.get('count')!r}}} "
+        f"｜服务端 ready={cl_api.get('ready')!r} missing={codes_api}（结算/余额族命中={hit_fam}）"
+        f"｜⚠️ 总 `ready` 可能因**与本值无关**的项为假（如未关案件）⇒ 本条只判这条值相关的两格",
     )
 
     errs = w.new_errors(err_base)
@@ -11907,6 +12023,39 @@ def sec_chain11(w: Walker) -> None:
     def idem11(tag: str) -> str:
         return f"walk-chain11-{tag}-{time.time_ns()}"
 
+    def case_revision(cid: int) -> tuple[int, str]:
+        """取案件的**权威** version：`(值, 取自哪里)`。
+
+         ⚠️⚠️ 这一格连踩两次（都只花在"字段/包裹层猜错"上）：
+         1. 原写法 `int(row.get("revision") or 1)` ⇒ **恒取 1** —— 列表行里**没有** `revision`；
+         2. 改成读详情、按 `revisionNo`/`revision`/`revision_no` 三个键找 ⇒ 仍**回退**，
+            因为 `GET /entrust/exceptions/{id}` 的响应是 **`{case:{…}, capabilities, events, …}`**
+            （`schemas.ExceptionCaseDetailOut`），version 在 **`case.revision_no`** 这一层里
+            （页面 `case.js` 的 `detail.revisionNo` 就是它经前端投影后的名字）。
+
+         症状都是同一个：关案件一律 **409「expected_revision=1 已过期」**。
+         ⇒ 现在按**文档化的包裹层**取（`case` 优先，再兜底顶层），并在**彻底取不到时把
+        响应的键清单打进读数** —— ⛔ 不再静默"回退默认 1"（那种回退看起来像"重试了"，
+         实际连一次成功的读都没有）。
+        """
+        det = api_get(f"/entrust/exceptions/{cid}", tok)
+        det = det if isinstance(det, dict) else {}
+        inner = det.get("case") if isinstance(det.get("case"), dict) else {}
+        for where, bag in (("detail.case", inner), ("detail", det)):
+            for key in ("revision_no", "revisionNo", "revision"):
+                val = (bag or {}).get(key)
+                if val not in (None, "", 0):
+                    return int(val), f"{where}.{key}"
+        # 退到列表行（尽力而为），并把**形状**记下来（下次不用再猜）
+        row_rev = 0
+        for e in ex_rows:
+            if int((e or {}).get("id") or (e or {}).get("case_id") or 0) == int(cid):
+                row_rev = int((e or {}).get("revision_no") or (e or {}).get("revisionNo") or 0)
+        shape = f"detail 顶层键={sorted(det.keys())[:10]} case 键={sorted(inner.keys())[:10]}"
+        if row_rev:
+            return row_rev, f"列表行.revision_no（详情未给出，形状：{shape}）"
+        return 1, f"**彻底取不到 ⇒ 回退默认 1（有风险）**（形状：{shape}）"
+
     if not anchor_active():
         w.rep.not_run(
             "chain11 收尾（第 10–12 步）",
@@ -11938,12 +12087,22 @@ def sec_chain11(w: Walker) -> None:
     t_items = t_resp.get("items") if isinstance(t_resp, dict) else t_resp
     rows = t_items if isinstance(t_items, list) else []
     need_task_close = "tasks_not_disposed" in miss_before
-    w.rep.rec(
-        "chain11 ②a ⭐ 任务清单的**形状自洽**：服务端说缺任务处置时，读到的条数**不能是 0**"
-        "（路径 `/entrust/tasks?assignment_id=…`；写错路径只会静默给 0）",
-        bool(rows) or not need_task_close,
-        f"读到任务 {len(rows)} 条；缺项含 tasks_not_disposed={need_task_close}",
-    )
+    if need_task_close:
+        # ⭐ 走**通用守卫**（`Walker.guard_shape`）：只在本条「权威读数说应有内容」时
+        #    才把"读到 0"判成矛盾 —— 服务端没报这一项时不该凭空要求非空。
+        w.guard_shape(
+            "chain11 ②a 任务清单",
+            read=len(rows),
+            authority="服务端 `closure-readiness` 缺 `tasks_not_disposed`（＝本单确实有未处置任务）",
+            path=f"GET /entrust/tasks?assignment_id={aid}&size=100",
+            sample=sorted((rows[0] or {}).keys()) if rows else t_resp,
+        )
+    else:
+        w.rep.rec(
+            "chain11 ②a 任务清单的形状自洽",
+            True,
+            f"服务端没报 `tasks_not_disposed` ⇒ 本条**不做非空要求**（读到 {len(rows)} 条）",
+        )
     todo = [r for r in rows if str((r or {}).get("status") or "") not in ("completed", "cancelled")]
     todo.sort(key=lambda r: int((r or {}).get("task_id") or 0))
     done_ids: list[str] = []
@@ -12001,14 +12160,24 @@ def sec_chain11(w: Walker) -> None:
     open_ex = [
         e for e in ex_rows if str((e or {}).get("status") or "") not in ("closed", "cancelled")
     ]
-    w.rep.rec(
-        "chain11 ③a ⭐ 案件清单的**形状自洽**：服务端说缺案件关闭时，读到的宗数**不能是 0**",
-        bool(ex_rows) or not need_case_close,
-        f"读到案件 {len(ex_rows)} 宗（待关 {len(open_ex)}）；缺项含 cases_not_closed="
-        f"{need_case_close}",
-    )
+    if need_case_close:
+        w.guard_shape(
+            "chain11 ③a 案件清单",
+            read=len(ex_rows),
+            authority="服务端 `closure-readiness` 缺 `cases_not_closed`（＝本单确实有未关案件）",
+            path=f"GET /entrust/exceptions?assignment_id={aid}&size=100",
+            sample=sorted((ex_rows[0] or {}).keys()) if ex_rows else exs,
+        )
+    else:
+        w.rep.rec(
+            "chain11 ③a 案件清单的形状自洽",
+            True,
+            f"服务端没报 `cases_not_closed` ⇒ 本条**不做非空要求**"
+            f"（读到 {len(ex_rows)} 宗、待关 {len(open_ex)}）",
+        )
     closed_ids: list[str] = []
     ex_fail: list[str] = []
+    rev_src: list[str] = []
     for e in open_ex:
         # ⚠️ 案件列表的 id 键**不是** `exception_id`（实测读到 0 ⇒ 关案件 404「案件 0 不存在」）。
         #    防御式按候选键取，并对 0 直接记失败 —— 静默拿 0 去请求，看起来像"案件不存在"。
@@ -12020,19 +12189,40 @@ def sec_chain11(w: Walker) -> None:
         if not eid_x:
             ex_fail.append(f"id 键缺失：row_keys={sorted((e or {}).keys())[:8]}")
             continue
-        st_x, body_x = api_post(
-            f"/entrust/exceptions/{eid_x}/close",
-            tok,
-            {
-                "expected_revision": int((e or {}).get("revision") or 1),
-                "closure_disposition": "resolved",
-                "evidence_ref": f"走查·案件{eid_x}处置证据（变更后复核与交接记录）",
-                "resolution_note": "走查：按审核后的口径完成处置并留证",
-            },
-            idem11(f"close{eid_x}"),
-        )
+        # ⚠️⚠️ **乐观锁的 version 必须从「案件详情」取，且字段名是 `revisionNo`。**
+        #     2026-09-20 实测（轮 X）：本处原写 `int(row.get("revision") or 1)` ⇒ **恒取 1**
+        #     （列表行与详情投影里都**没有** `revision` 这个键，页面用的是 `detail.revisionNo`）
+        #     ⇒ 关案件一律 **409「expected_revision=1 已过期（他人已修改）」**，
+        #     而那一轮 7 条 FAIL 里 **6 条**都是它的下游（齐备⇒结案⇒重开⇒D1-15 下游面）。
+        #     ⇒ 取权威 version ＋ 409 时**重读再试一次**（有界），并把"重试了几次"记进读数。
+        rev, src = case_revision(eid_x)
+        rev_src.append(f"{eid_x}:{src}")
+        attempts = 0
+        st_x, body_x = 0, {}
+        for attempt in (1, 2):
+            attempts = attempt
+            st_x, body_x = api_post(
+                f"/entrust/exceptions/{eid_x}/close",
+                tok,
+                {
+                    "expected_revision": rev,
+                    "closure_disposition": "resolved",
+                    "evidence_ref": f"走查·案件{eid_x}处置证据（变更后复核与交接记录）",
+                    "resolution_note": "走查：按审核后的口径完成处置并留证",
+                },
+                # ⚠️ 幂等键必须**每次尝试都不同**：同一个键重发会被幂等层原样回放那条 409，
+                #    于是"重试"看起来像"还是过期"（本项目已有 2 例"重试其实是回放"）。
+                idem11(f"close{eid_x}-a{attempt}"),
+            )
+            if st_x == 200:
+                break
+            if st_x == 409 and attempt == 1:
+                rev, src = case_revision(eid_x)  # 重读权威 version（有界重试 1 次）
+                rev_src.append(f"{eid_x}:{src}(重试)")
+                continue
+            break
         if st_x == 200:
-            closed_ids.append(str(eid_x))
+            closed_ids.append(f"{eid_x}(尝试{attempts}次)")
         else:
             ex_fail.append(f"{eid_x}:HTTP{st_x} {str((body_x or {}).get('detail'))[:70]}")
     w.rep.rec(
@@ -12040,7 +12230,7 @@ def sec_chain11(w: Walker) -> None:
         "没有一键关闭；⛔ 界面在本切片没有这个入口，如实登记为**经接口**）",
         not ex_fail and len(closed_ids) == len(open_ex) and (bool(open_ex) or not need_case_close),
         f"待关 {len(open_ex)} 宗（本单案件共 {len(ex_rows)} 宗）⇒ 已关 {closed_ids}；"
-        f"失败 {ex_fail or '无'}",
+        f"失败 {ex_fail or '无'}；乐观锁 version 取自 {rev_src or '（无待关案件）'}",
     )
 
     # ── ④ 处理后：齐备（这就是 53 章「齐备 ⇒ 结案成功」的前提）────────────────
@@ -12843,11 +13033,22 @@ def sec_53(w: Walker) -> None:
 
     srv = api_get(f"/entrust/assignments/{aid}/closure-readiness", tok_mgr) or {}
     srv_codes = [str((m or {}).get("code")) for m in (srv.get("missing") or [])]
-    w.rep.rec(
-        "53 ① 后端读端点可用：能结案的人拿到 missing[]（与结案命令**同一把锁**）",
-        isinstance(srv.get("ready"), bool) and bool(srv_codes),
-        f"ready={srv.get('ready')!r} missing={len(srv_codes)} codes={srv_codes[:6]}",
-    )
+    # ⭐ **本单现在是不是已经齐备**（2026-09-20 轮 X3 新增）：链式轮次里 `chain11` 会先把
+    #    同一张单收尾成齐备 ⇒ 本章原以为"起点一定不齐备"的两个剧本会相撞（详见 ⑥ 的说明）。
+    ready_now = srv.get("ready") is True and not srv_codes
+    if ready_now:
+        w.rep.rec(
+            "53 ① 后端读端点可用（本单**已齐备** ⇒ `ready=True` ＋ `missing=[]` 本身就是有效读数）",
+            isinstance(srv.get("ready"), bool),
+            f"ready={srv.get('ready')!r} missing=0 codes=[]"
+            "（⛔ 不是「读不到」：端点返回的就是**空清单**）",
+        )
+    else:
+        w.rep.rec(
+            "53 ① 后端读端点可用：能结案的人拿到 missing[]（与结案命令**同一把锁**）",
+            isinstance(srv.get("ready"), bool) and bool(srv_codes),
+            f"ready={srv.get('ready')!r} missing={len(srv_codes)} codes={srv_codes[:6]}",
+        )
 
     if not w.open_workbench(CODE_OWNER, tag="53"):
         w.rep.not_run("53 结案剧本", "未能以 seed-owner 进入经理工作台")
@@ -12891,22 +13092,40 @@ def sec_53(w: Walker) -> None:
         opened,
         f"确认条出现={opened}",
     )
-    if opened:
-        w.c.scroll_into('[data-act-complete-submit="1"]')
-        w.c.tap('[data-act-complete-submit="1"]')
-        time.sleep(2.5)
-    mdd2 = w.c.page_data()
-    hint = str(mdd2.get("completeHint") or "")
-    w.rep.rec(
-        "53 ⑥ 前置不齐时点结案 ⇒ 被服务端拦，且页面把**缺项**摆出来（不是一句「失败」）",
-        ("还不能结案" in hint) and ("项" in hint),
-        f"completeHint={hint[:130]!r}",
-    )
-    w.rep.rec(
-        "53 ⑦ 被拦之后委托**没有**被改状态（不可逆动作不能半途生效）",
-        str((mdd2.get("detail") or {}).get("status") or "") == "claimed",
-        f"页面 detail.status={str((mdd2.get('detail') or {}).get('status'))!r}",
-    )
+    # ⚠️ **本单已齐备时不许在这里点提交**（2026-09-20 轮 X3 实测）：那时它会**真的结案成功**，
+    #    于是 ⑦ 读到 `status='completed'`、后面 ⑧ 的"齐备 ⇒ 结案成功"就**没有对象**了
+    #    （实测 ⑧-a 随后读到 `closure` 空、`ready=None` —— 因为单子已经结掉了）。
+    #    ⇒ 齐备路径下把「被拦」这两条记 `NOT_RUN` 并点名，把"结案成功"完整留给 ⑧。
+    if not ready_now:
+        if opened:
+            w.c.scroll_into('[data-act-complete-submit="1"]')
+            w.c.tap('[data-act-complete-submit="1"]')
+            time.sleep(2.5)
+        mdd2 = w.c.page_data()
+        hint = str(mdd2.get("completeHint") or "")
+        w.rep.rec(
+            "53 ⑥ 前置不齐时点结案 ⇒ 被服务端拦，且页面把**缺项**摆出来（不是一句「失败」）",
+            ("还不能结案" in hint) and ("项" in hint),
+            f"completeHint={hint[:130]!r}",
+        )
+        w.rep.rec(
+            "53 ⑦ 被拦之后委托**没有**被改状态（不可逆动作不能半途生效）",
+            str((mdd2.get("detail") or {}).get("status") or "") == "claimed",
+            f"页面 detail.status={str((mdd2.get('detail') or {}).get('status'))!r}",
+        )
+    else:
+        w.rep.not_run(
+            "53 ⑥ 前置不齐时点结案 ⇒ 被服务端拦，且页面把**缺项**摆出来",
+            f"本章选到的委托（aid={aid}）**已经齐备**（`ready=True`、`missing=[]`）⇒ "
+            "「被拦」这一段**没有对象**。⛔ 不把「点下去成功了」记成「被拦通过」；"
+            "该行为由**不齐备**的轮次证明（轮 X／X2：界面给出 `还差 1 项：cases_not_closed`，"
+            "且委托状态未被改）。",
+        )
+        w.rep.not_run(
+            "53 ⑦ 被拦之后委托**没有**被改状态（不可逆动作不能半途生效）",
+            "同上：本单已齐备 ⇒ 没有「被拦」这一步可验；且本节**不在这里点提交**，"
+            "把「齐备 ⇒ 结案成功」完整留给 ⑧。",
+        )
 
     # ---- ④ 齐备 ⇒ 结案成功（**同一张委托连跑**：受理 → 任务 → 费用 → 结算 →
     #        客户确认 → 收付 → 结案，全部由 `seed_entrust_completion_ready.py` 经
@@ -13776,8 +13995,26 @@ def main() -> int:
         try:
             SECTIONS[name](w)
         except Exception as exc:  # noqa: BLE001
-            # 单章异常不打断整轮：记录为失败，继续跑后面的章节
-            rep.rec(f"章节 {name} 执行异常", False, repr(exc)[:300])
+            # 单章异常不打断整轮：记录为失败，继续跑后面的章节。
+            # ⚠️ **必须带"异常现场"**（2026-09-20 轮 X3 教训）：只记 `repr(exc)` 时，
+            #    `IndexError('list index out of range')` 完全指不出是哪一行 ⇒ 只能靠
+            #    "最后一个已记录的断言"倒推崩溃点（那次就是这么倒推出来的）。
+            #    异常比 FAIL 更难查，因为它**不留读数** ⇒ 把 `File … line N` 那一行带进读数。
+            tb_lines = traceback.format_exc().strip().splitlines()
+            here = ""
+            for ln in reversed(tb_lines):
+                if ln.strip().startswith("File "):
+                    here = ln.strip()[:170]
+                    break
+            rep.rec(
+                f"章节 {name} 执行异常",
+                False,
+                f"{repr(exc)[:160]} ｜ 现场：{here or '（traceback 里没有 File 行）'}",
+            )
+            print(
+                f"\n⚠️ 章节 {name} 执行异常 ⇒ 现场 {here}\n" + "\n".join(tb_lines[-14:]),
+                flush=True,
+            )
 
     print("\n================ 汇总 ================", flush=True)
     rep.print_summary()
