@@ -1,0 +1,23 @@
+########## 2026-09-21 02:43:37 P2 定向复验：**同一路径**（E:/_diag/reset_drill.db，即当初失败的那一个）##########
+-- 安全闸 --
+   [✓] ① 显式指定 --db：E:\_diag\reset_drill.db
+   [✓] ② 目标是 SQLite 文件（.db）：suffix=.db
+   [✓] ③ 不是开发 / 测试主库：开发主库与测试库一律拒绝，且**不可解除**
+   [✓] ④ 不是生产环境：APP_ENV=development
+   [✓] ⑤ 不在仓库工作树内：目标在仓库外（隔离目录）
+-- 自证判据（DR-0018 §6）--
+   [✓] ① 复位清除改动（两轮）：[True, True]
+   [✓] ② 迁移记账复位后与种子后一致（两轮）：[True, True]
+   [✓] ③ 两轮种子后基线一致：True
+   [✓] ④ 两轮复位后指纹一致：True
+   [✓] ⑤ 两轮均无环境错误：True
+   round1 种子后 ent_rows=40 / round2=40
+   round1 改动后 ent_rows=42（较种子后 +2）
+   round1 reset_1 删库前等待句柄释放：最长 0 ms（无等待）
+   round1 reset_2 删库前等待句柄释放：最长 250 ms（含等待 ⇒ 见 UNLINK_TRIES 注释）
+   round2 reset_1 删库前等待句柄释放：最长 0 ms（无等待）
+   round2 reset_2 删库前等待句柄释放：最长 273 ms（含等待 ⇒ 见 UNLINK_TRIES 注释）
+报告已写：E:/_diag/reset_report_fixed.json
+RESET: OK
+rc=0
+########## 结束 2026-09-21 02:44:06 ##########
