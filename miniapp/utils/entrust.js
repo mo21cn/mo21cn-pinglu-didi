@@ -38,6 +38,35 @@ const { request, getToken, BASE_URL } = require('./request')
 // 每次 CI 都逐格比对 —— 任何一侧改了而另一侧没跟上，静态契约先红。
 // ---------------------------------------------------------------------------
 const SAMPLE_QUOTE_FILENAME = "DEMO1-canonical-sample-quotation.txt"
+// ---------------------------------------------------------------------------
+// 内置**扫描件样本**：一张真 PNG（合成，非真实客户材料）。
+//
+// 用途：让「提取失败 ⇒ 人工转录」这条通路在**走查里可断言**。
+//   * 真机通路是 `wx.chooseMedia({sourceType:['camera']})`（OS 摄像头）——
+//     那是**系统层弹层**，走查工具够不着，与小节 L-2 的「原生文件选择器」同族；
+//   * 所以另给这条页内通路，拿到的**设备证据才覆盖得了**「图片 ⇒ needs_transcription
+//     ⇒ 人工转录 ⇒ 可引用」这一段。
+//
+// ⚠️ 这**不是**骗过嗅探：后端提取**魔数优先**（`extraction.sniff_media`，AC-18，
+//    不听信客户端声明的 MIME），一个真 PNG 字节流**本来就该**被判为图片
+//    ⇒ `extract_status='needs_transcription'`。这是产品的**如实**行为。
+// ---------------------------------------------------------------------------
+const SAMPLE_SCAN_FILENAME = "DEMO1-canonical-sample-quotation-scan.png"
+// 400×260 的合成"报价单扫描件"（纸白底 + 墨条版面），862 字节。
+// ⚠️ 改这份数据要**同时**更新 `verify_entrust_ui.js` 里的魔数断言。
+const SAMPLE_SCAN_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAZAAAAEECAIAAACJKvXOAAADJUlEQVR42u3dsQ2EMBBEURfiiKJdrOWABoiRZ/RWr4ILvsRpF8YyxpiQGX4C" +
+  "Y0xYsM7ZANcSLECwAAQLECzBAgQLQLAAwQIQLADBAgQLQLAABAsQLADBAhAsQLAABAtAsADBAsgP1pwPwCfBAgRLsADBAgRLsADBEixAsADB" +
+  "EixAsAQLECxAsAQLECzBAjqCBeBtDQCCBQgWgGABgiVYgGABCBYgWACCBSBYgGABCBaAYAGCBSBYAIIFCBaAYAEIFiBYAIIF8F+wfMgIUj6Z" +
+  "JViCBYIlWIBgCRYIlmABgiVYgGBZawAEC0CwAMECECwAwQIEC0CwAAQLECwApzmAcyLBAgRLsADBAgRLsADBEiygIVgA9rAABAsQLADBAgRL" +
+  "sADBAhAsQLAABAvAaQ7gNEewAMECBEuwAMESLECwAMGy1gBYawAQLADBAgQLQLAABAsQLADBAhAsQLCc5kDamYtgCRYIlmABgiVYIFiCBQiW" +
+  "YAGCZa0BECwAwQIEC0CwAAQLECwAwQIQLECwAJzmAM6JBAsQLMECBAsQLMECBEuwgIZgAdjDAhAsQLAABAsQLMECBAtAsADBAhAsAKc5gNMc" +
+  "wQIECxAswQIES7AAwQIEy1oDYK0BQLAABAsQLADBAhAsQLAABAtAsADBcpoDaWcugiVYIFiCBQiWYIFgCRYgWIIFCJa1BkCwAAQLECwAwQIQ" +
+  "LECwAAQLQLAAwQJwmgM4JxIsQLAECxAsQLAECxAswQIaggVgDwtAsADBAhAsQLAECxAsAMECBAtAsACc5gBOcwQLECxAsAQLECzBAgQLECxr" +
+  "DYC1BgDBAhAsQLAABAtAsADBAhAsAMECBAtAsAAECxAsAMECECxAsAAECxAsr0gGvNMdwDvdAY+EAIIFIFiAYAEIFoBgAYIFIFgAggUIltMc" +
+  "wC0hIFgeCQGPhACCBSBYgGABCBaAYAGCBSBYAIIFuCV0fwC4JQQEyyMh4D8sAMECBEuwAMECECxAsAAEC0CwAMECECwAwQIEC0CwAAQLECwA" +
+  "wQIQLECwAAQLQLAAwQIQLADBAjqCZYwx949gGWNi5gX1pby37LaQYwAAAABJRU5ErkJggg=="
+
 const SAMPLE_QUOTE_TEXT = [
   "数据标签（Data label）：合成场景 / 人工录入证据",
   "DEMO-1-CANONICAL — 这不是真实客户材料，也不是真实航运报价。",
@@ -5283,6 +5312,8 @@ module.exports = {
   BASE,
   SAMPLE_QUOTE_FILENAME,
   SAMPLE_QUOTE_TEXT,
+  SAMPLE_SCAN_FILENAME,
+  SAMPLE_SCAN_BASE64,
   ARTIFACT_FIELD_KINDS,
   ARTIFACT_FIELD_LABELS,
   ARTIFACT_STATUS_LABELS,
