@@ -626,3 +626,27 @@
   font-size: 23rpx;
   color: #c0392b;
 }
+
+/* WP-1（2026-09-21）：作业区的**对客报价金额**（可选）。
+   视觉语言与 composer 一致，但**不放进**底部输入条 —— 它回答的是
+   "这次作业要报多少"，属于「作业」这一节，不属于"我在说什么"。 */
+.job-amount {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding: 12rpx 0 16rpx;
+}
+
+.job-amount-label {
+  font-size: 24rpx;
+  color: #6B7A90;
+}
+
+.job-amount-input {
+  height: 64rpx;
+  padding: 0 20rpx;
+  border-radius: 12rpx;
+  font-size: 26rpx;
+  color: #1F2A37;
+  background: #F2F5FA;
+}

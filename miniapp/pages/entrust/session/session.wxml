@@ -236,6 +236,21 @@
     <view class="section">
       <view class="section-title">作业（{{jobs.length}}）</view>
 
+      <!-- WP-1（2026-09-21）**对客报价金额**（可选，元）：填了它，
+           「发送并解析」/「让 Agent 解析这份报价单」才会产出**对客报价**提案
+           （后端 `ag02` 只在 `amount` 非空时产出该提案）；留空 ＝ 只解析、不报价。
+           ⛔ 不是模型调用费；⛔ 也不替用户发明金额。 -->
+      <view class="job-amount">
+        <text class="job-amount-label">对客报价金额（元，可选）</text>
+        <input
+          class="job-amount-input"
+          data-act-job-amount="1"
+          value="{{jobAmount}}"
+          placeholder="如 38000.00；留空则只解析、不报价"
+          bindinput="onJobAmountInput"
+        />
+      </view>
+
       <block wx:for="{{jobs}}" wx:key="jobId">
         <view class="job">
           <view class="job-head">

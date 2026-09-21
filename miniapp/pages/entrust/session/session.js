@@ -91,6 +91,15 @@ Page({
     attachments: [],
     attachmentText: '',
     draft: '',
+    /**
+     * **对客报价金额**（元，可选）—— WP-1，2026-09-21。
+     *
+     * ⚠️ 此前这个入参只有接口能给（`miniapp` 全仓无 `amount`）⇒ "对客报价"这条
+     *    业务事实在界面上**造不出来**，只能由开发者代填。
+     * 留空 ＝ 只解析、不报价（后端 `ag02` 只在 `amount` 非空时才产出 `customer_quote`
+     * 提案）；⛔ 不发明金额，⛔ 也不是"模型调用费"。
+     */
+    jobAmount: '',
     sending: false,
     /** 上传报价单：进行中标记（上传 + 提取是一串动作，全程只能有一个在跑） */
     uploading: false,
@@ -375,6 +384,23 @@ Page({
     this.setData({ draft: (e && e.detail && e.detail.value) || '' })
   },
 
+  /** 作业金额输入（页内；随「发送并解析」或「让 Agent 解析这份报价单」一起提交） */
+  onJobAmountInput(e) {
+    this.setData({ jobAmount: (e && e.detail && e.detail.value) || '' })
+  },
+
+  /**
+   * 作业输入里的可选字段 —— **只在真的填了金额时才带**（WP-1）。
+   *
+   * ⛔ 字段缺席 ≠ 传 `null`：前者是"这次没报价"，后者会变成"我确认金额为空"。
+   * ⛔ 币种不猜：与 `ag02` 的缺省口径一致（`currency` 缺省 `CNY`）。
+   */
+  jobAmountInput() {
+    const amount = String(this.data.jobAmount == null ? '' : this.data.jobAmount).trim()
+    if (!amount) return {}
+    return { amount: amount, currency: 'CNY' }
+  },
+
   /**
    * 发一条报价文本并让 Agent 解析。
    *
@@ -392,7 +418,7 @@ Page({
       .then(function () {
         return submitJob(
           sessionId,
-          { input: { quote_text: text } },
+          { input: Object.assign({ quote_text: text }, self.jobAmountInput()) },
           newIdempotencyKey('job')
         )
       })
@@ -883,7 +909,7 @@ Page({
       .then(function () {
         return submitJob(
           self.data.sessionId,
-          { input: { attachment_id: Number(id) } },
+          { input: Object.assign({ attachment_id: Number(id) }, self.jobAmountInput()) },
           newIdempotencyKey('job')
         )
       })

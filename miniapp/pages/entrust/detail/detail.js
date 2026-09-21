@@ -135,6 +135,25 @@ const CAPACITY_EVIDENCE_OPTIONS = CAPACITY_EVIDENCE_ORDER.map(function (k) {
 })
 
 /**
+ * 任务**必需证据**的可选项（WP-1，2026-09-21）。
+ *
+ * **同一张表、同一形态**：取值域仍是 `CAPACITY_EVIDENCE_ORDER`（⇄ `registry.ALL_EVIDENCE_KINDS`），
+ * 只是给每项多挂一个 `on` —— 因为必需证据是**多选**，而 WXML 模板里**不能调用
+ * `arr.indexOf(x)`** 这类方法（小程序模板只支持取值与简单运算）⇒ 选中态必须挂在
+ * 选项对象自身，由 `onToggleEvidence` 重建这个数组。
+ */
+const TASK_EVIDENCE_OPTIONS = CAPACITY_EVIDENCE_ORDER.map(function (k) {
+  return { key: k, label: CAPACITY_EVIDENCE_LABELS[k] || k, on: false }
+})
+
+/** 把必需证据选项复位成"一个都没选"（每次打开输入条 / 取消都要复位，⛔ 不留残余） */
+function resetEvidenceOptions() {
+  return TASK_EVIDENCE_OPTIONS.map(function (o) {
+    return { key: o.key, label: o.label, on: false }
+  })
+}
+
+/**
  * 登记表单的空白草稿。
  *
  * 做成**函数**而不是共享对象字面量：把同一个对象引用放进 `setData`/`data`，
@@ -298,7 +317,23 @@ Page({
      */
     taskOpenKey: '',
     /** 输入条内的任务类型与标题（标题由 `bindinput` 按**路径**写回，不整对象替换） */
-    taskForm: { type: '', typeLabel: '', title: '' },
+    /**
+     * 输入条内的任务类型、标题、**前置任务**与**必需证据**。
+     *
+     * ⚠️ 后两项（2026-09-21 · WP-1）此前**只有接口能给定** —— 界面缺
+     * `precondition_task_id` 与 `required_evidence` 两个入参，于是第 4 步的
+     * "任务依赖链"在界面上造不出来（只能由开发者预置）。
+     * `preconditionId` 存**同单任务 id**（取自 `plan.tasks[].taskIdText`，人可读标签用标题）；
+     * 空串 ＝ **不设前置**，提交时**不传该字段**（⛔ 不传 `null`：未知保持未知）。
+     */
+    taskForm: {
+      type: '',
+      typeLabel: '',
+      title: '',
+      preconditionId: '',
+      preconditionLabel: '',
+      evidence: []
+    },
     /** 输入条的校验提示（在**页内**说清，不用 toast —— toast 会消失，而这句话要一直看得见） */
     taskHint: '',
     /**
@@ -312,6 +347,14 @@ Page({
     /** 受理请求在飞（防同一页重复点击；跨用户并发仍由服务端 409 兜住） */
     claiming: false,
     taskTypes: TASK_TYPE_OPTIONS,
+    /**
+     * 任务**必需证据**的可选项 —— **复用运力证据同一张表**
+     * （⇄ `registry.ALL_EVIDENCE_KINDS`，7 类）。
+     * ⛔ 不新建第二套证据分类（工作单 WP-1：Do not create a new evidence taxonomy）。
+     */
+    taskEvidenceOptions: TASK_EVIDENCE_OPTIONS,
+    /** 前置任务选择条是否展开（**页内展开**，与任务类型同一形态） */
+    preconditionPick: false,
 
     // ── 对客报价（客户侧；S3 纵向切片 / BP-03 第 6/7/9/10 条）──────────────
     /**
@@ -834,7 +877,16 @@ Page({
     this.setData({
       pickKey: '',
       taskOpenKey: key,
-      taskForm: { type: taskType, typeLabel: TASK_TYPE_LABELS[taskType] || taskType, title: '' },
+      preconditionPick: false,
+      taskEvidenceOptions: resetEvidenceOptions(),
+      taskForm: {
+        type: taskType,
+        typeLabel: TASK_TYPE_LABELS[taskType] || taskType,
+        title: '',
+        preconditionId: '',
+        preconditionLabel: '',
+        evidence: []
+      },
       taskHint: ''
     })
   },
@@ -847,9 +899,75 @@ Page({
     })
   },
 
+  // ── WP-1（2026-09-21）：前置任务与必需证据 —— 两项此前"只有接口能给定" ──
+
+  /** 展开/收起「前置任务」选择条（页内展开，与任务类型同一形态） */
+  onTogglePrecondition() {
+    this.setData({ preconditionPick: !this.data.preconditionPick, taskHint: '' })
+  },
+
+  /**
+   * 选中一个前置任务。
+   *
+   * ⚠️ 列表来自 `plan.tasks`（本单**可读**的任务与前置总览），**点的是标题、
+   *    存的是服务端 `task_id`** —— 用户不需要知道内部 id，也不需要手输（WP-1 明确要求）。
+   * ⛔ 本页**不判**"环/跨单前置"：那由**服务端**按既有契约拒（页面自己判一次
+   *    就会与后端漂移，同 DR-0010 §3.6 对空值四态的理由）。
+   */
+  onPickPrecondition(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const id = String(ds.preId || '')
+    if (!id) return
+    this.setData({
+      preconditionPick: false,
+      'taskForm.preconditionId': id,
+      'taskForm.preconditionLabel': String(ds.preLabel || ('任务 #' + id)),
+      taskHint: ''
+    })
+  },
+
+  /** 清除前置 ——「不设固定前置」是**合法状态**，不是错误（与 `preText` 的「无固定前置」同一口径） */
+  onClearPrecondition() {
+    this.setData({
+      preconditionPick: false,
+      'taskForm.preconditionId': '',
+      'taskForm.preconditionLabel': '',
+      taskHint: ''
+    })
+  },
+
+  /** 勾选/取消一类**必需证据**（多选；类别取值域与运力证据**同表**） */
+  onToggleEvidence(e) {
+    const ds = (e && e.currentTarget && e.currentTarget.dataset) || {}
+    const kind = String(ds.evKind || '')
+    if (!kind) return
+    const picked = (this.data.taskForm && this.data.taskForm.evidence) || []
+    const next = picked.indexOf(kind) === -1
+      ? picked.concat([kind])
+      : picked.filter(function (k) { return k !== kind })
+    // 选中态挂在**选项自身**（WXML 模板不能调用 `indexOf`）⇒ 每次切换重建该数组
+    const options = (this.data.taskEvidenceOptions || TASK_EVIDENCE_OPTIONS).map(function (o) {
+      return { key: o.key, label: o.label, on: next.indexOf(o.key) !== -1 }
+    })
+    this.setData({ 'taskForm.evidence': next, taskEvidenceOptions: options, taskHint: '' })
+  },
+
   /** 收起输入条（取消）。用户打过的标题**不保留** —— 取消就是取消，不做"半保存"。 */
   onCancelTask() {
-    this.setData({ taskOpenKey: '', taskForm: { type: '', typeLabel: '', title: '' }, taskHint: '' })
+    this.setData({
+      taskOpenKey: '',
+      preconditionPick: false,
+      taskEvidenceOptions: resetEvidenceOptions(),
+      taskForm: {
+        type: '',
+        typeLabel: '',
+        title: '',
+        preconditionId: '',
+        preconditionLabel: '',
+        evidence: []
+      },
+      taskHint: ''
+    })
   },
 
   /**
@@ -865,11 +983,29 @@ Page({
       this.setData({ taskHint: '任务标题不能为空（1–128 字）' })
       return Promise.resolve()
     }
-    return this.submitTask(form.type, title)
+    return this.submitTask(form.type, title, form.preconditionId, form.evidence)
   },
 
-  submitTask(taskType, title) {
+  /**
+   * 提交任务（WP-1：可带**前置任务**与**必需证据**）。
+   *
+   * ⚠️ 两个新字段**只在用户真的选了才带上**：字段缺席 ＝ 服务端按
+   *    "无固定前置 / 不要求证据"处理；显式传 `null` 会把"我没选"表达成
+   *    "我确认它没有" —— 那是两句不同的话（未知保持未知）。
+   * ⛔ 前端不复制后端的取值域与环校验：取值域由 `taskEvidenceOptions` 限定，
+   *    合法性（跨单、环、未完成前置）由服务端判并给可读理由。
+   */
+  submitTask(taskType, title, preconditionId, evidence) {
     const self = this
+    const body = { task_type: taskType, title: title }
+    const preNum = Number(String(preconditionId == null ? '' : preconditionId))
+    if (Number.isFinite(preNum) && preNum > 0) {
+      body.precondition_task_id = preNum
+    }
+    const kinds = Array.isArray(evidence) ? evidence.slice() : []
+    if (kinds.length) {
+      body.required_evidence = kinds
+    }
     wx.showLoading({ title: '提交中', mask: true })
     // 幂等键每次提交新生成：重试同一次提交时会复用同一个键（此处是单次用户动作，
     // 用户重新点击就是一次新的意图，应当新键）。

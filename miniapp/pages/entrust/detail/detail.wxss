@@ -190,6 +190,21 @@
   background: #F2F5FA;
 }
 
+/* WP-1（2026-09-21）：前置任务与**必需证据多选**需要看得见"我选了哪个"。
+   主色与 `.slot-btn-strong` 一致 —— 同一个页面上"确定性的动作/选中的东西"只有一种强调色。 */
+.slot-pick-on {
+  color: #FFFFFF;
+  background: #3B5BDB;
+}
+
+/* 前置任务：**选择器与「清除前置」并排**（一条窄行，不占满整张卡） */
+.slot-pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  padding-bottom: 12rpx;
+}
+
 .slot-btn {
   height: 64rpx;
   line-height: 64rpx;

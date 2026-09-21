@@ -110,7 +110,23 @@ Page({
     chargeCounted: 0,
     chargeExcluded: 0,
     chargeOpen: false,
-    chargeForm: { direction: 'receivable', chargeKind: '', amount: '', basis: '', counterparty: '' },
+    /**
+     * 费用登记表单。
+     *
+     * `quantity` / `unit`（2026-09-21 · WP-1）：此前**只有接口能给** ——
+     * 界面能登记"金额"，却说不出"按多少算的"。两个字段都**可选**，但必须**成对**
+     * （只填一个等于说了半句）；⛔ 不自动带出委托货量，也不在货量变更后静默重算
+     * 已确认的金额（那会让"这条费用按什么算的"变得不可追溯）。
+     */
+    chargeForm: {
+      direction: 'receivable',
+      chargeKind: '',
+      amount: '',
+      quantity: '',
+      unit: '',
+      basis: '',
+      counterparty: ''
+    },
     chargeHint: '',
     disputeOpenKey: '',
     disputeForm: { reason: '' },
@@ -350,6 +366,14 @@ Page({
       this.setData({ chargeHint: '类别、金额与计费依据都要填：没有依据的费用行不可核对' })
       return
     }
+    // 数量与单位**成对**：后端两个字段各自可选，但半填的记录在核对时没有意义
+    // （"金额 5000，数量 100，单位 ——"）。⇒ 在提交前拦下，并说清怎么改。
+    const qty = String(f.quantity == null ? '' : f.quantity).trim()
+    const unit = String(f.unit == null ? '' : f.unit).trim()
+    if ((qty && !unit) || (!qty && unit)) {
+      this.setData({ chargeHint: '数量与单位要成对填：只填一个，"按多少算的"就是半句话' })
+      return
+    }
     const body = {
       direction: f.direction,
       charge_kind: f.chargeKind,
@@ -358,12 +382,23 @@ Page({
       basis: f.basis,
       counterparty: f.counterparty || null
     }
+    // ⛔ 只在**真的填了**才带（字段缺席 ≠ 显式 null：前者是"没记"，后者是"确认没有"）
+    if (qty) body.quantity = qty
+    if (unit) body.unit = unit
     recordCharge(this.data.assignmentId, body, newIdempotencyKey('charge'))
       .then(() => {
         this.setData({
           chargeOpen: false,
           chargeHint: '已登记为草稿 —— 草稿不进合计，确认后才算数',
-          chargeForm: { direction: 'receivable', chargeKind: '', amount: '', basis: '', counterparty: '' }
+          chargeForm: {
+            direction: 'receivable',
+            chargeKind: '',
+            amount: '',
+            quantity: '',
+            unit: '',
+            basis: '',
+            counterparty: ''
+          }
         })
         this.load()
       })
