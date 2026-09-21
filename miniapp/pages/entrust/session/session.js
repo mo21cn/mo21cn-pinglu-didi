@@ -29,6 +29,8 @@
 const {
   SAMPLE_QUOTE_FILENAME,
   SAMPLE_QUOTE_TEXT,
+  SAMPLE_SCAN_FILENAME,
+  SAMPLE_SCAN_BASE64,
   VIEW,
   decorateArtifact,
   decorateJob,
@@ -581,6 +583,74 @@ Page({
       wx.getFileSystemManager().writeFileSync(path, SAMPLE_QUOTE_TEXT, 'utf8')
     } catch (e) {
       wx.showToast({ icon: 'none', title: '写入示例文件失败：' + ((e && e.errMsg) || '') })
+      return
+    }
+    return this.uploadQuote({ path: path, name: name })
+  },
+
+  /**
+   * **拍照上传（调 OS 摄像头）** —— 扫描件/纸质报价单的入口。
+   *
+   * ⚠️ 范围到此为止：只调 `wx.chooseMedia({sourceType:['camera']})` 拿到一张图，
+   * 然后走**与上传文件完全同一条链**。⛔ 不做 OCR、不做图像增强/裁剪/多页、
+   * 不做"扫描件 → 可机读文本"的任何自动转换 —— 拿不到文本时的正确出路是
+   * **人工转录**（页面已有的那一条），不是在这里偷偷塞一段识别。
+   *
+   * 为什么它有价值：图片没有机读文本层 ⇒ 后端如实判 `needs_transcription`
+   * ⇒ 「人工转录」入口按状态出现。这就是 D1-05 附件分支的**真机通路**。
+   *
+   * ⚠️ 诚实边界：摄像头是 **OS 级弹层**，自动走查够不着它（与该页的
+   * `chooseMessageFile` 同族）⇒ 该格只能记 `LIMITATION`，取证走下面的"内置扫描件样本"。
+   */
+  onCaptureScan() {
+    const self = this
+    if (this.data.uploading) return
+    if (!this.data.sessionId) {
+      wx.showToast({ icon: 'none', title: '会话尚未就绪，请稍后重试' })
+      return
+    }
+    wx.chooseMedia({
+      count: 1,
+      mediaType: ['image'],
+      sourceType: ['camera'],
+      camera: 'back',
+      success(res) {
+        const f = (res.tempFiles || [])[0]
+        if (!f || !f.tempFilePath) return
+        self.uploadQuote({ path: f.tempFilePath, name: '扫描件-' + Date.now() + '.jpg' })
+      },
+      fail() {
+        // 用户取消拍照：不是错误，不提示、不报错
+      }
+    })
+  },
+
+  /**
+   * 用**内置扫描件样本**（一张真 PNG 字节流）走同一套上传/提取链。
+   *
+   * 与"内置示例报价单"是**同一族的第二条通路**，理由也一样：真机通路（摄像头、
+   * 系统文件选择器）都在小程序渲染树之外，走查够不着 ⇒ 不给页内通路就永远拿不到
+   * 设备证据。两条通路**分开记**，⛔ 互不冒充（真机那一格记 `LIMITATION`）。
+   *
+   * ⚠️ 不是"骗过嗅探"：后端**魔数优先**（AC-18，不听信客户端声明），真 PNG
+   * 本来就该被判成图片 ⇒ `needs_transcription`。这是产品的如实行为。
+   */
+  onUseSampleScan() {
+    const self = this
+    if (this.data.uploading) return
+    if (!this.data.sessionId) {
+      wx.showToast({ icon: 'none', title: '会话尚未就绪，请稍后重试' })
+      return
+    }
+    const name = SAMPLE_SCAN_FILENAME
+    const path = wx.env.USER_DATA_PATH + '/' + name
+    try {
+      // `wx.base64ToArrayBuffer` 而不是 `writeFileSync(..., 'base64')`：
+      // 后者依赖各端对 encoding 参数的支持差异，前者是**字节级**的、可预期。
+      const buf = wx.base64ToArrayBuffer(SAMPLE_SCAN_BASE64)
+      wx.getFileSystemManager().writeFileSync(path, buf)
+    } catch (e) {
+      wx.showToast({ icon: 'none', title: '写入扫描件样本失败：' + ((e && e.errMsg) || '') })
       return
     }
     return this.uploadQuote({ path: path, name: name })

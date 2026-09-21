@@ -529,6 +529,88 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
    ⇒ 等待**只发生在该发生的那一半轮**里；`RESET: OK`、五项判据全 `True`、`rc=0`。
 4. ⚠️ **首次失败没有被抹掉**：2026-09-20 23:29 那次 `WinError 32` 的完整 traceback 仍在
    `docs/entrust/evidence/2026-09-20-reset-drill/reset-drill-stdout.log`；本节是"修后同路径通过"的对照。
+### 3.12 **无模型人工替代通路 · 段A（附件分支）**（2026-09-21 · P1）
+
+> 目录：`docs/entrust/evidence/2026-09-21-manual-substitute/`
+> 轮次：`walk-20260921-032823`（干净实例 `hold18`，认领 pid 6292）
+> 环境：**`LLM_MOCK=false` ＋ `LLM_BASE_URL=http://127.0.0.1:9`（不可达）＋ `LLM_API_KEY=invalid`**
+> 命令：`--skip-ide --min-keepalive-left 1800 --section chain-manual`
+> ⚠️ 该轮**未开 `--chain`**（只跑附件分支；业务分支见段B），因此本单 `aid=1` 是脚本按"队列里最新"挑的。
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-a-stdout.txt` | 权威逐条读数（`PASS 6 / LIMITATION 1 / NOT_RUN 1`，**`FAIL=0`**） | 6711 | `512f8b0136fd0ecc` |
+| `summary-a.json` | 该轮汇总 | 9528 | `628f343295445c36` |
+| `shots/chain-manual-人工转录-已提交.jpg` | 转录提交后的会话屏 | 40534 | `8bc73ae48c4d6830` |
+
+**逐条读数（可直接核对）**
+
+| # | 格 | 结果 | 关键读数 |
+| --- | --- | --- | --- |
+| ① | 会话屏给出**两条**扫描件入口 | ✅ PASS | 拍照入口=1、内置样本入口=1 |
+| ①-a | 「拍照上传」**真机通路**（调 OS 摄像头） | `LIMITATION` | 入口在渲染树上，但点击打开的是**系统层摄像头** ⇒ 走查够不着（与 L-2／L-7 同族）。⛔ **不宣称通过**、⛔ 不为它扩建 OS 输入通道 |
+| ② | 上传**内置扫描件样本** ⇒ 产出附件 | ✅ PASS | 附件 1 条，`contentType=image/png`；页面原文「**已上传…，但需人工转录。图片没有文本层，本服务不做 OCR**」 |
+| ③ | ⭐ 提取**如实分档** | ✅ PASS | **服务端** `extract_status=['needs_transcription']`（`entrustmentId='1'`）｜界面同值｜**正控** `canReference=[False]`（图片没有机读文本 ⇒ 这里必须是 False） |
+| ④ | ⭐ 「人工转录」入口**按状态**出现 | ✅ PASS | 入口命中=1；界面 `referenceHint='图片/扫描件须先人工转录，之后才能被引用'` |
+| ④b | ⭐ **人工转录落库**（服务端＋界面双读数） | ✅ PASS | 界面 `textSourceLabel=['人工转录']`｜**服务端** `text_source=['manual_transcription']`｜`canReference=[True]`｜页面「已人工转录 **67** 字」 |
+| ⑤ | ⭐ 转录后可引用 ⇒ 点「让 Agent 解析」⇒ 模型不可用时**如实报错** | ✅ PASS | job 行 `errorKind='llm_network'`、`errorMessage='LLM 服务端错误 502'`、**`mocked=False`** ⇒ 是真模型不可用，不是 fixture |
+| ⑥ | 业务分支（人工组装成果 → … → 结案 → 重载） | `NOT_RUN` | 本章只取附件分支；业务分支**由同单的 ㊹ 〇节 ＋ `chain11/53/chain12` 承担** —— ⛔ 不在本章伪造 |
+
+**这一段补上的是什么（对比 2026-09-20 的 B2 轮）**
+
+* B2 轮用**纯文本样本** ⇒ 提取成功 ⇒ 「人工转录」那一格**永远没有对象**（那一轮的 ③ 就是 `NOT_RUN`）；
+* 本轮用**真 PNG 字节流**（内置扫描件样本）⇒ 后端**魔数优先**（`extraction.sniff_media`，AC-18）
+  如实判 `needs_transcription` ⇒ 人工转录这一格**第一次拿到设备证据**。
+* ⛔ 两份读数**互不替代**：B2 证的是"提取不依赖模型"＋"模型那一步如实报错"；
+  本轮证的是"**提取失败 ⇒ 人工转录 ⇒ 可引用**"这条**附件分支**。
+
+**为什么"用图片当样本"不是骗过嗅探**：后端提取**魔数优先**、⛔ 不听信客户端声明的 MIME；
+一个真 PNG 字节流**本来就该**被判成图片。产品在页面上的原话也是「图片没有文本层，**本服务不做 OCR**」
+⇒ 判 `needs_transcription` 是**如实**行为，不是为走查造的假象。
+
+**两条通路分开记**（沿用 L-2 的既有纪律，⛔ 互不冒充）：
+① **真机 ＝ 调 OS 摄像头** ⇒ `LIMITATION`；② **内置扫描件样本** ⇒ 可断言的设备读数。
+
+### 3.12.1 **段B（业务分支）**：三轮，最终以 `FAIL=0` 的干净轮定档（2026-09-21 · P1）
+
+> 目录同上：`docs/entrust/evidence/2026-09-21-manual-substitute/`
+> 三轮同一配方：`--skip-ide --pay --chain --section 43,chain-manual,chain4,45,44,49,50,chain9,55,52,chain11,53,chain12`
+> ＋ `--extra-seeds seed_entrust_canonical.py,seed_entrust_contract_flow.py,seed_entrust_completion_ready.py`
+> 环境：**`LLM_MOCK=false` ＋ `LLM_BASE_URL=http://127.0.0.1:9`（不可达）＋ `LLM_API_KEY=invalid`**
+
+| 轮 | 文件 | 实例 | 汇总 | 定档 |
+| --- | --- | --- | --- | --- |
+| **B1** | `walk-b1-stdout.txt`（`f61d36872d69`） | `hold18` 第 2 轮 | `FAIL=4 / NOT_RUN=9 / LIMITATION=2` | **修前对照，保留**（4 条 FAIL：1 条＝我方判据太宽、3 条同根＝模型不可用未做状态感知，见提交 `9b7b828`） |
+| **B2** | `walk-b2-degraded-stdout.txt`（`36168fd3c5e5`） | `hold18` **第 3 轮** | `FAIL=4 / NOT_RUN=11 / LIMITATION=2` | ⛔ **读数无效＝实例退化**：4 条 FAIL 全在**上传通道/处理器**（`attachments=0`、`handler_ran=False`、`err='Error: accessSync:fail …'`）⇒ **样本与扫描件两条上传链同时失效** ⇒ 处置＝**换实例**。**保留不抹掉** |
+| **B3** | `walk-b3-stdout.txt`（`77f6d3b89115`） | **`hold19` 第 1 轮**（干净） | **`FAIL=0`** / `NOT_RUN=13` / `LIMITATION=2` | ⭐ **定档用这一轮** |
+
+**B3 的决定性读数（`summary-b3.json` ＝ `6f3c025f691b`）**
+
+| 环节 | 读数 |
+| --- | --- |
+| 同一张单 | **13 个取单点 · aid 集合=`['7']` · 同一张=是** |
+| 人工建立成果 | `㊹ 〇` **经界面组装**对客报价 ⇒ 服务端成果清单命中 `customer_quote id=9`（来源 `manual`） |
+| 附件分支（本章） | `chain-manual ①`～`⑤` **全 PASS**：② 本委托附件 2 条（`image/png` ＋ `text/plain`）；③ **服务端·图片附件** `extract_status=['needs_transcription']`；④ 入口 1 个；④b 界面 `人工转录`／服务端 `text_source=['manual_transcription']`、`canReference=[True,True]`；⑤ `errorKind='llm_network'` |
+| 不齐备 ⇒ 被拦 | `chain11 ①b-b` 逐条缺项"有 10 个任务尚未处置完成…有 5 项受影响的复核未完成…有 1 条案件未关闭"，`①b-c` 状态未变 |
+| 齐备 ⇒ 结案 | `④` `ready=False 缺 3` ⇒ **`ready=True 缺 []`**；`53 ⑧-b` **`status='completed'`** |
+| 受控重开 | `⑨-c` `status='claimed'`、`completed_at=''` |
+| **重载一致** | `chain12 ④a` 不同键=**无**；`④c` **零写入正控 `写请求=无`** |
+| 2 条 `LIMITATION` | ㊸ 原生文件选择器｜`chain-manual ①-a` OS 摄像头 —— 都是**系统层弹层**，⛔ 不宣称通过 |
+
+**B3 的 13 条 `NOT_RUN` 逐条去向**（⛔ 不用"对象不存在"一句话替代验收判断）
+
+| # | 条目 | 为什么没跑 | 去向 |
+| --- | --- | --- | --- |
+| 1–4 | `㊸ 第2步`：作业终态／提案／`attachment_text` 来源／**未核验来源** | **模型不可用**（job `errorKind='llm_network'`、`mocked=False`；页面/服务端 `status` 均 `queued` —— 本仓无常驻 worker）⇒ 第 2 步的**模型产出不存在** | 这四格是**模型步骤的产出**，D1-05 明确「⛔ 不要求 AG-02 成功」；⚠️ 第 4 格原本会**真空通过**（`[] == []`）⇒ 一并记 `NOT_RUN`。**有模型轮次时照旧逐条断言** |
+| 5 | `㊸ 第3步 · 采纳为成果` | 同上（无提案 ⇒ 无采纳入口） | 同 1–4 |
+| 6 | `chain-manual ⑥`（业务分支"交代"格） | 本章只取附件分支 | 业务分支**由本轮同一张单上的 `㊹ 〇` ＋ `chain11/53/chain12` 承担**（见上表，**均已 PASS**） |
+| 7 | `㊹ 前置 · 客户可见成果` | 读前置时本单还没有客户可见成果（白名单命中 0） | 该前置随后的 `㊹ 〇` **经界面**满足（`customer_quote id=9`） |
+| 8–10 | `㊹ 第6步 · 来源核验三条` | 本轮载体是**经界面人工组装**（来源 `manual`）⇒ 服务端**无待核验声明**、`gate.ok=True` ⇒ 门槛**一次就过**，负例无对象 | ⚠️ 早前一轮这三格记 `FAIL` 并据此报"界面无核验入口" —— **那是误读**，已更正 |
+| 11 | `㊹ 第6步 · 授权清单冻结` | 载体 `artifact#9` **无附件** ⇒ 断言会**真空通过**（`[] == []`） | ⛔ **主动不记**真空通过 |
+| 12–13 | `53 ⑥/⑦ · 不齐备时点结案` | 本章选到的单**已齐备** ⇒ 无"被拦"可验 | ⭐ **已由同轮 `chain11 ①b-a/b/c` 证明**（清理**之前**点结案：界面给缺项清单、点下去**被拦**、状态未变） |
+
+⇒ **段B 的结论**：模型**持续不可用**时，经理**经界面人工建立成果**后，在**同一张委托**上完成了
+接受→合同→变更→履约→结算→**结案**→**受控重开**→**重载一致性**，且这一轮 **`FAIL=0`**。
 ---
 
 ## 4. 待补（本索引自己的缺口，如实登记）
