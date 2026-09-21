@@ -66,6 +66,7 @@
             wx:for="{{targets}}"
             wx:key="entrustmentId"
             class="pick-pill {{orgId === item.orgId ? 'pick-pill-on' : ''}}"
+            data-act-pick-org="{{item.orgId}}"
             data-org-id="{{item.orgId}}"
             bindtap="onPickOrg"
             hover-class="hover-dim"

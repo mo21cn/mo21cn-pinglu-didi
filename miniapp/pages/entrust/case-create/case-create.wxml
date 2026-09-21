@@ -114,6 +114,7 @@
             </view>
             <view
               class="link-remove"
+              data-act-link-remove="{{item.key}}"
               data-rm-key="{{item.key}}"
               bindtap="onRemoveLink"
               hover-class="hover-dim"
@@ -138,6 +139,7 @@
               wx:for="{{candidates}}"
               wx:key="key"
               class="cand-row"
+              data-act-link-add="{{item.key}}"
               data-kind="{{item.target_kind}}"
               data-id="{{item.target_id}}"
               bindtap="onAddLink"

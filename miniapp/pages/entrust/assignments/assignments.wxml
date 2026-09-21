@@ -63,6 +63,7 @@
         wx:for="{{items}}"
         wx:key="assignmentId"
         class="card mine-card"
+        data-act-open-mine="{{item.assignmentId}}"
         data-mine-id="{{item.assignmentId}}"
         bindtap="onOpen"
         hover-class="row-hover"

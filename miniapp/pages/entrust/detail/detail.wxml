@@ -1175,6 +1175,7 @@
                 wx:for-item="tt"
                 wx:key="key"
                 class="slot-pick"
+                data-act-task-type="{{tt.key}}"
                 data-type="{{tt.key}}"
                 bindtap="onPickTaskType"
                 hover-class="hover-dim"
@@ -1182,6 +1183,7 @@
             </view>
             <view
               class="slot-btn"
+              data-act-task-open="{{item.key}}"
               data-key="{{item.key}}"
               data-task="{{item.taskType}}"
               bindtap="onRecordTask"
