@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 API_SHIP = "/api/v1/ship/registry"
 API_CARGO = "/api/v1/cargo/shipments"
 API_ORDER = "/api/v1/order/orders"
 API_PAY = "/api/v1/payment/payments"
+
+#: 货源装运日＝**今天 + 30 天**。⛔ 不写死日历日期：`cargo/service.py` 判
+#: `expect_date < date.today()` 时**建货被拒**，写死的日期过一天就变成"昨天"，
+#: 整组用例会以"建单直接失败"（进而 `KeyError: 'id'`）的形式烂掉 —— 同类问题
+#: 已在 `test_match.py` 上发生过一次（`cert_expiry="2026-09-20"`）。
+CARGO_EXPECT_DATE = (date.today() + timedelta(days=30)).isoformat()
 
 CARGO_PAYLOAD = {
     "cargo_name": "水泥熟料",
@@ -13,7 +21,7 @@ CARGO_PAYLOAD = {
     "weight_t": 1000,
     "origin_port": "NNG",
     "dest_port": "QNZ",
-    "expect_date": "2026-10-01",
+    "expect_date": CARGO_EXPECT_DATE,
     "publish_now": True,
 }
 
