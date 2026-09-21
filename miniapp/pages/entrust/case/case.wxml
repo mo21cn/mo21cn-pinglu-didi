@@ -216,6 +216,7 @@
                 wx:for="{{categoryOptions}}"
                 wx:key="key"
                 class="act-btn {{decideForm.category === item.key ? 'act-btn-on' : ''}}"
+                data-act-decide-category="{{item.key}}"
                 data-cat="{{item.key}}"
                 bindtap="onPickCategory"
                 hover-class="hover-dim"
@@ -228,8 +229,9 @@
               wx:for="{{decisionOptions}}"
               wx:key="key"
               class="act-btn {{decideForm.to === item.key ? 'act-btn-on' : ''}}"
-              data-status="{{item.key}}"
-              bindtap="onPickDecision"
+                data-act-decide-to="{{item.key}}"
+                data-status="{{item.key}}"
+                bindtap="onPickDecision"
               hover-class="hover-dim"
             >{{item.label}}</view>
           </view>
@@ -315,8 +317,9 @@
               wx:for="{{closureOptions}}"
               wx:key="key"
               class="act-btn {{closeForm.disp === item.key ? 'act-btn-on' : ''}}"
-              data-disp="{{item.key}}"
-              bindtap="onPickDisposition"
+                data-act-close-disposition="{{item.key}}"
+                data-disp="{{item.key}}"
+                bindtap="onPickDisposition"
               hover-class="hover-dim"
             >以「{{item.label}}」关闭</view>
           </view>

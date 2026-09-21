@@ -102,6 +102,7 @@
             >让 Agent 解析这份报价单</view>
             <view
               class="att-btn"
+              data-act-reextract-open="1"
               data-attachment_id="{{item.attachmentId}}"
               hover-class="hover-dim"
               bindtap="onReextractAsk"
@@ -120,8 +121,16 @@
           <view wx:if="{{reextractId === item.attachmentId}}" class="confirm-bar">
             <text class="confirm-text">这份附件的文本来自人工转录，重新提取会覆盖它且不可恢复（提取失败时还会删掉）。确认覆盖？</text>
             <view class="confirm-actions">
-              <view class="confirm-cancel" bindtap="onReextractCancel">取消</view>
-              <view class="confirm-ok" bindtap="onReextractConfirm">确认重抽</view>
+              <view
+                class="confirm-cancel"
+                data-act-reextract-cancel="1"
+                bindtap="onReextractCancel"
+              >取消</view>
+              <view
+                class="confirm-ok"
+                data-act-reextract-confirm="1"
+                bindtap="onReextractConfirm"
+              >确认重抽</view>
             </view>
           </view>
 
@@ -135,7 +144,11 @@
               placeholder="粘贴或输入报价单内容"
             />
             <view class="confirm-actions">
-              <view class="confirm-cancel" bindtap="onTranscribeCancel">取消</view>
+              <view
+                class="confirm-cancel"
+                data-act-transcribe-cancel="1"
+                bindtap="onTranscribeCancel"
+              >取消</view>
               <view
                 class="confirm-ok"
                 data-act-transcribe-submit="1"
@@ -301,7 +314,11 @@
                 >
                   <text class="confirm-text">采纳「{{prop.typeLabel}}」为成果？这会新建一份成果（提案 ≠ 成果）。</text>
                   <view class="confirm-actions">
-                    <view class="confirm-cancel" bindtap="onAdoptCancel">取消</view>
+                    <view
+                      class="confirm-cancel"
+                      data-act-adopt-cancel="1"
+                      bindtap="onAdoptCancel"
+                    >取消</view>
                     <view class="confirm-ok" data-act-adopt-confirm="1" bindtap="onAdoptConfirm">确认采纳</view>
                   </view>
                 </view>
@@ -333,6 +350,7 @@
       <block wx:for="{{cards}}" wx:key="artifactId">
         <view
           class="card"
+          data-act-open-artifact="1"
           data-artifact_id="{{item.artifactId}}"
           hover-class="hover-dim"
           bindtap="onOpenArtifact"
@@ -369,7 +387,11 @@
       confirm-type="send"
       bindconfirm="onSend"
     />
-    <view class="composer-send {{sending ? 'composer-send-off' : ''}}" bindtap="onSend">
+    <view
+      class="composer-send {{sending ? 'composer-send-off' : ''}}"
+      data-act-send="{{sending ? 0 : 1}}"
+      bindtap="onSend"
+    >
       <text class="composer-send-text">{{sending ? '执行中' : '发送并解析'}}</text>
     </view>
   </view>
