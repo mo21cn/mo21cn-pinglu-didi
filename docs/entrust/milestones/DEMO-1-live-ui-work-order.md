@@ -308,9 +308,77 @@ WP-4 的准备从 WP-0 起并行，实现须在最终见证前完成
 
 | 项 | 状态 |
 | --- | --- |
-| 部署目标（云开发环境 ID） | ❌ 待 HO 建环境并给 **envId** |
+| 部署目标（云开发环境 ID） | ✅ **已开通**（见 E-0.9） |
 | 真实登录凭据（准入账号） | ❌ 待 HO |
 | 准入组织／用户清单 | ❌ 待 HO |
 | 模型配置（真 Key） | ⚠️ 本机 `.env.local` 有；**release 要独立配置**（仓库外） |
 | 发布渠道／类目资质 | ⚠️ 体验版不需要提审；**正式版**需要（属"正式发布决策"） |
 | 附件存储形态 | ⚠️ 待定：对象存储（推荐）／云托管持久卷 |
+
+## E-0.9 云开发环境已开通（HO 2026-09-23）＋ 接入层落地
+
+### E-0.9.1 环境事实
+
+| 项 | 值 |
+| --- | --- |
+| 环境 | `prod`（**上海**） |
+| **envId** | `prod-d0ga9bxi6e4226222` |
+| 主体 | 与 AppID `wx4a57f29bc38ca11d` 同主体（`callContainer` 的前提，✅） |
+| 随环境资源 | 云托管 MySQL（模板开通时一并创建；**凭据只在云托管环境变量里配，⛔ 不入仓库**） |
+| 环境内服务 | **`pinglu-backend`（尚未创建）** —— `config/env.js` 已按此名预配，创建时须同名 |
+
+### E-0.9.2 接入层落地（本提交）
+
+- 新增 **`miniapp/config/env.js`**：三档配置的唯一入口 —— `PROFILE`（dev/demo/release，
+  当前 `dev`）、`CLOUD_ENV_ID`、`CLOUD_SERVICE`；**切档＝改一行**。⛔ 模块顶层不碰 `wx`（Node 校验环境安全）。
+- `utils/request.js`：按档位分流 —— dev 走原 `wx.request` 直连（语义零改动，CI/走查基线不动）；
+  **demo/release 走 `wx.cloud.callContainer`**（私有协议，免域名/免备案）。两档共用同一套
+  响应/失败处理（`onResponse`/`onFail`），401 清态与错误形状不漂移；`describeError` 补
+  callContainer 专属分支（env 错／服务停机／基础库过旧给"依次确认"的可执行提示）。
+- ⛔ **release/demo 档禁用 Storage 覆盖**（WP-4："不用 LAN 兜底与本地存储覆盖"）——
+  `dev_base_url` 只在 dev 档生效。
+- `app.js`：云档 onLaunch 时 `wx.cloud.init({ env })`（`callContainer` 前置）。
+- `utils/entrust.js` 上传守卫：**云档下附件上传显式拒绝**（错误信息写明 WP-4 待办），
+  ⛔ 不静默把字节发到 dev 档的 LAN 地址 —— `callContainer` 不支持文件上传，合规通路
+  （对象存储中转或 base64 通道，仍经服务端嗅探）待 WP-4 接通后撤守卫。
+- **静态契约新增 6 条**（`verify_entrust_ui.js` §7）：三档入口存在／envId+服务名已配／
+  云档禁 Storage 覆盖／按档分流／callContainer 带 env＋`X-WX-SERVICE`／app.js 云档 init ——
+  全部"能失败"。
+
+### E-0.9.3 部署配方（绑 GitHub，构建上下文 `backend/`；HO 2026-09-23 选此方式）
+
+**① 建服务**：云托管控制台 → 服务列表 → 新建服务 → 名称 **`pinglu-backend`**
+（必须与 `miniapp/config/env.js` 的 `CLOUD_SERVICE` 同名，否则 `X-WX-SERVICE` 路由不到）。
+**监听端口填 `8000`**（容器内 `uvicorn --port 8000`，`Dockerfile` 已 `EXPOSE 8000`）。
+
+**② 绑 GitHub**：部署方式选「代码仓库 → GitHub」→ 仓库 `mo21cn/mo21cn-pinglu-didi`
+→ 分支 `develop` → **构建目录/上下文填 `backend`** → Dockerfile 路径 `Dockerfile`。
+（本仓 `backend/Dockerfile` 的 `COPY requirements.txt` / `COPY app`，**只认 `backend/` 作上下文**。）
+
+**③ 环境变量**（云托管服务的「配置 → 环境变量」里写，⛔ 不进仓库；
+全部来自 `backend/app/core/config.py` 的 `Settings`，pydantic 环境变量优先级 > `.env`）：
+
+| 变量 | 说明 | 本轮取值 |
+| --- | --- | --- |
+| `APP_ENV` | 镜像已 baked `production`，可再显式写一遍 | `production` |
+| `DEBUG` / `LOG_LEVEL` | 生产关调试 | `false` / `INFO` |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | 云托管 MySQL **内网**地址与账号；或直接用 `DATABASE_URL` 一次给全 | 内网地址／`3306`／库名／账号／**注入** |
+| `DATABASE_URL` | 非空时**优先**于上面五个；MySQL 形如 `mysql+pymysql://u:p@host:3306/db`（驱动 `pymysql` 已在 requirements） | 可选 |
+| `JWT_SECRET_KEY` | 登录签发必需 | **注入** |
+| `ENTRUST_ENABLED` | 委托支线开关（默认 `False`） | `true` |
+| `LLM_MOCK` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | 真模型：false＋填 Key；先跑通可用 `true`（内置规则，零网络） | 先 `true`，Key 后配 |
+| `WX_APP_ID` / `WX_APP_SECRET` | 真实登录（`callContainer` 会带 `x-wx-openid`） | **注入**；未配时 `WECHAT_MOCK=true` |
+| `REDIS_URL` | 无 Redis 可先不配（当前未强依赖） | 可选 |
+
+**④ 建库与迁移**：容器内已有 `migrate.py` + `migrations/`（本轮 `Dockerfile` 补上）⇒
+在云托管「容器执行 / 一次性任务」里跑 `python migrate.py`，它按 `(module, migration_id)`
+去重、**重复执行安全**；先建空库再跑。
+
+**⑤ 健康检查与自证**：`GET /healthz`（`backend/app/main.py:46`）—— 云托管健康检查填 `/healthz`，
+服务起来后先访问它确认容器活着，再回到小程序侧。
+
+**⑥ 切档并实测**：服务在线后把 `miniapp/config/env.js` 的 `PROFILE` 改 `'release'`
+→ 模拟器/真机走查 **`callContainer` 可达性**（本工作单点名的唯一技术风险点）。
+
+> ⚠️ 诚实边界：`callContainer` 从**模拟器**点通与否**尚未实测**（服务还没建）；
+> 本提交只保证"接线正确 + 契约锁死"，**"可达"要等上面第 ⑥ 步的设备证据**。

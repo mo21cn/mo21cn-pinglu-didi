@@ -366,6 +366,23 @@ check(
   /\.httpStatus\s*=/.test(requestJs)
 )
 
+// ── 云托管接入层（工作单 WP-0 E-0.4 三档配置；2026-09-23 环境已开通）──
+const envCfg = read(path.join(MINI, 'config', 'env.js'))
+check('[云托管] 存在三档配置入口 config/env.js（PROFILE 显式三选一）',
+  /const\s+PROFILE\s*=\s*'(dev|demo|release)'/.test(envCfg))
+check('[云托管] 配置了云环境 envId 与服务名（callContainer 的两个必填项）',
+  /CLOUD_ENV_ID\s*=\s*'[a-z0-9-]+'/.test(envCfg) && /CLOUD_SERVICE\s*=\s*'[a-z0-9-]+'/.test(envCfg))
+check('[云托管] release/demo 档禁用 Storage 覆盖（WP-4：不用本地存储覆盖）',
+  /if\s*\(!USE_CLOUD\)\s*\{[^}]*dev_base_url/.test(requestJs))
+check('[云托管] request 按档位分流到 callContainer（不是只在 dev 档可用的单通路）',
+  /USE_CLOUD\s*\?\s*cloudRequest\(opts\)\s*:\s*directRequest\(opts\)/.test(requestJs))
+check('[云托管] callContainer 指定目标环境（config.env）',
+  /callContainer\(\{[\s\S]*?config:\s*\{\s*env:\s*CLOUD_ENV_ID\s*\}/.test(requestJs))
+check('[云托管] 请求经 X-WX-SERVICE 头路由到指定服务（缺了打不进服务）',
+  /X-WX-SERVICE['"]\]\s*=\s*CLOUD_SERVICE/.test(requestJs))
+check('[云托管] app.js 在云档 onLaunch 时 init wx.cloud（callContainer 的前置）',
+  /PROFILE\s*!==\s*'dev'[\s\S]*?wx\.cloud\.init\(\{\s*env:\s*CLOUD_ENV_ID\s*\}\)/.test(read(path.join(MINI, 'app.js'))))
+
 const mineJs = read(path.join(MINI, 'pages/mine/mine.js'))
 check('[接线] 我的页通过 probeEntry 决定入口可见性', /probeEntry\(/.test(mineJs))
 check(

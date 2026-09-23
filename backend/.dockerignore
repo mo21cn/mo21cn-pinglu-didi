@@ -1,0 +1,40 @@
+# 云托管构建上下文 = `backend/`（服务部署时填的工作目录）
+# 目的有两个：① 减小构建上下文；② **即使将来 Dockerfile 改成 `COPY . .`，
+# 敏感文件也不会被拼进镜像** —— 密钥必须在仓库外、在环境变量里（WP-4 硬要求）。
+
+# 本机敏感值／环境文件（⛔ 永不入镜像：配置一律由环境变量注入）
+.env
+.env.*
+!.env.example
+!.env.production
+
+# 密钥备份
+secrets-backup/
+
+# 测试与缓存
+tests/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 本地运行产物（SQLite 开发库、临时目录）
+*.db
+*.sqlite3
+var/
+*.log
+
+# 版本控制与文档
+.git/
+.gitignore
+*.md
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+.venv/
+venv/

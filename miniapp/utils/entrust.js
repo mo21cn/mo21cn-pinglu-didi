@@ -24,6 +24,8 @@
 // `getToken` / `BASE_URL` 是给**上传**用的：`wx.uploadFile` 走的是另一套 API，
 // 它既不自动带鉴权头、也不解析 JSON 响应 —— 这两件事必须在调用处自己做。
 const { request, getToken, BASE_URL } = require('./request')
+// 运行档位（三档唯一入口）：云档下附件上传必须显式拒绝，见 `uploadAttachment`
+const { PROFILE } = require('../config/env')
 
 // ---------------------------------------------------------------------------
 // DEMO-1 canonical 样报价单（**前端副本**）
@@ -3418,6 +3420,16 @@ function decorateAttachment(row) {
 function uploadAttachment(filePath, opts, idempotencyKey) {
   const o = opts || {}
   return new Promise(function (resolve, reject) {
+    // ⛔ 云档守卫：`wx.uploadFile` 只会打到 dev 档的 LAN/回环地址，release/demo
+    // 档下那是**错的地址**（callContainer 不支持文件上传）。这里**显式拒绝**而不是
+    // 静默把字节发去开发机 —— 附件必须经服务端（魔数嗅探/提取/转录，工作单 E-0.8.2），
+    // 云档的合规通路（对象存储中转或 base64 通道）属 WP-4 待办，接通后撤掉本守卫。
+    if (PROFILE !== 'dev') {
+      const e = new Error('云托管档的附件上传通路尚未接通（WP-4 待办：经对象存储或 base64 通道，仍由服务端处理）')
+      e.httpStatus = 0
+      reject(e)
+      return
+    }
     const form = {}
     if (o.entrustmentId) form.entrustment_id = String(o.entrustmentId)
     else if (o.assignmentId) form.assignment_id = String(o.assignmentId)
