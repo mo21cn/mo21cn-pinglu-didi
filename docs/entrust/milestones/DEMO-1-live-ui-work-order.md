@@ -367,8 +367,18 @@ WP-4 的准备从 WP-0 起并行，实现须在最终见证前完成
 | `JWT_SECRET_KEY` | 登录签发必需 | **注入** |
 | `ENTRUST_ENABLED` | 委托支线开关（默认 `False`） | `true` |
 | `LLM_MOCK` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | 真模型：false＋填 Key；先跑通可用 `true`（内置规则，零网络） | 先 `true`，Key 后配 |
-| `WX_APP_ID` / `WX_APP_SECRET` | 真实登录（`callContainer` 会带 `x-wx-openid`） | **注入**；未配时 `WECHAT_MOCK=true` |
+| `WX_APP_ID` / `WX_APP_SECRET` | **直连通道**（`wx.request`，用 `wx.login` 的 code 换 openid）需要 | **注入** |
+| `CLOUD_OPENID_TRUSTED` | **云托管通道开关**（默认 `False`）。置 `true` 后后端采信平台按**微信私有协议**注入的 `x-wx-openid`，**免 code2session** ⇒ 顺带绕开容器出网可能撞上的 TLS 自签证书问题。⛔ **只有确认服务不经公网直连时才可开**（公网请求平台不注入该头，无条件采信等于把身份交给调用方伪造） | 切云档时 `true` |
 | `REDIS_URL` | 无 Redis 可先不配（当前未强依赖） | 可选 |
+
+> **登录的两条通道**（见 `backend/app/modules/auth/`）：
+> 1. **直连通道** —— 小程序 `wx.request` → `POST /auth/login {code}` → 后端调 `code2session` 换 openid；
+> 2. **云托管通道** —— 小程序 `wx.cloud.callContainer` → 平台按微信私有协议注入 `x-wx-openid`
+>    → 后端**直接采信**（需 `CLOUD_OPENID_TRUSTED=true`），**完全不调 code2session**。
+>
+> ⚠️ 云托管容器出网访问 `api.weixin.qq.com` 时可能撞上**平台自签证书**，容器日志表现为
+> `code2session 网络异常: [SSL: CERTIFICATE_VERIFY_FAILED] ... self-signed certificate`
+> —— 这正是云托管通道应当**优先于** code2session 的原因：它把「出网」这一环整个省掉了。
 
 **④ 建库与迁移**：容器内已有 `migrate.py` + `migrations/`（本轮 `Dockerfile` 补上）⇒
 在云托管「容器执行 / 一次性任务」里跑 `python migrate.py`，它按 `(module, migration_id)`

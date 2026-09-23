@@ -102,6 +102,45 @@ async def code2session(code: str, dev_code: str = "") -> dict[str, str]:
     return {"openid": openid, "unionid": data.get("unionid", "") or ""}
 
 
+async def resolve_identity(
+    code: str = "",
+    dev_code: str = "",
+    cloud_openid: str = "",
+    cloud_unionid: str = "",
+) -> dict[str, str]:
+    """解析登录身份：**云托管注入的可信 openid 优先**，否则回落到 code2session。
+
+    为什么需要云托管通道：小程序走 `wx.cloud.callContainer` 时，平台按**微信私有协议**
+    注入当前用户身份（`x-wx-openid`），后端**无需**再调 code2session —— 既省一次外部往返，
+    也绕开了容器出网可能遇到的 TLS 证书问题（云托管容器访问微信接口时可能撞上平台
+    自签证书，表现为 `CERTIFICATE_VERIFY_FAILED`，详见 `docs/` 的联动诊断报告）。
+
+    ⚠️ 采信该头**必须**满足 `CLOUD_OPENID_TRUSTED=true`：公网直连时平台不注入，
+    若无条件采信，任何人都能自带该头冒充任意用户。Mock 模式下也不采信（保证测试可复现）。
+
+    Args:
+        code: `wx.login` 的临时凭证（云托管通道下可为空）。
+        dev_code: 预览期回退身份（演示账号 code）。
+        cloud_openid: 请求头 `x-wx-openid`。
+        cloud_unionid: 请求头 `x-wx-unionid`。
+
+    Returns:
+        {"openid": ..., "unionid": ...}
+
+    Raises:
+        WechatAuthError: 两条通道都拿不到身份。
+    """
+    if cloud_openid and settings.CLOUD_OPENID_TRUSTED and not settings.WECHAT_MOCK:
+        logger.info("云托管通道采信平台注入身份: openid=%s", cloud_openid)
+        return {"openid": cloud_openid, "unionid": cloud_unionid or ""}
+
+    if not code:
+        raise WechatAuthError(
+            "缺少登录凭证：未收到云托管注入的 x-wx-openid，也未提供 wx.login 的 code"
+        )
+    return await code2session(code, dev_code)
+
+
 def upsert_user(db: Session, openid: str, unionid: str, nickname: str, role: str) -> User:
     """按 openid 查找用户；不存在则注册（新用户绑定首个角色）。"""
     user = db.query(User).filter(User.openid == openid).first()

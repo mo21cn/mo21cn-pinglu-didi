@@ -164,9 +164,79 @@ def test_token_payload_carries_audit_fields(client):
 # ---------- 非微信侧校验 ----------
 
 
-def test_login_empty_code_422(client):
+def test_login_without_code_and_without_cloud_header_401(client, monkeypatch):
+    """既无云托管注入身份、又无 code ⇒ 401（凭证缺失）。
+
+    注：`code` 已改为可选（云托管通道不需要它），因此这里不再是 422 参数校验失败，
+    而是登录凭证缺失的 401 —— 语义更准确。
+    """
+    monkeypatch.setattr(settings, "WECHAT_MOCK", False)
+    monkeypatch.setattr(settings, "CLOUD_OPENID_TRUSTED", True)
     resp = client.post("/api/v1/auth/login", json={"code": ""})
-    assert resp.status_code == 422
+    assert resp.status_code == 401
+    assert "缺少登录凭证" in resp.json()["detail"]
+
+
+# ---------- 微信云托管通道（x-wx-openid）----------
+# 小程序走 wx.cloud.callContainer 时，平台按**微信私有协议**注入当前用户身份，
+# 后端无需再调 code2session —— 既省一次外部往返，也绕开了容器出网可能撞上的
+# TLS 自签证书问题。⚠️ 但该头在公网直连时平台**不会**注入，故必须显式开启
+# CLOUD_OPENID_TRUSTED 才采信，否则任何人都能自带该头冒充任意用户。
+
+
+def test_cloud_openid_trusted_takes_precedence(client, monkeypatch):
+    """开关开启：平台注入的 openid 直接采信，且**不需要** code。"""
+    monkeypatch.setattr(settings, "WECHAT_MOCK", False)
+    monkeypatch.setattr(settings, "CLOUD_OPENID_TRUSTED", True)
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"nickname": "云通道用户"},
+        headers={"x-wx-openid": "o-cloud-openid-trusted"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["openid"] == "o-cloud-openid-trusted"
+    assert body["user_id"] > 0
+    assert body["current_role"] == "shipper"
+
+
+def test_cloud_openid_rejected_when_not_trusted(client, monkeypatch):
+    """开关关闭（默认）：注入头被忽略 ⇒ 无 code 时 401，伪造身份不可行。"""
+    monkeypatch.setattr(settings, "WECHAT_MOCK", False)
+    monkeypatch.setattr(settings, "CLOUD_OPENID_TRUSTED", False)
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"code": ""},
+        headers={"x-wx-openid": "o-forged-openid"},
+    )
+    assert resp.status_code == 401
+    assert "缺少登录凭证" in resp.json()["detail"]
+
+
+def test_cloud_openid_ignored_in_mock_mode(client, monkeypatch):
+    """Mock 模式下即使开关开启也不采信注入头，保证本地/CI 身份可复现。"""
+    monkeypatch.setattr(settings, "WECHAT_MOCK", True)
+    monkeypatch.setattr(settings, "CLOUD_OPENID_TRUSTED", True)
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"code": "seed-shipper"},
+        headers={"x-wx-openid": "o-should-be-ignored"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["openid"] == "mock-openid-seed-shipper"
+
+
+def test_cloud_header_does_not_break_direct_channel(client, monkeypatch):
+    """开关关闭时，带 code 的直连链路不受注入头影响（既有行为零改动）。"""
+    monkeypatch.setattr(settings, "WECHAT_MOCK", True)
+    monkeypatch.setattr(settings, "CLOUD_OPENID_TRUSTED", False)
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"code": "seed-owner"},
+        headers={"x-wx-openid": "o-ignored"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["openid"] == "mock-openid-seed-owner"
 
 
 # ---------- 预览回退身份（dev_code）----------

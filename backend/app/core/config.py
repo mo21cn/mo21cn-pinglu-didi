@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     WX_PAY_KEY: str = ""
     # Mock 开关：true 时不真实调用 code2session（本地开发/CI 无 appid 时使用）
     WECHAT_MOCK: bool = False
+    # 微信云托管通道：是否采信平台注入的 `x-wx-openid` 头（默认 False，安全优先）。
+    # ⚠️ 该头由云托管在**微信私有协议**请求（wx.cloud.callContainer）上注入，
+    #    走公网域名直连时平台**不注入** —— 因此只有确认服务仅经私有协议对外时才可开启，
+    #    否则任何人都能自带该头冒充任意用户。云托管环境需显式设为 true。
+    CLOUD_OPENID_TRUSTED: bool = False
 
     # ---- 撮合引擎 ----
     MATCH_STAGE1_TIMEOUT_MS: int = 200
