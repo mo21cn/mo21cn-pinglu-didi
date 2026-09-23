@@ -81,9 +81,7 @@ def main() -> int:
         cmd = [sys.executable, os.path.join("scripts", name), *extra]
         print(f"[boot_seed] → {' '.join(cmd)}", flush=True)
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=600, check=False
-            )
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
         except subprocess.TimeoutExpired:
             failed.append(name)
             print(f"[boot_seed] !! {name} 超时（>600s）", flush=True)
@@ -114,9 +112,7 @@ def main() -> int:
         ]
         print(f"[boot_seed] → {' '.join(cmd)}", flush=True)
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300, check=False
-            )
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
             for line in (proc.stdout or "").strip().splitlines():
                 print(f"[boot_seed]    {line}", flush=True)
             if proc.returncode != 0:

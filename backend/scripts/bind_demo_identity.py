@@ -90,9 +90,7 @@ def bind(db, openid: str) -> int:  # type: ignore[no-untyped-def]
 
     archived = f"archived-{target_id}"
     print(f"[bind] 1/2 归档空账号 id={target_id} → openid={archived}")
-    db.execute(
-        text("UPDATE users SET openid = :n WHERE id = :i"), {"n": archived, "i": target_id}
-    )
+    db.execute(text("UPDATE users SET openid = :n WHERE id = :i"), {"n": archived, "i": target_id})
     print(f"[bind] 2/2 演示账号 id={demo_id} 接管 openid={openid}")
     db.execute(text("UPDATE users SET openid = :o WHERE id = :i"), {"o": openid, "i": demo_id})
     db.commit()
