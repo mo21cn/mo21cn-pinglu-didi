@@ -345,16 +345,40 @@ WP-4 的准备从 WP-0 起并行，实现须在最终见证前完成
   云档禁 Storage 覆盖／按档分流／callContainer 带 env＋`X-WX-SERVICE`／app.js 云档 init ——
   全部"能失败"。
 
-### E-0.9.3 下一步（把 release 档点亮的控制台动作，按序）
+### E-0.9.3 部署配方（绑 GitHub，构建上下文 `backend/`；HO 2026-09-23 选此方式）
 
-1. 云托管控制台 → 服务列表 → **创建服务 `pinglu-backend`**（空白服务），监听端口设 **8000**
-   （容器内 uvicorn 就是 8000）；
-2. 部署方式：上传 `backend/` 目录打包（zip，含 `Dockerfile`），或绑定 GitHub 仓库选 `backend/` 上下文；
-3. 服务**环境变量**（云托管侧配置，⛔ 不进仓库）：`APP_ENV=production`、数据库连接串
-   （指向环境内 MySQL 内网地址）、模型 Key、`ENTRUST_ENABLED` 等密钥类；
-4. MySQL 内建库＋跑迁移（迁移 SQL 在仓，CI 已在 MySQL 8.0 验证过）；
-5. 小程序侧把 `PROFILE` 切 `release` → 模拟器/真机走查 **`callContainer` 可达性**
-   （本工作单点名的唯一技术风险点，实测才算数）。
+**① 建服务**：云托管控制台 → 服务列表 → 新建服务 → 名称 **`pinglu-backend`**
+（必须与 `miniapp/config/env.js` 的 `CLOUD_SERVICE` 同名，否则 `X-WX-SERVICE` 路由不到）。
+**监听端口填 `8000`**（容器内 `uvicorn --port 8000`，`Dockerfile` 已 `EXPOSE 8000`）。
+
+**② 绑 GitHub**：部署方式选「代码仓库 → GitHub」→ 仓库 `mo21cn/mo21cn-pinglu-didi`
+→ 分支 `develop` → **构建目录/上下文填 `backend`** → Dockerfile 路径 `Dockerfile`。
+（本仓 `backend/Dockerfile` 的 `COPY requirements.txt` / `COPY app`，**只认 `backend/` 作上下文**。）
+
+**③ 环境变量**（云托管服务的「配置 → 环境变量」里写，⛔ 不进仓库；
+全部来自 `backend/app/core/config.py` 的 `Settings`，pydantic 环境变量优先级 > `.env`）：
+
+| 变量 | 说明 | 本轮取值 |
+| --- | --- | --- |
+| `APP_ENV` | 镜像已 baked `production`，可再显式写一遍 | `production` |
+| `DEBUG` / `LOG_LEVEL` | 生产关调试 | `false` / `INFO` |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | 云托管 MySQL **内网**地址与账号；或直接用 `DATABASE_URL` 一次给全 | 内网地址／`3306`／库名／账号／**注入** |
+| `DATABASE_URL` | 非空时**优先**于上面五个；MySQL 形如 `mysql+pymysql://u:p@host:3306/db`（驱动 `pymysql` 已在 requirements） | 可选 |
+| `JWT_SECRET_KEY` | 登录签发必需 | **注入** |
+| `ENTRUST_ENABLED` | 委托支线开关（默认 `False`） | `true` |
+| `LLM_MOCK` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | 真模型：false＋填 Key；先跑通可用 `true`（内置规则，零网络） | 先 `true`，Key 后配 |
+| `WX_APP_ID` / `WX_APP_SECRET` | 真实登录（`callContainer` 会带 `x-wx-openid`） | **注入**；未配时 `WECHAT_MOCK=true` |
+| `REDIS_URL` | 无 Redis 可先不配（当前未强依赖） | 可选 |
+
+**④ 建库与迁移**：容器内已有 `migrate.py` + `migrations/`（本轮 `Dockerfile` 补上）⇒
+在云托管「容器执行 / 一次性任务」里跑 `python migrate.py`，它按 `(module, migration_id)`
+去重、**重复执行安全**；先建空库再跑。
+
+**⑤ 健康检查与自证**：`GET /healthz`（`backend/app/main.py:46`）—— 云托管健康检查填 `/healthz`，
+服务起来后先访问它确认容器活着，再回到小程序侧。
+
+**⑥ 切档并实测**：服务在线后把 `miniapp/config/env.js` 的 `PROFILE` 改 `'release'`
+→ 模拟器/真机走查 **`callContainer` 可达性**（本工作单点名的唯一技术风险点）。
 
 > ⚠️ 诚实边界：`callContainer` 从**模拟器**点通与否**尚未实测**（服务还没建）；
-> 本提交只保证"接线正确 + 契约锁死"，**"可达"要等 E-0.9.3 第 5 步的设备证据**。
+> 本提交只保证"接线正确 + 契约锁死"，**"可达"要等上面第 ⑥ 步的设备证据**。
