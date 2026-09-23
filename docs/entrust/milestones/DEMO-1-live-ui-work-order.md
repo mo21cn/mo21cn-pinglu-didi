@@ -412,6 +412,29 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
 `code=seed-shipper` 登录，云端 `APP_ENV=production` 会去**真实调微信 code2session** ⇒ 必然失败；
 而放开 `seed-*` 直通等于让任何人凭一个固定字符串登录成演示账号，**不可接受**。待另行设计。
 
+**④'' 演示身份归属**（✅ 已落地 2026-09-23；同日按评审加固）：种子把数据挂在
+`mock-openid-seed-shipper`（**货主**，委托的 owner）与 `mock-openid-seed-owner`（**组织经理**，
+队列视角）两个**演示账号**上，而云端登录拿到的是**平台注入的真实 openid** ⇒ 是两个账号、
+界面看起来"功能正常但全空"。一次性动作 `scripts/bind_demo_identity.py` 把演示账号的 openid
+**过继**给真实账号（**不迁数据**：`ent_*` 全部按 `user_id` 关联），由 `BIND_DEMO_IDENTITY` 触发。
+
+⛔ 四条硬约束（评审后加固，别退回旧做法）：
+
+- **没有 `auto`**：原自动模式取「最近创建的非演示账号」，**无法证明那就是操作者本人的微信号**
+  ⇒ 必须先 `--mode list` 读候选，再**显式**给 `--openid` / `--user-id`；
+- **目标已有业务数据则拒绝**（加 `--force` 才放行）：否则那些行会挂到被归档的账号下；
+- **回滚 SQL 必须"先释放再还原"**：`users.openid` 有唯一约束，原打印顺序会撞冲突；
+- **重开 `SEED_ON_BOOT` 会被拦**：`boot_seed.py` 先探演示账号状态，`bound` / `unknown` 一律
+  **跳过铺种子** —— 否则种子按 openid 找不到演示账号会新建一个，铺出**第二套样本**。
+
+⚠️ 已知边界：过继只给了**货主**那个账号，而「委托发货（组织受理）」入口的判据是
+**组织成员资格 + 委托授权 + `entrust:view`** ⇒ 以货主身份看到的组织队列为空。
+要演示受理台，需把该账号补成组织成员，或用第二个微信号登录 `seed-owner`。
+
+⚠️ **治理**：这是**演示环境的一次性准备**，不是上线路径。真实用户的身份与权限应走
+**正常准入 + 组织授权**（`ent_org_member` / `ent_entrustment`），
+**不应长期依赖"改 openid 把种子数据分给某个人"**。
+
 **⑤ 健康检查与自证**：`GET /healthz`（`backend/app/main.py:46`）—— 云托管健康检查填 `/healthz`，
 服务起来后先访问它确认容器活着，再回到小程序侧。
 
