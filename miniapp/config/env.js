@@ -17,7 +17,21 @@
 // ---------------------------------------------------------------------------
 
 // 当前档位：上线前把这一行改成 'release'（或出体验版时改 'demo'）
-const PROFILE = 'dev'
+//
+// ⚠️ 生效规则分两级（2026-09-23 补，为了"切档"不误伤 CI）：
+//   1. `MP_PROFILE` 环境变量优先（CI 想专门测某一档时显式指定）；
+//   2. **Node 校验环境默认回落 `dev`** —— 因为 `verify_frontend_e2e.js` 等脚本会**直接
+//      require 本文件**，若它们跟着线上档位走去连云托管，CI 会因"本地没有真实云"而假红。
+//      小程序运行时**没有 `process`**，所以真机/开发者工具**始终**取 `RUNTIME_PROFILE`。
+const RUNTIME_PROFILE = 'demo'
+const NODE_FALLBACK_PROFILE = 'dev'
+
+const isNodeRuntime =
+  typeof process !== 'undefined' && !!process.versions && !!process.versions.node
+
+const PROFILE = isNodeRuntime
+  ? process.env.MP_PROFILE || NODE_FALLBACK_PROFILE
+  : RUNTIME_PROFILE
 
 // 微信云托管环境 ID（envId）—— 2026-09-23 HO 开通，与 AppID wx4a57f29bc38ca11d 同主体
 const CLOUD_ENV_ID = 'prod-d0ga9bxi6e4226222'
