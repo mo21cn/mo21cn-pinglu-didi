@@ -19,6 +19,11 @@ COPY app ./app
 COPY migrate.py .
 COPY migrations ./migrations
 
+# 演示数据种子 + 启动期编排器：容器**没有 Shell**，这些脚本只能在容器内被调用
+# （`seed_entrust_*.py` 是**直连库**的，而云库是内网地址，容器外根本连不上）。
+COPY scripts ./scripts
+COPY boot_seed.py .
+
 # 容器内不含任何 .env 文件（本 Dockerfile 只 COPY 上面三项）
 # ⇒ 配置**只能**来自环境变量，符合 WP-4「密钥在仓库外」；
 #   pydantic-settings 里环境变量优先级高于 .env 文件，注入即生效。
@@ -35,4 +40,8 @@ EXPOSE 8000
 # 迁移本身按 `(module, migration_id)` 去重、可重复执行（见 `migrate.py`），启动开销很小。
 # ⛔ 迁移失败**不吞异常**（不用 `|| true` 之类）：宁可让本次部署失败、立刻暴露，
 #    也不要服务"活着但不工作"—— 这正是本次要修的故障模式。
-CMD ["sh", "-c", "python migrate.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+#
+# 演示数据（可选、一次性）：`SEED_ON_BOOT=true` 时后台铺种子，**铺完请把它关掉**。
+# 它与迁移**故意不同**：种子只决定"界面有没有数据"，服务本身是好的，
+# 所以让它失败只打印日志、不阻塞启动 —— 免得把小问题放大成服务不可用。
+CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
