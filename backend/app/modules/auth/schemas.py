@@ -15,9 +15,18 @@ ROLE_LABELS = {
 
 
 class LoginRequest(BaseModel):
-    """微信登录请求：code 由 wx.login() 获取。"""
+    """微信登录请求。
 
-    code: str = Field(..., min_length=1, max_length=128, description="wx.login 返回的临时凭证")
+    两条通道：
+    - **直连**（`wx.request`）：填 `code`（由 `wx.login()` 获取）；
+    - **云托管**（`wx.cloud.callContainer`）：平台注入 `x-wx-openid`，`code` 可为空。
+    """
+
+    code: str = Field(
+        default="",
+        max_length=128,
+        description="wx.login 返回的临时凭证。走云托管通道时平台已注入身份，可为空。",
+    )
     nickname: str = Field(default="", max_length=64, description="昵称（可选，首次注册时使用")
     dev_code: str = Field(
         default="",

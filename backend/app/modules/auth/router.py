@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -28,10 +28,27 @@ router = APIRouter()
 
 
 @router.post("/login", response_model=TokenResponse, summary="微信登录（三角色合一）")
-async def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    """wx.login 的 code 换 openid；新用户自动注册，默认角色为货主（shipper）。"""
+async def login(
+    body: LoginRequest,
+    db: Session = Depends(get_db),
+    x_wx_openid: str = Header(default="", alias="x-wx-openid"),
+    x_wx_unionid: str = Header(default="", alias="x-wx-unionid"),
+) -> TokenResponse:
+    """登录两条通道；新用户自动注册，默认角色为货主（shipper）。
+
+    - **云托管通道**（`wx.cloud.callContainer`）：平台按微信私有协议注入 `x-wx-openid`，
+      直接采信，**不再调 code2session**；
+    - **直连通道**（`wx.request`）：用 `wx.login` 的 code 调 code2session 换取 openid。
+
+    采信注入头需 `CLOUD_OPENID_TRUSTED=true`（默认关闭，防止公网伪造身份）。
+    """
     try:
-        wx = await service.code2session(body.code, body.dev_code)
+        wx = await service.resolve_identity(
+            code=body.code,
+            dev_code=body.dev_code,
+            cloud_openid=x_wx_openid,
+            cloud_unionid=x_wx_unionid,
+        )
     except service.WechatAuthError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
