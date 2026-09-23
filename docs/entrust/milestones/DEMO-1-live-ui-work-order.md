@@ -380,9 +380,37 @@ WP-4 的准备从 WP-0 起并行，实现须在最终见证前完成
 > `code2session 网络异常: [SSL: CERTIFICATE_VERIFY_FAILED] ... self-signed certificate`
 > —— 这正是云托管通道应当**优先于** code2session 的原因：它把「出网」这一环整个省掉了。
 
-**④ 建库与迁移**：容器内已有 `migrate.py` + `migrations/`（本轮 `Dockerfile` 补上）⇒
-在云托管「容器执行 / 一次性任务」里跑 `python migrate.py`，它按 `(module, migration_id)`
-去重、**重复执行安全**；先建空库再跑。
+**④ 建库与迁移**（✅ 已落地并实测 2026-09-23）：
+~~「在云托管「容器执行 / 一次性任务」里跑 `python migrate.py`」~~ —— **这条路走不通**：
+云托管容器**没有 Shell**（「云端调试」页只是 HTTP 接口调试器，不是终端），无法人工进容器执行。
+⇒ 已把迁移**并进启动命令**（`backend/Dockerfile`），启动即迁移、**失败不吞**：
+
+```dockerfile
+CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+```
+
+迁移按 `(module, migration_id)` 去重、**重复执行安全**（实测二次执行为「0 条」）。
+**实测证据**：`pinglu-backend-008` 启动日志 `✓ 本次执行 44 条迁移（方言：mysql）`
+—— **MySQL 5.7 兼容性同时得到验证**（此前只能靠"未见 8.0 专有语法"推断）。
+
+⚠️ **漏跑迁移的症状极难排查**：`app/main.py` 的 `create_all` 明确排除 `ent_` 前缀，
+缺表时表现为「服务正常、`/healthz` 200，但业务接口整组 500 / 功能整块不可见」。
+**本项目一度把它误判成「代码回退到 0.5.1 版本」**，最后靠容器日志
+`(1146, "Table 'pinglu.ent_assignment' doesn't exist")` 才定位。
+⇒ 迁移必须 fail-fast；**别在文档里写"人工进容器执行"这类走不通的步骤**。
+
+**④' 演示数据**（✅ 已落地 2026-09-23）：同理，`scripts/seed_*.py` 也**只能在容器内**跑
+（`seed_entrust_*` 是**直连库**的，而云库是内网地址 `10.1.105.83`，容器外连不上）。
+已由 `backend/boot_seed.py` 承载，受环境变量 **`SEED_ON_BOOT=true`** 控制 ——
+⚠️ **铺完请把它关掉**，避免每次部署重复插入。
+
+它与迁移**刻意不同**：迁移 fail-fast（决定服务能否正确工作），
+种子**不阻塞**服务启动（只决定界面有没有数据）—— 让服务因为"演示数据没铺上"而起不来，
+是把小问题放大成大故障；失败仍**明确打印**，不静默。
+
+⚠️ 未覆盖：`seed_demo.py`（平台侧货源/船舶/订单）**不在**启动种子里 —— 它走 HTTP 且以
+`code=seed-shipper` 登录，云端 `APP_ENV=production` 会去**真实调微信 code2session** ⇒ 必然失败；
+而放开 `seed-*` 直通等于让任何人凭一个固定字符串登录成演示账号，**不可接受**。待另行设计。
 
 **⑤ 健康检查与自证**：`GET /healthz`（`backend/app/main.py:46`）—— 云托管健康检查填 `/healthz`，
 服务起来后先访问它确认容器活着，再回到小程序侧。
