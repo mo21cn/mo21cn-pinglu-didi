@@ -81,9 +81,7 @@ def main() -> int:
         cmd = [sys.executable, os.path.join("scripts", name), *extra]
         print(f"[boot_seed] → {' '.join(cmd)}", flush=True)
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=600, check=False
-            )
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
         except subprocess.TimeoutExpired:
             failed.append(name)
             print(f"[boot_seed] !! {name} 超时（>600s）", flush=True)
@@ -100,6 +98,30 @@ def main() -> int:
             print(f"[boot_seed] !! {name} 退出码 {proc.returncode}", flush=True)
             for line in (proc.stderr or "").strip().splitlines()[-5:]:
                 print(f"[boot_seed]    ERR {line}", flush=True)
+
+    # 一次性：把演示数据归属切到**真实登录账号**（`BIND_DEMO_IDENTITY` = list / auto / <openid>）
+    # 说明：种子把数据挂在 `mock-openid-seed-*` 演示账号上，而登录拿到的是平台注入的
+    # 真实 openid ⇒ 是两个账号、界面仍为空。这里把演示账号的 openid 过继给真实账号。
+    bind_mode = os.getenv("BIND_DEMO_IDENTITY", "").strip()
+    if bind_mode:
+        cmd = [
+            sys.executable,
+            os.path.join("scripts", "bind_demo_identity.py"),
+            "--mode",
+            bind_mode,
+        ]
+        print(f"[boot_seed] → {' '.join(cmd)}", flush=True)
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+            for line in (proc.stdout or "").strip().splitlines():
+                print(f"[boot_seed]    {line}", flush=True)
+            if proc.returncode != 0:
+                failed.append("bind_demo_identity.py")
+                for line in (proc.stderr or "").strip().splitlines()[-5:]:
+                    print(f"[boot_seed]    ERR {line}", flush=True)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            failed.append("bind_demo_identity.py")
+            print(f"[boot_seed] !! 身份绑定异常: {exc}", flush=True)
 
     if failed:
         print(f"[boot_seed] 结束，但以下步骤失败：{failed}", flush=True)
