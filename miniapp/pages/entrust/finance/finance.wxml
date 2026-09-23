@@ -122,6 +122,13 @@
           </view>
           <input class="input" placeholder="费用类别（如 freight / waiting_time）" value="{{chargeForm.chargeKind}}" data-key="chargeKind" bindinput="onChargeInput" />
           <input class="input" placeholder="金额（元）" value="{{chargeForm.amount}}" data-key="amount" bindinput="onChargeInput" />
+          <!-- WP-1（2026-09-21）**数量与单位**：此前这两个入参只有接口能给
+               （`ChargeCreateIn.quantity` / `unit` 早已存在）⇒ 界面登记的费用行
+               说得出"金额"，却说不出"按多少算的"。
+               ⛔ **不自动带出委托货量**、也不在货量变更后静默重算已确认金额
+               （工作单 WP-1 明令）；这里只记录**本条费用自己的**计费口径。 -->
+          <input class="input" placeholder="数量（可选，与单位成对）" value="{{chargeForm.quantity}}" data-key="quantity" bindinput="onChargeInput" />
+          <input class="input" placeholder="单位（可选，如 吨 / 车 / 次）" value="{{chargeForm.unit}}" data-key="unit" bindinput="onChargeInput" />
           <input class="input" placeholder="计费依据（必填）" value="{{chargeForm.basis}}" data-key="basis" bindinput="onChargeInput" />
           <input class="input" placeholder="对手方（可选）" value="{{chargeForm.counterparty}}" data-key="counterparty" bindinput="onChargeInput" />
           <view class="btn btn-mini" data-act="submit-charge" bindtap="onSubmitCharge">登记</view>

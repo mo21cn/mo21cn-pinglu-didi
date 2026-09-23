@@ -1153,6 +1153,60 @@
                 maxlength="128"
                 bindinput="onTaskInput"
               />
+
+              <!-- WP-1（2026-09-21）**前置任务**（可选）：列表来自 `plan.tasks`
+                   （本单**可读**的任务与前置总览），**点的是标题、存的是服务端 id** ——
+                   ⛔ 不要求用户手输内部 id（工作单 WP-1 明确要求）。
+                   ⛔ 前端不判"环/跨单"：那由服务端按既有契约拒并给可读理由。 -->
+              <view class="slot-note">前置任务（可留空）</view>
+              <view class="slot-pick-row">
+                <view
+                  class="slot-pick {{taskForm.preconditionId ? 'slot-pick-on' : ''}}"
+                  data-act-precondition-toggle="1"
+                  bindtap="onTogglePrecondition"
+                  hover-class="hover-dim"
+                >{{taskForm.preconditionLabel || '选择前置任务'}}</view>
+                <view
+                  wx:if="{{taskForm.preconditionId}}"
+                  class="slot-pick"
+                  data-act-precondition-clear="1"
+                  bindtap="onClearPrecondition"
+                  hover-class="hover-dim"
+                >清除前置</view>
+              </view>
+              <view wx:if="{{preconditionPick}}" class="slot-picks">
+                <block wx:if="{{plan && plan.tasks.length}}">
+                  <view
+                    wx:for="{{plan.tasks}}"
+                    wx:key="taskIdText"
+                    class="slot-pick"
+                    data-act-precondition-pick="{{item.taskIdText}}"
+                    data-pre-id="{{item.taskIdText}}"
+                    data-pre-label="{{item.titleText}}"
+                    bindtap="onPickPrecondition"
+                    hover-class="hover-dim"
+                  >{{item.titleText}}（#{{item.taskIdText}} · {{item.statusText}}）</view>
+                </block>
+                <view wx:else class="slot-note slot-warn">本单还没有可作前置的任务</view>
+              </view>
+
+              <!-- WP-1（2026-09-21）**必需证据**（多选，可留空）：取值域与运力证据
+                   **同一张表**（7 类，⇄ `registry.ALL_EVIDENCE_KINDS`）——
+                   ⛔ 不新建第二套证据分类；选中态由 `onToggleEvidence` 重建选项数组。 -->
+              <view class="slot-note">必需证据（可留空 ＝ 不要求）</view>
+              <view class="slot-picks">
+                <view
+                  wx:for="{{taskEvidenceOptions}}"
+                  wx:for-item="ev"
+                  wx:key="key"
+                  class="slot-pick {{ev.on ? 'slot-pick-on' : ''}}"
+                  data-act-task-evidence="{{ev.key}}"
+                  data-ev-kind="{{ev.key}}"
+                  bindtap="onToggleEvidence"
+                  hover-class="hover-dim"
+                >{{ev.label}}</view>
+              </view>
+
               <view
                 class="slot-btn slot-btn-strong"
                 data-act-task-submit="{{item.key}}"
