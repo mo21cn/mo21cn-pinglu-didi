@@ -24,6 +24,8 @@
 // `getToken` / `BASE_URL` 是给**上传**用的：`wx.uploadFile` 走的是另一套 API，
 // 它既不自动带鉴权头、也不解析 JSON 响应 —— 这两件事必须在调用处自己做。
 const { request, getToken, BASE_URL } = require('./request')
+// 运行档位（三档唯一入口）：云档下附件上传必须显式拒绝，见 `uploadAttachment`
+const { PROFILE } = require('../config/env')
 
 // ---------------------------------------------------------------------------
 // DEMO-1 canonical 样报价单（**前端副本**）
