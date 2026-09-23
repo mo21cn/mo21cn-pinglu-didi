@@ -308,9 +308,53 @@ WP-4 的准备从 WP-0 起并行，实现须在最终见证前完成
 
 | 项 | 状态 |
 | --- | --- |
-| 部署目标（云开发环境 ID） | ❌ 待 HO 建环境并给 **envId** |
+| 部署目标（云开发环境 ID） | ✅ **已开通**（见 E-0.9） |
 | 真实登录凭据（准入账号） | ❌ 待 HO |
 | 准入组织／用户清单 | ❌ 待 HO |
 | 模型配置（真 Key） | ⚠️ 本机 `.env.local` 有；**release 要独立配置**（仓库外） |
 | 发布渠道／类目资质 | ⚠️ 体验版不需要提审；**正式版**需要（属"正式发布决策"） |
 | 附件存储形态 | ⚠️ 待定：对象存储（推荐）／云托管持久卷 |
+
+## E-0.9 云开发环境已开通（HO 2026-09-23）＋ 接入层落地
+
+### E-0.9.1 环境事实
+
+| 项 | 值 |
+| --- | --- |
+| 环境 | `prod`（**上海**） |
+| **envId** | `prod-d0ga9bxi6e4226222` |
+| 主体 | 与 AppID `wx4a57f29bc38ca11d` 同主体（`callContainer` 的前提，✅） |
+| 随环境资源 | 云托管 MySQL（模板开通时一并创建；**凭据只在云托管环境变量里配，⛔ 不入仓库**） |
+| 环境内服务 | **`pinglu-backend`（尚未创建）** —— `config/env.js` 已按此名预配，创建时须同名 |
+
+### E-0.9.2 接入层落地（本提交）
+
+- 新增 **`miniapp/config/env.js`**：三档配置的唯一入口 —— `PROFILE`（dev/demo/release，
+  当前 `dev`）、`CLOUD_ENV_ID`、`CLOUD_SERVICE`；**切档＝改一行**。⛔ 模块顶层不碰 `wx`（Node 校验环境安全）。
+- `utils/request.js`：按档位分流 —— dev 走原 `wx.request` 直连（语义零改动，CI/走查基线不动）；
+  **demo/release 走 `wx.cloud.callContainer`**（私有协议，免域名/免备案）。两档共用同一套
+  响应/失败处理（`onResponse`/`onFail`），401 清态与错误形状不漂移；`describeError` 补
+  callContainer 专属分支（env 错／服务停机／基础库过旧给"依次确认"的可执行提示）。
+- ⛔ **release/demo 档禁用 Storage 覆盖**（WP-4："不用 LAN 兜底与本地存储覆盖"）——
+  `dev_base_url` 只在 dev 档生效。
+- `app.js`：云档 onLaunch 时 `wx.cloud.init({ env })`（`callContainer` 前置）。
+- `utils/entrust.js` 上传守卫：**云档下附件上传显式拒绝**（错误信息写明 WP-4 待办），
+  ⛔ 不静默把字节发到 dev 档的 LAN 地址 —— `callContainer` 不支持文件上传，合规通路
+  （对象存储中转或 base64 通道，仍经服务端嗅探）待 WP-4 接通后撤守卫。
+- **静态契约新增 6 条**（`verify_entrust_ui.js` §7）：三档入口存在／envId+服务名已配／
+  云档禁 Storage 覆盖／按档分流／callContainer 带 env＋`X-WX-SERVICE`／app.js 云档 init ——
+  全部"能失败"。
+
+### E-0.9.3 下一步（把 release 档点亮的控制台动作，按序）
+
+1. 云托管控制台 → 服务列表 → **创建服务 `pinglu-backend`**（空白服务），监听端口设 **8000**
+   （容器内 uvicorn 就是 8000）；
+2. 部署方式：上传 `backend/` 目录打包（zip，含 `Dockerfile`），或绑定 GitHub 仓库选 `backend/` 上下文；
+3. 服务**环境变量**（云托管侧配置，⛔ 不进仓库）：`APP_ENV=production`、数据库连接串
+   （指向环境内 MySQL 内网地址）、模型 Key、`ENTRUST_ENABLED` 等密钥类；
+4. MySQL 内建库＋跑迁移（迁移 SQL 在仓，CI 已在 MySQL 8.0 验证过）；
+5. 小程序侧把 `PROFILE` 切 `release` → 模拟器/真机走查 **`callContainer` 可达性**
+   （本工作单点名的唯一技术风险点，实测才算数）。
+
+> ⚠️ 诚实边界：`callContainer` 从**模拟器**点通与否**尚未实测**（服务还没建）；
+> 本提交只保证"接线正确 + 契约锁死"，**"可达"要等 E-0.9.3 第 5 步的设备证据**。
