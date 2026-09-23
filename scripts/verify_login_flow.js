@@ -92,13 +92,28 @@ function makeHarness(o) {
     },
   }
 
+  // ⚠️ 桩只认下面这几个模块，**未识别的必须抛错**，不许静默返回 {}。
+  // 教训（本文件曾因此静默失效）：`utils/request.js` 新增 `require('../config/env')`
+  // 取 `PROFILE` 后，桩把它解析成 {} ⇒ `PROFILE` 为 undefined ⇒ `PROFILE !== 'dev'`
+  // 成立 ⇒ 误判成云档走 `wx.cloud.callContainer` ⇒ 22 项断言全红，而**报错指向云端**，
+  // 与真实缺陷（桩缺模块）毫无关系。
+  // 静态契约（verify_require_paths.js）只能保证"路径指向真实文件"，
+  // **不能保证本桩能解析它** —— 所以这里改成"缺一个就炸"，把静默降级变响。
   const req = (p) => {
     const s = String(p)
     let file = null
     if (s === './request' || s.indexOf('utils/request') !== -1) file = path.join(MP, 'utils', 'request.js')
     else if (s === './auth' || s.indexOf('utils/auth') !== -1) file = path.join(MP, 'utils', 'auth.js')
+    else if (s.indexOf('config/env') !== -1) file = path.join(MP, 'config', 'env.js')
     else if (s.indexOf('tabbar') !== -1) return { syncTabBar() {} }
-    else return {}
+    else {
+      throw new Error(
+        'makeHarness 的模块桩不认识 require("' + s + '")。\n'
+        + '  这不是被测代码的缺陷，而是本脚本的桩缺了模块。\n'
+        + '  静态契约查不出这一类（只保证路径存在，不保证桩能解析）。\n'
+        + '  修法：在 scripts/verify_login_flow.js 的 req() 里补上该模块的分支。'
+      )
+    }
     if (cache[file]) return cache[file]
     const mod = { exports: {} }
     new Function('require', 'module', 'exports', 'wx', fs.readFileSync(file, 'utf8'))(req, mod, mod.exports, wx)
