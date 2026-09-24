@@ -1,4 +1,16 @@
-"""启动期铺演示数据 —— 仅当环境变量 `SEED_ON_BOOT=true` 时执行。
+"""启动期的**演示环境准备**（铺种子 ＋ 一次性动作）。
+
+本脚本同时承载两类事，**各自看自己的环境变量、互不依赖**：
+
+| 环境变量 | 动作 | 语义 |
+| --- | --- | --- |
+| `SEED_ON_BOOT=true` | 按序铺委托侧种子（幂等） | 见下方"执行顺序" |
+| `BIND_DEMO_IDENTITY=<openid｜user:<id>>` | 把演示账号的 openid **过继**给真实登录账号 | 一次性 |
+| `DEMO_GRANT_ORG_MEMBER=<openid｜user:<id>>` | 给该账号补**组织成员资格**（受理台才有数据） | 一次性 |
+
+⛔ 一次性动作**不接受** `auto` / `true`（无法证明那条账号就是操作者本人的微信号）；
+⛔ 一次性动作**独立于** `SEED_ON_BOOT` 与播种守卫 —— 过继之后播种守卫会跳过铺种子，
+若把一次性动作写在守卫之后并由守卫早退，它们会被一并吞掉（2026-09-24 实测的陷阱）。
 
 为什么需要它
 ------------
@@ -134,66 +146,88 @@ def _run_script(name: str, extra: tuple[str, ...] = (), *, timeout: int = 600) -
     return True
 
 
-def main() -> int:
-    """按序铺种子；始终返回 0（不阻塞服务启动）。"""
-    if os.getenv("SEED_ON_BOOT", "").strip().lower() != "true":
-        print("[boot_seed] SEED_ON_BOOT 未开启，跳过铺种子", flush=True)
-        return 0
+def _explicit_target_args(raw: str, *, mode: str) -> tuple[tuple[str, ...] | None, str | None]:
+    """把 `<openid>` / `user:<id>` 翻成脚本参数；`auto` / `true` 之类一律拒绝。
 
-    print("[boot_seed] SEED_ON_BOOT=true，等待后端就绪 …", flush=True)
-    if not _wait_backend():
-        print("[boot_seed] !! 后端未就绪，放弃铺种子（不影响服务）", flush=True)
-        return 0
+    ⛔ 为什么拒绝：那两个值会落到"自动挑一个账号"的语义上 —— 无法证明挑中的就是
+    操作者本人的微信号（详见 `scripts/bind_demo_identity.py` 的模块说明）。
+    返回 `(args, None)` 表示可用；`(None, 原值)` 表示非法。
+    """
+    value = raw.strip()
+    if value.lower() in {"auto", "true", "1", "yes"}:
+        return None, value
+    if value.startswith("user:"):
+        return ("--mode", mode, "--user-id", value[len("user:") :]), None
+    return ("--mode", mode, "--openid", value), None
 
-    # 铺之前先确认「没被过继过」——否则会铺出第二套样本（见模块 docstring）
-    state = _demo_state()
-    print(f"[boot_seed] 演示账号状态 = {state}", flush=True)
-    reason = _seed_skip_reason(state)
-    if reason:
-        print(f"[boot_seed] ⛔ {reason}", flush=True)
-        print(
-            "[boot_seed]    如需重铺：先在隔离库上核对，再手工处理演示账号后再开 SEED_ON_BOOT",
-            flush=True,
-        )
-        return 0
 
+#: 启动期的**一次性动作**：`(环境变量名, 脚本名, 子命令, 超时秒)`
+ONESHOTS: tuple[tuple[str, str, str, int], ...] = (
+    # 把演示账号的 openid 过继给真实登录账号（种子数据归属切换）
+    ("BIND_DEMO_IDENTITY", "bind_demo_identity.py", "bind", 300),
+    # 给演示账号补组织成员资格（让"受理台"也有数据：一个微信号走完整条链）
+    ("DEMO_GRANT_ORG_MEMBER", "grant_demo_membership.py", "grant", 300),
+)
+
+
+def _run_oneshots() -> list[str]:
+    """跑所有**已配置**的一次性动作，返回失败项。
+
+    ⚠️ 刻意**独立于** `SEED_ON_BOOT` 与播种守卫：过继之后播种守卫会跳过铺种子
+    （避免第二套样本），但"补组织成员资格"这类动作仍需要在**同一个容器启动**里执行 ——
+    若把它放在守卫之后并由守卫早退，就会被一起吞掉（2026-09-24 实测的设计陷阱）。
+    """
     failed: list[str] = []
-    for name, extra in SEED_STEPS:
-        if not _run_script(name, extra):
-            failed.append(name)
+    for env_name, script, mode, timeout in ONESHOTS:
+        raw = os.getenv(env_name, "").strip()
+        if not raw:
+            continue
+        extra, bad = _explicit_target_args(raw, mode=mode)
+        if extra is None:
+            failed.append(f"{script}(参数非法)")
+            print(
+                f"[boot_seed] ⛔ {env_name}={bad} 不接受：auto/true 无法证明那条账号是你本人的",
+                flush=True,
+            )
+            print(f"[boot_seed]    请改用显式值：{env_name}=<openid>（或 user:<id>）", flush=True)
+            continue
+        if not _run_script(script, extra, timeout=timeout):
+            failed.append(script)
+    return failed
 
-    # 一次性：把演示数据归属切到**真实登录账号**（`BIND_DEMO_IDENTITY` = `<openid>` 或 `user:<id>`）
-    # 说明：种子把数据挂在 `mock-openid-seed-*` 演示账号上，而登录拿到的是平台注入的
-    # 真实 openid ⇒ 是两个账号、界面仍为空。这里把演示账号的 openid 过继给真实账号。
-    # ⛔ 刻意**不接受** `auto` / `true`：那会挑「最近创建的非演示账号」，
-    #    无法证明它就是操作者本人的微信号 —— 绑错等于把演示数据挂到别人名下。
-    bind_target = os.getenv("BIND_DEMO_IDENTITY", "").strip()
-    if bind_target:
-        if bind_target.lower() in {"auto", "true", "1", "yes"}:
-            failed.append("bind_demo_identity.py(参数非法)")
-            print(
-                f"[boot_seed] ⛔ BIND_DEMO_IDENTITY={bind_target} 不接受："
-                "auto/true 无法证明那条账号是你的微信号",
-                flush=True,
-            )
-            print(
-                "[boot_seed]    先设 list 读候选日志，再改成显式值："
-                "BIND_DEMO_IDENTITY=<openid>（或 user:<id>）",
-                flush=True,
-            )
+
+def main() -> int:
+    """按序铺种子 + 跑一次性动作；**始终返回 0**（不阻塞服务启动）。"""
+    failed: list[str] = []
+
+    if os.getenv("SEED_ON_BOOT", "").strip().lower() == "true":
+        print("[boot_seed] SEED_ON_BOOT=true，等待后端就绪 …", flush=True)
+        if not _wait_backend():
+            print("[boot_seed] !! 后端未就绪，放弃铺种子（不影响服务）", flush=True)
         else:
-            extra = (
-                ("--mode", "bind", "--user-id", bind_target[len("user:") :])
-                if bind_target.startswith("user:")
-                else ("--mode", "bind", "--openid", bind_target)
-            )
-            if not _run_script("bind_demo_identity.py", extra, timeout=300):
-                failed.append("bind_demo_identity.py")
+            # 铺之前先确认「没被过继过」——否则会铺出第二套样本（见模块 docstring）
+            state = _demo_state()
+            print(f"[boot_seed] 演示账号状态 = {state}", flush=True)
+            reason = _seed_skip_reason(state)
+            if reason:
+                print(f"[boot_seed] ⛔ {reason}", flush=True)
+                print(
+                    "[boot_seed]    如需重铺：先在隔离库上核对，再手工处理演示账号后再开 SEED_ON_BOOT",
+                    flush=True,
+                )
+            else:
+                for name, extra in SEED_STEPS:
+                    if not _run_script(name, extra):
+                        failed.append(name)
+    else:
+        print("[boot_seed] SEED_ON_BOOT 未开启，跳过铺种子", flush=True)
+
+    failed.extend(_run_oneshots())
 
     if failed:
         print(f"[boot_seed] 结束，但以下步骤失败：{failed}", flush=True)
     else:
-        print("[boot_seed] 全部种子执行完成 ✓", flush=True)
+        print("[boot_seed] 启动期任务执行完成 ✓", flush=True)
     return 0
 
 
