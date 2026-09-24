@@ -271,3 +271,95 @@ def test_boot_seed_rejects_auto_grant_target(monkeypatch, capsys):  # type: igno
     assert "不接受" in out
     assert "DEMO_GRANT_ORG_MEMBER=<openid>" in out
     assert calls == []
+
+
+# ── 多目标（2026-09-24：两位测试者一次授予） ────────────────────────────────
+
+
+def test_grant_env_accepts_multiple_targets(monkeypatch, capsys):  # type: ignore[no-untyped-def]
+    """体验成员是多个人 ⇒ 一次性动作必须能一次授予多条，避免反复改环境变量＋反复冷启动。"""
+    monkeypatch.setenv("DEMO_GRANT_ORG_MEMBER", "user:4,user:5")
+    calls: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(
+        boot_seed,
+        "_run_script",
+        lambda name, extra=(), **k: calls.append((name, tuple(extra))) or True,
+    )
+
+    assert boot_seed.main() == 0
+    out = capsys.readouterr().out
+    assert calls == [
+        ("grant_demo_membership.py", ("--mode", "grant", "--user-id", "4")),
+        ("grant_demo_membership.py", ("--mode", "grant", "--user-id", "5")),
+    ]
+    assert "共 2 个目标" in out
+
+
+@pytest.mark.parametrize("raw", ["user:4 user:5", "user:4, user:5", " user:4 ,user:5 "])
+def test_grant_env_tolerates_separators_and_spaces(monkeypatch, raw):  # type: ignore[no-untyped-def]
+    """逗号 / 空白 / 混合，以及多余空格都必须容忍 —— 运维手抄时最常见的噪声。"""
+    monkeypatch.setenv("DEMO_GRANT_ORG_MEMBER", raw)
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        boot_seed, "_run_script", lambda name, extra=(), **k: calls.append(tuple(extra)) or True
+    )
+
+    assert boot_seed.main() == 0
+    assert calls == [
+        ("--mode", "grant", "--user-id", "4"),
+        ("--mode", "grant", "--user-id", "5"),
+    ]
+
+
+def test_grant_env_supports_mixed_openid_and_user_id(monkeypatch):  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DEMO_GRANT_ORG_MEMBER", "oxREAL0000000000000000000000,user:5")
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        boot_seed, "_run_script", lambda name, extra=(), **k: calls.append(tuple(extra)) or True
+    )
+
+    assert boot_seed.main() == 0
+    assert calls == [
+        ("--mode", "grant", "--openid", "oxREAL0000000000000000000000"),
+        ("--mode", "grant", "--user-id", "5"),
+    ]
+
+
+def test_grant_env_rejects_whole_list_when_any_target_invalid(monkeypatch, capsys):  # type: ignore[no-untyped-def]
+    """列表里有一项非法 ⇒ **整段拒绝**（不静默跳过），否则"以为加了两条、实际一条"会变成下一个故障。"""
+    monkeypatch.setenv("DEMO_GRANT_ORG_MEMBER", "user:4,auto")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        boot_seed, "_run_script", lambda name, extra=(), **k: calls.append(name) or True
+    )
+
+    assert boot_seed.main() == 0
+    assert calls == []
+    assert "不接受" in capsys.readouterr().out
+
+
+def test_grant_env_rejects_malformed_user_id(monkeypatch, capsys):  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DEMO_GRANT_ORG_MEMBER", "user:abc")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        boot_seed, "_run_script", lambda name, extra=(), **k: calls.append(name) or True
+    )
+
+    assert boot_seed.main() == 0
+    assert calls == []
+    assert "不接受" in capsys.readouterr().out
+
+
+def test_oneshot_failure_is_reported_with_target(monkeypatch, capsys):  # type: ignore[no-untyped-def]
+    """失败项要**点名到目标**：只报脚本名会让人不知道是哪一条没加上。"""
+    monkeypatch.setenv("DEMO_GRANT_ORG_MEMBER", "user:4,user:5")
+    # 4 成功、5 失败（回显最后一位参数即 user-id）
+    monkeypatch.setattr(
+        boot_seed, "_run_script", lambda name, extra=(), **k: tuple(extra)[-1] == "4"
+    )
+
+    assert boot_seed.main() == 0
+    out = capsys.readouterr().out
+    assert "以下步骤失败" in out
+    assert "grant_demo_membership.py(user:5)" in out
+    assert "grant_demo_membership.py(user:4)" not in out

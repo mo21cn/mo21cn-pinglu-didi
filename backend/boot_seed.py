@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `SEED_ON_BOOT=true` | 按序铺委托侧种子（幂等） | 见下方"执行顺序" |
 | `BIND_DEMO_IDENTITY=<openid｜user:<id>>` | 把演示账号的 openid **过继**给真实登录账号 | 一次性 |
-| `DEMO_GRANT_ORG_MEMBER=<openid｜user:<id>>` | 给该账号补**组织成员资格**（受理台才有数据） | 一次性 |
+| `DEMO_GRANT_ORG_MEMBER=<openid｜user:<id>>` | 给该账号补**组织成员资格**（受理台才有数据） | 一次性；**可多个**，逗号分隔 |
 
 ⛔ 一次性动作**不接受** `auto` / `true`（无法证明那条账号就是操作者本人的微信号）；
 ⛔ 一次性动作**独立于** `SEED_ON_BOOT` 与播种守卫 —— 过继之后播种守卫会跳过铺种子，
@@ -146,19 +146,43 @@ def _run_script(name: str, extra: tuple[str, ...] = (), *, timeout: int = 600) -
     return True
 
 
-def _explicit_target_args(raw: str, *, mode: str) -> tuple[tuple[str, ...] | None, str | None]:
-    """把 `<openid>` / `user:<id>` 翻成脚本参数；`auto` / `true` 之类一律拒绝。
+def _explicit_target_args(
+    raw: str, *, mode: str
+) -> tuple[list[tuple[str, ...]] | None, str | None]:
+    """把 `<openid>` / `user:<id>`（**可多个**，逗号或空白分隔）翻成脚本参数。
 
-    ⛔ 为什么拒绝：那两个值会落到"自动挑一个账号"的语义上 —— 无法证明挑中的就是
-    操作者本人的微信号（详见 `scripts/bind_demo_identity.py` 的模块说明）。
-    返回 `(args, None)` 表示可用；`(None, 原值)` 表示非法。
+    ⛔ 为什么拒绝 `auto` / `true`：那两个值会落到"自动挑一个账号"的语义上 ——
+    无法证明挑中的就是操作者本人的微信号（详见 `scripts/bind_demo_identity.py` 的模块说明）。
+    返回 `(args_list, None)` 表示可用；`(None, 原值)` 表示非法。
+
+    ⚠️ 为什么要支持**多个**目标（2026-09-24 实测）：体验成员是**多个微信号**，
+    而"体验成员资格"与"组织成员资格"是**两张表、两件事**（前者在小程序后台，
+    后者是 `ent_org_member`）。每多一位测试者，就需要给一个新 `user_id` 补成员行；
+    只支持单目标时得**反复改环境变量 + 反复重启**（每次都触发一次冷启动）。
+    一次性动作因此改为接受列表：`DEMO_GRANT_ORG_MEMBER=user:4,user:5`。
+
+    任一项非法 ⇒ **整段拒绝**（不静默跳过其中一条）：静默半成功会让"我以为加了两条、
+    实际只加了一条"变成下一个需要排查的故障。
     """
     value = raw.strip()
-    if value.lower() in {"auto", "true", "1", "yes"}:
+    if not value:
         return None, value
-    if value.startswith("user:"):
-        return ("--mode", mode, "--user-id", value[len("user:") :]), None
-    return ("--mode", mode, "--openid", value), None
+    items = [part for part in value.replace(",", " ").split() if part]
+    if not items:
+        return None, value
+
+    args_list: list[tuple[str, ...]] = []
+    for item in items:
+        if item.lower() in {"auto", "true", "1", "yes"}:
+            return None, item
+        if item.startswith("user:"):
+            tail = item[len("user:") :].strip()
+            if not tail.isdigit():
+                return None, item
+            args_list.append(("--mode", mode, "--user-id", tail))
+        else:
+            args_list.append(("--mode", mode, "--openid", item))
+    return args_list, None
 
 
 #: 启动期的**一次性动作**：`(环境变量名, 脚本名, 子命令, 超时秒)`
@@ -182,17 +206,25 @@ def _run_oneshots() -> list[str]:
         raw = os.getenv(env_name, "").strip()
         if not raw:
             continue
-        extra, bad = _explicit_target_args(raw, mode=mode)
-        if extra is None:
+        args_list, bad = _explicit_target_args(raw, mode=mode)
+        if args_list is None:
             failed.append(f"{script}(参数非法)")
             print(
                 f"[boot_seed] ⛔ {env_name}={bad} 不接受：auto/true 无法证明那条账号是你本人的",
                 flush=True,
             )
-            print(f"[boot_seed]    请改用显式值：{env_name}=<openid>（或 user:<id>）", flush=True)
+            print(
+                f"[boot_seed]    请改用显式值：{env_name}=<openid>（或 user:<id>，多个用逗号分隔）",
+                flush=True,
+            )
             continue
-        if not _run_script(script, extra, timeout=timeout):
-            failed.append(script)
+        if len(args_list) > 1:
+            print(f"[boot_seed] {env_name} 共 {len(args_list)} 个目标，逐个执行", flush=True)
+        for i, extra in enumerate(args_list, start=1):
+            tag = os.getenv(env_name, "").strip().replace(",", " ").split()[i - 1]
+            print(f"[boot_seed] ── 目标 {i}/{len(args_list)}：{tag} ──", flush=True)
+            if not _run_script(script, extra, timeout=timeout):
+                failed.append(f"{script}({tag})")
     return failed
 
 
