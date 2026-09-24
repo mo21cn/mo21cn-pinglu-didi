@@ -34,6 +34,13 @@ from scripts.bind_demo_identity import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clean_boot_env(monkeypatch):
+    """清掉启动期开关，避免本机环境变量污染用例（一次性动作现已扩到两项）。"""
+    for name in ("SEED_ON_BOOT", "BIND_DEMO_IDENTITY", "DEMO_GRANT_ORG_MEMBER"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _make_session(*, with_migrations: bool = True):  # type: ignore[no-untyped-def]
     engine = create_engine(
         "sqlite://",
