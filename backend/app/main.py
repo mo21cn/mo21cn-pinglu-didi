@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 
 from app.core.config import get_settings
@@ -23,6 +25,50 @@ from app.modules.port import router as port_router
 from app.modules.ship import router as ship_router
 
 settings = get_settings()
+
+#: 应用日志格式。**带 logger 名**：云端日志里 uvicorn 访问行与业务行混排，
+#: 没有 logger 名就只能靠文案猜"这条属于哪一层"。
+LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+
+
+def _resolve_level(level: str) -> int:
+    """把配置里的级别字符串翻成 logging 常量；无法识别 ⇒ INFO（不静默变成 NOTSET）。"""
+    value = getattr(logging, str(level or "").strip().upper(), None)
+    return value if isinstance(value, int) else logging.INFO
+
+
+def configure_logging(level: str) -> None:
+    """把**应用自身**的日志接到 stdout。
+
+    ## 为什么必须有这一步（2026-09-24 实测的排查成本）
+
+    此前全仓没有任何 `basicConfig` / root handler —— `uvicorn` 只配置**它自己的**
+    logger，于是应用 logger 的日志在云端**只剩 WARNING 以上可见**（Python 的
+    `lastResort` 处理器只管 WARNING+）。后果不是"少几条日志"，而是**关键事实缺失**：
+
+    * `auth/service.py` 里那条「云托管通道采信平台注入身份: openid=…」是 `logger.info`
+      ⇒ 云端看不见 ⇒ 排查"这次登录的是哪个账号"时**没有任何日志证据**，
+      只能反推（2026-09-24 甲方「委托发货」空队列故障即因此多绕了数步）；
+    * 而 `logger.error` 的「code2session 网络异常」看得见 ⇒ 症状是"只有报错、没有上下文"。
+
+    接上 root handler 后，`LOG_LEVEL`（云侧 `INFO`）才真的生效 —— 环境变量写了
+    而无人读取，等于没配。
+
+    ⚠️ **不能只调 `logging.basicConfig`**：root 上**已有 handler** 时它是**静默 no-op**
+    （`basicConfig` 只在"无 handler"时才动 root）。测试框架、宿主进程、uvicorn 的
+    `dictConfig` 都可能事先装上 handler ⇒ 级别悄悄不变，症状与"没接线"完全一样，
+    且更难查（看起来代码是对的）。所以这里分两路：无 handler 才交给 `basicConfig`
+    （顺带装上我们的格式），有 handler 就**显式抬级别**。
+    """
+    numeric = _resolve_level(level)
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=numeric, format=LOG_FORMAT)
+        return
+    root.setLevel(numeric)
+
+
+configure_logging(settings.LOG_LEVEL)
 
 app = FastAPI(
     title=settings.APP_NAME,
