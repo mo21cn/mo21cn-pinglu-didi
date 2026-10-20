@@ -153,7 +153,7 @@
           <text class="ch-radio-label">默认</text>
         </view>
       </view>
-      <view class="ch-desc">您发布货物，自行在<text class="ch-brand">船好多</text>平台找寻认证船主接单并完成运输。</view>
+      <view class="ch-desc">您发布货物，自行在<text class="ch-brand">向海通</text>平台找寻认证船主接单并完成运输。</view>
 
       <!-- `data-act-entrust` 是走查锚点：两个 `.ch-opt` 是**同类元素**，而工具没有
            index 参数（`nth-child` 被忽略、坐标触摸也会落到第一个）⇒ 没有可区分的
@@ -178,7 +178,7 @@
           <text class="ch-radio-label">默认</text>
         </view>
       </view>
-      <view class="ch-desc">您发布货物，委托给<text class="ch-brand">船好多</text>平台承运，由平台组织运力完成运输。</view>
+      <view class="ch-desc">您发布货物，委托给<text class="ch-brand">向海通</text>平台承运，由平台组织运力完成运输。</view>
     </view>
   </view>
 </view>

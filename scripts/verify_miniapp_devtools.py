@@ -788,8 +788,8 @@ _STATE: dict = {}
 ARTIFACT_ID = 5
 
 # ⑮ 章文案（逐字对齐设计稿）
-DESC_SELF = "您发布货物，自行在船好多平台找寻认证船主接单并完成运输。"
-DESC_ENTRUST = "您发布货物，委托给船好多平台承运，由平台组织运力完成运输。"
+DESC_SELF = "您发布货物，自行在向海通平台找寻认证船主接单并完成运输。"
+DESC_ENTRUST = "您发布货物，委托给向海通平台承运，由平台组织运力完成运输。"
 
 
 class Reporter:
@@ -1586,7 +1586,7 @@ def sec_15(w: Walker) -> None:
     )
 
     # 文案：`--action text` 只能读第一个匹配项 → 用整块 WXML 做包含断言（等价）。
-    # ⚠️ 必须先剥掉标签：desc 文案里嵌了 `<text class="ch-brand">船好多</text>`，
+    # ⚠️ 必须先剥掉标签：desc 文案里嵌了 `<text class="ch-brand">向海通</text>`，
     # 标签会把纯文本切断（2026-09-13 实测踩到，误报为「文案缺失」）。
     panel = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".ch-panel")))
     w.rep.rec(

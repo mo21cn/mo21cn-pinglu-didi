@@ -874,8 +874,8 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
     for (const el of await cp.$$('.ch-desc')) descs.push((await el.text()).replace(/\s+/g, ''))
     rec('⑮ 两段说明文案齐全（自行找船 / 平台承运）',
       descs.length === 2 &&
-      /自行在船好多平台找寻认证船主接单并完成运输。$/.test(descs[0] || '') &&
-      /委托给船好多平台承运，由平台组织运力完成运输。$/.test(descs[1] || ''),
+      /自行在向海通平台找寻认证船主接单并完成运输。$/.test(descs[0] || '') &&
+      /委托给向海通平台承运，由平台组织运力完成运输。$/.test(descs[1] || ''),
       descs.join(' || '))
     rec('⑮ 两枚单选圈 + 「默认」标记（设计稿元素齐全）',
       (await cp.$$('.ch-ring')).length === 2 && (await cp.$$('.ch-radio-label')).length === 2)
