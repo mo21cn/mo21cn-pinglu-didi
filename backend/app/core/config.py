@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # 开关与服务端权限相互独立：开启后每个端点仍各自做叠加层权限校验。
     ENTRUST_ENABLED: bool = False
 
+    # ---- 智慧关务（关域）D1 ----
+    # 官方数据源开关。**默认关闭**：Q-02（数据源授权）未定，关务状态只能来自人工登记。
+    # 拿到授权后只改这一项（不改代码、不改页面）：`/api/v1/customs/sources` 会随之翻成
+    # 「可用」，页面据此渲染查询入口。⛔ 打开它**不等于**已有数据 —— 仍需适配层真实回源。
+    CUSTOMS_OFFICIAL_SOURCE_ENABLED: bool = False
+
     # ---- 附件（S1 第 5 条）----
     # 20 MiB 上限**可配置**（计划 §3.2 建模红线），不是硬编码常量。
     ATTACHMENT_MAX_BYTES: int = 20 * 1024 * 1024
