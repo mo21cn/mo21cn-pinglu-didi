@@ -5,6 +5,44 @@
 
 ## [未发布]
 
+### 变更 · 命名统一（2026-10-25）
+
+产品名统一为 **「向海通航运数字化运营与智能决策平台」（简称「向海通」）**；本轮开发的关务模块
+统一为 **「智慧关务」**。
+
+- 文档：`docs/**` 内的旧产品名替换为「向海通」（10 个文件 / 25 处）；
+  `MVP开发与交付计划_向海通委托发货AgentIM_v1.7.md` **连同文件名**一并更名，
+  并同步三处引用（决策记录模板、`decisions/0010`、`DEMO-1-contract-v1.0`）；
+- 标题级首现用全称：`README.md`、MVP 交付计划、Agent IM PRD 三处写入
+  「向海通航运数字化运营与智能决策平台（简称「向海通」）」，其余文档用简称；
+- 模块名：界面文案与代码注释统一为「智慧关务」（原「智慧通关 / 委托关务」不再使用）；
+- **刻意不改的三类**（写了理由，避免下次"顺手全替换"）：
+  1. `docs/entrust/evidence/**` —— 机器原始件，改写即篡改证据；
+  2. 本文件的历史条目 —— 描述的是当时的事实；
+  3. `design/prototypes/**` —— 图像生成 prompt，指向素材上**真实印着**的旧字样，
+     改字会让 prompt 与素材对不上（素材重绘是另一件事）。
+- 仓库名 `pinglu-didi`、包名 `pinglu_didi` **不改**：改动成本极高且不影响对外表述。
+
+### 新增 · 智慧关务 D1 最小骨架（人工登记 + 状态时间线）
+
+关域从"只有入口"到"数据能进库"的第一刀。**不接任何外部数据源**（Q-02 未定），
+状态全部来自人工登记，并把这件事写进响应里而不是藏起来。
+
+- 迁移 `backend/migrations/cus_declaration.py`：`cus_declaration`（报关记录）+
+  `cus_status_event`（状态事件，**只追加**）；与 `ent_*` 弱关联（存 `assignment_id`，无外键）；
+  `source` / `source_kind` / `fetched_at` 三列 NOT NULL —— AC-09 的落点；
+- `backend/app/modules/customs/`：`/api/v1/customs` 五个端点 ——
+  `GET /sources`（数据源状态）、`POST /declarations`、`GET /declarations?no=`、
+  `GET /declarations/{id}`、`POST /declarations/{id}/events`（**比决策文档多一条**：
+  没有它，"同一票货的第二条状态"无处可写，时间线永远只有一行，AC-06 演不出来）；
+- 派生状态只在服务层算：`released` 为终态，晚到的乱序旧事件不得把它顶回去；
+  更正＝追加一条 `corrects_event_id`，原记录保留；
+- 可见性：本人或所属组织成员，不可见与不存在**同一种 404**（不泄漏存在性）；
+- 配置 `CUSTOMS_OFFICIAL_SOURCE_ENABLED`（默认 `False`）：拿到授权后只改这一项，
+  `/sources` 即翻成「可用」，页面不用动；
+- 测试 `backend/tests/test_customs_declarations.py`（16 项）：服务层 10 项 + API 6 项，
+  覆盖派生状态、终态冻结、只追加、重复登记 409、越权写、跨用户 404、新鲜度、幂等重放。
+
 ### 新增
 
 - **真机预览部署（手机微信扫码体验本机实例）** —— 把「手机访问本机后端」真正打通，并消除两个必踩的坑：
