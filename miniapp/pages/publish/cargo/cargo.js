@@ -65,19 +65,50 @@ Page({
     ppPorts: PORTS,
     ppAction: '',
 
-    // 发货方式选择弹窗（纯前端，不涉及后端；进入本页即弹出）
-    showChannel: true
+    // 发货及关务方式选择弹窗（纯前端，不涉及后端；进入本页即弹出）
+    showChannel: true,
+    // 「智慧关务 · 规划中」说明层（点绿卡后弹出；纯前端静态文案，零接口调用）
+    cusTipVisible: false
   },
 
   onLoad() {
     const d = new Date(Date.now() + 24 * 3600 * 1000)
-    // 点击 tabBar 中间「+发货」进入本页 → 先弹「自主发货 / 委托发货」选择
+    // 点击 tabBar 中间「+发货」进入本页 → 先弹「智慧关务 / 自主发货 / 委托发货」选择
     this.setData({ 'form.expect_date': fmtDate(d), showChannel: true })
     // 来自「✨Ai 解析页」或「统一入口」的草稿 → 回填表单
     this.applySmartDraft()
   },
 
-  // ---- 发货方式选择（纯前端：自主发货=本页续填；委托发货=占位预览页） ----
+  // ---- 发货 / 关务方式选择（纯前端：关务=规划中说明；自主发货=本页续填；委托发货=真实受理屏） ----
+  /**
+   * 智慧关务（关域）：**规划中口径**，不进入任何页面。
+   *
+   * 为什么不是一个空页面：《船好多-智慧通关-需求开发文档-v1.0》§13 的 M1（查询骨架）
+   * 都还没做，`pages/customs/*` 在 `app.json` 里不存在。挂一个点进去必然空白（或必然
+   * 失败）的入口，比不挂更糟 —— 这是文档 §3 权限原则第 4 条的原话，也是本仓库对
+   * 「看起来有」的入口一贯的态度（`pickEntrustDelivery` 上一版就踩过：跳一页
+   * 「功能预览，即将开放」，零接口调用）。
+   *
+   * 所以这里只做一件事：把**边界**说清楚（信息服务 / 不代申报 / 以官方结果为准）。
+   * 这三句是 PRD §10.1 与附录 B 的原文口径，演示现场被追问资质时也照这三句答。
+   *
+   * 用页内说明层而不是 `wx.showModal`：系统弹窗在走查工具里**关不掉**
+   * （没有 API 能编程关闭），会卡住后面整章；页内层可点、可截图、可断言。
+   *
+   * ⚠️ D1（人工登记 + 状态时间线）落地后，把本函数体换成：关掉弹窗 + 经 `R.go()` 进
+   *    关务首页（页面路径届时才在 `app.json` 注册，现在写死会触发
+   *    `verify_miniapp.js` 的「引用了未注册页面」——本注释刻意不写完整路径），
+   *    并在 `utils/routes.js` 的 NAV_EDGES / ROUTES 登记这条边与目标页 —— 卡片本身不用动。
+   */
+  openCustomsEntry() {
+    this.setData({ showChannel: false, cusTipVisible: true })
+  },
+
+  /** 关闭「智慧关务 · 规划中」说明层（点「我知道了」或遮罩，等同） */
+  closeCustomsTip() {
+    this.setData({ cusTipVisible: false })
+  },
+
   /** 自主发货：关闭弹窗，留在本页自行填写发布 */
   pickSelfDelivery() {
     this.setData({ showChannel: false })

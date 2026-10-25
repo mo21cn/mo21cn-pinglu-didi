@@ -1211,24 +1211,31 @@ section('⑤ 静态防线')
     const cargoJs = read('pages/publish/cargo/cargo.js')
     const cargoWxss = read('pages/publish/cargo/cargo.wxss')
 
-    // —— 结构：弹窗 + 两张卡片 + 两枚单选 + 两段说明（对齐设计稿）——
-    check('发布货物页有发货方式弹窗（进入本页即弹出）',
+    // —— 结构：弹窗 + 三张卡片 + 三枚单选 + 三段说明（对齐设计稿 v2）——
+    // 设计稿 v2 在「自主发货 / 委托发货」之上新增第三条「智慧关务」（绿卡），
+    // 因此下面的计数与顺序断言跟着改成 3 —— 旧口径（2 张、自主在前）会让新卡片
+    // **静默通过**，等于把"卡片没渲染"和"卡片多了一张"都放过。
+    check('发布货物页有发货及关务方式弹窗（进入本页即弹出）',
       /wx:if="\{\{showChannel\}\}"/.test(cargoWxml) && /class="ch-panel"/.test(cargoWxml))
-    check('两张卡片文案为「自主发货 / 委托发货」，且自主在前',
-      /自主发货/.test(cargoWxml) && /委托发货/.test(cargoWxml) &&
+    check('三张卡片文案为「智慧关务 / 自主发货 / 委托发货」，且智慧关务在最上',
+      /智慧关务/.test(cargoWxml) && /自主发货/.test(cargoWxml) && /委托发货/.test(cargoWxml) &&
+      cargoWxml.indexOf('智慧关务') < cargoWxml.indexOf('自主发货') &&
       cargoWxml.indexOf('自主发货') < cargoWxml.indexOf('委托发货'))
-    check('两张卡片各带一枚单选圈 + 「默认」标记（设计稿 1:1）',
-      (cargoWxml.match(/class="ch-ring"/g) || []).length === 2 &&
-      (cargoWxml.match(/class="ch-radio-label">默认</g) || []).length === 2)
-    check('两段说明文案齐全（平台名用品牌色强调）',
+    check('三张卡片各带一枚单选圈 + 「默认」标记（设计稿 1:1）',
+      (cargoWxml.match(/class="ch-ring"/g) || []).length === 3 &&
+      (cargoWxml.match(/class="ch-radio-label">默认</g) || []).length === 3)
+    check('三段说明文案齐全（关务边界 / 自行找船 / 平台承运）',
       (cargoWxml.match(/class="ch-brand"/g) || []).length === 2 &&
+      /提供信息查询与辅助工具，本版本不提供申报代理服务/.test(cargoWxml) &&
       /自行在/.test(cargoWxml) && /委托给/.test(cargoWxml) &&
       /找寻认证船主接单并完成运输/.test(cargoWxml) && /由平台组织运力完成运输/.test(cargoWxml))
-    check('图标为纯 CSS 矢量（白圆 + 人形 / 手托盒），不新增图片资源',
+    check('图标为纯 CSS 矢量（白圆 + 纸飞机 / 人形 / 手托盒），不新增图片资源',
+      /\.ch-plane\s*\{/.test(cargoWxss) && /\.ch-plane-fold\s*\{/.test(cargoWxss) &&
       /\.ch-head\s*\{/.test(cargoWxss) && /\.ch-shoulder\s*\{/.test(cargoWxss) &&
       /\.ch-box-front\s*\{/.test(cargoWxss) && /\.ch-box-lid\s*\{/.test(cargoWxss) &&
       /\.ch-palm\s*\{/.test(cargoWxss) && !/\.ch-icon[^}]*url\(/.test(cargoWxss))
-    check('卡片配色取自设计稿（橙 #E5A75A→#FECD91 / 蓝 #3584FD→#4A81FF）',
+    check('卡片配色取自设计稿（绿 #57D780→#26D554 / 橙 #E5A75A→#FECD91 / 蓝 #3584FD→#4A81FF）',
+      /\.ch-card-customs\s*\{[^}]*#57D780[^}]*#26D554/.test(cargoWxss) &&
       /\.ch-card-self\s*\{[^}]*#E5A75A[^}]*#FECD91/.test(cargoWxss) &&
       /\.ch-card-entrust\s*\{[^}]*#3584FD[^}]*#4A81FF/.test(cargoWxss))
 
@@ -1251,6 +1258,19 @@ section('⑤ 静态防线')
       /cargo_name=/.test(entBody) && /quantity=/.test(entBody) && /quantity_unit=/.test(entBody))
     check('委托发货不再跳占位预览页（该入口曾经是「无接口调用的看起来有」）',
       !/\/pages\/preview\/preview/.test(entBody))
+    // 智慧关务：D0 只交付入口与口径，**不**导航 —— 关务页（`pages/customs/*`）尚未开发，
+    // 跳过去只会是一张空白页。等 D1 落地，这条断言要跟着改成"进真实关务首页"。
+    const cusBody = cargoCode.slice(cargoCode.indexOf('openCustomsEntry'), cargoCode.indexOf('pickSelfDelivery'))
+    check('智慧关务落「规划中」口径：只弹页内说明层，不导航、不调接口',
+      /cusTipVisible:\s*true/.test(cusBody) && /showChannel:\s*false/.test(cusBody) &&
+      !/R\.go\(/.test(cusBody) && !/navigateTo|redirectTo|reLaunch/.test(cusBody) &&
+      !/request\(/.test(cusBody) && !/callContainer/.test(cusBody))
+    check('说明层写清三句口径（能力 / 不代申报 / 以官方结果为准）且可关闭',
+      /智慧关务/.test(cargoWxml) && /不提供申报代理服务/.test(cargoWxml) &&
+      /以海关等官方系统结果为准/.test(cargoWxml) &&
+      /bindtap="closeCustomsTip"/.test(cargoWxml) && /closeCustomsTip\(\)/.test(cargoCode))
+    check('智慧关务有独立走查锚点（三张 `.ch-opt` 需要可区分属性）',
+      /data-act-cus-entry="1"/.test(cargoWxml))
     check('本功能纯前端：发货方式相关代码零接口调用',
       !/request\(/.test(selfBody) && !/request\(/.test(entBody))
     check('遮罩可关闭（再次点 tabBar 中间「+发货」可重新唤起）',
