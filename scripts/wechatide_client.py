@@ -104,6 +104,64 @@ def _reject_bare_attr(selector: str) -> None:
         )
 
 
+#: **「权限被拒」的指纹** —— 和「IDE 没开」「没授权」长得完全不一样，别再并成一句。
+#:
+#: 2026-10-26 实测（本机 Windows + 安全中心）：调用 `wechatide` 时两块证据同时出现 ——
+#:   · stderr `[ERROR:base\i18n\icu_util.cc] Invalid file descriptor to ICU data received`
+#:   · rc = 2147483651（0x80000003）
+#: 审计日志里对应的是 `category=file-safety` / `eventType=file-safety.deny-matched` /
+#: `messageKey=…denyMatched.readWithRule`，路径 `D:\…\微信web开发者工具\icudtl.dat`；
+#: 同一轮还有一条 `writeWithRule` 指向该目录下的 `debug.log`。
+#:
+#: ⚠️ 为什么必须单独识别：当时 **IDE 明明在跑**（模拟器已编译、控制台有 `App.onLaunch`
+#:    日志、基础库 3.17.5、资源来自 `127.0.0.1:39133`）。若把它并进
+#:    "wechatide 不可用 → 请确认 1) IDE 已启动 2) 已授权 3) 非沙箱"，
+#:    读数会把人指向**三个都成立**的方向，而真因在第四个地方（安全中心文件规则）。
+#:    这正是本项目反复记的那类坑：判据把两种相反性质的事写成同一个名字。
+_POLICY_BLOCK_RC = 2147483651
+_POLICY_BLOCK_MARKERS = (
+    "Invalid file descriptor to ICU data",
+    "Access is denied",
+    "Permission denied",
+)
+
+
+def classify_launch_failure(rc: int, raw: str) -> str:
+    """判定一次 CLI 启动失败的性质：`"policy"`（本机权限拦截）或 `""`（未命中）。
+
+    之所以只认这两个**指纹**而不是"看看 stderr 里有没有 error"：Electron 正常启动时
+    stderr 也会刷无害告警（如 `link preload` 之类），按"有 error 就算坏"会大面积假红。
+    """
+    if rc == _POLICY_BLOCK_RC:
+        return "policy"
+    blob = str(raw or "")
+    if any(m in blob for m in _POLICY_BLOCK_MARKERS):
+        return "policy"
+    return ""
+
+
+def _policy_block_hint(ide: str, project: str, client: str) -> str:
+    """「权限被拒」的处置指引 —— 要能让照着做的人一次改对，而不是再猜一轮。"""
+    ide_n = os.path.normpath(ide)
+    return (
+        "wechatide 被**本机安全策略**拦住：安全中心拒绝读取 IDE 安装目录。\n"
+        "  ⛔ 这不是「IDE 没启动」。IDE 在跑也照样报这个 —— 拦的是读文件，不是连进程。\n"
+        "  证据：审计中心里 category=file-safety / eventType=deny-matched，\n"
+        f"        路径 {os.path.normpath(os.path.join(ide_n, 'icudtl.dat'))}（读）"
+        "与同目录 debug.log（写）。\n"
+        "\n  改法（客户端内操作，改完从下一条消息生效）：\n"
+        "    设置 → 安全中心 → 沙箱安全 → 文件安全\n"
+        f"    找到路径为 `{ide_n}` 的规则（可能显示为整个目录，也可能拆成两条具体文件）\n"
+        "    把「读取」「写入」由「拒绝」改为「允许」；若规则是误建的，直接删除该条。\n"
+        "    找不到时：审计中心搜 `微信web开发者工具`，点那条拦截记录可跳到命中规则。\n"
+        "\n  兜底（不改策略）：在同一台机器用**普通终端**跑\n"
+        "    python scripts/verify_miniapp_devtools.py --section 15\n"
+        f"    （{os.path.normpath(project)}；如需真机环境先设 RUNTIME_PROFILE='dev'）\n"
+        "  另一条兜底：把 IDE 目录整体复制到不受保护的盘（如 E:），再设环境变量\n"
+        f"    WECHAT_DEVTOOLS_HOME=<副本目录>，client={client} 不用改。\n"
+    )
+
+
 # 在页面上下文取「匹配元素个数」
 _COUNT_FN = (
     "function(sel){return new Promise(function(res){"
@@ -282,11 +340,21 @@ class Client:
         j = self.status(skill_version)
         if j.get("ok"):
             return j
+        # ⚠️ 顺序很重要：**先判「本机安全策略拦截」，再判「真的连不上」**。
+        #    两者的处置完全相反，而本项目的读数曾把它们并成同一句
+        #    "wechatide 不可用 → 请确认 IDE 已启动 / 已授权 / 非沙箱"，
+        #    结果三条全部成立、人却被引偏（真因在第四个地方：安全中心文件规则）。
+        try:
+            rc0 = int(j.get("__rc__") or 0)
+        except (TypeError, ValueError):
+            rc0 = 0
+        if classify_launch_failure(rc0, str(j.get("__raw__") or "")) == "policy":
+            raise RuntimeError(_policy_block_hint(self.ide, self.project, self.client))
         probe = self.open_window()
         if probe.get("ok"):
             return {"ok": True, "degraded": True, "status": j, "probe": probe}
         raise RuntimeError(
-            "wechatide 不可用 —— 请依次确认：\n"
+            "wechatide 连不上 IDE（能启动，但通道没通）—— 请依次确认：\n"
             f'  1) IDE 已启动：`"{os.path.join(self.ide, "cli.bat")}" open '
             f'--project "{self.project}"`\n'
             f"  2) 已授权：`wechatide auth -c {self.client}` 并在 IDE 内点击批准\n"
