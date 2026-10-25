@@ -1656,8 +1656,7 @@ def sec_15(w: Walker) -> None:
         w.rep.rec(
             "⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（几何）",
             cus_r["top"] < self_r["top"] < ent_r["top"],
-            f"customs={cus_r['top']:.1f} self={self_r['top']:.1f} "
-            f"entrust={ent_r['top']:.1f}",
+            f"customs={cus_r['top']:.1f} self={self_r['top']:.1f} entrust={ent_r['top']:.1f}",
         )
         # 图标 / 单选圈 / 说明文案都取**第一组**（＝智慧关务那组），所以拿 cus_r 比。
         w.rep.rec(
