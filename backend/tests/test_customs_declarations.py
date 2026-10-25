@@ -21,12 +21,13 @@ from types import SimpleNamespace
 os.environ["APP_ENV"] = "test"
 
 import pytest  # noqa: E402
-from app.modules.customs import declarations as svc  # noqa: E402
-from app.modules.customs import sources as src  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
+
+from app.modules.customs import declarations as svc  # noqa: E402
+from app.modules.customs import sources as src  # noqa: E402
 
 _TS = "%Y-%m-%d %H:%M:%S"
 
@@ -223,9 +224,12 @@ def test_other_owner_cannot_see(session):
     with pytest.raises(svc.DeclarationNotFoundError):
         svc.get_detail(session, user_id=107, org_ids=frozenset(), declaration_id=did)
     # 正控：本人拿得到
-    assert svc.get_detail(
-        session, user_id=106, org_ids=frozenset(), declaration_id=did
-    )["declaration"]["id"] == did
+    assert (
+        svc.get_detail(session, user_id=106, org_ids=frozenset(), declaration_id=did)[
+            "declaration"
+        ]["id"]
+        == did
+    )
 
 
 def test_org_member_can_see_org_record(session):
@@ -241,9 +245,10 @@ def test_org_member_can_see_org_record(session):
     )
     did = detail["declaration"]["id"]
     # 同组织成员（manager）可见
-    assert svc.get_detail(
-        session, user_id=109, org_ids={org}, declaration_id=did
-    )["declaration"]["id"] == did
+    assert (
+        svc.get_detail(session, user_id=109, org_ids={org}, declaration_id=did)["declaration"]["id"]
+        == did
+    )
 
 
 def test_freshness_declares_official_source_unavailable(session):

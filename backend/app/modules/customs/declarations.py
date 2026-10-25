@@ -196,7 +196,10 @@ def _visible_clause(org_ids: frozenset[int] | set[int]) -> tuple[str, dict[str, 
         return "d.owner_user_id = :uid", {}
     placeholders = ", ".join(f":org{i}" for i in range(len(ids)))
     params = {f"org{i}": oid for i, oid in enumerate(ids)}
-    return f"(d.owner_user_id = :uid OR (d.org_id IS NOT NULL AND d.org_id IN ({placeholders})))", params
+    return (
+        f"(d.owner_user_id = :uid OR (d.org_id IS NOT NULL AND d.org_id IN ({placeholders})))",
+        params,
+    )
 
 
 def create_declaration(
@@ -280,9 +283,7 @@ def create_declaration(
     )
     _refresh_status(session, declaration_id)
     session.commit()
-    return get_detail(
-        session, user_id=user_id, org_ids=org_ids, declaration_id=declaration_id
-    )
+    return get_detail(session, user_id=user_id, org_ids=org_ids, declaration_id=declaration_id)
 
 
 def append_event(
@@ -326,9 +327,7 @@ def append_event(
     )
     _refresh_status(session, declaration_id)
     session.commit()
-    return get_detail(
-        session, user_id=user_id, org_ids=org_ids, declaration_id=declaration_id
-    )
+    return get_detail(session, user_id=user_id, org_ids=org_ids, declaration_id=declaration_id)
 
 
 def list_declarations(
@@ -363,14 +362,18 @@ def get_detail(
 ) -> dict[str, Any]:
     """详情 + 时间线 + 新鲜度。不可见与不存在都返回同一种错误。"""
     clause, extra = _visible_clause(org_ids)
-    row = session.execute(
-        text(
-            "SELECT d.id, d.declaration_no, d.kind, d.status, d.owner_user_id, d.org_id, "
-            "d.assignment_id, d.note, d.revision, d.created_at, d.updated_at "
-            f"FROM cus_declaration d WHERE d.id = :id AND {clause}"
-        ),
-        {"id": declaration_id, "uid": user_id, **extra},
-    ).mappings().first()
+    row = (
+        session.execute(
+            text(
+                "SELECT d.id, d.declaration_no, d.kind, d.status, d.owner_user_id, d.org_id, "
+                "d.assignment_id, d.note, d.revision, d.created_at, d.updated_at "
+                f"FROM cus_declaration d WHERE d.id = :id AND {clause}"
+            ),
+            {"id": declaration_id, "uid": user_id, **extra},
+        )
+        .mappings()
+        .first()
+    )
     if row is None:
         raise DeclarationNotFoundError("记录不存在或无权限查看")
 
