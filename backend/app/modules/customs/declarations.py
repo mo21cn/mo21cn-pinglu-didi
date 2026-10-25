@@ -258,7 +258,9 @@ def create_declaration(
             "u": now,
         },
     )
-    declaration_id = int(ins.lastrowid or 0)
+    # `text()` 插入拿主键只能读驱动的 `lastrowid`（SQLite/MySQL 都支持），
+    # 但 SQLAlchemy 的 `Result` 类型上没有这个属性 ⇒ mypy 需要一处显式豁免。
+    declaration_id = int(ins.lastrowid or 0)  # type: ignore[attr-defined]
     if not declaration_id:
         raise DeclarationError("登记失败：未能取得记录 id")
 
