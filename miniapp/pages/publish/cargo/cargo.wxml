@@ -143,7 +143,7 @@
     <view class="ch-panel">
       <!--
         智慧关务（关域）：设计稿第三条卡片，位置在**最上**（绿卡）。
-        ⚠️ 这一项**不通向任何页面**：《船好多-智慧通关-需求开发文档-v1.0》§6.2 的 6 个
+        ⚠️ 这一项**不通向任何页面**：《向海通-智慧关务-需求开发文档-v1.0》§6.2 的 6 个
            关务页（`pages/customs/*`）尚未开发，`app.json` 里也没有它们。挂一个
            "点进去必然空白 / 必然失败"的入口，比不挂更糟（同文档 §3 权限原则第 4 条）。
            所以本卡片落**规划中口径**：只弹一次页内说明层（含"不提供申报代理服务"这句
@@ -218,7 +218,7 @@
     「智慧关务 · 规划中」说明层（纯前端静态文案，零接口调用）
     为什么要有它：关务页（`pages/customs/*`）尚未开发，绿卡点进去若无反馈等于坏入口；
     这一层把三句口径当场说清（信息服务 / 不代申报 / 以官方结果为准），
-    与《智慧通关需求开发文档 v1.0》§10.1、附录 B 的对外表述一致。
+    与《智慧关务需求开发文档 v1.0》§10.1、附录 B 的对外表述一致。
     用页内层而非 `wx.showModal`：系统弹窗在走查工具里关不掉，会卡住后续整章。
   -->
   <view wx:if="{{cusTipVisible}}" class="ct-mask">
@@ -230,7 +230,7 @@
       </view>
       <view class="ct-line">提供<text class="ct-strong">通关状态查询</text>、<text class="ct-strong">商品归类辅助</text>、<text class="ct-strong">查验过程留痕</text>三类工具。</view>
       <view class="ct-line">本版本<text class="ct-warn">不提供申报代理服务</text>，所有状态以海关等官方系统结果为准。</view>
-      <view class="ct-line ct-line-quiet">数据来源、授权状态与首版范围，见《船好多 · 智慧通关需求开发文档 v1.0》。</view>
+      <view class="ct-line ct-line-quiet">数据来源、授权状态与首版范围，见《向海通 · 智慧关务需求开发文档 v1.0》。</view>
       <view class="ct-btn" bindtap="closeCustomsTip" hover-class="ct-btn-hover">我知道了</view>
     </view>
   </view>

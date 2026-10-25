@@ -48,7 +48,7 @@ no completion or acceptance is asserted`。故登记动作**不等于**采纳动
 ## 与仓库内既有文件的关系
 
 - 需求权威仍是 `docs/entrust/Entrusted_Shipping_Agent_IM_PRD_v1.0.md`（尤其 AC-01–AC-26）
-  与 `docs/entrust/MVP开发与交付计划_船好多委托发货AgentIM_v1.7.md`。
+  与 `docs/entrust/MVP开发与交付计划_向海通委托发货AgentIM_v1.7.md`。
 - 本合同只变更 **DEMO-1 期间的即时里程碑目标与排期**；合同 §1.2 明令它
   **不删除既有需求、不把延期项转成已完成项、不追溯改动已采纳的业务语义**。
 - 合同 §7 开篇还有一条最容易被读漏的约束：
@@ -741,7 +741,7 @@ These links pin the planning basis. Later implementation shall record its own ca
 - [Verified repository baseline](https://github.com/mo21cn/mo21cn-pinglu-didi/tree/e9a4a9d7ee86b950d60b137fd7583cecc4d28b0f).
 - [Repository implementation rules](https://github.com/mo21cn/mo21cn-pinglu-didi/blob/e9a4a9d7ee86b950d60b137fd7583cecc4d28b0f/AGENTS.md).
 - [Master PRD v1.0](https://github.com/mo21cn/mo21cn-pinglu-didi/blob/e9a4a9d7ee86b950d60b137fd7583cecc4d28b0f/docs/entrust/Entrusted_Shipping_Agent_IM_PRD_v1.0.md).
-- [Delivery plan v1.7](https://github.com/mo21cn/mo21cn-pinglu-didi/blob/e9a4a9d7ee86b950d60b137fd7583cecc4d28b0f/docs/entrust/MVP开发与交付计划_船好多委托发货AgentIM_v1.7.md).
+- [Delivery plan v1.7](https://github.com/mo21cn/mo21cn-pinglu-didi/blob/e9a4a9d7ee86b950d60b137fd7583cecc4d28b0f/docs/entrust/MVP开发与交付计划_向海通委托发货AgentIM_v1.7.md).
 - [A2 slice plan and S3 closure boundary](https://github.com/mo21cn/mo21cn-pinglu-didi/blob/e9a4a9d7ee86b950d60b137fd7583cecc4d28b0f/docs/entrust/04-A2期切片计划.md).
 - [Decision-record directory](https://github.com/mo21cn/mo21cn-pinglu-didi/tree/e9a4a9d7ee86b950d60b137fd7583cecc4d28b0f/docs/entrust/decisions).
 

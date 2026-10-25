@@ -2,7 +2,7 @@
 
 > Execution owner: **Codex**  
 > Product decision owner and acceptance reviewer: **Human Operator (HO)**  
-> Product: 船好多 / Pinglu Didi  
+> Product: 向海通航运数字化运营与智能决策平台（简称「向海通」）/ Pinglu Didi  
 > Document date: 2026-09-12  
 > Document status: Implementation-ready requirements; not a software release certification  
 > Repository: https://github.com/mo21cn/mo21cn-pinglu-didi  
@@ -139,7 +139,7 @@ Manager assignment access may be owner/editor or viewer. Organization administra
 
 ## 4. Information architecture and pages
 
-The HO-provided workflow image is an interaction reference: center main assistant, left drawer, specialist conversation, right structured workbench. Use the existing 船好多 visual language. Do not copy medical branding, clinician credentials, promotional panels, or health-specific functionality.
+The HO-provided workflow image is an interaction reference: center main assistant, left drawer, specialist conversation, right structured workbench. Use the existing 向海通 visual language. Do not copy medical branding, clinician credentials, promotional panels, or health-specific functionality.
 
 ### 4.1 Page contracts
 
