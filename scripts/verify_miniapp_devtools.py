@@ -787,9 +787,12 @@ _STATE: dict = {}
 # 换成另一个库 / 另一份种子时编号会漂，此时 ㉕A 的成果类型断言会明确失败。
 ARTIFACT_ID = 5
 
-# ⑮ 章文案（逐字对齐设计稿）
+# ⑮ 章文案（逐字对齐设计稿 v2：三张卡 —— 智慧关务 / 自主发货 / 委托发货）
+DESC_CUSTOMS = "提供信息查询与辅助工具，本版本不提供申报代理服务。"
 DESC_SELF = "您发布货物，自行在向海通平台找寻认证船主接单并完成运输。"
 DESC_ENTRUST = "您发布货物，委托给向海通平台承运，由平台组织运力完成运输。"
+#: 「智慧关务 · 规划中」说明层里**必须出现**的两句口径（PRD §10.1 / 附录 B 原文）
+TIP_MUST = ("不提供申报代理服务", "以海关等官方系统结果为准")
 
 
 class Reporter:
@@ -1527,7 +1530,7 @@ def sec_12(w: Walker) -> None:
 
 
 def sec_15(w: Walker) -> None:
-    """⑮ 发货方式选择：自主发货 / 委托发货（纯前端 + 几何对齐设计稿）。"""
+    """⑮ 发货及关务方式选择：智慧关务 / 自主发货 / 委托发货（纯前端 + 几何对齐设计稿 v2）。"""
 
     def intake_query() -> dict:
         """读受理屏（`pages/entrust/intake/intake`）实例自己记着的 `onLoad` 入参。
@@ -1590,22 +1593,31 @@ def sec_15(w: Walker) -> None:
     # 标签会把纯文本切断（2026-09-13 实测踩到，误报为「文案缺失」）。
     panel = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".ch-panel")))
     w.rep.rec(
-        "⑮ 两张卡片文案为「自主发货 / 委托发货」",
-        "自主发货" in panel and "委托发货" in panel,
+        "⑮ 三张卡片文案为「智慧关务 / 自主发货 / 委托发货」",
+        "智慧关务" in panel and "自主发货" in panel and "委托发货" in panel,
         f"面板文本 {len(panel)} 字符",
     )
+    # 顺序必须用**面板文本里的下标**比，而不是靠"两个词都在"：三张卡同构，
+    # 顺序错了（绿卡跑到最下）仍然会"两个词都在"⇒ 旧断言会假绿。
+    order_ok = panel.find("智慧关务") < panel.find("自主发货") < panel.find("委托发货")
+    w.rep.rec(
+        "⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（设计稿 v2）",
+        order_ok,
+        f"idx={panel.find('智慧关务')}/{panel.find('自主发货')}/{panel.find('委托发货')}",
+    )
+    has_cus = DESC_CUSTOMS.replace(" ", "") in panel
     has_self = DESC_SELF.replace(" ", "") in panel
     has_entrust = DESC_ENTRUST.replace(" ", "") in panel
     w.rep.rec(
-        "⑮ 两段说明文案齐全（自行找船 / 平台承运）",
-        has_self and has_entrust,
-        f"self={has_self} entrust={has_entrust}",
+        "⑮ 三段说明文案齐全（关务边界 / 自行找船 / 平台承运）",
+        has_cus and has_self and has_entrust,
+        f"customs={has_cus} self={has_self} entrust={has_entrust}",
     )
     rings = w.c.count(".ch-ring")
     labels = w.c.count(".ch-radio-label")
     w.rep.rec(
-        "⑮ 两枚单选圈 + 「默认」标记（设计稿元素齐全）",
-        rings == 2 and labels == 2,
+        "⑮ 三枚单选圈 + 「默认」标记（设计稿元素齐全）",
+        rings == 3 and labels == 3,
         f"ring={rings} label={labels}",
     )
 
@@ -1615,15 +1627,16 @@ def sec_15(w: Walker) -> None:
         return got[0] if got else {}
 
     panel_r = first(".ch-panel")
+    cus_r = first(".ch-card-customs")
     self_r = first(".ch-card-self")
     ent_r = first(".ch-card-entrust")
     icon_r = first(".ch-icon")
     ring_r = first(".ch-ring")
     desc_r = first(".ch-desc")
     win_h = w.win_height()
-    has_geo = all((panel_r, self_r, ent_r, icon_r, ring_r, desc_r))
+    has_geo = all((panel_r, cus_r, self_r, ent_r, icon_r, ring_r, desc_r))
     w.rep.rec(
-        "⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案）",
+        "⑮ 弹窗几何可读（面板/三张卡片/图标/单选圈/文案）",
         has_geo,
         "ok" if has_geo else "缺几何回执",
     )
@@ -1635,32 +1648,35 @@ def sec_15(w: Walker) -> None:
             f"w/h={ratio:.2f} ({self_r['width']:.0f}x{self_r['height']:.0f})",
         )
         w.rep.rec(
-            "⑮ 两张卡片等高（同规格）",
-            abs(self_r["height"] - ent_r["height"]) <= 1,
-            f"{self_r['height']:.1f} vs {ent_r['height']:.1f}",
+            "⑮ 三张卡片等高（同规格）",
+            abs(self_r["height"] - ent_r["height"]) <= 1
+            and abs(self_r["height"] - cus_r["height"]) <= 1,
+            f"{cus_r['height']:.1f} / {self_r['height']:.1f} / {ent_r['height']:.1f}",
         )
         w.rep.rec(
-            "⑮ 卡片顺序：自主发货在委托发货之上",
-            self_r["top"] < ent_r["top"],
-            f"self={self_r['top']:.1f} entrust={ent_r['top']:.1f}",
+            "⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（几何）",
+            cus_r["top"] < self_r["top"] < ent_r["top"],
+            f"customs={cus_r['top']:.1f} self={self_r['top']:.1f} "
+            f"entrust={ent_r['top']:.1f}",
         )
+        # 图标 / 单选圈 / 说明文案都取**第一组**（＝智慧关务那组），所以拿 cus_r 比。
         w.rep.rec(
             "⑮ 图标为白圆且在卡片左内侧",
-            icon_r["left"] > self_r["left"]
-            and icon_r["left"] - self_r["left"] < 20
+            icon_r["left"] > cus_r["left"]
+            and icon_r["left"] - cus_r["left"] < 20
             and abs(icon_r["width"] - icon_r["height"]) <= 1,
-            f"Δleft={icon_r['left'] - self_r['left']:.1f} "
+            f"Δleft={icon_r['left'] - cus_r['left']:.1f} "
             f"{icon_r['width']:.0f}x{icon_r['height']:.0f}",
         )
         w.rep.rec(
             "⑮ 单选圈在卡片右侧之外（设计稿布局）",
-            ring_r["left"] >= self_r["right"],
-            f"ring.left={ring_r['left']:.1f} card.right={self_r['right']:.1f}",
+            ring_r["left"] >= cus_r["right"],
+            f"ring.left={ring_r['left']:.1f} card.right={cus_r['right']:.1f}",
         )
         w.rep.rec(
             "⑮ 说明文案在卡片下方且不重叠",
-            desc_r["top"] >= self_r["bottom"] - 1,
-            f"desc.top={desc_r['top']:.1f} card.bottom={self_r['bottom']:.1f}",
+            desc_r["top"] >= cus_r["bottom"] - 1,
+            f"desc.top={desc_r['top']:.1f} card.bottom={cus_r['bottom']:.1f}",
         )
         w.rep.rec(
             "⑮ 弹窗完整落在视口内（不被裁切）",
@@ -1668,7 +1684,40 @@ def sec_15(w: Walker) -> None:
             f"panel={panel_r['top']:.0f}..{panel_r['bottom']:.0f} winH={win_h:.0f}",
         )
 
+    # 行为 0：智慧关务 → **只弹页内说明层**，不跳页、不调接口。
+    # ⚠️ 这一格断的是 D0 的**产品决定**：`pages/customs/*` 还没开发，绿卡跳过去只会是
+    #    空白页（PRD §3 第 4 条）。等 D1 页面落地，本格要跟着改成"进关务首页"。
+    t_cus = w.c.tap('[data-act-cus-entry="1"]')
+    time.sleep(1.1)
+    d_tip = w.wait_data(lambda d: d.get("cusTipVisible") is True, tries=20)
+    w.shot("15-智慧关务-规划中说明层")
+    w.rep.rec(
+        "⑮ 智慧关务：关掉弹窗 + 弹「规划中」说明层，且**留在发布货物页**（不跳空白页）",
+        d_tip.get("cusTipVisible") is True
+        and d_tip.get("showChannel") is False
+        and w.c.current_path() == PUBLISH_CARGO,
+        f"cusTipVisible={d_tip.get('cusTipVisible')} "
+        f"showChannel={d_tip.get('showChannel')} path={w.c.current_path()} tap={t_cus}",
+    )
+    tip_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".ct-panel")))
+    miss = [s for s in TIP_MUST if s not in tip_txt]
+    w.rep.rec(
+        "⑮ 说明层写清法务口径（不提供申报代理服务 / 以官方结果为准）",
+        not miss,
+        f"缺={miss} 文本={tip_txt[:60]}",
+    )
+    w.c.tap(".ct-btn")
+    time.sleep(0.9)
+    d_tip2 = w.c.page_data()
+    w.rep.rec(
+        "⑮ 「我知道了」可关闭说明层",
+        d_tip2.get("cusTipVisible") is False,
+        str(d_tip2.get("cusTipVisible")),
+    )
+
     # 行为 1：自主发货 → 只关弹窗、留在本页
+    w.c.set_data({"showChannel": True})
+    time.sleep(0.8)
     w.c.tap(".ch-card-self")
     time.sleep(1.1)
     d2 = w.wait_data(lambda d: d.get("showChannel") is False)
