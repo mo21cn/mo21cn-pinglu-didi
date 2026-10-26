@@ -106,7 +106,15 @@ IDE_CANDIDATES = (
 IDE_PROC_NAME = "微信开发者工具.exe"
 
 #: 种子脚本的**固定顺序**（`seed_entrust_demo` 依赖 `seed_demo` 造的基础数据）
-SEEDS = ("seed_demo.py", "seed_entrust_demo.py", "seed_entrust_orgpicker.py")
+SEEDS = (
+    "seed_demo.py",
+    "seed_entrust_demo.py",
+    "seed_entrust_orgpicker.py",
+    # D1 关务：⑮ 章点开绿卡后落在关务首页，页面上**必须有东西可看**。
+    # 它只依赖 `cus_declaration` 迁移（本 runner 在种子之前已经跑过 migrate），
+    # 与 entrust 那三份互不依赖，放在末尾以免扰动既有编号。
+    "seed_customs_demo.py",
+)
 #: 可选种子（存在才跑）
 OPTIONAL_SEEDS = ("seed_contract_cases.py",)
 
