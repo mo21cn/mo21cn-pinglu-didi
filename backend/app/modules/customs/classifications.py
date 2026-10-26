@@ -513,6 +513,10 @@ def list_classifications(
     if status:
         where.append("c.status = :st")
         params["st"] = status
+    # ⚠️ 用 `.mappings()` 而不是 `.scalars()`：后者在部分 SQLAlchemy 存根版本上
+    # 会推断不出元素类型，`mypy --strict` 报 `var-annotated`（"Need type annotation"）。
+    # 本机旧 venv 不报、CI 装最新依赖就报 —— 2026-10-26 实际因此红过一次，
+    # 靠"按 requirements.txt 新建干净 venv 复现"才定位。D1 全程用 `.mappings()`，同源。
     rows = (
         session.execute(
             text(
@@ -522,10 +526,11 @@ def list_classifications(
             ),
             params,
         )
-        .scalars()
+        .mappings()
         .all()
     )
-    return [_out(session, _record(session, int(rid))) for rid in rows]
+    ids = [int(r["id"]) for r in rows]
+    return [_out(session, _record(session, rid)) for rid in ids]
 
 
 def get_detail(
