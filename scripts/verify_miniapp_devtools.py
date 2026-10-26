@@ -14722,7 +14722,8 @@ def main() -> int:
     print(
         f"基础库  ：{rt.get('SDKVersion') or '?'}（{_gray}）"
         f" ／ 档位 {rt.get('profile') or '?'}"
-        f" ／ 机型 {rt.get('model') or '?'}（{rt.get('system') or '?'}）",
+        f" ／ 机型 {rt.get('model') or '?'}（{rt.get('system') or '?'}）"
+        f" ／ 通道 {getattr(client, 'channel', lambda: 'cli')()}",
         flush=True,
     )
     _cfg = rt.get("libVersionCfg") or {}
@@ -14834,6 +14835,9 @@ def main() -> int:
                 "startedAt": started_at,
                 "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "argv": sys.argv,
+                # 通道必须进证据：同一章用 CLI 轨与 MCP 轨跑出来的 PASS 不是同一件事，
+                # 复核者要能一眼看出这份产物是哪条通道产出的（2026-10-26 MCP 轨上线）。
+                "channel": getattr(w.c, "channel", lambda: "cli")(),
                 "runtime": rt,
                 "verdict": verdict,
                 "tally": tally,
