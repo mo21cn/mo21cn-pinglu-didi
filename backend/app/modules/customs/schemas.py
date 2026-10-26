@@ -54,3 +54,36 @@ class DeclarationEventCreate(BaseModel):
     corrects_event_id: int | None = Field(
         default=None, description="更正某条事件时指向原事件；原记录保留（AC-06）"
     )
+
+
+# ---------------------------------------------------------------------------
+# D2：商品归类辅助（模型建议 + 人工定稿）
+# ---------------------------------------------------------------------------
+
+
+class ClassificationCreate(BaseModel):
+    """发起一次归类建议。
+
+    ⛔ 这里**没有** `hs_code` 字段：结论不由请求方传入，模型也不直接写结论。
+    结论文本走 `POST /classifications/{id}/manual`（人工确认）。
+    """
+
+    product_name: str = Field(min_length=1, max_length=128, description="商品名称（原文）")
+    product_desc: str | None = Field(
+        default=None, max_length=1024, description="补充描述：材质 / 用途 / 规格"
+    )
+    declaration_id: int | None = Field(default=None, description="弱关联的报关记录 id（可空）")
+    org_id: int | None = Field(default=None, description="所属组织；必须是你所在的组织")
+
+
+class ClassificationManualCreate(BaseModel):
+    """人工填写并确认结论 —— 模型不可用时这是**唯一**的出口，故不依赖任何模型字段。"""
+
+    hs_code: str = Field(
+        min_length=8,
+        max_length=10,
+        pattern=r"^\d{8}(\d{2})?$",
+        description="8 位或 10 位税则号列（纯数字，不做自动纠错）",
+    )
+    label: str | None = Field(default=None, max_length=256, description="商品名称 / 税则描述")
+    rationale: str | None = Field(default=None, max_length=1024, description="归类依据")
