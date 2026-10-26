@@ -42,11 +42,12 @@ _BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
+
 from app.core.database import SessionLocal  # noqa: E402
 from app.modules.auth import service as auth_service  # noqa: E402
 from app.modules.customs import declarations as svc  # noqa: E402
-from sqlalchemy import text  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
 
 #: 演示账号。与 `seed_entrust_demo.py` 用的是同一个货主身份 ——
 #: 走查 ⑮ 章登录的就是它，两边不一致会导致"种子里有、页面上没有"。
