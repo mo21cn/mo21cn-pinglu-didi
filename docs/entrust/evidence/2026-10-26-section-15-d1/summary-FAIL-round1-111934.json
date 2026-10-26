@@ -1,0 +1,407 @@
+{
+  "sections": [
+    "15"
+  ],
+  "project": "E:\\pinglu-didi\\miniapp",
+  "startedAt": "2026-10-26T11:20:32+0800",
+  "finishedAt": "2026-10-26T11:24:05+0800",
+  "argv": [
+    "scripts\\verify_miniapp_devtools.py",
+    "--shots",
+    "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-111934",
+    "--section",
+    "15"
+  ],
+  "channel": "mcp",
+  "runtime": {
+    "SDKVersion": "3.17.2",
+    "model": "iPhone 12/13 (Pro)",
+    "platform": "devtools",
+    "system": "iOS 10.0.1",
+    "language": "zh_CN",
+    "profile": "dev",
+    "libVersionCfg": {
+      "sharedPresent": true,
+      "shared": "3.17.2",
+      "privatePresent": true,
+      "private": "3.17.2"
+    },
+    "libVersionGray": {
+      "verdict": "stable",
+      "source": "C:\\Users\\Administrator\\AppData\\Local\\微信开发者工具\\User Data\\bf938c1203f9e0460b7dd4d58f95dcc0\\WeappVendor\\cfg.json",
+      "sourceMtime": "2026-10-26T11:20:37",
+      "cfgLibCount": 48
+    }
+  },
+  "verdict": "FAIL",
+  "tally": {
+    "PASS": 37,
+    "FAIL": 3,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0,
+    "LIMITATION": 0
+  },
+  "rollup": {
+    "PASS": 37,
+    "FAIL": 3,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0
+  },
+  "passed": 37,
+  "notPassed": 3,
+  "attempt": 7,
+  "previousRuns": [
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-074751",
+      "finishedAt": "2026-10-26T07:50:02+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-074751",
+        "--section",
+        "15"
+      ],
+      "verdict": "PASS",
+      "passed": 30,
+      "notPassed": 0
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-075344",
+      "finishedAt": "2026-10-26T07:55:43+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-075344",
+        "--section",
+        "15"
+      ],
+      "verdict": "PASS",
+      "passed": 30,
+      "notPassed": 0
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-075640",
+      "finishedAt": "2026-10-26T07:58:35+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-075640",
+        "--section",
+        "15"
+      ],
+      "verdict": "PASS",
+      "passed": 30,
+      "notPassed": 0
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-092050",
+      "finishedAt": "2026-10-26T09:24:55+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-092050",
+        "--section",
+        "15"
+      ],
+      "verdict": "PASS",
+      "passed": 30,
+      "notPassed": 0
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-092810",
+      "finishedAt": "2026-10-26T09:34:23+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-092810",
+        "--section",
+        "15"
+      ],
+      "verdict": "PASS",
+      "passed": 30,
+      "notPassed": 0
+    },
+    {
+      "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-110950",
+      "finishedAt": "2026-10-26T11:12:57+0800",
+      "argv": [
+        "scripts\\verify_miniapp_devtools.py",
+        "--shots",
+        "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-110950",
+        "--section",
+        "15"
+      ],
+      "verdict": "FAIL",
+      "passed": 30,
+      "notPassed": 5
+    }
+  ],
+  "results": [
+    {
+      "step": "⑮ 前置 · 已登录进入货主工作台（关务首页要带 token 才读得到数据源状态）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "identity=pages/index/index role_ok=True"
+    },
+    {
+      "step": "⑮ 前置 · 真的到达「发布货源」页（⛔ 没有这一条，下面每一条都会指向产品）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/publish/cargo/cargo via=navigateTo"
+    },
+    {
+      "step": "截图 15-发货方式弹窗",
+      "ok": true,
+      "kind": "PASS",
+      "note": "37382B"
+    },
+    {
+      "step": "⑮ 进入发布货物页即弹出发货方式选择",
+      "ok": true,
+      "kind": "PASS",
+      "note": "True"
+    },
+    {
+      "step": "⑮ 三张卡片文案为「智慧关务 / 自主发货 / 委托发货」",
+      "ok": true,
+      "kind": "PASS",
+      "note": "面板文本 100 字符"
+    },
+    {
+      "step": "⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（设计稿 v2）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "idx=0/31/65"
+    },
+    {
+      "step": "⑮ 三段说明文案齐全（关务边界 / 自行找船 / 平台承运）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "customs=True self=True entrust=True"
+    },
+    {
+      "step": "⑮ 三枚单选圈 + 「默认」标记（设计稿元素齐全）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ring=3 label=3"
+    },
+    {
+      "step": "⑮ 弹窗几何可读（面板/三张卡片/图标/单选圈/文案）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ok"
+    },
+    {
+      "step": "⑮ 卡片宽高比 ≈ 设计稿 3:1（非压扁/拉伸）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "w/h=3.03 (227x75)"
+    },
+    {
+      "step": "⑮ 三张卡片等高（同规格）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "75.0 / 75.0 / 75.0"
+    },
+    {
+      "step": "⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（几何）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "customs=159.0 self=302.0 entrust=462.0"
+    },
+    {
+      "step": "⑮ 图标为白圆且在卡片左内侧",
+      "ok": true,
+      "kind": "PASS",
+      "note": "Δleft=10.0 48x48"
+    },
+    {
+      "step": "⑮ 单选圈在卡片右侧之外（设计稿布局）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ring.left=309.5 card.right=297.0"
+    },
+    {
+      "step": "⑮ 说明文案在卡片下方且不重叠",
+      "ok": true,
+      "kind": "PASS",
+      "note": "desc.top=251.0 card.bottom=234.0"
+    },
+    {
+      "step": "⑮ 弹窗完整落在视口内（不被裁切）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "panel=145..608 winH=844"
+    },
+    {
+      "step": "截图 15-智慧关务-首页-数据源状态条",
+      "ok": true,
+      "kind": "PASS",
+      "note": "44708B"
+    },
+    {
+      "step": "⑮ 智慧关务换成真导航：落在关务首页（⛔ 不再是「弹一层说明、留在发布页」）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/customs/home/home tap=True"
+    },
+    {
+      "step": "⑮ 关务首页读到「官方源不可用」（AC-02 的界面开关：没授权就必须说没授权）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "officialUnavailable=True view='ready'"
+    },
+    {
+      "step": "⑮ 「官方状态查询暂不可用」在屏幕上真的画出来了（矩形非空，不是只有 data 里一个布尔）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "取不到几何"
+    },
+    {
+      "step": "⑮ 状态条逐条列出数据源（官方 + 人工登记至少各一条）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "数据源条目=3"
+    },
+    {
+      "step": "⑮ 法务口径随页面搬过来（不提供申报代理服务 / 以海关等官方系统结果为准）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "缺=[]"
+    },
+    {
+      "step": "截图 15-智慧关务-记录详情-发生与取得分列",
+      "ok": true,
+      "kind": "PASS",
+      "note": "14016B"
+    },
+    {
+      "step": "⑮ 列表 → 详情：真的进了详情页（`R.go()` 的 push 边生效）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/customs/detail/detail tap=True"
+    },
+    {
+      "step": "⑮ 详情页时间线的两条时间**不是同一个值**（合并即伪装新鲜度，AC-09 禁止）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "events=0"
+    },
+    {
+      "step": "⑮ 详情页把「发生」与「取得」写成两行（并排会让补录的旧状态看起来像刚更新）",
+      "ok": false,
+      "kind": "FAIL",
+      "note": "文本 51 字符"
+    },
+    {
+      "step": "⑮ 从详情可返回关务首页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "pages/customs/home/home"
+    },
+    {
+      "step": "⑮ 从关务首页可返回发布货物页（push 边，不是 replace）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "pages/publish/cargo/cargo"
+    },
+    {
+      "step": "⑮ 返回后源页表单仍在（一旦换成 replace，用户填了一半的货单会被扔掉）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "before='2026-10-27' after='2026-10-27'"
+    },
+    {
+      "step": "截图 15-自主发货-留在发布页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "31538B"
+    },
+    {
+      "step": "⑮ 自主发货只关弹窗、留在发布货物页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "False"
+    },
+    {
+      "step": "⑮ 关弹窗后发布页表单可用（原有内容仍在）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "2026-10-27"
+    },
+    {
+      "step": "⑮ 点遮罩可关闭弹窗（不进占位页）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "showChannel=False path=pages/publish/cargo/cargo"
+    },
+    {
+      "step": "截图 15-委托发货前-源页表单已填",
+      "ok": true,
+      "kind": "PASS",
+      "note": "32102B"
+    },
+    {
+      "step": "⑮ 前置（正控）· 源页表单里**真的有**货名/货量 —— 没有它下面两格恒红（`pickEntrustDelivery` 是**条件携带**：字段为空就不进 query）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "form.cargo_name='走查货物·铁矿石' form.weight_t='2400' 填值路径=真实输入（bindinput）"
+    },
+    {
+      "step": "截图 15-委托发货-受理屏",
+      "ok": true,
+      "kind": "PASS",
+      "note": "30824B"
+    },
+    {
+      "step": "⑮ 委托发货跳受理屏（UI-07）—— ⛔ 不再是「功能预览」占位页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "path=pages/entrust/intake/intake tap=True"
+    },
+    {
+      "step": "⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "cargo_name='走查货物·铁矿石' 期望='走查货物·铁矿石'"
+    },
+    {
+      "step": "⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "quantity='2400' unit='吨' 期望='2400'/吨"
+    },
+    {
+      "step": "⑮ 从受理屏可返回发布货物页（二级页栈正常）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "pages/publish/cargo/cargo"
+    }
+  ],
+  "console": {
+    "baselineCaptured": true,
+    "collectFailed": false,
+    "openPhaseWaived": [],
+    "openPhaseUnwaived": [],
+    "bizPhaseUnwaived": [],
+    "whitelist": [
+      {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": "open",
+        "evidence": "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+      },
+      {
+        "pattern": "routeDone with a webviewId",
+        "phase": "open",
+        "evidence": "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉（HO D1 明确点名这个范围过宽）"
+      }
+    ]
+  },
+  "consoleError": "",
+  "consoleErrorDetected": false,
+  "consoleNoiseCount": 0,
+  "consoleOtherCount": 0,
+  "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-111934"
+}
