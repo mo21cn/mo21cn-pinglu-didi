@@ -665,6 +665,52 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 
 ---
 
+### 3.14 E-2026-10-26-B — ⑮ 章**换 MCP 通道后**的首轮自证证据（取代 3.13 作正式证据）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-15-mcp/`（逐字节入库；含 `env-provenance.md`）
+> 轮次：`walk-20261026-092810`（同章节第 5 次运行，前 4 次均 `PASS`，**都不覆盖**）
+> 命令（产物自证 argv）：`scripts\verify_miniapp_devtools.py --shots …\walk-20261026-092810 --section 15`
+> 外层入口：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`（runner 起后端）
+> **通道：`mcp`** —— `summary.json` 的 `channel` 字段自证（本轮起新增该字段）
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-15-stdout.txt` | 权威逐条读数（**30/30 PASS**，其余四档全 0，console 增量空） | 4845 | `e2cd4eef162f065d` |
+| `summary.json` | 该轮汇总，含 `channel=mcp` 与 `runtime.SDKVersion=3.17.2` | 10186 | `6baa825e85864514` |
+| `shots/15-发货方式弹窗.jpg` | **三卡**：智慧关务 / 自主发货 / 委托发货 | 36973 | `8d86e708d24c0171` |
+| `shots/15-智慧关务-规划中说明层.jpg` | 点绿卡 ⇒ 页内「规划中」说明层（**不跳空白页**） | 33503 | `20f2a6339b048eb5` |
+| `shots/15-自主发货-留在发布页.jpg` | 自主发货只关弹窗 | 31210 | `c99f2c28ad0225f4` |
+| `shots/15-委托发货-受理屏.jpg` | 委托发货 ⇒ 受理屏（⛔ 不再是占位页） | 14476 | `d7c845bcd09f0e80` |
+| `shots/15-委托发货前-源页表单已填.jpg` | 前置正控：货名/货量确已填入 | 31745 | `28dc5dac1741a889` |
+| `env-provenance.md` | 出处、通道说明、环境自证字段、与 3.13 的关系 | — | — |
+
+**⭐ 这一轮补的两个缺口**（正是 3.13 标"不能自证"的两条）
+
+| 缺口 | 3.13 的状态 | 3.14 的状态 |
+| --- | --- | --- |
+| 基础库版本不能自证 | 只能靠 `project.private.config.json` 的 mtime 旁证 | ✅ `runtime.SDKVersion=3.17.2`，灰度判定 `stable`（来源 cfg 48 个版本） |
+| `RUNTIME_PROFILE` 未随证据记录 | 转述 | ✅ `runtime.profile=dev` 进 summary |
+
+**通道为什么换了（这是本轮真正的排障结论）**
+
+旧轨用 IDE 自带 Electron 当 Node 跑 `wechatide` CLI，前置是**能读 IDE 安装目录**
+（`icudtl.dat`、`resource/app.asar.unpacked/.../index.js`）并**能写** `debug.log`。
+本机安全策略逐条拒绝后旧轨整体失效。⚠️ 而"去文件安全里改那两条规则"是**死路**：
+`settings.json` 里 135 条预设规则 **deny 数 = 0**、`customized=false`，审计的 `matchedRule`
+就等于文件路径本身 ⇒ 那是**按路径逐条生成**的拦截，**UI 里没有可编辑的规则条目**。
+
+现用 IDE **自带的 MCP 服务端**：`POST http://127.0.0.1:<.ide>/mcp` ＋ `Authorization: Bearer <token>`
+（配置与端口都从 IDE 自己的 `User Data\<hash>\Default\{.ide,mcp.json}` 读）。
+**不启动任何 exe、不读 IDE 安装目录** ⇒ 与那些文件规则完全不发生关系。
+代码：`scripts/wechatide_mcp.py`（`McpBackend`，与 `Client` 同接口；`__init__` 里方法级替换，
+走查脚本 224 处 `w.c.tap` / 221 处 `w.c.count` 无须改动），回退开关 `WALK_CHANNEL=cli`。
+
+**⚠️ 一个必须记住的授权坑**：未授权回 `403 -32002 Client authorization pending`，IDE 会弹
+420px 小窗，但**窗口生命周期绑在请求方连接上** —— "发一次就退出"会让 IDE **1.3 秒后**
+`forceClose` 并记 `authResult=deny`。必须用 `scripts/ide_mcp_auth.py` **复用长连接轮询**等人点。
+
+---
+
 ## 4. 待补（本索引自己的缺口，如实登记）
 
 | # | 缺口 | 处置 |
@@ -676,4 +722,4 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 | 4 | **同一张新委托的 13 步主链** | ⭐ **2026-09-20：第 1–9 步已在同一张新委托上跑通**（见 **§3.5 ＋ §3.6**：八章同一 `aid=6`，命令见 `runbook` §8.9）—— 含第 5 步的 900 吨/不拆批候选、第 6–7 步在本单组装→发布→客户接受→派生、第 8 步 `800→950`、第 9 步复核＋重新确认＋**换新成果重新接受**＋A2 接管。**仍未覆盖：第 10–13 步在本单上的动作**（费用/结算已有章 52 证据、结案/重开已有章 53） |
 | 5.5 | **证据文件的行尾归一化会毁掉可核对性** | 已修：`docs/entrust/evidence/.gitattributes` 加 `* -text`（该目录逐字节入库）；⛔ 新证据入库前要**复核「工作区哈希 == 索引 blob 哈希」**；⭐ **核对方式已固化成小工具**：`python -X utf8 backend/scripts/check_evidence_integrity.py`（`git ls-files -s -z` **NUL 分隔解析文件名** ＋ 逐件内容哈希比对；⛔ 不要用"`ls-files` 逐行 + 字符串路径"的老查法 —— `core.quotepath=true` 会把中文名转成八进制转义，实测把 124 件里的 **70 件中文名 `.jpg` 全判成"不一致"**）|
 | 5 | **密钥文件曾被本机删除故障永久删除** | 2026-09-19 核实发现 `backend/.env.local`（含**可用订阅 Key**）缺失、**回收站无记录**；已从 `_b_recon3.txt`（09-16 的 env 基线快照）找回并还原，`llm_key_doctor.py` **四步全绿**。⚠️ **untracked 文件不在护栏的恢复范围内** ⇒ 已扩展护栏（见 DR-0019 追加节） |
-| 6 | ~~**设备证据不自证运行环境**（基础库版本 / 档位）~~ ⇒ **2026-10-26 已改代码关闭，待下一轮生效** | §3.13 那批产物里**没有一处**记着 `SDKVersion`，"跑在 3.17.2 稳定版上"只能靠口头转述。已修：`verify_miniapp_devtools.py` 新增 `capture_runtime()` / `lib_version_gray()` —— 此后 `summary.json` 自带 `runtime.SDKVersion`、`runtime.profile`（`RUNTIME_PROFILE`）、`runtime.libVersionCfg`（共享/私有两份）与 `runtime.libVersionGray`（含来源 cfg 路径与 mtime），并在头部打印一行；配置与实测不一致时**点名以实测为准**。⚠️ **对已产出的历史证据无效**，只在下一轮起生效。同时把 `miniapp/project.config.json` 的 `libVersion` 由 `3.0.0`（差 17 个小版本）改为 `3.17.2`，使干净 clone 不再依赖被忽略的 `project.private.config.json` |
+| 6 | ~~**设备证据不自证运行环境**（基础库版本 / 档位）~~ ⇒ **2026-10-26 已改代码关闭，待下一轮生效** | §3.13 那批产物里**没有一处**记着 `SDKVersion`，"跑在 3.17.2 稳定版上"只能靠口头转述。已修：`verify_miniapp_devtools.py` 新增 `capture_runtime()` / `lib_version_gray()` —— 此后 `summary.json` 自带 `runtime.SDKVersion`、`runtime.profile`（`RUNTIME_PROFILE`）、`runtime.libVersionCfg`（共享/私有两份）与 `runtime.libVersionGray`（含来源 cfg 路径与 mtime），并在头部打印一行；配置与实测不一致时**点名以实测为准**。⚠️ **对已产出的历史证据无效**，只在下一轮起生效。同时把 `miniapp/project.config.json` 的 `libVersion` 由 `3.0.0`（差 17 个小版本）改为 `3.17.2`，使干净 clone 不再依赖被忽略的 `project.private.config.json`。✅ **2026-10-26 09:28 已生效**（见 **§3.14**，`runtime.SDKVersion=3.17.2` / `profile=dev` 均进 summary） |
