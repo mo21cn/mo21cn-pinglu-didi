@@ -119,11 +119,15 @@ def _reject_bare_attr(selector: str) -> None:
 #:    读数会把人指向**三个都成立**的方向，而真因在第四个地方（安全中心文件规则）。
 #:    这正是本项目反复记的那类坑：判据把两种相反性质的事写成同一个名字。
 _POLICY_BLOCK_RC = 2147483651
-_POLICY_BLOCK_MARKERS = (
-    "Invalid file descriptor to ICU data",
-    "Access is denied",
-    "Permission denied",
-)
+#: ⚠️ 2026-10-26 收紧：此前这里还有 `Access is denied` / `Permission denied` 两条。
+#:    它们太泛 —— 用户目录权限、被占用的端口、杀软隔离单个文件都会吐这两句，
+#:    一旦命中就把故障**改判成「安全中心拦了 IDE」**，人照着去改那条根本不存在的规则。
+#:    只保留 ICU 这一条：它与 rc=2147483651 是同一个故障的两种表现，其余都不认。
+_POLICY_BLOCK_MARKERS = ("Invalid file descriptor to ICU data",)
+
+#: 泛化的权限类字样。**只用于给「连不上」的报错补一句可能的旁证**，
+#: ⛔ 不参与分支判定 —— 见上面那段「为什么收紧」。
+_PERMISSION_SMELLS = ("Access is denied", "Permission denied", "EACCES", "EPERM")
 
 
 def classify_launch_failure(rc: int, raw: str) -> str:
@@ -131,6 +135,9 @@ def classify_launch_failure(rc: int, raw: str) -> str:
 
     之所以只认这两个**指纹**而不是"看看 stderr 里有没有 error"：Electron 正常启动时
     stderr 也会刷无害告警（如 `link preload` 之类），按"有 error 就算坏"会大面积假红。
+
+    ⚠️ 判据宁可**漏判**也不要**错判**：漏判的后果是报成"连不上"（人再查一轮即可），
+    错判的后果是让人去改一条无关的安全策略 —— 后者更贵，且会让人怀疑整套诊断。
     """
     if rc == _POLICY_BLOCK_RC:
         return "policy"
@@ -138,6 +145,12 @@ def classify_launch_failure(rc: int, raw: str) -> str:
     if any(m in blob for m in _POLICY_BLOCK_MARKERS):
         return "policy"
     return ""
+
+
+def permission_smells(raw: str) -> bool:
+    """stderr 里有没有泛化权限字样（仅作旁证，⛔ 不用于分支判定）。"""
+    blob = str(raw or "")
+    return any(m in blob for m in _PERMISSION_SMELLS)
 
 
 def _policy_block_hint(ide: str, project: str, client: str) -> str:
@@ -353,13 +366,20 @@ class Client:
         probe = self.open_window()
         if probe.get("ok"):
             return {"ok": True, "degraded": True, "status": j, "probe": probe}
+        tail = ""
+        if permission_smells(str(j.get("__raw__") or "")):
+            tail = (
+                "\n  旁证：stderr 里有权限类字样（Access is denied / EACCES 等）。\n"
+                "        ⚠️ 这不是「安全中心拦 IDE」的判据（那条要同时满足 rc=2147483651\n"
+                "        或 ICU 指纹），更常见的是项目目录/临时目录的权限问题。\n"
+            )
         raise RuntimeError(
             "wechatide 连不上 IDE（能启动，但通道没通）—— 请依次确认：\n"
             f'  1) IDE 已启动：`"{os.path.join(self.ide, "cli.bat")}" open '
             f'--project "{self.project}"`\n'
             f"  2) 已授权：`wechatide auth -c {self.client}` 并在 IDE 内点击批准\n"
             f"  3) 助手工具不在沙箱中运行（官方硬要求）\n"
-            f"原始返回：{str(j)[:300]}"
+            f"原始返回：{str(j)[:300]}{tail}"
         )
         return j
 
