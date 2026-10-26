@@ -55,6 +55,8 @@ EXPECTED: dict[str, Any] = {
     "root_scripts.linted": [
         "scripts/verify_miniapp_devtools.py",
         "scripts/wechatide_client.py",
+        "scripts/wechatide_mcp.py",
+        "scripts/ide_mcp_auth.py",
         "scripts/verify_ci_parity.py",
         "scripts/run_walkthrough_devtools.py",
         "scripts/verify_local_gates.py",
