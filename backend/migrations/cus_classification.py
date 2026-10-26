@@ -31,7 +31,11 @@
 * **弱关联**：`declaration_id` 只存 id，不建外键、不级联删除（PRD §7）；
 * **未知保持 NULL**：`hs_code` / `confidence` / `rationale` / `decided_by_user_id` 都可空，
   不补 0、不填空串；
-* 时间存 UTC 朴素时间，格式与既有 `ent_*` / `cus_*` 表一致。
+* 时间存 UTC 朴素时间，格式与既有 `ent_*` / `cus_*` 表一致；
+* `confidence` 用 `DECIMAL(5,4)`、**两侧写法一致**：SQLite 侧也不许写 `REAL`。
+  这是本仓的静态守卫（`tests/test_migration_static_guards.py`）要求 ——
+  浮点声明在金额/数量列上会在四舍五入处悄悄出错，而"本机只跑 SQLite、CI 才跑 MySQL"
+  会让两侧不一致时**只在一边炸**。首版就写成 `REAL` 被守卫抓到过一次。
 
 `cus_` 前缀 = 由迁移管理，不进 `Base.metadata.create_all`。
 """
@@ -130,7 +134,7 @@ CREATE TABLE IF NOT EXISTS `cus_classification_candidate` (
   `classification_id` INTEGER NOT NULL,
   `hs_code` TEXT NOT NULL,
   `label` TEXT NULL,
-  `confidence` REAL NULL,
+  `confidence` DECIMAL(5,4) NULL,
   `source` TEXT NOT NULL DEFAULT 'model',
   `rank_no` INTEGER NOT NULL DEFAULT 1,
   `rationale` TEXT NULL,
