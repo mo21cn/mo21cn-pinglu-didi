@@ -298,92 +298,9 @@ page { background: #F5F7FA; }
 }
 
 /* ==========================================================================
- * 「智慧关务 · 规划中」说明层（纯前端静态文案 · 零接口调用）
- * 色值：标题 #1F2D3D / 正文 #4A5A6A / 弱化 #98A6B8 / 标签 #22A85A on #EAF9F0
- *      「不提供申报代理服务」用暖色 #C4562F 强调（这句是法务口径，不能被读漏）
+ * 说明层的样式（`.ct-*`）已随 D1 一并删除 —— 绿卡现在真导航到关务首页，
+ * 那三句法务口径搬到了 `pages/customs/home/home` 的页头副标题与页脚，
+ * 不再是"点「我知道了」就消失"的一层。留空这段注释是为了让下一个人
+ * 知道它不是"漏了"，而是"故意不在了"。
  * ========================================================================== */
-.ct-mask {
-  position: fixed;
-  left: 0; right: 0; top: 0; bottom: 0;
-  z-index: 1200; /* 高于发货方式弹窗（1100）：说明层是从那张绿卡里出来的 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 
-.ct-mask-bg {
-  position: absolute;
-  left: 0; right: 0; top: 0; bottom: 0;
-  background: rgba(20, 35, 59, .5);
-  animation: ch-fade .18s ease-out;
-}
-
-.ct-panel {
-  position: relative;
-  width: 600rpx;
-  padding: 40rpx 40rpx 32rpx;
-  box-sizing: border-box;
-  background: #FFFFFF;
-  border-radius: 26rpx;
-  box-shadow: 0 16rpx 56rpx rgba(15, 37, 64, .2);
-  animation: ch-pop .22s ease-out;
-}
-
-.ct-head {
-  display: flex;
-  align-items: center;
-}
-
-.ct-title {
-  font-size: 38rpx;
-  font-weight: 600;
-  color: #1F2D3D;
-  letter-spacing: 1rpx;
-}
-
-.ct-tag {
-  margin-left: 16rpx;
-  padding: 2rpx 14rpx;
-  font-size: 20rpx;
-  line-height: 32rpx;
-  color: #22A85A;
-  background: #EAF9F0;
-  border-radius: 8rpx;
-}
-
-.ct-line {
-  margin-top: 22rpx;
-  font-size: 26rpx;
-  line-height: 40rpx;
-  color: #4A5A6A;
-}
-
-.ct-strong {
-  color: #1F2D3D;
-  font-weight: 600;
-}
-
-.ct-warn {
-  color: #C4562F;
-  font-weight: 600;
-}
-
-.ct-line-quiet {
-  font-size: 22rpx;
-  line-height: 34rpx;
-  color: #98A6B8;
-}
-
-.ct-btn {
-  margin-top: 32rpx;
-  height: 84rpx;
-  line-height: 84rpx;
-  text-align: center;
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #FFFFFF;
-  border-radius: 42rpx;
-  background: linear-gradient(90deg, #57D780 0%, #26D554 100%);
-}
-
-.ct-btn-hover { opacity: .86; }

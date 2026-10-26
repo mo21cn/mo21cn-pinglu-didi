@@ -1258,21 +1258,33 @@ section('⑤ 静态防线')
       /cargo_name=/.test(entBody) && /quantity=/.test(entBody) && /quantity_unit=/.test(entBody))
     check('委托发货不再跳占位预览页（该入口曾经是「无接口调用的看起来有」）',
       !/\/pages\/preview\/preview/.test(entBody))
-    // 智慧关务：D0 只交付入口与口径，**不**导航 —— 关务页（`pages/customs/*`）尚未开发，
-    // 跳过去只会是一张空白页。等 D1 落地，这条断言要跟着改成"进真实关务首页"。
+    // 智慧关务：D0 时只交付入口与口径、**不**导航（关务页还没开发，跳过去是空白页）。
+    // D1 落地后换成**真导航**，本节断言同步改写 —— 留着"只弹说明层"的旧断言，
+    // 等于把已经作废的产品决定钉成契约，而且会**恒红**（`cusTipVisible` 已随说明层删除）。
     const cusBody = cargoCode.slice(cargoCode.indexOf('openCustomsEntry'), cargoCode.indexOf('pickSelfDelivery'))
-    check('智慧关务落「规划中」口径：只弹页内说明层，不导航、不调接口',
-      /cusTipVisible:\s*true/.test(cusBody) && /showChannel:\s*false/.test(cusBody) &&
-      !/R\.go\(/.test(cusBody) && !/navigateTo|redirectTo|reLaunch/.test(cusBody) &&
-      !/request\(/.test(cusBody) && !/callContainer/.test(cusBody))
-    check('说明层写清三句口径（能力 / 不代申报 / 以官方结果为准）且可关闭',
-      /智慧关务/.test(cargoWxml) && /不提供申报代理服务/.test(cargoWxml) &&
-      /以海关等官方系统结果为准/.test(cargoWxml) &&
-      /bindtap="closeCustomsTip"/.test(cargoWxml) && /closeCustomsTip\(\)/.test(cargoCode))
+    check('智慧关务经 R.go() 进入**已注册**的关务首页（真导航，不再是弹层）',
+      /R\.go\(\s*['"]\/pages\/customs\/home\/home['"]/.test(cusBody) &&
+      /showChannel:\s*false/.test(cusBody) &&
+      !/navigateTo|redirectTo|reLaunch/.test(cusBody) &&
+      JSON.parse(read('app.json')).pages.indexOf('pages/customs/home/home') >= 0)
+    check('智慧关务入口带 `from`（否则 go() 无法判断是可 push 的边还是非法跳转）',
+      /from:\s*['"]pages\/publish\/cargo\/cargo['"]/.test(cusBody))
+    check('「规划中」说明层已整体移除（`cusTipVisible` / `closeCustomsTip` 不得残留 —— '
+      + '留着就是一段谁也到不了的死代码）',
+      !/cusTipVisible/.test(cargoCode) && !/closeCustomsTip/.test(cargoCode) &&
+      !/cusTipVisible/.test(cargoWxml) && !/\.ct-panel\s*\{/.test(cargoWxss))
+    // 三句法务口径没有丢，而是搬到了真正该出现它的地方：关务首页本身。
+    // 断言必须落在**关务首页**上（而不是原来的弹层），否则"口径还在"会变成空话。
+    const cusHomeWxml = read('pages/customs/home/home.wxml')
+    check('法务口径搬到了关务首页（信息服务 / 不代申报 / 以官方结果为准），'
+      + '不再是"点我知道了就消失"的一层',
+      /不提供申报代理服务/.test(cusHomeWxml) &&
+      /以海关等官方系统结果为准/.test(cusHomeWxml) &&
+      /data-act-cus-official-off="1"/.test(cusHomeWxml))
     check('智慧关务有独立走查锚点（三张 `.ch-opt` 需要可区分属性）',
       /data-act-cus-entry="1"/.test(cargoWxml))
-    check('本功能纯前端：发货方式相关代码零接口调用',
-      !/request\(/.test(selfBody) && !/request\(/.test(entBody))
+    check('本功能纯前端：发货方式相关代码零接口调用（关务页自己取数，入口页不取）',
+      !/request\(/.test(selfBody) && !/request\(/.test(entBody) && !/request\(/.test(cusBody))
     check('遮罩可关闭（再次点 tabBar 中间「+发货」可重新唤起）',
       /bindtap="closeChannelModal"/.test(cargoWxml) && /closeChannelModal\(\)/.test(cargoCode))
 
@@ -2716,6 +2728,124 @@ section('⑤ 静态防线')
     if (skippedDyn > 0) {
       ok('跳过 ' + skippedDyn + ' 处动态 data-df（值由插值决定，静态配不了对）')
     }
+  }
+
+  // ---------------------------------------------------------------- ⑫ 智慧关务 D1 两页
+  // 为什么这几条必须在这里（而不是只靠真机走查）：D1 的全部价值都在**口径**上 ——
+  // "官方源不可用就说不可用"、"发生时间与取得时间分列"、"未知状态保持未知"。
+  // 这三件事写错了界面照样能点、能截图，只有把口径函数真的跑一遍才看得出来。
+  section('⑫ 智慧关务 D1（数据源状态条 / 人工登记时间线）口径契约')
+  {
+    const CUS = require(path.join(MP, 'utils', 'customs.js'))
+
+    // —— sourcesView：官方源不可用这件事必须**照实**传出去 ——
+    const off = CUS.sourcesView({
+      checked_at: '2026-10-26 10:00:00',
+      official_available: false,
+      notice: '本版本不接官方数据源：所有状态来自人工登记，以官方结果为准',
+      sources: [
+        { key: 'official', label: '海关官方', kind: 'official', state: 'unavailable', reason: '未取得授权' },
+        { key: 'manual', label: '人工登记', kind: 'manual', state: 'available', reason: '不依赖外部系统' }
+      ]
+    })
+    check('官方源不可用 ⇒ officialUnavailable 为真（AC-02 的界面开关）', off.officialUnavailable === true)
+    check('官方源不可用 ⇒ notice 原样透传（页面不自己编一句"暂无数据"）',
+      off.notice === '本版本不接官方数据源：所有状态来自人工登记，以官方结果为准', off.notice)
+    check('人工登记始终可用 ⇒ manualAvailable 为真（AC-08「断源仍可作业」）', off.manualAvailable === true)
+    // ⚠️ 这里**不断言具体时分数值**：服务端存 UTC，页面按运行环境时区转本地（见
+    // `toLocalTime`）。写死一个值会让这条断言在 CI（UTC）与本机（UTC+8）给出不同答案 ——
+    // 那是把"跑在哪台机器上"伪装成"产品对不对"。断的是**形状**与**不丢**。
+    check('核对时间来自服务端 checked_at（页面不自造时间戳，也不留空）',
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(off.checkedAt), off.checkedAt)
+    check('服务端时间戳（UTC 无时区标记）被转成本地时间（否则屏幕上会差 8 小时且看不出来）',
+      CUS.toLocalTime('2026-10-26 03:21:53') !== '2026-10-26 03:21:53' ||
+      // 运行环境恰好在 UTC：此时"不转"是对的，改断格式而不是断差异
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(CUS.toLocalTime('2026-10-26 03:21:53')),
+      CUS.toLocalTime('2026-10-26 03:21:53'))
+    check('解析失败的时间**原样返回**（显示一个可疑但真实的值，好过 Invalid Date 或"刚刚"）',
+      CUS.toLocalTime('not-a-time') === 'not-a-time' && CUS.toLocalTime('') === '',
+      CUS.toLocalTime('not-a-time'))
+
+    // ⭐ 正控：同一条判据在官方源**可用**时必须翻成 false。
+    //    不做这一条，"officialUnavailable 恒真"这种写法也能全绿 —— 那是假绿。
+    const on = CUS.sourcesView({
+      official_available: true,
+      sources: [{ key: 'official', label: '海关官方', kind: 'official', state: 'available' }]
+    })
+    check('（正控）官方源可用 ⇒ officialUnavailable 翻为假 —— 否则上一条恒真、等于没断',
+      on.officialUnavailable === false)
+
+    // —— eventView：发生时间与取得时间必须**分开** ——
+    const ev = CUS.eventView({
+      id: 7, status: 'inspection', occurred_at: '2026-10-20 09:00:00',
+      fetched_at: '2026-10-26 08:00:00', source: '人工补录', source_kind: 'manual'
+    })
+    check('事件的两个时间各归各位（occurred_at → 发生 / fetched_at → 取得，互不覆盖）',
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(ev.occurredAt) &&
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(ev.fetchedAt) &&
+      ev.occurredAt !== ev.fetchedAt,
+      `occurred=${ev.occurredAt} fetched=${ev.fetchedAt}`)
+    check('补录事件的取得时间**晚于**发生时间时不被抹平（抹平＝伪装新鲜度，AC-09 禁止）',
+      ev.occurredAt !== ev.fetchedAt)
+    check('来源类型 official 才有官方标记（人工补录不得显示成官方回执）', ev.official === false)
+
+    // —— declarationView：未知保持未知 ——
+    const dz = CUS.declarationView({ id: 1, declaration_no: 'X1', status: 'some_new_state' })
+    check('未收录的状态回落「未知」，不猜成某一个已知状态', dz.statusLabel === '未知', dz.statusLabel)
+    check('终态判定只认 released（多认一个就等于替海关宣布结案）',
+      CUS.isTerminal('released') === true && CUS.isTerminal('held') === false &&
+      CUS.isTerminal('inspection') === false)
+
+    // —— 两页的取数口径：都走同一个 util，不各写一份 ——
+    const homeJs = read('pages/customs/home/home.js')
+    const detailJs = read('pages/customs/detail/detail.js')
+    // 判「代码里有没有 X」必须剥注释（本页注释里正写着反例，见 404 那条的说明）
+    const detailCode = stripComments(detailJs)
+    check('两页共用 `utils/customs` 的口径函数（各写一份就会出现"列表说不可用、详情说已接入"）',
+      /require\(['"].*utils\/customs['"]\)/.test(homeJs) &&
+      /require\(['"].*utils\/customs['"]\)/.test(detailJs))
+    check('两页都经 `guardEntry` 接入运行期治理（`MIGRATED_PAGES` 名单已含两页）',
+      /R\.guardEntry\(\s*SELF/.test(homeJs) && /R\.guardEntry\(\s*SELF/.test(detailJs) &&
+      require(path.join(MP, 'utils', 'routes.js')).MIGRATED_PAGES.indexOf('pages/customs/home/home') >= 0 &&
+      require(path.join(MP, 'utils', 'routes.js')).MIGRATED_PAGES.indexOf('pages/customs/detail/detail') >= 0)
+    check('列表 → 详情走 `R.go()` 并带 `from`（裸 navigateTo 会让页面栈预算失效）',
+      /R\.go\(\s*['"]\/pages\/customs\/detail\/detail\?id=/.test(homeJs) &&
+      /from:\s*SELF/.test(homeJs) && !/wx\.navigateTo\(/.test(stripComments(homeJs)))
+
+    // —— 模板：口径落的**位置**对不对 ——
+    const homeWxml = read('pages/customs/home/home.wxml')
+    const detailWxml = read('pages/customs/detail/detail.wxml')
+    check('首页：官方源不可用时渲染 `.src-off` 说明块（而不是留一块空白让人猜）',
+      /wx:if="\{\{officialUnavailable\}\}"[\s\S]{0,120}src-off/.test(homeWxml))
+    check('首页：本页**不存在**任何"查官方状态"的入口 —— 说明块就是它的替代物',
+      !/data-act-cus-official-query/.test(homeWxml) && !/data-act-cus-official="1"/.test(homeWxml))
+    check('首页：列表标题标明「非官方」，不让任何一条看起来像海关回执',
+      /人工登记记录/.test(homeWxml) && /非官方/.test(homeWxml))
+    check('详情：状态取自 `freshness`（服务端算好的那一份），页面不自己再算一遍',
+      /freshness\.officialLabel/.test(detailWxml) && /freshness\.message/.test(detailWxml))
+    // 同一个屏幕上不能同时出现两个时区：时间线已转本地，若新鲜度卡还直接渲染
+    // 服务端 UTC 原值，就会出现"上面 03:30、下面 11:30"——用户分不清是数据错还是时区差。
+    check('详情：新鲜度卡的时间也过 `freshnessView`（模板里不得直接读 `freshness.*_at` 原始字段）',
+      !/freshness\.last_fetched_at/.test(detailWxml) &&
+      !/freshness\.last_source/.test(detailWxml) &&
+      /freshnessView/.test(detailCode))
+    check('详情：时间线里「发生」与「取得」分两行渲染（合成一行就是伪装新鲜度）',
+      /发生\s*\{\{item\.occurredAt\}\}/.test(detailWxml) &&
+      /取得\s*\{\{item\.fetchedAt\}\}/.test(detailWxml))
+    check('详情：两条时间线文案之间必须有换行元素（同一行内并排＝看起来像一个时间）',
+      /发生\s*\{\{item\.occurredAt\}\}<\/view>\s*<view class="tl-time">取得/.test(detailWxml))
+
+    // —— 详情页的取数失败：404 与"无权限"同一个响应，措辞不能泄漏存在性 ——
+    // 判"代码里有没有这四个字"必须剥注释：本页的注释里**正写着**「⛔ 不要写成无权限」，
+    // 把注释算进来会把一次正确实现判成失败（`stripComments` 保长，切片下标不受影响）。
+    check('详情：404 措辞为「不存在或不可见」，⛔ 不写"无权查看"（那等于承认记录存在）',
+      /记录不存在或不可见/.test(detailCode) && !/无权查看/.test(detailCode))
+    // ⭐ 这条是真机踩出来的：`guardEntry(url, ctx)` 从 **url** 里解析参数，
+    //    只传页面路径 = 告诉守卫"这页没有参数" ⇒ 每次进入都被拦成
+    //    「id 缺少必填参数」，而列表跳转本身是对的（2026-10-26 截图可见）。
+    //    静态判据拦得住这一类：带 params 的页，守卫的入参必须是**拼过参的**字符串。
+    check('详情：把 id 拼进 url 再交给 `guardEntry`（只传页面路径 ⇒ 恒被拦成「缺参」）',
+      /R\.guardEntry\(\s*SELF\s*\+/.test(detailCode), '守卫入参未拼参数')
   }
 
   // ---------------------------------------------------------------- 汇总

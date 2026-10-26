@@ -1,0 +1,283 @@
+/* 智慧关务 · 详情 —— 只写本页特有排版；`.page` / `.page-content` / `.empty` /
+   `.empty-icon` / `.btn-primary` 复用 app.wxss 的全局类 */
+
+.head-bg {
+  background: linear-gradient(135deg, #57D780, #26D554);
+  padding-bottom: 24rpx;
+}
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  height: 88rpx;
+  padding: 0 24rpx;
+}
+
+.nav-back {
+  width: 64rpx;
+  font-size: 48rpx;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.nav-spacer {
+  width: 64rpx;
+}
+
+.head-sub {
+  padding: 0 32rpx;
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, .9);
+}
+
+.hover-dim {
+  opacity: .72;
+}
+
+/* ---- 状态大卡 ---- */
+.top-card {
+  margin: 24rpx 24rpx 0;
+  padding: 28rpx 24rpx;
+  background: #FFFFFF;
+  border-radius: 20rpx;
+  box-shadow: 0 6rpx 20rpx rgba(31, 45, 61, .06);
+}
+
+.top-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.top-no {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #1F2D3D;
+}
+
+.top-status {
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  font-size: 23rpx;
+}
+
+.top-status.done {
+  background: #E8F8EE;
+  color: #1B7A44;
+}
+
+.top-status.doing {
+  background: #EEF4FF;
+  color: #3B5BDB;
+}
+
+.top-meta {
+  margin-top: 14rpx;
+  font-size: 23rpx;
+  color: #8C9AAB;
+}
+
+.top-meta-item {
+  margin-right: 12rpx;
+}
+
+/* ---- 新鲜度 ---- */
+.fresh-card {
+  margin: 16rpx 24rpx 0;
+  padding: 24rpx;
+  background: #FFF8E6;
+  border-radius: 20rpx;
+}
+
+.fresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fresh-label {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #8A5A00;
+}
+
+.fresh-chip {
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+}
+
+.fresh-chip.off {
+  background: #FFE7C4;
+  color: #8A5A00;
+}
+
+.fresh-chip.ok {
+  background: #E8F8EE;
+  color: #1B7A44;
+}
+
+.fresh-msg {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: #A07A2A;
+  line-height: 1.55;
+}
+
+.fresh-meta {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #B08B3E;
+}
+
+/* ---- 时间线 ---- */
+.sec-title {
+  display: flex;
+  align-items: center;
+  margin: 32rpx 24rpx 0;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1F2D3D;
+}
+
+.sec-count {
+  margin-left: 12rpx;
+  font-size: 22rpx;
+  font-weight: 400;
+  color: #98A6B8;
+}
+
+/* 时区说明：一行小字，弱到不抢视线，但必须存在（见 detail.wxml 的注释） */
+.sec-note {
+  margin: 6rpx 24rpx 0;
+  font-size: 22rpx;
+  color: #98A6B8;
+}
+
+.tl {
+  margin: 16rpx 24rpx 0;
+  padding: 8rpx 24rpx 8rpx 8rpx;
+  background: #FFFFFF;
+  border-radius: 20rpx;
+}
+
+.tl-item {
+  position: relative;
+  display: flex;
+  padding: 20rpx 0 20rpx 24rpx;
+}
+
+.tl-item::before {
+  content: '';
+  position: absolute;
+  left: 33rpx;
+  top: 44rpx;
+  bottom: -8rpx;
+  width: 2rpx;
+  background: #EDF1F6;
+}
+
+.tl-item:last-child::before {
+  display: none;
+}
+
+.tl-dot {
+  flex: none;
+  width: 18rpx;
+  height: 18rpx;
+  margin-top: 10rpx;
+  border-radius: 50%;
+  background: #C9D3DF;
+}
+
+.tl-dot.new {
+  background: #26D554;
+  box-shadow: 0 0 0 6rpx rgba(38, 213, 84, .16);
+}
+
+.tl-body {
+  flex: 1;
+  padding-left: 20rpx;
+}
+
+.tl-head {
+  display: flex;
+  align-items: center;
+}
+
+.tl-status {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: #1F2D3D;
+}
+
+.tl-src {
+  margin-left: 12rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+  font-size: 20rpx;
+}
+
+.tl-src.manual {
+  background: #EEF2F7;
+  color: #7A8798;
+}
+
+.tl-src.official {
+  background: #E8F8EE;
+  color: #1B7A44;
+}
+
+.tl-correct {
+  margin-left: 12rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+  background: #FFF1F0;
+  color: #C0392B;
+  font-size: 20rpx;
+}
+
+.tl-time {
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #8C9AAB;
+}
+
+.tl-note {
+  margin-top: 8rpx;
+  font-size: 23rpx;
+  color: #5B6B7F;
+  line-height: 1.5;
+}
+
+.empty-title {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 28rpx;
+  color: #5B6B7F;
+}
+
+.empty-hint {
+  display: block;
+  margin-top: 10rpx;
+  padding: 0 60rpx;
+  font-size: 23rpx;
+  color: #98A6B8;
+  line-height: 1.6;
+}
+
+.foot-note {
+  margin: 40rpx 24rpx 60rpx;
+  font-size: 22rpx;
+  color: #A9B4C2;
+  text-align: center;
+  line-height: 1.6;
+}

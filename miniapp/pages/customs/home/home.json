@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "智慧关务",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
+}

@@ -875,6 +875,10 @@ CASE_CREATE = "pages/entrust/case-create/case-create"
 SESSION = "pages/entrust/session/session"
 #: S1 工作项 5：货主侧「我的委托」列表（真实状态 + 承接组织）。
 MINE_LIST = "pages/entrust/assignments/assignments"
+#: D1 关务域两页。⑮ 章的行为 0 现在断的是"绿卡真的导航到这里"，
+#: 所以这两条路径是**断言的落点**，不写死就等于断"某个页面"。
+CUSTOMS_HOME = "pages/customs/home/home"
+CUSTOMS_DETAIL = "pages/customs/detail/detail"
 
 # ㉖/㉗/㉘ 章（ENT-030 切四之六：登记案件 → 记录决定 → 关闭）依赖的演示数据。
 # 委托 `#1` 是 `seed_entrust_demo.py` 的 `ASSIGNMENT_MAIN`，状态 `claimed`
@@ -910,7 +914,9 @@ ARTIFACT_ID = 5
 DESC_CUSTOMS = "提供信息查询与辅助工具，本版本不提供申报代理服务。"
 DESC_SELF = "您发布货物，自行在向海通平台找寻认证船主接单并完成运输。"
 DESC_ENTRUST = "您发布货物，委托给向海通平台承运，由平台组织运力完成运输。"
-#: 「智慧关务 · 规划中」说明层里**必须出现**的两句口径（PRD §10.1 / 附录 B 原文）
+#: 法务口径里**必须出现**的两句（PRD §10.1 / 附录 B 原文）。
+#: D0 时这两句挂在「规划中」说明层上；D1 说明层删除后它们搬到了**关务首页**
+#: （页头副标题 + 页脚），所以 ⑮ 章改在 `CUSTOMS_HOME` 上断这两句。
 TIP_MUST = ("不提供申报代理服务", "以海关等官方系统结果为准")
 
 
@@ -1673,6 +1679,25 @@ def sec_15(w: Walker) -> None:
         return read()
 
     print("\n== ⑮ 发货方式选择 ==", flush=True)
+    # ── 身份前置（D1 之后新增）─────────────────────────────────────────
+    # 本章**以前**不需要登录：它断的是弹窗、文案、几何，全是纯前端。
+    # D1 把绿卡接成真导航之后，"关务首页读到官方源不可用"这条要**真的调**
+    # `/customs/sources`（要 token），于是没登录就整页错误态、四条断言齐红。
+    # 2026-10-26 11:09 首跑实测就是如此（`view='error'`，而 console 无报错）——
+    # FAIL 指向了产品，真因是"这一章没登录"。⇒ 先把身份钉死（与 ⑯ 同一个演示账号）。
+    id_path = w.login_as("seed-shipper")
+    role_ok = id_path == INDEX and w.enter_role("shipper", SHIPPER)
+    w.rep.rec(
+        "⑮ 前置 · 已登录进入货主工作台（关务首页要带 token 才读得到数据源状态）",
+        role_ok,
+        f"identity={id_path} role_ok={role_ok}",
+    )
+    if not role_ok:
+        w.rep.not_run(
+            "⑮ 发货方式选择 · 全部断言",
+            "前置登录/切角色没成功 ⇒ 后面每一条都没有对象（⛔ 不是产品行为违反预期）",
+        )
+        return
     # ⭐ 2026-09-20：**先证明自己到了那一页**。此前这里只有一句 `nav()`，**不看返回值**
     #    ⇒ 当模拟器停在上一次运行留下的深栈上（实测开窗即 `pages/mine/mine` ＋ 栈内还有
     #    其它页）时，`navigateTo` **静默不落地**，随后 12 条断言**齐刷刷指向产品**
@@ -1802,35 +1827,115 @@ def sec_15(w: Walker) -> None:
             f"panel={panel_r['top']:.0f}..{panel_r['bottom']:.0f} winH={win_h:.0f}",
         )
 
-    # 行为 0：智慧关务 → **只弹页内说明层**，不跳页、不调接口。
-    # ⚠️ 这一格断的是 D0 的**产品决定**：`pages/customs/*` 还没开发，绿卡跳过去只会是
-    #    空白页（PRD §3 第 4 条）。等 D1 页面落地，本格要跟着改成"进关务首页"。
+    # 行为 0：智慧关务 → **真导航**进关务首页（D1 已落地）。
+    # ⚠️ 这一格在 D0 断的是「只弹页内说明层、留在本页」—— 那是一个**已经作废**的产品决定
+    #    （`pages/customs/*` 当时还不存在，跳过去只会是空白页）。D1 把两页做出来之后，
+    #    留着旧断言会 ① 恒红（`cusTipVisible` 已随说明层一并删除）
+    #    ② 即使不红也是在给"入口没接上"背书 —— 那正是本仓库反复踩的"假绿"。
+    #    ⇒ 现在断新契约，而且**三件事都断**：
+    #      a) 真的换页了（不是弹个层留在原地）；
+    #      b) 读到了"官方源不可用"（D1 的立身之本：没授权就说没授权，AC-02）；
+    #      c) 那一块说明在屏幕上**真的画出来了**（矩形非空）—— 只有 data 里一个布尔不算。
+    src_form_before = w.c.page_data().get("form") or {}
     t_cus = w.c.tap('[data-act-cus-entry="1"]')
-    time.sleep(1.1)
-    d_tip = w.wait_data(lambda d: d.get("cusTipVisible") is True, tries=20)
-    w.shot("15-智慧关务-规划中说明层")
+    time.sleep(1.8)
+    at_cus = w.c.wait_path(CUSTOMS_HOME, 25)
+    time.sleep(1.2)  # 页面已就位但渲染帧可能滞后（与受理屏那两格同一条理由）
+    w.shot("15-智慧关务-首页-数据源状态条")
+    d_cus = w.c.page_data()
     w.rep.rec(
-        "⑮ 智慧关务：关掉弹窗 + 弹「规划中」说明层，且**留在发布货物页**（不跳空白页）",
-        d_tip.get("cusTipVisible") is True
-        and d_tip.get("showChannel") is False
-        and w.c.current_path() == PUBLISH_CARGO,
-        f"cusTipVisible={d_tip.get('cusTipVisible')} "
-        f"showChannel={d_tip.get('showChannel')} path={w.c.current_path()} tap={t_cus}",
+        "⑮ 智慧关务换成真导航：落在关务首页（⛔ 不再是「弹一层说明、留在发布页」）",
+        at_cus,
+        f"path={w.c.current_path()} tap={t_cus}",
     )
-    tip_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".ct-panel")))
-    miss = [s for s in TIP_MUST if s not in tip_txt]
     w.rep.rec(
-        "⑮ 说明层写清法务口径（不提供申报代理服务 / 以官方结果为准）",
-        not miss,
-        f"缺={miss} 文本={tip_txt[:60]}",
+        "⑮ 关务首页读到「官方源不可用」（AC-02 的界面开关：没授权就必须说没授权）",
+        d_cus.get("officialUnavailable") is True and d_cus.get("view") == "ready",
+        f"officialUnavailable={d_cus.get('officialUnavailable')!r} view={d_cus.get('view')!r}",
     )
-    w.c.tap(".ct-btn")
-    time.sleep(0.9)
-    d_tip2 = w.c.page_data()
+    # ⚠️ 取几何用**类选择器**，不用 `[data-act-cus-official-off="1"]`：
+    #    2026-10-26 11:19 实测同一个节点 `count()` 能数到、`boundingClientRect()`
+    #    却回空数组（截图里那块明显画着）。`count` 走的是节点查询、`rects` 走的是
+    #    布局查询，两者对自定义 data 属性的支持并不一致 —— 断"画出来了"这件事
+    #    用类选择器更稳，锚点仍然用 data 属性（那是给点击用的）。
+    off_got = w.c.rects(".src-off")
+    off_r = off_got[0] if off_got else {}
     w.rep.rec(
-        "⑮ 「我知道了」可关闭说明层",
-        d_tip2.get("cusTipVisible") is False,
-        str(d_tip2.get("cusTipVisible")),
+        "⑮ 「官方状态查询暂不可用」在屏幕上真的画出来了（矩形非空，不是只有 data 里一个布尔）",
+        bool(off_r) and off_r.get("width", 0) > 0 and off_r.get("height", 0) > 0,
+        f"rect={off_r.get('width')}x{off_r.get('height')}" if off_r else "取不到几何",
+    )
+    src_rows = w.c.count('[data-act-cus-source="1"]')
+    w.rep.rec(
+        "⑮ 状态条逐条列出数据源（官方 + 人工登记至少各一条）",
+        src_rows >= 2,
+        f"数据源条目={src_rows}",
+    )
+    # 法务口径必须能在**关务页**上读到：说明层删了之后它是搬过来的，不是丢了。
+    home_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+    w.rep.rec(
+        "⑮ 法务口径随页面搬过来（不提供申报代理服务 / 以海关等官方系统结果为准）",
+        not [s for s in TIP_MUST if s not in home_txt],
+        f"缺={[s for s in TIP_MUST if s not in home_txt]}",
+    )
+
+    # 列表 → 详情：**空态也算通过**，但"进了详情"这件事必须真的发生。
+    # 造一条记录不归本章管（本章断的是入口），所以有记录就点开验时间线两列，
+    # 没记录就只验空态文案 —— 两侧都如实写进读数，⛔ 不把"没数据"说成"通过"。
+    n_rec = w.c.count('[data-act-cus-item="1"]')
+    if n_rec > 0:
+        t_item = w.c.tap('[data-act-cus-item="1"]')
+        time.sleep(1.6)
+        at_det = w.c.wait_path(CUSTOMS_DETAIL, 25)
+        time.sleep(1.0)
+        w.shot("15-智慧关务-记录详情-发生与取得分列")
+        d_det = w.c.page_data()
+        w.rep.rec(
+            "⑮ 列表 → 详情：真的进了详情页（`R.go()` 的 push 边生效）",
+            at_det,
+            f"path={w.c.current_path()} tap={t_item}",
+        )
+        w.rep.rec(
+            "⑮ 详情页时间线的两条时间**不是同一个值**（合并即伪装新鲜度，AC-09 禁止）",
+            any(
+                (it.get("occurredAt") or "") != (it.get("fetchedAt") or "")
+                for it in (d_det.get("timeline") or [])
+            ),
+            f"events={len(d_det.get('timeline') or [])}",
+        )
+        det_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+        w.rep.rec(
+            "⑮ 详情页把「发生」与「取得」写成两行（并排会让补录的旧状态看起来像刚更新）",
+            "发生" in det_txt and "取得" in det_txt,
+            f"文本 {len(det_txt)} 字符",
+        )
+        w.c.back()
+        time.sleep(1.0)
+        w.rep.rec("⑮ 从详情可返回关务首页", w.c.wait_path(CUSTOMS_HOME, 15), w.c.current_path())
+    else:
+        w.rep.not_run(
+            "⑮ 关务列表 → 详情 · 时间线两列",
+            "本次库里没有本账号可见的人工登记记录 ⇒ 列表为空态，**没有对象可点**。"
+            "⛔ 这不是通过，也不是产品缺陷（D1 只做查询，登记入口在后续切片）",
+        )
+
+    # 返回发布页：关务入口是 push 边，回来时那张已经填了一半的货单**不该被清空**。
+    back_cargo = False
+    for _ in range(3):
+        w.c.back()
+        time.sleep(0.9)
+        if w.c.wait_path(PUBLISH_CARGO, 15):
+            back_cargo = True
+            break
+    w.rep.rec(
+        "⑮ 从关务首页可返回发布货物页（push 边，不是 replace）", back_cargo, w.c.current_path()
+    )
+    form_after = w.c.page_data().get("form") or {}
+    w.rep.rec(
+        "⑮ 返回后源页表单仍在（一旦换成 replace，用户填了一半的货单会被扔掉）",
+        (not src_form_before.get("expect_date"))
+        or form_after.get("expect_date") == src_form_before.get("expect_date"),
+        f"before={src_form_before.get('expect_date')!r} after={form_after.get('expect_date')!r}",
     )
 
     # 行为 1：自主发货 → 只关弹窗、留在本页

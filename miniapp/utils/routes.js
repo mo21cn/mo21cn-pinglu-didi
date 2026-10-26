@@ -276,6 +276,33 @@ const NAV_EDGES = [
     reason: '从委托详情进入「财务与结算」（费用行 / 缺件补录 / 结算版本与收付依据）'
   },
 
+  // ── 关务域（D1 切片）──────────────────────────────────────────────
+  // 入口是「发布货源」页发货方式弹窗里的第三张卡（`openCustomsEntry()`）。
+  // **push 而不是 replace**：用户看完关务状态还要回到那张已经填了一半的货单，
+  // 替换掉发布页等于把他填的东西扔掉（与 `cargo --push--> intake` 同一条口径）。
+  {
+    from: 'pages/publish/cargo/cargo',
+    to: 'pages/customs/home/home',
+    strategy: 'push',
+    reason: '「发布货源」页发货方式弹窗选「智慧关务」→ 进入关务首页（带已填货名当查询线索）'
+  },
+  {
+    // 列表 → 某条登记记录。**push**：看完一条还要回列表看下一条。
+    from: 'pages/customs/home/home',
+    to: 'pages/customs/detail/detail',
+    strategy: 'push',
+    reason: '从人工登记记录列表进入某条记录的状态与时间线'
+  },
+  {
+    // 冷启动直接落在详情（分享链接）时返回键没有上一页，回关务首页。
+    // **reuse 而不是 push**：正常路径下来源就是栈里的那个首页，再 push 会叠第二份 ——
+    // 也正是「把 push 图弄成环」的那一类写法（`session --reuse--> workbench` 同口径）。
+    from: 'pages/customs/detail/detail',
+    to: 'pages/customs/home/home',
+    strategy: 'reuse',
+    reason: '无上一页可返回时（冷启动深链）回到栈里的关务首页'
+  },
+
   // ── 重置栈（回首页重走身份链路）────────────────────────────────────
   { from: 'pages/mine/mine', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/workbench/workbench', to: 'pages/index/index', strategy: 'reset' },
@@ -286,6 +313,10 @@ const NAV_EDGES = [
   { from: 'pages/entrust/intake/intake', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/assignments/assignments', to: 'pages/index/index', strategy: 'reset' },
   { from: 'pages/entrust/finance/finance', to: 'pages/index/index', strategy: 'reset' },
+  // 关务首页的返回键在"冷启动深链、无上一页"时回身份入口（见 `home.js` 的 `onBack`）。
+  // ⛔ 详情页**不**声明这条：它的返回键落点是关务首页，不是身份入口 ——
+  //    声明一条没有代码证据的边会被 `verify_routes.js` 判成"缺证据的边"。
+  { from: 'pages/customs/home/home', to: 'pages/index/index', strategy: 'reset' },
 
   // ── 工作台 ↔ 会话：产品要求「经理人可在会话/工作台/成果之间反复切换」────
   //    HO 明确指出：有循环的业务导航不一定无限压栈，不能把所有循环判成错误。
@@ -568,6 +599,25 @@ const ROUTES = {
     //    `assignment_id` 唯一决定，它不是"选中的组织"；算进复用键会让同一张委托
     //    在不同组织上下文下被当成两个页面，白压一层栈。
     note: '财务与结算（§10.1 第 10–11 步；费用行 / 缺件补录 / 结算版本与收付依据）'
+  },
+
+  // ── 关务域（D1 切片：先有"数据源状态 + 人工登记时间线"两页）────────────
+  // 域名单独立 `customs`：这两页回答的是"海关那边现在是什么状态、这状态谁给的"，
+  // 与委托支线（谁在替我跑这票货）是两件事。混进 `entrust` 域后，
+  // 页面清单和权限投影都会跟着含混。
+  'pages/customs/home/home': {
+    kind: 'detail', deepLink: 'allow', domain: 'customs',
+    // 无参数：列的是"本平台登记过、且我有权看"的记录，范围由服务端按身份决定，
+    // 不接受调用方指定（指定了就变成"可以枚举别人登记了什么"）。
+    paramSchema: {},
+    note: '智慧关务首页（数据源状态条 + 人工登记记录查询）'
+  },
+  'pages/customs/detail/detail': {
+    kind: 'detail', deepLink: 'require-params', domain: 'customs',
+    // `id` 必需且为 id 类型：缺参是**调用方编程错误**，不能退化成"记录不存在"——
+    // 那会让"我点进来但什么都没看到"看起来像服务端问题。
+    paramSchema: { id: { type: 'id', required: true } },
+    note: '关务记录详情（状态 + 时间线 + 新鲜度；发生时间与取得时间分列）'
   }
 }
 
@@ -629,7 +679,15 @@ const MIGRATED_PAGES = [
   // 而且它有**三条通道可见性不同**的取数（内部 / 对客 / 仅客户本人）——
   // 脱离 `go()` 直接 navigateTo 会让"同一张委托只该有一页"与栈预算一起失效，
   // 而这类页正是最容易绕过预算的一类（与 case / session 同理）。
-  'pages/entrust/finance/finance'
+  'pages/entrust/finance/finance',
+  // D1 关务域两页从落地起接入。理由与上面几条不同、值得单说：
+  // 这两页**没有表单、也不写任何数据**（D1 只读），
+  // 但它们是本项目里第一批「**页面自己决定要不要渲染某个入口**」的页 ——
+  // 官方源不可用时首页不渲染查询入口。若绕开 `go()` 直接用裸 navigateTo，
+  // 那套"界面照实反映数据源可用性"的口径就会在页面栈层面裂开：
+  // 同一页可能出现两份，其中一份还带着上一轮的 `officialUnavailable`。
+  'pages/customs/home/home',
+  'pages/customs/detail/detail'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */
