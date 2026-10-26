@@ -197,6 +197,125 @@ def backend_ready(timeout: float = 2.0) -> bool:
         return False
 
 
+# ------------------------------------------------------------ 运行环境自证（2026-10-26）
+# 为什么非要单独取这一格：2026-10-26 那一轮 §15 **30/30 全绿**、五张截图与哈希都真，
+# 但**四份产物（summary.json / stdout / 截图 / 结果明细）里没有一处写着基础库版本**。
+# 于是"这批证据跑在 3.17.2 稳定版上"只能靠口头转述 —— 复核的人既无法确认也无法推翻。
+# 设备证据的前提是**能自证环境**，所以版本必须由产物自己带出来，不能靠人记得。
+_RUNTIME_FN = (
+    "function(){var o={};try{var s=wx.getSystemInfoSync();"
+    "o.SDKVersion=s.SDKVersion;o.model=s.model;o.platform=s.platform;"
+    "o.system=s.system;o.language=s.language;}catch(e){o.error=String(e);}return o;}"
+)
+
+
+def runtime_profile(project: str = DEFAULT_PROJECT) -> str:
+    """读 `miniapp/config/env.js` 的 `RUNTIME_PROFILE`（`dev` / `demo` / …）。
+
+    ⚠️ 这一格**必须随证据一起记**：本机走查要 `dev` 档，而仓库默认是 `demo` 档
+    （`demo` 走 `wx.cloud.callContainer` 打云端生产库，个人维度页面会是空的）。
+    同一个章节在两种档位下的读数**根本不是一件事**，不记档位等于不记环境。
+    """
+    p = os.path.join(project, "config", "env.js")
+    try:
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                s = line.strip()
+                if s.startswith("const RUNTIME_PROFILE"):
+                    return s.split("=", 1)[1].strip().strip("'\";")
+    except OSError:
+        pass
+    return ""
+
+
+def lib_version_cfg(project: str = DEFAULT_PROJECT) -> dict:
+    """项目侧写的基础库版本 —— 注意这是**「应该用哪个」**，不是「实际用了哪个」。
+
+    `project.private.config.json` 覆盖 `project.config.json`，而前者在 `.gitignore` 里
+    ⇒ 换一台机器复现时它会消失、行为跟着回退。所以两份都要记：
+    只记私有那份，等于记了一个别人手里根本没有的状态。
+    """
+    out: dict = {}
+    for name, key in (
+        ("project.config.json", "shared"),
+        ("project.private.config.json", "private"),
+    ):
+        p = os.path.join(project, name)
+        out[key + "Present"] = os.path.exists(p)
+        try:
+            with open(p, encoding="utf-8") as fh:
+                out[key] = json.load(fh).get("libVersion")
+        except (OSError, ValueError):
+            out[key] = None
+    return out
+
+
+def lib_version_gray(ver: str) -> dict:
+    """判定某版本是不是灰度基础库（读 IDE 自己的 `WeappVendor/cfg.json`）。
+
+    `notGrayList` = 不在灰度里的版本（即正式可用）。
+
+    ⚠️ 同一台机器上可能存在**多份** cfg.json（不同 IDE 数据目录），快照时间不同、
+    结论甚至相互矛盾 —— 2026-10-26 实踩：按一份 10-21 的旧快照读会得出
+    "3.17.3 也是灰度"，而当天生效那份里 3.17.3 **在** `notGrayList` 内。
+    ⇒ 本函数**取 mtime 最新的一份**，并把来源路径与时间一并返回，让读数可核；
+    查不到时如实回 `unknown`，⛔ 不猜。
+    """
+    la = os.environ.get("LOCALAPPDATA") or ""
+    best: tuple[float, str] | None = None
+    for name in ("微信开发者工具", "微信web开发者工具"):
+        root = os.path.join(la, name, "User Data") if la else ""
+        if not root or not os.path.isdir(root):
+            continue
+        try:
+            subs = os.listdir(root)
+        except OSError:
+            continue
+        for sub in subs:
+            p = os.path.join(root, sub, "WeappVendor", "cfg.json")
+            if not os.path.isfile(p):
+                continue
+            try:
+                m = os.path.getmtime(p)
+            except OSError:
+                continue
+            if best is None or m > best[0]:
+                best = (m, p)
+    if best is None:
+        return {"verdict": "unknown", "why": "未找到 IDE 的 WeappVendor/cfg.json"}
+    try:
+        with open(best[1], encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return {"verdict": "unknown", "why": f"cfg.json 读不了：{repr(exc)[:100]}"}
+    not_gray = {str(v) for v in (cfg.get("notGrayList") or [])}
+    base = {
+        "source": best[1],
+        "sourceMtime": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(best[0])),
+        "cfgLibCount": len(cfg.get("list") or []),
+    }
+    if not ver:
+        return {"verdict": "unknown", "why": "拿不到运行时 SDKVersion", **base}
+    return {"verdict": "stable" if ver in not_gray else "not_stable", **base}
+
+
+def capture_runtime(client) -> dict:
+    """本轮**实际**在跑什么：基础库 / 机型 / 系统 / 档位 / 项目侧配置，全部进 summary。"""
+    info: dict = {}
+    try:
+        val = client.evaluate(_RUNTIME_FN)
+    except Exception as exc:  # noqa: BLE001
+        val = {"error": repr(exc)[:160]}
+    if isinstance(val, dict):
+        for k in ("SDKVersion", "model", "platform", "system", "language", "error"):
+            if val.get(k) not in (None, ""):
+                info[k] = val[k]
+    info["profile"] = runtime_profile()
+    info["libVersionCfg"] = lib_version_cfg()
+    info["libVersionGray"] = lib_version_gray(str(info.get("SDKVersion") or ""))
+    return info
+
+
 # ---------------------------------------------------------------- REST 锚点预取
 # 为什么需要：待迁移的 12 章要「点第 N 张订单卡 / 第 N 个泊位」，而 wechatide
 # 的元素工具**没有 index 参数**。先向后端问清目标对象的真实 id，再用属性选择器
@@ -14597,6 +14716,23 @@ def main() -> int:
         )
         return 2
     print("模拟器  ：pageStack 非空", flush=True)
+    # 环境自证：谁跑的、跑在哪版基础库/哪档上 —— 与截图、哈希一起构成证据。
+    rt = capture_runtime(client)
+    _gray = (rt.get("libVersionGray") or {}).get("verdict") or "unknown"
+    print(
+        f"基础库  ：{rt.get('SDKVersion') or '?'}（{_gray}）"
+        f" ／ 档位 {rt.get('profile') or '?'}"
+        f" ／ 机型 {rt.get('model') or '?'}（{rt.get('system') or '?'}）",
+        flush=True,
+    )
+    _cfg = rt.get("libVersionCfg") or {}
+    _cfg_v = _cfg.get("private") or _cfg.get("shared")
+    if _cfg_v and rt.get("SDKVersion") and _cfg_v != rt.get("SDKVersion"):
+        # 配置与实测不一致时必须点名：否则事后只能靠"谁配的、谁记得"来判读数归属。
+        print(
+            f"           ⚠️ 项目配置写的是 {_cfg_v}，实测 {rt.get('SDKVersion')} ⇒ **以实测为准**",
+            flush=True,
+        )
     # 开窗阶段结束的切点：此后产生的 console 条目都算「业务阶段」，**一律不豁免**。
     console_at_open = _errors_safe(client)
 
@@ -14698,6 +14834,7 @@ def main() -> int:
                 "startedAt": started_at,
                 "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "argv": sys.argv,
+                "runtime": rt,
                 "verdict": verdict,
                 "tally": tally,
                 "rollup": rollup,
