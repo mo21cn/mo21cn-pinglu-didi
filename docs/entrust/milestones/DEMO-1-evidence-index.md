@@ -612,6 +612,58 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 ⇒ **段B 的结论**：模型**持续不可用**时，经理**经界面人工建立成果**后，在**同一张委托**上完成了
 接受→合同→变更→履约→结算→**结案**→**受控重开**→**重载一致性**，且这一轮 **`FAIL=0`**。
 ---
+### 3.13 E-2026-10-26-A — ⑮ 发货方式选择改三卡后的**设备证据**（含「智慧关务」入口 ＋ 规划中说明层）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-15-lib-3.17.2/`（逐字节入库；含 `env-provenance.md`）
+> 轮次：`walk-20261026-075640`（**第 3 次尝试**；前两轮 `walk-20261026-074751` / `-075344` 亦 `PASS`，
+> 由 `summary.json` 的 `previousRuns` 串起来，**没有被覆盖**）
+> 命令（产物自证）：`scripts\verify_miniapp_devtools.py --shots …\walk-20261026-075640 --section 15`
+> 环境：见下（⚠️ **有一格不能自证**，不要按"已确认"引用）
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-15-stdout.txt` | 权威逐条读数（**30/30 PASS**，`FAIL/ENV_BLOCKED/NOT_RUN` 均 0，console 增量空） | 4671 | `60fe821736efcb3b` |
+| `summary.json` | 该轮汇总（含 `previousRuns` 两轮溯源） | 8696 | `64cd76872982066f` |
+| `shots/15-发货方式弹窗.jpg` | **三卡**：智慧关务 / 自主发货 / 委托发货 | 37050 | `9fc59d6332b95f24` |
+| `shots/15-智慧关务-规划中说明层.jpg` | 点绿卡 ⇒ 页内「规划中」说明层（**不跳空白页**） | 33570 | `db8b318a8a150a50` |
+| `shots/15-自主发货-留在发布页.jpg` | 自主发货只关弹窗 | 31310 | `58e0fd0e2cd94333` |
+| `shots/15-委托发货-受理屏.jpg` | 委托发货 ⇒ 受理屏（⛔ 不再是"功能预览"占位页） | 14531 | `a8fe635d6c590f2e` |
+| `shots/15-委托发货前-源页表单已填.jpg` | 前置正控：货名/货量确已填入 | 31847 | `61616a3101353141` |
+| `env-provenance.md` | 出处、自证/转述分档、被推翻的两条转述、本会话复跑受阻记录 | — | — |
+
+**证据能证明什么（逐条，可直接核对 stdout）**
+
+| # | 格 | 结果 | 关键读数 |
+| --- | --- | --- | --- |
+| ① | 三卡文案与**顺序** | ✅ PASS | 面板文本 100 字符；`idx=0/31/65`（智慧关务→自主→委托）；几何 `y=159/302/462` |
+| ② | 三卡**同规格** | ✅ PASS | 宽高比 `3.03`（227×75）、等高 `75.0/75.0/75.0`；⛔ 压扁/拉伸会在这里露 |
+| ③ | 图标与单选圈位置 | ✅ PASS | 白圆 48×48、`Δleft=10.0`；单选圈在卡片**右侧之外**（`309.5 > 297.0`）；`ring=3`、`label=3` |
+| ④ | ⭐ 点「智慧关务」⇒ **只弹说明层、不导航** | ✅ PASS | `cusTipVisible=True`、`showChannel=False`、`path` 仍是 `pages/publish/cargo/cargo` |
+| ⑤ | 说明层写清法务底线 | ✅ PASS | 缺项 `[]`；原文含「本版本**不提供申报代理服务**」「以海关等官方系统结果为准」 |
+| ⑥ | 「我知道了」可关闭说明层 | ✅ PASS | 关闭后 `cusTipVisible=False` |
+| ⑦ | 自主发货 / 遮罩点击都只关弹窗 | ✅ PASS | 两条均 `showChannel=False` 且留在发布页 |
+| ⑧ | 委托发货 ⇒ 受理屏且**带值** | ✅ PASS | `cargo_name='走查货物·铁矿石'`、`quantity='2400' unit='吨'`（源页表单经 query 携带，非空 url） |
+| ⑨ | 从受理屏可回车源页 | ✅ PASS | 二级页栈正常回 `pages/publish/cargo/cargo` |
+
+**⭐ 这一轮补的是什么**：D0 的"入口只讲边界、不假装有功能"此前**只有静态校验**（`UI 377/0`、锚点 186），
+没有任何设备侧读数。本节第一次证明：**三卡同屏、顺序与设计稿一致、点绿卡既不跳空白页也不假装进功能**。
+
+**⚠️ 三处如实标注（⛔ 不要当"已确认"引用）**
+
+1. **基础库版本不能自证**：`summary.json` / stdout / 截图里**都没有** `SDKVersion`。
+   "3.17.2 稳定版"只有旁证（`project.private.config.json` mtime 07:55；IDE `cfg.json` 的
+   `notGrayList` 含 `3.17.2`，且该 cfg mtime 07:57:04 恰在本轮）。⇒ 已改代码关闭该缺口
+   （见 §4 第 6 条），但**对已产出的这一批无效**；复核者可要求重跑。
+2. **`RUNTIME_PROFILE='dev'` 未随证据记录**：仓库默认 `demo`，两者读数**不是一回事**
+   （`demo` 走 `wx.cloud.callContainer` 打云端生产库）。跑后已还原 `demo` 并复核 `git status`。
+3. **外层命令是转述**：产物只自证内层 argv（`verify_miniapp_devtools.py … --section 15`）；
+   据称的外层入口 `run_walkthrough_devtools.py --section 15 --skip-ide` 无产物可自证。
+
+**与既有登记的冲突，已更正**：转述里"3.17.3 不在 `notGrayList` ⇒ 仍是灰度"是按 **10-21 旧快照**得出的；
+按 **10-26 生效那份**（`list` 48 条）3.17.3 与 3.17.4 **都在**表内。结论（3.17.2 是稳定版）不变，
+但"3.17.2 是最新稳定版 / 使用率最高"**不成立**（当前 `usageRateList[0]` 是 3.17.4）。详见 `env-provenance.md` §3。
+
+---
 
 ## 4. 待补（本索引自己的缺口，如实登记）
 
@@ -624,3 +676,4 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 | 4 | **同一张新委托的 13 步主链** | ⭐ **2026-09-20：第 1–9 步已在同一张新委托上跑通**（见 **§3.5 ＋ §3.6**：八章同一 `aid=6`，命令见 `runbook` §8.9）—— 含第 5 步的 900 吨/不拆批候选、第 6–7 步在本单组装→发布→客户接受→派生、第 8 步 `800→950`、第 9 步复核＋重新确认＋**换新成果重新接受**＋A2 接管。**仍未覆盖：第 10–13 步在本单上的动作**（费用/结算已有章 52 证据、结案/重开已有章 53） |
 | 5.5 | **证据文件的行尾归一化会毁掉可核对性** | 已修：`docs/entrust/evidence/.gitattributes` 加 `* -text`（该目录逐字节入库）；⛔ 新证据入库前要**复核「工作区哈希 == 索引 blob 哈希」**；⭐ **核对方式已固化成小工具**：`python -X utf8 backend/scripts/check_evidence_integrity.py`（`git ls-files -s -z` **NUL 分隔解析文件名** ＋ 逐件内容哈希比对；⛔ 不要用"`ls-files` 逐行 + 字符串路径"的老查法 —— `core.quotepath=true` 会把中文名转成八进制转义，实测把 124 件里的 **70 件中文名 `.jpg` 全判成"不一致"**）|
 | 5 | **密钥文件曾被本机删除故障永久删除** | 2026-09-19 核实发现 `backend/.env.local`（含**可用订阅 Key**）缺失、**回收站无记录**；已从 `_b_recon3.txt`（09-16 的 env 基线快照）找回并还原，`llm_key_doctor.py` **四步全绿**。⚠️ **untracked 文件不在护栏的恢复范围内** ⇒ 已扩展护栏（见 DR-0019 追加节） |
+| 6 | ~~**设备证据不自证运行环境**（基础库版本 / 档位）~~ ⇒ **2026-10-26 已改代码关闭，待下一轮生效** | §3.13 那批产物里**没有一处**记着 `SDKVersion`，"跑在 3.17.2 稳定版上"只能靠口头转述。已修：`verify_miniapp_devtools.py` 新增 `capture_runtime()` / `lib_version_gray()` —— 此后 `summary.json` 自带 `runtime.SDKVersion`、`runtime.profile`（`RUNTIME_PROFILE`）、`runtime.libVersionCfg`（共享/私有两份）与 `runtime.libVersionGray`（含来源 cfg 路径与 mtime），并在头部打印一行；配置与实测不一致时**点名以实测为准**。⚠️ **对已产出的历史证据无效**，只在下一轮起生效。同时把 `miniapp/project.config.json` 的 `libVersion` 由 `3.0.0`（差 17 个小版本）改为 `3.17.2`，使干净 clone 不再依赖被忽略的 `project.private.config.json` |
