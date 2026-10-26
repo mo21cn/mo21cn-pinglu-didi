@@ -1,0 +1,70 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20261026-132603
+章节    ：15
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.2s] pageStack=[{'pageId': 252, 'path': 'pages/shipper/shipper', 'query': {}, 'route': '/pages/shipper/shipper', 'title': '找船  (探测   1.2s)
+模拟器  ：pageStack 非空
+基础库  ：3.17.2（stable） ／ 档位 dev ／ 机型 iPhone 12/13 (Pro)（iOS 10.0.1） ／ 通道 mcp
+
+== ⑮ 发货方式选择 ==
+PASS | ⑮ 前置 · 已登录进入货主工作台（关务首页要带 token 才读得到数据源状态） | identity=pages/index/index role_ok=True
+PASS | ⑮ 前置 · 真的到达「发布货源」页（⛔ 没有这一条，下面每一条都会指向产品） | path=pages/publish/cargo/cargo via=navigateTo
+PASS | 截图 15-发货方式弹窗 | 37386B
+PASS | ⑮ 进入发布货物页即弹出发货方式选择 | True
+PASS | ⑮ 三张卡片文案为「智慧关务 / 自主发货 / 委托发货」 | 面板文本 100 字符
+PASS | ⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（设计稿 v2） | idx=0/31/65
+PASS | ⑮ 三段说明文案齐全（关务边界 / 自行找船 / 平台承运） | customs=True self=True entrust=True
+PASS | ⑮ 三枚单选圈 + 「默认」标记（设计稿元素齐全） | ring=3 label=3
+PASS | ⑮ 弹窗几何可读（面板/三张卡片/图标/单选圈/文案） | ok
+PASS | ⑮ 卡片宽高比 ≈ 设计稿 3:1（非压扁/拉伸） | w/h=3.03 (227x75)
+PASS | ⑮ 三张卡片等高（同规格） | 75.0 / 75.0 / 75.0
+PASS | ⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（几何） | customs=159.0 self=302.0 entrust=462.0
+PASS | ⑮ 图标为白圆且在卡片左内侧 | Δleft=10.0 48x48
+PASS | ⑮ 单选圈在卡片右侧之外（设计稿布局） | ring.left=309.5 card.right=297.0
+PASS | ⑮ 说明文案在卡片下方且不重叠 | desc.top=251.0 card.bottom=234.0
+PASS | ⑮ 弹窗完整落在视口内（不被裁切） | panel=145..608 winH=844
+PASS | 截图 15-智慧关务-首页-数据源状态条 | 44520B
+PASS | ⑮ 智慧关务换成真导航：落在关务首页（⛔ 不再是「弹一层说明、留在发布页」） | path=pages/customs/home/home tap=True
+PASS | ⑮ 关务首页读到「官方源不可用」（AC-02 的界面开关：没授权就必须说没授权） | officialUnavailable=True view='ready'
+PASS | ⑮ 「官方状态查询暂不可用」在屏幕上真的画出来了（矩形非空，不是只有 data 里一个布尔） | rect=318x74.796875
+PASS | ⑮ 状态条逐条列出数据源（官方 + 人工登记至少各一条） | 数据源条目=3
+PASS | ⑮ 法务口径随页面搬过来（不提供申报代理服务 / 以海关等官方系统结果为准） | 缺=[]
+PASS | ⑮ 关务首页 · 屏幕上每处时间都是本地格式 `YYYY-MM-DD HH:MM`（出现 T / Z / +08:00 / 毫秒尾巴 ⇒ 原始串漏上屏了） | 命中 3 处，越界 []
+PASS | 截图 15-智慧关务-记录详情-发生与取得分列 | 27938B
+PASS | ⑮ 列表 → 详情：真的进了详情页（`R.go()` 的 push 边生效） | path=pages/customs/detail/detail tap=True
+PASS | ⑮ 详情页时间线的两条时间**不是同一个值**（合并即伪装新鲜度，AC-09 禁止） | events=1
+PASS | ⑮ 详情页把「发生」与「取得」写成两行（并排会让补录的旧状态看起来像刚更新） | 文本 264 字符
+PASS | ⑮ 关务详情 · 屏幕上每处时间都是本地格式 `YYYY-MM-DD HH:MM`（出现 T / Z / +08:00 / 毫秒尾巴 ⇒ 原始串漏上屏了） | 命中 4 处，越界 []
+PASS | ⑮ 屏幕上的时间 = 服务端 UTC + 8 小时（⛔ 全绿也可能差 8 小时，本轮实测过） | 接口 3 个时间点，屏幕上缺 []
+PASS | ⑮ 从详情可返回关务首页 | pages/customs/home/home
+PASS | ⑮ 从关务首页可返回发布货物页（push 边，不是 replace） | pages/publish/cargo/cargo
+PASS | ⑮ 返回后源页表单仍在（一旦换成 replace，用户填了一半的货单会被扔掉） | before='2026-10-27' after='2026-10-27'
+PASS | 截图 15-自主发货-留在发布页 | 31548B
+PASS | ⑮ 自主发货只关弹窗、留在发布货物页 | False
+PASS | ⑮ 关弹窗后发布页表单可用（原有内容仍在） | 2026-10-27
+PASS | ⑮ 点遮罩可关闭弹窗（不进占位页） | showChannel=False path=pages/publish/cargo/cargo
+PASS | 截图 15-委托发货前-源页表单已填 | 32121B
+PASS | ⑮ 前置（正控）· 源页表单里**真的有**货名/货量 —— 没有它下面两格恒红（`pickEntrustDelivery` 是**条件携带**：字段为空就不进 query） | form.cargo_name='走查货物·铁矿石' form.weight_t='2400' 填值路径=真实输入（bindinput）
+PASS | 截图 15-委托发货-受理屏 | 30832B
+PASS | ⑮ 委托发货跳受理屏（UI-07）—— ⛔ 不再是「功能预览」占位页 | path=pages/entrust/intake/intake tap=True
+PASS | ⑮ 受理屏拿到了**货名**（源页的表单值经 query 带过去，不是空 url） | cargo_name='走查货物·铁矿石' 期望='走查货物·铁矿石'
+PASS | ⑮ 受理屏拿到了**货量与量纲**（带量不带量纲 ⇒ 受理屏上会出现没有单位的数字） | quantity='2400' unit='吨' 期望='2400'/吨
+PASS | ⑮ 从受理屏可返回发布货物页（二级页栈正常） | pages/publish/cargo/cargo
+
+================ 汇总 ================
+断言 43 项：**通过 43** / 未取得通过证据 0
+  分档：PASS=43 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0 | LIMITATION=0
+  归并（HO 五档）：PASS=43 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20261026-132603
+[重跑关联] 同章节历史运行 10 次（首次结果**保留不覆盖**）：2026-10-26T07:50:02+0800=PASS；2026-10-26T07:55:43+0800=PASS；2026-10-26T07:58:35+0800=PASS；2026-10-26T09:24:55+0800=PASS；2026-10-26T09:34:23+0800=PASS；2026-10-26T11:12:57+0800=FAIL；2026-10-26T11:24:05+0800=FAIL；2026-10-26T11:33:41+0800=PASS；2026-10-26T11:40:39+0800=PASS；2026-10-26T13:24:17+0800=FAIL
+RESULT: PASS （全为 PASS）
+
+===== 走查 stderr =====
+(空)

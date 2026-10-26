@@ -118,6 +118,7 @@ import traceback
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -918,6 +919,88 @@ DESC_ENTRUST = "您发布货物，委托给向海通平台承运，由平台组�
 #: D0 时这两句挂在「规划中」说明层上；D1 说明层删除后它们搬到了**关务首页**
 #: （页头副标题 + 页脚），所以 ⑮ 章改在 `CUSTOMS_HOME` 上断这两句。
 TIP_MUST = ("不提供申报代理服务", "以海关等官方系统结果为准")
+
+# ---------------------------------------------------------------------------
+# 「看图」判据：屏幕上出现的时间串必须是**本地时间**，且只有一种格式
+#
+# 为什么需要这一条（2026-10-26 实测，⑮ 章 40/40 全绿那一轮）：
+# 服务端时间列是 **UTC 朴素时间**（无时区标记），页面第一版直接把它上屏 ⇒
+# 屏幕上写「核对于 03:21」，而真实时间是上午 11:21。**格式完全正常**，断言全绿，
+# 只有人打开截图才看得出来。这类缺陷靠"有没有渲染出来"永远抓不到，必须比**内容**。
+#
+# 判据分两层：
+#   ① 格式层：所有时间串只能是 `YYYY-MM-DD HH:MM`（展示层 `toLocalTime` 的输出单位）；
+#      出现 `T`、`Z`、`+08:00`、毫秒尾巴、或多余的秒，都说明**原始串**漏到了屏幕上
+#      （没走展示层）；
+#   ② 数值层：屏幕上的时间必须 = 服务端 UTC **+8 小时**（Asia/Shanghai）——
+#      这一层才是真正能抓住"差 8 小时"的那一层。
+# ---------------------------------------------------------------------------
+
+#: 候选时间串（含各种"不像我们格式"的写法，用于**发现**而不是放行）
+SCREEN_TIME_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+)
+#: 唯一允许的格式：**本地时间、分钟级**（`utils/customs.js` 的 `toLocalTime` 输出）。
+#:
+#: ⚠️ 这里刻意**不**允许秒：展示层统一截到分钟是产品决定（状态时间到秒是噪音）。
+#: 所以 `13:20:10` 这种"多给了秒"也算越界 —— 它说明某个字段**绕过了** `toLocalTime`
+#: 直接上了屏，那正是这条判据要抓的东西（2026-10-26 13:19 首跑就抓到 3 处越界，
+#: 当时是我把断言写成秒级、页面是分钟级；按真实约定改正后下面第二层才真正起作用）。
+SCREEN_TIME_OK = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+#: 展示层与服务端的时差（本项目演示环境固定东八区；服务器时间列按 UTC 存）
+SCREEN_UTC_OFFSET_HOURS = 8
+
+
+def screen_text(wxml: str) -> str:
+    """把 WXML 变成"人眼看到的一段文本"。
+
+    ⚠️ 标签替换成**空格**而不是空串：时间经常被拆在两个 `<text>` 里
+    （`{{d}}` 与 `{{t}}` 分开渲染），用空串拼起来会变成 `2026-10-2611:37:00`，
+    于是判据既抓不到合法的、也抓不到非法的。
+    """
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", wxml))
+
+
+def screen_time_strings(wxml: str) -> list[str]:
+    """屏幕上出现的时间串（按出现顺序，保留重复 —— 重复本身不是问题）。"""
+    return SCREEN_TIME_RE.findall(screen_text(wxml))
+
+
+def screen_has_stamp(wxml: str, stamp: str) -> bool:
+    """屏幕上是否出现某个 `YYYY-MM-DD HH:MM`（容忍节点切分造成的空格差异）。"""
+    day, _, clock = stamp.partition(" ")
+    if not clock:
+        return False
+    pat = re.escape(day) + r"[\s]*" + re.escape(clock)
+    return re.search(pat, screen_text(wxml)) is not None
+
+
+def local_from_utc(raw: str | None) -> str | None:
+    """服务端 UTC（`YYYY-MM-DD HH:MM:SS`）→ 屏幕上应显示的本地时间（分钟级）。
+
+    截到分钟是**对齐展示层**（`toLocalTime`），不是放宽判据：差 8 小时这种错，
+    在分钟级上照样一眼可见（03:20 vs 11:20）。
+    """
+    if not raw:
+        return None
+    try:
+        dt = datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return (dt + timedelta(hours=SCREEN_UTC_OFFSET_HOURS)).strftime("%Y-%m-%d %H:%M")
+
+
+def check_screen_time_format(w: Walker, label: str, wxml: str) -> list[str]:
+    """① 格式层：断言这一页所有时间串都是本地格式，返回命中的时间串。"""
+    found = screen_time_strings(wxml)
+    bad = [s for s in found if not SCREEN_TIME_OK.match(s)]
+    w.rep.rec(
+        f"{label} · 屏幕上每处时间都是本地格式 `YYYY-MM-DD HH:MM`"
+        "（出现 T / Z / +08:00 / 毫秒尾巴 ⇒ 原始串漏上屏了）",
+        bool(found) and not bad,
+        f"命中 {len(found)} 处，越界 {bad[:3]}" if found else "本页没有任何时间串",
+    )
+    return found
 
 
 class Reporter:
@@ -1878,6 +1961,8 @@ def sec_15(w: Walker) -> None:
         not [s for s in TIP_MUST if s not in home_txt],
         f"缺={[s for s in TIP_MUST if s not in home_txt]}",
     )
+    # 「看图」判据 ①（首页）：核对时间这类服务端字段必须走展示层再上屏。
+    check_screen_time_format(w, "⑮ 关务首页", w.c.outer_wxml(".page"))
 
     # 列表 → 详情：**空态也算通过**，但"进了详情"这件事必须真的发生。
     # 造一条记录不归本章管（本章断的是入口），所以有记录就点开验时间线两列，
@@ -1908,6 +1993,38 @@ def sec_15(w: Walker) -> None:
             "⑮ 详情页把「发生」与「取得」写成两行（并排会让补录的旧状态看起来像刚更新）",
             "发生" in det_txt and "取得" in det_txt,
             f"文本 {len(det_txt)} 字符",
+        )
+        # ── 「看图」判据 ②（详情页）：格式 + **数值**
+        # 这一页是本项目时间显示最密的地方（状态时间 + 两条时间线 × 发生/取得 + 新鲜度），
+        # 也是 2026-10-26 那次"同屏两个时区"的现场。格式对、数值错正是那一轮的样子。
+        det_wxml = w.c.outer_wxml(".page")
+        check_screen_time_format(w, "⑮ 关务详情", det_wxml)
+        # 数值层：直接问一次服务端拿**原始 UTC**，再算它应该显示成什么，
+        # 然后去屏幕上找。⛔ 不比页面 data（那是转换后的，等于拿答案对答案）。
+        rid = (d_det.get("rec") or {}).get("id")
+        tok = (api_login("seed-shipper") or {}).get("access_token")
+        raw_det = api_get(f"/customs/declarations/{rid}", tok) if (tok and rid) else None
+        raw_stamps = []
+        fresh = (raw_det or {}).get("freshness") or {}
+        # ⚠️ 服务端字段名是 snake_case（`last_fetched_at`），页面 data 里才是驼峰 ——
+        #    这里读的是**接口原文**，别顺手改成页面那套命名（改了就恒 None ⇒ 假绿）。
+        if fresh.get("last_fetched_at"):
+            raw_stamps.append(str(fresh["last_fetched_at"]))
+        for ev in (raw_det or {}).get("timeline") or []:
+            for key in ("occurred_at", "fetched_at"):
+                if ev.get(key):
+                    raw_stamps.append(str(ev[key]))
+        expected = [local_from_utc(s) for s in raw_stamps]
+        expected = [e for e in expected if e]
+        missing = [e for e in expected if not screen_has_stamp(det_wxml, e)]
+        w.rep.rec(
+            "⑮ 屏幕上的时间 = 服务端 UTC + 8 小时（⛔ 全绿也可能差 8 小时，本轮实测过）",
+            bool(expected) and not missing,
+            (
+                f"接口 {len(expected)} 个时间点，屏幕上缺 {missing[:2]}"
+                if expected
+                else f"取不到接口原文（api_error={_LAST_API_ERROR}）⇒ 本格无对象"
+            ),
         )
         w.c.back()
         time.sleep(1.0)

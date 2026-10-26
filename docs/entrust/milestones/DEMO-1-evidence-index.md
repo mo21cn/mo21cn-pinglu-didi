@@ -784,6 +784,43 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 
 ---
 
+### 3.17 E-2026-10-26-E — **时间串判据**（⑮ 章 43/43；含一次真实 FAIL 留证）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-15-timereflect/`
+> 命令：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
+> 读数：**PASS=43 / FAIL=0**（原 40 条 ＋ 新增 3 条时间判据），`channel=mcp`、`SDKVersion=3.17.2`
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-15-stdout.txt` | 权威逐条读数（PASS 轮） | 6665 | `2127a4c9bd5ca04a` |
+| `summary-PASS-132603.json` | PASS 轮汇总（`verdict=PASS` / `passed=43` / `attempt=11`） | 15415 | `ca1347f35a7cc283` |
+| `summary-FAIL-round1-131936.json` | **首轮 FAIL 留证**（`FAIL=3`，见下） | 15161 | `ad995f3399f60e69` |
+
+**为什么留一份 FAIL 的产物**：这套判据第一次跑就红了，红的原因是**判据比展示层严**
+（我按秒级写，页面是分钟级 `YYYY-MM-DD HH:MM`）。留着它有两层用处：
+
+1. 证明这条判据**能失败**（本项目对判据的基本要求：能失败 ＋ 有正控）；
+2. 提醒后来人：**"全绿"与"界面对"是两件事**。上一轮 40/40 全绿，是靠**人眼看截图**
+   才发现同一屏出现 03:30 与 11:30；这一轮的判据就是把那次人眼动作变成断言。
+
+**判据两层**（都在 `verify_miniapp_devtools.py`，可复用到任何页面）：
+
+| 层 | 断什么 | 抓什么缺陷 |
+| --- | --- | --- |
+| ① 格式 | 屏幕上每处时间串只能是 `YYYY-MM-DD HH:MM` | 原始串漏上屏（`T` / `Z` / `+08:00` / 毫秒 / 多余秒 ⇒ 某字段**绕过了** `toLocalTime`） |
+| ② 数值 | 屏幕上的时间 = 服务端 UTC **+8 小时** | **差 8 小时**（格式完全正常，看不出来；必须拿接口原文算） |
+
+实现要点（踩过才知道的）：
+
+- 取文本时**标签替换成空格**而不是空串：时间常被拆在两个 `<text>` 里，
+  拼成 `2026-10-2611:37` 会让判据两头都失效；
+- 第 ② 层**读接口原文**（`api_get` 拿 `freshness.last_fetched_at` 与事件的
+  `occurred_at`/`fetched_at`），⛔ 不比页面 `data` —— 那是转换后的结果，等于拿答案对答案；
+- 服务端字段是 snake_case，页面 data 是驼峰；读错字段会恒 `None` ⇒ **假绿**，
+  所以"取不到原文"这一格显式判 FAIL 而不是跳过（`expected` 为空时给出 `api_error`）。
+
+---
+
 ## 4. 待补（本索引自己的缺口，如实登记）
 
 | # | 缺口 | 处置 |
