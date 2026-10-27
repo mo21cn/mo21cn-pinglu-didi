@@ -821,6 +821,42 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 
 ---
 
+### 3.18 E-2026-10-27-A — **D2 归类页**：静态契约已过，**设备证据未取到**（⚠️ 不是 PASS）
+
+> 提交：`2fe608b`（PR #207）｜ 档位：仓库 `RUNTIME_PROFILE=demo`（走查前临时切 `dev`，跑完已复位）
+> 命令：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
+
+| 层 | 读数 | 判据来源 |
+| --- | --- | --- |
+| 静态契约（口径 + 模板） | **OK 421 · FAIL 0**（原 403，新增 ⑫-2 共 18 项） | `node scripts/verify_ui_interactions.js`，CI「前端静态契约」job 已 success |
+| 后端守卫 | `sources` 真值表 5 项 / 旧名守卫 2 项 **全过** | `pytest backend/tests/test_customs_{declarations,naming_guard}.py` |
+| **设备证据（⑮ 章含归类段落）** | ⛔ **本轮未取到**（`rc=2`，前置不通过） | 见下 |
+
+**为什么没取到**：两种通道都不通，且**都不是产品问题**——
+
+1. **MCP 通道**：需要读 IDE 用户目录 `User Data\<hash>\Default\.ide`（端口）与 `mcp.json`（令牌），
+   这三个路径被**安全中心按路径拒绝读取**（`file-read` deny 已记在审计里）；
+2. **CLI 通道**：`wechatide` 读 `D:\Program Files (x86)\Tencent\微信web开发者工具\resources\app.asar.unpacked\…`
+   时报 `EPERM`（同一性质的路径拒绝），所以"能启动、但通道没通"。
+
+⇒ 归类页的**真机断行为 0**（"从详情进得去 / 候选或降级至少一块可见 / 手工块矩形非空"）
+目前只有**代码与静态契约**支撑，⛔ 不能记成 PASS。按四档口径：**代码已合 / 静态契约已过 /
+设备已验＝未做（环境阻塞）**。
+
+**解阻塞需要其中一条**（都不是开发侧能自己完成的）：
+
+| # | 做法 | 影响面 |
+| --- | --- | --- |
+| 1 | 在安全中心放行 `…\微信开发者工具\User Data\*\Default\.ide` 与 `mcp.json` 两个读权限 | 走查 MCP 通道恢复（首选，改动最小） |
+| 2 | 放行 IDE 安装目录 `app.asar.unpacked`（仅 CLI 通道需要） | 走查 CLI 通道恢复 |
+| 3 | 用户在**普通终端**（非沙箱）跑同一条命令，把 `_walk_*_out.txt` 与截图目录给我归档 | 不改任何配置，但要在两个进程间搬产物 |
+
+**给下一轮的注意事项**：⑮ 章的归类段落**会真的调一次模型**（`POST /classifications`），
+最坏要等 80 秒；⛔ 不要为了跑快去缩短等待 —— 那样红的不是页面，是耐心。
+模型不可用也没关系：接口仍 201，页面必须落成"降级原因 + 手工入口"，那正是这一段要断的东西。
+
+---
+
 ## 4. 待补（本索引自己的缺口，如实登记）
 
 | # | 缺口 | 处置 |
