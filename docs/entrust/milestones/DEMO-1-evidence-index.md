@@ -821,7 +821,11 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 
 ---
 
-### 3.18 E-2026-10-27-A — **D2 归类页**：静态契约已过，**设备证据未取到**（⚠️ 不是 PASS）
+### 3.18 E-2026-10-27-A — **D2 归类页**：静态契约已过，设备证据当时未取到（✅ 同日已补，见 §3.19）
+
+> ✅ **2026-10-27 11:30 已解除**：设备证据已取到，**52/52 ×2 轮**，见 **§3.19**（含真实降级轮）。
+> 本节保留当时的阻塞记录 —— 它记的是"通道被本机安全策略挡住"这一事实与三条解阻塞路径，
+> 对下次遇到同一现象仍有价值。
 
 > 提交：`2fe608b`（PR #207）｜ 档位：仓库 `RUNTIME_PROFILE=demo`（走查前临时切 `dev`，跑完已复位）
 > 命令：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
@@ -854,6 +858,64 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 **给下一轮的注意事项**：⑮ 章的归类段落**会真的调一次模型**（`POST /classifications`），
 最坏要等 80 秒；⛔ 不要为了跑快去缩短等待 —— 那样红的不是页面，是耐心。
 模型不可用也没关系：接口仍 201，页面必须落成"降级原因 + 手工入口"，那正是这一段要断的东西。
+
+---
+
+### 3.19 E-2026-10-27-B — **D2 归类页设备证据**（⑮ 章 **52/52 ×2 轮**；含真实降级轮与一次判据自错留证）
+
+> 目录：`docs/entrust/evidence/2026-10-27-section-15-d2/`
+> 命令（两轮只差一个环境变量）：
+> A `python scripts/run_walkthrough_devtools.py --section 15 --skip-ide --llm-mock`
+> B `LLM_BASE_URL=http://127.0.0.1:9/v1 python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
+> 读数：**A 轮 PASS=52 / FAIL=0**（`walk-20261027-112607`）｜**B 轮 PASS=52 / FAIL=0**（`walk-20261027-113013`）
+
+| 文件 | 内容 | 字节 |
+| --- | --- | --- |
+| `walk-15-stdout-A-suggested.txt` | A 轮（模型可用）权威逐条读数 | 7933 |
+| `summary-PASS-A-112607.json` | A 轮汇总（`verdict=PASS` / `passed=52`） | 18059 |
+| `walk-15-stdout-B-degraded.txt` | B 轮（模型不可达）逐条读数 | 8075 |
+| `summary-PASS-B-degraded-113013.json` | B 轮汇总（`verdict=PASS` / `passed=52`） | 18592 |
+| `summary-FAIL-round1-111951.json` | **首轮 FAIL 留证**（`FAIL=1`，判据自错，见下） | 17604 |
+| `shots-A-suggested/`（8 张） | 含 `15-智慧关务-归类辅助-{发起,结果}.jpg` | — |
+| `shots-B-degraded/`（8 张） | 同上，**结果页那张是降级形态** | — |
+
+**环境自证**（`summary.json` 的 `runtime` 格，两轮一致）：`channel=mcp`、`SDKVersion=3.17.2`、
+`profile=dev`、`libVersionCfg={shared:3.17.2, private:3.17.2}`。
+⚠️ **本轮 `libVersionGray.verdict=unknown`**（`WeappVendor\cfg.json` 被本机安全策略拦读，
+`PermissionError(13)`）—— 与 10-26 那轮 `=stable` 不同。**这是取证环境的降级，不是产品问题**，
+但按"读数要看自证格"的纪律必须写明：本轮**不能**复述"灰度=stable"。
+
+**新增的 9 条归类断言与两轮读数**（A=模型建议 / B=模型不可达）：
+
+| 断言 | A 轮读数 | B 轮读数 |
+| --- | --- | --- |
+| 详情 → 归类：真的换了页（push 边生效） | `path=pages/customs/classify/classify` | 同 |
+| 归类页把「候选」与「结论」分开写 | 文本 118 字符 | 同 |
+| 结果块有东西可看（⛔ 空列表＝要消灭的形态） | `status=suggested` · `candidates=1` · `degraded=None` | **`status=manual_required` · `candidates=0` · `degraded={kind:network, reason:"归类模型暂时不可达（网络或服务端异常），本次没有给出建议"}`** |
+| 降级/建议态下手工入口可见 | `manualVisible=True`，hint「也可手工填写或改判…」 | **`manualVisible=True`，hint「模型没有给出建议，可直接手工填写税则号列并确认结论」** |
+| 手工块在屏幕上真画出来了 | `rect=342x377.75` | `rect=342x377.75` |
+| 未定稿时明写「尚未有人定稿」 | `hasConclusion=False`，结果块 314 字符 | `hasConclusion=False`，结果块 307 字符 |
+| 从归类辅助可返回关务详情 | `pages/customs/detail/detail` | 同 |
+
+⭐ **这两轮合起来才是结论**：同一条判据在"模型给了建议"和"模型挂了"两种形态下都必须过 ——
+**判据本身不假设模型可用**（`hasOutcome = 候选 或 降级原因`）。B 轮的 hint 文案与 A 轮不同，
+正好证明前端是按 `manual_entry.hint` 分岔渲染的，而不是把一句固定文案写死。
+
+**首轮为什么 FAIL（值得留档的失败）**：第 1 轮（`111951`）报 `FAIL=1`，
+是「未定稿时页面明写「尚未定稿」」这条 —— 但**页面是对的，判据写错了对象**：
+它拿的是**发起之前**（空态）取的 `cls_txt`，而这句话只在结果块渲染后才出现。
+修法：结果渲染后**重新取一次**页面文本（`cls_after`），并分岔成
+「有结论 ⇒ 必须出现「人工结论」＋ 号列」/「无结论 ⇒ 必须出现「尚未有人定稿」或「尚无结论」」。
+⇒ 与 §3.17 那轮 FAIL 同性质：**新判据第一次跑就红，红在判据，不在产品**。
+两轮 FAIL 的 summary 都留在仓里，是为了让"判据能失败"这件事可核。
+
+**仍然没覆盖的**：`profile=demo`（云托管 / 体验版）下**没有**设备证据 —— 上面两轮都是
+`profile=dev` 连本机后端。演示按 DEMO-0 §7 走 demo 档，这条边界继续写在 §3.15 的口径里。
+
+**复现通道的坑（这轮才遇到）**：本机安全策略会拦**子进程**读 IDE 用户目录
+（`.ide` 端口 / `mcp.json` 令牌），`discover()` 会把 `OSError` 吞掉并返回 `None`，
+现象与"IDE 没启动"**无法区分**（`rc=2`）。已在 `scripts/wechatide_mcp.py` 加**显式注入**：
+`WECHATIDE_PORT` + `WECHATIDE_TOKEN` 同时存在时直接用，不再做目录发现（令牌不落盘、不打印）。
 
 ---
 
