@@ -2094,12 +2094,26 @@ def sec_15(w: Walker) -> None:
                     bool(man_r) and man_r.get("width", 0) > 0 and man_r.get("height", 0) > 0,
                     f"rect={man_r.get('width')}x{man_r.get('height')}" if man_r else "取不到几何",
                 )
-                # 模型候选**不得**被渲染成结论：结论为空时页面上要有"尚未定稿"这句话
+                # 模型候选**不得**被渲染成结论：结论为空时页面上要有"尚未定稿"这句话。
+                # ⚠️ 2026-10-27 首跑 FAIL 打的就是这里：原来用的是 `cls_txt` —— 那是
+                #     **发起之前**（空态）取的文本，而这句话只在结果块渲染后才出现。
+                #     判据本身写错了对象，页面是对的。现在改为**结果渲染之后**再取一次文本。
+                cls_after = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+                has_conc = rec_prop.get("hasConclusion") is True
+                verdict_txt = rec_prop.get("conclusion") or ""
+                if has_conc:
+                    # 已有结论：页面必须把它标成「人工结论」，并出现那个号列
+                    ok_verdict = ("人工结论" in cls_after) and (
+                        not verdict_txt or verdict_txt in cls_after
+                    )
+                else:
+                    # 只有候选：页面必须明说"还没人定稿"，⛔ 不能把第一条候选冒充结论
+                    ok_verdict = "尚未有人定稿" in cls_after or "尚无结论" in cls_after
                 w.rep.rec(
-                    "⑮ 未定稿时页面明写「尚未定稿」（⛔ 不把第一条候选当结论显示）",
-                    (rec_prop.get("hasConclusion") is True)
-                    or ("尚未" in cls_txt or "未有人定稿" in cls_txt),
-                    f"hasConclusion={rec_prop.get('hasConclusion')!r} conclusion={rec_prop.get('conclusion')!r}",
+                    "⑮ 未定稿时页面明写「尚未有人定稿」（⛔ 不把第一条候选当结论显示）",
+                    ok_verdict,
+                    f"hasConclusion={has_conc} conclusion={verdict_txt!r} "
+                    f"结果块文本 {len(cls_after)} 字符",
                 )
             w.c.back()
             time.sleep(1.0)

@@ -47,7 +47,17 @@ def discover() -> tuple[int, str, str] | None:
 
     取**最近修改过 `.ide`** 的那个 User Data 目录：同机可能并存多份
     （本例 2 份，其中一份是 10-21 的旧快照），拿错就会去连一个已死的端口。
+
+    ⭐ **显式注入**：`WECHATIDE_PORT` + `WECHATIDE_TOKEN` 同时存在时直接用，不做目录发现。
+    用途是「本机安全策略禁止**子进程**读 IDE 配置目录」这一种情形 —— 此时自动发现会
+    静默返回 None（`OSError` 被 `continue` 吞掉），表现为"找不到 MCP 配置"，与
+    "IDE 没启动"极难区分。注入通道把这条路显式化：值由知道它的人给，语义不变。
+    ⛔ token 不落盘、不打印（只在内存里传给 HTTP 头）。
     """
+    env_port = os.environ.get("WECHATIDE_PORT", "").strip()
+    env_tok = os.environ.get("WECHATIDE_TOKEN", "").strip()
+    if env_port.isdigit() and env_tok:
+        return int(env_port), env_tok, "env"
     base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "微信开发者工具", "User Data")
     if not os.path.isdir(base):
         return None
