@@ -23,12 +23,11 @@ import uuid
 os.environ["APP_ENV"] = "test"
 
 import pytest  # noqa: E402
+from app.modules.customs import classifications as cls  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
-
-from app.modules.customs import classifications as cls  # noqa: E402
 
 _TS = "%Y-%m-%d %H:%M:%S"
 
@@ -258,6 +257,69 @@ def test_manual_does_not_overwrite_model_candidates(session):
     assert [c["hs_code"] for c in after["candidates"] if c["source"] == "manual"] == ["3926909090"]
 
 
+def test_manual_by_teammate_records_the_real_decider(session):
+    """Q-10 留痕：同组织他人可以定稿，但「谁定的」必须记**真正按下去的人**。
+
+    本条要拦的反例很具体：把 `decided_by_user_id` 写成记录的 `owner_user_id`。
+    那样写看起来"更自然"（记录是谁的，结论就算谁定的），实际是把一次**代定稿**
+    记成了货主自己定的 —— 事后追责时留痕直接指向错误的人，而这在界面上完全看不出来。
+
+    正控在同一用例里：所有者自己定稿时，两列必须都等于所有者（否则"都记同一个人"
+    也能让前一半通过，判据就变成不可失败的）。
+    """
+    org = 7
+    by_owner = asyncio.run(
+        cls.propose(
+            session,
+            user_id=1,
+            org_ids=frozenset({org}),
+            product_name="钢结构支架",
+            org_id=org,
+        )
+    )
+    got_owner = cls.submit_manual(
+        session,
+        user_id=1,
+        org_ids=frozenset({org}),
+        classification_id=by_owner["id"],
+        hs_code="7308900000",
+    )
+    assert got_owner["decided_by_user_id"] == 1, "正控：所有者自己定稿时定稿人必须是他本人"
+
+    by_teammate = asyncio.run(
+        cls.propose(
+            session,
+            user_id=1,
+            org_ids=frozenset({org}),
+            product_name="钢结构支架",
+            org_id=org,
+        )
+    )
+    got = cls.submit_manual(
+        session,
+        user_id=2,  # 同组织的另一个人
+        org_ids=frozenset({org}),
+        classification_id=by_teammate["id"],
+        hs_code="3926909090",
+        rationale="同事代定稿，依据见备注",
+    )
+    assert got["decided_by_user_id"] == 2, "定稿人必须是按下去的那个人，不是记录所有者"
+    assert got["decided_at"], "留时：定稿时间由服务端盖章，不能为空"
+    owner_row = (
+        session.execute(
+            text("SELECT owner_user_id FROM cus_classification WHERE id = :i"),
+            {"i": by_teammate["id"]},
+        )
+        .mappings()
+        .one()
+    )
+    assert int(owner_row["owner_user_id"]) == 1, "代定稿不改所有者"
+
+    manual_rows = [c for c in got["candidates"] if c["source"] == "manual"]
+    assert [c["hs_code"] for c in manual_rows] == ["3926909090"]
+    assert manual_rows[0]["actor_user_id"] == 2, "候选那一行也要记真正填写的人"
+
+
 def test_confirmed_cannot_be_reconfirmed(session):
     out = _propose(session)
     cls.submit_manual(
@@ -288,6 +350,22 @@ def test_manual_rejects_bad_hs_code(session):
                 classification_id=out["id"],
                 hs_code=bad,
             )
+
+
+def test_manual_schema_has_no_decider_fields():
+    """入参只有「码 + 名称 + 依据」三样：定稿人与定稿时间**不是**入参。
+
+    同一条约束在 API 层还有端到端用例（`test_api_manual_cannot_spoof_decider_or_time`），
+    但那条要真库、本机跑不了（无本地 MySQL）。这条把它压成**本机能跑**的断言：
+    谁哪天顺手加一个可选的 `decided_by_user_id`，这里立刻红。
+    """
+    from app.modules.customs import schemas as cus_schemas
+
+    assert set(cus_schemas.ClassificationManualCreate.model_fields) == {
+        "hs_code",
+        "label",
+        "rationale",
+    }
 
 
 # ─────────────────────────────────────────────── 可见性 / API
@@ -352,6 +430,40 @@ def test_api_manual_is_idempotent(env):
     assert second.status_code == 200
     # 同键重放：人工候选不会变成两条
     assert len([c for c in second.json()["candidates"] if c["source"] == "manual"]) == 1
+
+
+def test_api_manual_cannot_spoof_decider_or_time(env):
+    """Q-10 留痕：定稿人与定稿时间**由服务端盖章**，请求体说了不算。
+
+    这条要拦的是"代填"最隐蔽的一种形态：不是别人来按，而是在请求里带一个
+    `decided_by_user_id` / `decided_at`，让留痕指向别人或别的时间。
+    schema 不声明这两个字段 ⇒ 夹带进来只会被忽略，不会写进库。
+    """
+    headers = _login(env.client, "cus-cls-spoof")
+    created = env.client.post(
+        "/api/v1/customs/classifications",
+        json={"product_name": "塑料托盘"},
+        headers={**headers, "Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+
+    resp = env.client.post(
+        f"/api/v1/customs/classifications/{cid}/manual",
+        json={
+            "hs_code": "3926909090",
+            "label": "其他塑料制品",
+            "decided_by_user_id": 999,
+            "decided_at": "2000-01-01 00:00:00",
+        },
+        headers={**headers, "Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["decided_by_user_id"] != 999, "客户端指定的定稿人必须被忽略"
+    assert body["decided_by_user_id"] is not None, "定稿人必须是服务端从登录态取的那个人"
+    assert not str(body["decided_at"]).startswith("2000"), "客户端指定的定稿时间必须被忽略"
+    assert body["hs_code"] == "3926909090"
 
 
 def test_api_manual_requires_idempotency_key(env):
