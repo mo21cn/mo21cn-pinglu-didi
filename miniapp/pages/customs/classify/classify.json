@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "归类辅助",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
+}

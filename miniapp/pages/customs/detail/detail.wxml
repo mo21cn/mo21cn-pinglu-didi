@@ -83,6 +83,16 @@
         </view>
       </view>
 
+      <!-- D2：从这条记录进入归类辅助。⛔ 文案里不写"查归类结果"——
+           模型给的是候选，结论要人工定稿，这个区别在入口上就得说清。 -->
+      <view class="cls-entry" bindtap="onOpenClassify" data-act-cus-classify="1" hover-class="hover-dim">
+        <view class="cls-entry-main">
+          <text class="cls-entry-title">归类建议</text>
+          <text class="cls-entry-sub">模型只给候选，结论由人工定稿</text>
+        </view>
+        <text class="cls-entry-arrow">›</text>
+      </view>
+
       <view class="foot-note">本版本不提供申报代理服务；所有状态以海关等官方系统结果为准。</view>
     </block>
   </view>

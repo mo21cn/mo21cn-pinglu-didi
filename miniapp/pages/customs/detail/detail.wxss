@@ -281,3 +281,37 @@
   text-align: center;
   line-height: 1.6;
 }
+
+/* ---- D2 归类入口（本页 → 归类辅助）---- */
+.cls-entry {
+  display: flex;
+  align-items: center;
+  margin: 32rpx 24rpx 0;
+  padding: 26rpx 24rpx;
+  background: #FFFFFF;
+  border-radius: 18rpx;
+  box-shadow: 0 6rpx 20rpx rgba(31, 45, 61, .06);
+}
+
+.cls-entry-main {
+  flex: 1;
+}
+
+.cls-entry-title {
+  display: block;
+  font-size: 29rpx;
+  font-weight: 600;
+  color: #1F2D3D;
+}
+
+.cls-entry-sub {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #9AA5B5;
+}
+
+.cls-entry-arrow {
+  font-size: 40rpx;
+  color: #C6CFDA;
+}

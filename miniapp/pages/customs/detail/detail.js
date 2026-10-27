@@ -102,6 +102,15 @@ Page({
     this.load()
   },
 
+  /** D2：进入这条记录的归类辅助（`declaration_id` 带过去，页面据此只列本单的归类） */
+  onOpenClassify() {
+    const id = this.data.id
+    if (!id) return
+    R.go('/pages/customs/classify/classify?declaration_id=' + encodeURIComponent(String(id)), {
+      from: SELF
+    })
+  },
+
   onBack() {
     if (R.currentDepth() <= 1) {
       R.go('/pages/customs/home/home', { from: SELF })

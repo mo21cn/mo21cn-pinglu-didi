@@ -880,6 +880,9 @@ MINE_LIST = "pages/entrust/assignments/assignments"
 #: 所以这两条路径是**断言的落点**，不写死就等于断"某个页面"。
 CUSTOMS_HOME = "pages/customs/home/home"
 CUSTOMS_DETAIL = "pages/customs/detail/detail"
+#: D2 归类辅助页。⑮ 章从这里断的是「模型没给建议时，页面不是一片空白，而是
+#: 降级原因 + 手工定稿入口」—— 也就是"候选为空 ≠ 失败"这条边界在真机上成不成立。
+CUSTOMS_CLASSIFY = "pages/customs/classify/classify"
 
 # ㉖/㉗/㉘ 章（ENT-030 切四之六：登记案件 → 记录决定 → 关闭）依赖的演示数据。
 # 委托 `#1` 是 `seed_entrust_demo.py` 的 `ASSIGNMENT_MAIN`，状态 `claimed`
@@ -2026,6 +2029,85 @@ def sec_15(w: Walker) -> None:
                 else f"取不到接口原文（api_error={_LAST_API_ERROR}）⇒ 本格无对象"
             ),
         )
+        # ── D2：详情 → 归类辅助（新页的第一条判据是"能不能到"，不是"好不好看"）──
+        # 这一块**故意放在返回关务首页之前**：归类是"这条记录的下一步"，
+        # 正常用户的路径就是从详情进去的；从首页直接 `navigateTo` 过去虽然也能到，
+        # 但那不是产品路径，用那条路断"入口通了"等于自己搭桥自己过。
+        t_cls = w.c.tap('[data-act-cus-classify="1"]')
+        time.sleep(1.8)
+        at_cls = w.c.wait_path(CUSTOMS_CLASSIFY, 25)
+        time.sleep(1.0)
+        w.shot("15-智慧关务-归类辅助-发起")
+        w.rep.rec(
+            "⑮ 详情页 → 归类辅助：真的换了页（`R.go()` 的 push 边生效）",
+            at_cls,
+            f"path={w.c.current_path()} tap={t_cls}",
+        )
+        if at_cls:
+            cls_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+            w.rep.rec(
+                "⑮ 归类页把「候选」与「结论」分开写（模型给的是建议，不是结论）",
+                "候选" in cls_txt and "结论" in cls_txt,
+                f"文本 {len(cls_txt)} 字符",
+            )
+            # 发起一次归类建议：**模型不可用时接口仍 201**（`manual_required`），
+            # 所以这里不断"成功/失败"，只断"表单能不能用、结果块有没有东西可看"。
+            typed = w.c.input_text('[data-act-cus-cls-name="1"]', "钢结构支架")
+            time.sleep(0.4)
+            t_prop = w.c.tap('[data-act-cus-cls-propose="1"]')
+            # 模型调用可能几十秒（超时也会降级返回），给到 80s。⛔ 不缩短成 10s：
+            # 那样跑出来的红是"我懒得等"，不是"页面不对"。
+            d_prop = w.wait_data(
+                lambda d: (
+                    isinstance(d.get("rec"), dict) and bool((d.get("rec") or {}).get("status"))
+                ),
+                tries=160,
+                gap=0.5,
+            )
+            rec_prop = d_prop.get("rec") if isinstance(d_prop.get("rec"), dict) else None
+            if not rec_prop:
+                w.rep.not_run(
+                    "⑮ 归类发起后的结果块（候选 / 降级 / 手工入口）",
+                    "发起请求在 80 秒内没有落到结果块（页面仍停在提交中）⇒ 本格**没有对象**。"
+                    f"typed={typed} tap={t_prop} submitting={d_prop.get('submitting')!r}",
+                )
+            else:
+                w.shot("15-智慧关务-归类辅助-结果")
+                # ⭐ 本条是这一章新增的核心判据：**候选为空也不能是一片空白** ——
+                #    模型没给建议时必须有降级原因，否则用户只看到一个空列表。
+                w.rep.rec(
+                    "⑮ 结果块有东西可看：候选 或 降级原因至少有一块（⛔ 空列表＝要消灭的形态）",
+                    rec_prop.get("hasOutcome") is True,
+                    f"status={rec_prop.get('status')!r} candidates={len(rec_prop.get('candidates') or [])} "
+                    f"degraded={rec_prop.get('degraded')!r}",
+                )
+                # ⭐ 降级时手工入口必须可见（Q-10 的出口；也是「模型挂了业务照跑」的界面证据）
+                w.rep.rec(
+                    "⑮ 降级/建议态下手工填写入口可见（模型不可用不是死路）",
+                    rec_prop.get("manualVisible") is True,
+                    f"manualVisible={rec_prop.get('manualVisible')!r} manual={rec_prop.get('manual')!r}",
+                )
+                man_got = w.c.rects(".cls-manual")
+                man_r = man_got[0] if man_got else {}
+                w.rep.rec(
+                    "⑮ 手工填写块在屏幕上真的画出来了（矩形非空，不是只有 data 里一个布尔）",
+                    bool(man_r) and man_r.get("width", 0) > 0 and man_r.get("height", 0) > 0,
+                    f"rect={man_r.get('width')}x{man_r.get('height')}" if man_r else "取不到几何",
+                )
+                # 模型候选**不得**被渲染成结论：结论为空时页面上要有"尚未定稿"这句话
+                w.rep.rec(
+                    "⑮ 未定稿时页面明写「尚未定稿」（⛔ 不把第一条候选当结论显示）",
+                    (rec_prop.get("hasConclusion") is True)
+                    or ("尚未" in cls_txt or "未有人定稿" in cls_txt),
+                    f"hasConclusion={rec_prop.get('hasConclusion')!r} conclusion={rec_prop.get('conclusion')!r}",
+                )
+            w.c.back()
+            time.sleep(1.0)
+            w.rep.rec(
+                "⑮ 从归类辅助可返回关务详情（push 边，回来时详情还在栈里）",
+                w.c.wait_path(CUSTOMS_DETAIL, 15),
+                w.c.current_path(),
+            )
         w.c.back()
         time.sleep(1.0)
         w.rep.rec("⑮ 从详情可返回关务首页", w.c.wait_path(CUSTOMS_HOME, 15), w.c.current_path())

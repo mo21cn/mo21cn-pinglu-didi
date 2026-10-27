@@ -302,6 +302,22 @@ const NAV_EDGES = [
     strategy: 'reuse',
     reason: '无上一页可返回时（冷启动深链）回到栈里的关务首页'
   },
+  {
+    // D2：详情 → 归类辅助。**push**：看完归类结论还要回这条记录的状态时间线看下一眼，
+    // 替换掉详情等于把用户当前正在看的那条记录扔掉。
+    from: 'pages/customs/detail/detail',
+    to: 'pages/customs/classify/classify',
+    strategy: 'push',
+    reason: '从某条报关记录进入它的归类建议（带 declaration_id，模型只给候选、结论人工定稿）'
+  },
+  {
+    // 归类的返回键在有上一页时走 `navigateBack`；冷启动深链直接落在本页时回关务首页。
+    // **reuse**：首页通常已在栈里，再 push 会叠出第二份（与 detail→home 同一条理由）。
+    from: 'pages/customs/classify/classify',
+    to: 'pages/customs/home/home',
+    strategy: 'reuse',
+    reason: '无上一页可返回时（冷启动深链）回到栈里的关务首页'
+  },
 
   // ── 重置栈（回首页重走身份链路）────────────────────────────────────
   { from: 'pages/mine/mine', to: 'pages/index/index', strategy: 'reset' },
@@ -618,6 +634,14 @@ const ROUTES = {
     // 那会让"我点进来但什么都没看到"看起来像服务端问题。
     paramSchema: { id: { type: 'id', required: true } },
     note: '关务记录详情（状态 + 时间线 + 新鲜度；发生时间与取得时间分列）'
+  },
+  'pages/customs/classify/classify': {
+    kind: 'detail', deepLink: 'allow', domain: 'customs',
+    // 无必填参数：归类不一定要挂在某条报关记录上（`declaration_id` 可空），
+    // 所以 `allow` 而不是 `require-params`。⛔ 若把 `declaration_id` 写成必填，
+    // "新建一条与记录无关的归类"就会在守卫层被拦掉，而这条路径后端是支持的。
+    paramSchema: {},
+    note: '归类辅助（模型候选 + 降级原因 + 人工定稿；候选不是结论）'
   }
 }
 
@@ -687,7 +711,13 @@ const MIGRATED_PAGES = [
   // 那套"界面照实反映数据源可用性"的口径就会在页面栈层面裂开：
   // 同一页可能出现两份，其中一份还带着上一轮的 `officialUnavailable`。
   'pages/customs/home/home',
-  'pages/customs/detail/detail'
+  'pages/customs/detail/detail',
+  // D2 归类页从落地起接入（与上两页同一条理由，另有一条它独有的）：
+  // 本页是**带两个表单**的写页面（发起建议 / 人工定稿）。若绕开 `go()` 用裸
+  // navigateTo，同一个 `classification_id` 会在栈里叠出两份，而两份各自持有一份
+  // 未提交的定稿表单 —— "人工定稿留人留时留依据"（Q-10）就会因为"到底哪一份生效"
+  // 而说不清。
+  'pages/customs/classify/classify'
 ]
 
 /** 去掉前导 `/`、查询串与 hash，得到注册表口径的页面路径 */

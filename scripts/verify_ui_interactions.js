@@ -2846,6 +2846,112 @@ section('⑤ 静态防线')
     //    静态判据拦得住这一类：带 params 的页，守卫的入参必须是**拼过参的**字符串。
     check('详情：把 id 拼进 url 再交给 `guardEntry`（只传页面路径 ⇒ 恒被拦成「缺参」）',
       /R\.guardEntry\(\s*SELF\s*\+/.test(detailCode), '守卫入参未拼参数')
+
+    // ---------------------------------------------------------------- ⑫-2 智慧关务 D2 归类
+    // D2 的全部价值在**边界**上，而不在"能不能调模型"：
+    //   候选 ≠ 结论；候选为空 ≠ 失败；模型挂了 ≠ 没有出口。
+    // 这三句话任何一句在界面上塌掉，页面照样能点、能截图 —— 所以必须在这里跑一遍口径函数。
+    section('⑫-2 智慧关务 D2（归类候选 / 降级原因 / 人工定稿）口径契约')
+    {
+      // —— 降级：模型没给建议时，页面必须给出原因 + 手工通路，而不是一个空列表 ——
+      const deg = CUS.classificationView({
+        id: 9,
+        status: 'manual_required',
+        product_name: '钢结构支架',
+        product_desc: null,
+        hs_code: null,
+        degraded: { kind: 'network', reason: '归类模型暂时不可达（网络或服务端异常），本次没有给出建议' },
+        manual_entry: { available: true, hint: '模型没有给出建议，可直接手工填写税则号列并确认结论' },
+        candidates: [],
+        model: { name: 'qwen', mocked: false },
+        created_at: '2026-10-26 05:11:00'
+      })
+      check('（降级）模型没给建议 ⇒ 降级原因为非空中文句（不是错误码，也不是空串）',
+        deg.hasDegraded === true && deg.degraded.reason.length > 8 && deg.degraded.kind === 'network',
+        JSON.stringify(deg.degraded))
+      // ⭐ 这一条是本次的核心判据：降级时**手工入口必须可见**。
+      //   把入口藏起来，用户就只剩"模型坏了，没别的办法"——那正是要消灭的形态。
+      check('（降级）手工填写入口**可见**（模型不可用不是死路：Q-10 的出口）',
+        deg.manualVisible === true && deg.manual.hint.length > 0, JSON.stringify(deg.manual))
+      check('（降级）候选为空 但 `hasOutcome` 为真 —— 页面上有降级块可看，不是一片空白',
+        deg.hasCandidates === false && deg.hasOutcome === true)
+      check('（降级）没有结论（模型候选永不自动落 `hs_code`）',
+        deg.hasConclusion === false && deg.conclusion === '', deg.conclusion)
+      check('（降级）降级原因与候选**互不替代**（拿"候选空"当"模型挂了"的判断依据就会同时错两边）',
+        deg.hasDegraded === true && deg.candidates.length === 0)
+
+      // —— 建议：有候选，但**仍然不是结论** ——
+      const sug = CUS.classificationView({
+        id: 10,
+        status: 'suggested',
+        product_name: '钢结构支架',
+        hs_code: null,
+        degraded: null,
+        manual_entry: { available: true, hint: '也可手工填写或改判；人工结论记为独立候选，不覆盖模型建议' },
+        candidates: [
+          { id: 1, hs_code: '7308900000', label: '其他钢铁结构件', confidence: 0.86, source: 'model', rank: 1, created_at: '2026-10-26 05:12:00' },
+          { id: 2, hs_code: '7308200000', label: '钢铁结构体', confidence: null, source: 'model', rank: 2 }
+        ],
+        model: { name: 'qwen', mocked: true }
+      })
+      check('（建议）候选带来源与置信度；缺失的置信度**不补 0**（补 0 会被读成"模型放弃了"）',
+        sug.hasCandidates === true &&
+        sug.candidates[0].sourceLabel === '模型候选' &&
+        sug.candidates[0].confidenceText === '86%' &&
+        sug.candidates[1].confidenceText === '',
+        JSON.stringify(sug.candidates.map((c) => c.confidenceText)))
+      check('（建议）有候选**不等于**有结论（`hs_code` 仍为空 ⇒ 界面上写着"尚未定稿"）',
+        sug.hasConclusion === false && sug.conclusion === '')
+      check('（建议）降级块不出现（没有降级就不许显示"模型不可用"，否则是自相矛盾）',
+        sug.hasDegraded === false && sug.degraded === null)
+      check('（建议）人工入口仍可用（人工结论不覆盖模型候选，两者都在记录里）',
+        sug.manualVisible === true)
+
+      // —— 已定稿：结论来自人工，且此时服务端关掉了人工入口 ——
+      const done = CUS.classificationView({
+        id: 11,
+        status: 'confirmed',
+        product_name: '钢结构支架',
+        hs_code: '7308900000',
+        manual_entry: { available: false, hint: '结论已确认。候选表只追加，如需更正请新建一条归类记录' },
+        candidates: [
+          { id: 3, hs_code: '7308900000', label: '人工定稿', source: 'manual', rank: 1 },
+          { id: 1, hs_code: '7308900000', label: '模型候选', confidence: 0.86, source: 'model', rank: 1 }
+        ],
+        decided_at: '2026-10-26 06:00:00'
+      })
+      check('（定稿）结论只在人工定稿后出现，且带定稿时间（留人留时：Q-10）',
+        done.hasConclusion === true && done.conclusion === '7308900000' && !!done.decidedAt)
+      check('（定稿）人工入口由服务端关闭时页面照办（⛔ 前端不按状态自己猜还能不能改）',
+        done.manualVisible === false && done.manual.available === false)
+      check('（定稿）模型候选与人工定稿**分列**呈现，人工不覆盖模型（候选表只追加）',
+        done.candidates.length === 2 &&
+        done.candidates.filter((c) => c.isModel).length === 1 &&
+        done.candidates.filter((c) => !c.isModel).length === 1)
+
+      // —— 模板：三块必须各自独立渲染，且手工块不得由"有没有候选"决定 ——
+      const clsJs = read('pages/customs/classify/classify.js')
+      const clsCode = stripComments(clsJs)
+      const clsWxml = read('pages/customs/classify/classify.wxml')
+      check('归类页：手工块可见性取自 `rec.manualVisible`（服务端判定），⛔ 不写成"有候选才显示"',
+        /cls-manual[\s\S]{0,80}wx:if="\{\{rec\.manualVisible\}\}"/.test(clsWxml) ||
+        /wx:if="\{\{rec\.manualVisible\}\}"[\s\S]{0,120}cls-manual/.test(clsWxml),
+        '手工块条件未接 manualVisible')
+      check('归类页：候选遍历 `rec.candidates`，⛔ 不把第一条候选当结论渲染',
+        /wx:for="\{\{rec\.candidates\}\}"/.test(clsWxml) && !/candidates\[0\]/.test(clsWxml))
+      check('归类页：降级块独立于候选块渲染（两块都有自己的 `wx:if`）',
+        /wx:if="\{\{rec\.hasDegraded\}\}"/.test(clsWxml) &&
+        /wx:if="\{\{!rec\.hasCandidates && !rec\.hasDegraded\}\}"/.test(clsWxml))
+      check('归类页：写端点带 `Idempotency-Key`（分类发起与人工定稿都是写命令，缺键由服务端 409）',
+        /Idempotency-Key/.test(read('utils/customs.js')))
+      check('归类页：跳转一律 `R.go()`（本页在 `MIGRATED_PAGES`，裸 navigateTo 会让栈预算失效）',
+        /R\.go\(/.test(clsCode) && !/wx\.navigateTo\(/.test(clsCode) &&
+        require(path.join(MP, 'utils', 'routes.js')).MIGRATED_PAGES
+          .indexOf('pages/customs/classify/classify') >= 0)
+      check('详情页：进入归类的入口走 `R.go()` 并带 `declaration_id`（⛔ 裸 navigateTo）',
+        /R\.go\(\s*['"]\/pages\/customs\/classify\/classify\?declaration_id=/.test(detailCode) &&
+        !/wx\.navigateTo\(/.test(detailCode))
+    }
   }
 
   // ---------------------------------------------------------------- 汇总

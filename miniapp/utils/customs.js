@@ -51,6 +51,59 @@ function fetchDeclaration(id) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// D2：商品归类辅助（模型建议 → 人工定稿）
+//
+// 三条铁律（与后端 `classifications.py` 同一口径，前端只负责**照实呈现**）：
+//   1. 模型候选**不是结论** —— `hs_code` 只有人工定稿后才有值；
+//   2. 模型不可用时**不是失败页** —— 接口仍 201，`status=manual_required` +
+//      `degraded.reason` 给一句中文原因，`manual_entry.available=true` 给出口；
+//   3. 人工结论**不覆盖**模型候选 —— 候选表只追加。
+// ⛔ 因此前端**不得**用"候选为空"来判断"模型挂了"：那两件事在界面上必须分开显示。
+// ---------------------------------------------------------------------------
+
+/** 幂等键：写端点必须带 `Idempotency-Key`（与委托支线同口径） */
+function newIdemKey(prefix) {
+  return (prefix || 'cus') + '-' + Date.now() + '-' + Math.floor(Math.random() * 1e6)
+}
+
+/** 发起一次归类建议（`POST /classifications`，模型不可用时仍 201） */
+function createClassification(payload) {
+  return request({
+    url: BASE + '/classifications',
+    method: 'POST',
+    data: payload || {},
+    headers: { 'Idempotency-Key': newIdemKey('cus-cls') }
+  })
+}
+
+/** 归类记录列表（`GET /classifications`；可按 `declaration_id` / `status` 过滤） */
+function fetchClassifications(options) {
+  const opts = options || {}
+  const data = {}
+  if (opts.declaration_id) data.declaration_id = Number(opts.declaration_id)
+  if (opts.status) data.status = String(opts.status)
+  return request({ url: BASE + '/classifications', method: 'GET', data: data })
+}
+
+/** 归类详情（`GET /classifications/{id}`） */
+function fetchClassification(id) {
+  return request({
+    url: BASE + '/classifications/' + encodeURIComponent(String(id)),
+    method: 'GET'
+  })
+}
+
+/** 人工填写并确认结论（`POST /classifications/{id}/manual`，不依赖模型） */
+function submitManualClassification(id, payload) {
+  return request({
+    url: BASE + '/classifications/' + encodeURIComponent(String(id)) + '/manual',
+    method: 'POST',
+    data: payload || {},
+    headers: { 'Idempotency-Key': newIdemKey('cus-man') }
+  })
+}
+
 function statusLabel(status) {
   return STATUS_LABEL[status] || '未知'
 }
@@ -186,17 +239,106 @@ function eventView(e) {
   }
 }
 
+/**
+ * 归类记录状态的中文标签。键与后端 `STATUSES` 一一对应；
+ * 未收录的值回落"未知"——未知保持未知，不猜。
+ *
+ * ⚠️ `manual_required` **不是错误态**，是"模型没给建议、请人工定稿"的正常状态。
+ * 给它写"失败"会让界面看起来像坏了，而我们恰恰要把"模型不可用"做成可演示的亮点。
+ */
+const CLS_STATUS_LABEL = {
+  pending: '待建议',
+  suggested: '已给出候选',
+  manual_required: '需人工填写',
+  confirmed: '已确认结论'
+}
+
+const CLS_SOURCE_LABEL = {
+  model: '模型候选',
+  manual: '人工定稿'
+}
+
+/**
+ * 归类记录的展示模型。
+ *
+ * 三条不合并的边界（合并任何一条，界面就会开始撒谎）：
+ * 1. `status === 'confirmed'` 之前 `conclusion` **恒为空** —— 模型候选永远不进这个字段；
+ * 2. `degraded` 与 `candidates` **各自独立** —— 不能因为"候选空"就说"模型挂了"，
+ *    也不能因为"有降级原因"就以为"一条候选都没有"；
+ * 3. `manual.available` 由**服务端**给（`manual_entry.available`），⛔ 前端不按状态自己猜。
+ */
+function classificationView(c) {
+  const row = c || {}
+  const status = row.status || 'pending'
+  const rawCands = Array.isArray(row.candidates) ? row.candidates : []
+  const candidates = rawCands.map(function (x) {
+    const conf = x.confidence == null ? null : Number(x.confidence)
+    return {
+      id: x.id,
+      hsCode: x.hs_code || '',
+      label: x.label || '',
+      rank: x.rank || 0,
+      source: x.source || 'model',
+      sourceLabel: CLS_SOURCE_LABEL[x.source] || '未知来源',
+      isModel: x.source === 'model',
+      // 置信度只在有值时显示：显示"0%"会让一条低分候选看起来像"模型放弃了"
+      confidenceText: conf == null || isNaN(conf) ? '' : Math.round(conf * 100) + '%',
+      rationale: x.rationale || '',
+      createdAt: toLocalTime(x.created_at)
+    }
+  })
+  const deg = row.degraded && row.degraded.kind
+    ? { kind: row.degraded.kind, reason: row.degraded.reason || '本次未给出可用结果' }
+    : null
+  const manual = row.manual_entry || {}
+  return {
+    id: row.id,
+    status: status,
+    statusLabel: CLS_STATUS_LABEL[status] || '未知',
+    productName: row.product_name || '',
+    productDesc: row.product_desc || '',
+    declarationId: row.declaration_id || 0,
+    // 结论：只有人工定稿才有。⛔ 不是 `candidates[0].hs_code`
+    conclusion: row.hs_code || '',
+    hasConclusion: !!(row.hs_code && String(row.hs_code).length),
+    candidates: candidates,
+    hasCandidates: candidates.length > 0,
+    degraded: deg,
+    hasDegraded: !!deg,
+    // 「候选区或降级区至少有一块可看」—— 这一条是页面级的可失败判据：
+    // 两块都空＝用户只看到一个空列表，那正是要消灭的形态
+    hasOutcome: candidates.length > 0 || !!deg,
+    manual: {
+      available: manual.available !== false,
+      hint: manual.hint || ''
+    },
+    manualVisible: manual.available === true,
+    model: {
+      name: (row.model && row.model.name) || '',
+      mocked: !!(row.model && row.model.mocked)
+    },
+    decidedAt: toLocalTime(row.decided_at),
+    createdAt: toLocalTime(row.created_at),
+    updatedAt: toLocalTime(row.updated_at)
+  }
+}
+
 module.exports = {
   BASE,
   STATUS_LABEL,
   fetchSources,
   fetchDeclarations,
   fetchDeclaration,
+  createClassification,
+  fetchClassifications,
+  fetchClassification,
+  submitManualClassification,
   statusLabel,
   isTerminal,
   toLocalTime,
   sourcesView,
   declarationView,
   freshnessView,
-  eventView
+  eventView,
+  classificationView
 }

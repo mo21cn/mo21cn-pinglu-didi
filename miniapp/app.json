@@ -25,7 +25,8 @@
     "pages/entrust/assignments/assignments",
     "pages/entrust/finance/finance",
     "pages/customs/home/home",
-    "pages/customs/detail/detail"
+    "pages/customs/detail/detail",
+    "pages/customs/classify/classify"
   ],
   "window": {
     "navigationBarTitleText": "向海通",
