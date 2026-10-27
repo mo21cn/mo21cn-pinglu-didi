@@ -45,9 +45,45 @@ if _BACKEND not in sys.path:
 from sqlalchemy import text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
+from app.core.config import get_settings  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 from app.modules.auth import service as auth_service  # noqa: E402
 from app.modules.customs import declarations as svc  # noqa: E402
+
+#: 允许铺演示种子的环境（**白名单**，不是黑名单）。
+#:
+#: 为什么必须挡：本脚本会写入 `PL-CUS-DEMO-*` 记录。在**生产库**上跑一次，
+#: 那些记录就成了真实客户库里的假数据 —— 既是数据事故，也直接违反 Q-06
+#: （"演示数据全部虚构、可公开、可录屏"只对演示库成立）。
+#: 先前没有这道守卫，而 `DEMO-0-演示台词.md` §7 的检查单又要求"重跑一次" ——
+#: 只要有人把生产库的 `DATABASE_URL` 配进 `.env.production` 再照单执行，就会中招。
+DEMO_ENVS = frozenset({"development", "dev", "local", "test"})
+
+#: 本机地址：给"看着不像生产库"一个可读的提示，但**不作判据**
+#: （开发库可以在内网另一台机器上，用地址做判据会误伤正常联调）。
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _assert_demo_env() -> None:
+    """拒绝在非演示环境执行。⛔ 不提供 `--force`：有开关就等于没有守卫。"""
+    settings = get_settings()
+    env = str(getattr(settings, "APP_ENV", "") or "").strip().lower()
+    if env == "production":
+        raise SystemExit(
+            "拒绝执行：APP_ENV=production。\n"
+            "本脚本会写入 PL-CUS-DEMO-* 演示记录，只允许在演示档后端执行（Q-06 守卫）。\n"
+            "演示环境请用 APP_ENV=development（本机）或在演示库上单独执行；\n"
+            "⛔ 生产库不做例外，也不接受任何绕过参数。"
+        )
+    if env not in DEMO_ENVS:
+        raise SystemExit(
+            f"拒绝执行：APP_ENV={env!r} 不在演示环境白名单 {sorted(DEMO_ENVS)} 内（Q-06 守卫）。"
+        )
+    url = str(getattr(settings, "DATABASE_URL", "") or "")
+    if url and not any(h in url for h in _LOOPBACK_HOSTS):
+        # 只提示、不拒绝：开发库在内网别处是合法的
+        print(f"⚠️ 目标库不是本机地址（{url.split('@')[-1]}）；请确认这是演示库而不是生产库。")
+
 
 #: 演示账号。与 `seed_entrust_demo.py` 用的是同一个货主身份 ——
 #: 走查 ⑮ 章登录的就是它，两边不一致会导致"种子里有、页面上没有"。
@@ -112,6 +148,7 @@ def _ensure(
 
 
 def main() -> int:
+    _assert_demo_env()
     db = SessionLocal()
     try:
         user_id = _user_id(db, SHIPPER_CODE, "演示货主")

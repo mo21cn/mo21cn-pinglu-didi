@@ -8,7 +8,8 @@
 4. API：路由挂载、幂等键必填、登记 201 / 查询 / 详情 / 追加事件。
 
 另有一组覆盖 `sources`：默认官方源不可用、人工登记可用 —— 这是演示里"数据源状态条"
-的数据源（AC-02 的显式呈现），也是 Q-02 决定在代码里的落点。
+的数据源（AC-02 的显式呈现），也是 Q-02a 决定在代码里的落点。
+以及 Q-02a 的**实现层守卫**：开关 + 真实适配器**同时存在**才允许 `available`。
 """
 
 from __future__ import annotations
@@ -272,20 +273,102 @@ def test_derive_status_without_events_is_unknown():
     assert svc.freshness([])["last_fetched_at"] is None
 
 
-def test_sources_default_and_switch(monkeypatch):
+def test_sources_default(monkeypatch):
+    """默认档：官方源不可用、人工登记可用（AC-02 的显式呈现）。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "CUSTOMS_OFFICIAL_SOURCE_ENABLED", False)
     snap = src.snapshot()
     by_key = {s["key"]: s for s in snap["sources"]}
     assert by_key["single_window"]["state"] == "unavailable"
     assert by_key["manual"]["state"] == "available"
     assert snap["official_available"] is False
 
+
+# ---------------------------------------------------------------------------
+# Q-02a 的实现层守卫：**开关不能单独代表来源可用**
+#
+# 旧行为（已删除）：置 `CUSTOMS_OFFICIAL_SOURCE_ENABLED=true` 就让
+# `single_window.state == "available"` —— 而背后没有任何数据源。
+# 这正是"看起来有"，且恰好落在 Q-02a 的兑现机制上。
+#
+# 新判定式：`official_available == True ⇒ 存在真实适配器`。
+# 下面四条是它的真值表，**每一条都能失败**（含一条正控，否则"恒 false"也能全绿）。
+# ---------------------------------------------------------------------------
+
+
+def test_switch_on_without_adapter_is_not_available(monkeypatch):
+    """开关开了但一个适配器都没有 ⇒ 仍然是不可用，且**明说**是守卫拦截。"""
     from app.core.config import get_settings
 
     monkeypatch.setattr(get_settings(), "CUSTOMS_OFFICIAL_SOURCE_ENABLED", True)
-    snap2 = src.snapshot()
-    by_key2 = {s["key"]: s for s in snap2["sources"]}
-    assert by_key2["single_window"]["state"] == "available"
-    assert snap2["official_available"] is True
+    monkeypatch.setattr(src, "OFFICIAL_ADAPTERS", {})
+    snap = src.snapshot()
+    by_key = {s["key"]: s for s in snap["sources"]}
+    assert snap["official_available"] is False, "开关单独不能把来源翻成可用（Q-02a 守卫）"
+    assert by_key["single_window"]["state"] == "unavailable"
+    assert by_key["single_window"]["reason"] == src.GUARD_REASON, by_key["single_window"]["reason"]
+    assert "配置异常" in snap["notice"], snap["notice"]
+    assert snap["official_missing_adapters"] == ["single_window", "manifest"]
+    assert snap["official_enabled"] is True, "开关状态本身要如实报出来，不能被守卫吞掉"
+
+
+def test_switch_off_with_adapter_still_unavailable(monkeypatch):
+    """有适配器但授权未到（开关关）⇒ 仍然不可用。两个条件缺一都不行。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "CUSTOMS_OFFICIAL_SOURCE_ENABLED", False)
+    monkeypatch.setattr(src, "OFFICIAL_ADAPTERS", {"single_window": object()})
+    snap = src.snapshot()
+    by_key = {s["key"]: s for s in snap["sources"]}
+    assert snap["official_available"] is False
+    assert by_key["single_window"]["state"] == "unavailable"
+    # 缺的是 manifest 那条 —— 报"缺哪些"，不只报一个总数
+    assert snap["official_missing_adapters"] == ["manifest"]
+
+
+def test_switch_on_with_adapters_is_available_positive_control(monkeypatch):
+    """（正控）授权到位 + 适配器齐全 ⇒ 必须翻成可用。没有这条，"恒 false"也能全绿。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "CUSTOMS_OFFICIAL_SOURCE_ENABLED", True)
+    monkeypatch.setattr(
+        src,
+        "OFFICIAL_ADAPTERS",
+        {"single_window": object(), "manifest": object()},
+    )
+    snap = src.snapshot()
+    by_key = {s["key"]: s for s in snap["sources"]}
+    assert snap["official_available"] is True
+    assert by_key["single_window"]["state"] == "available"
+    assert by_key["single_window"]["reason"] == "已按授权接入（配置开启 · 适配器已登记）"
+    assert snap["official_missing_adapters"] == []
+
+
+def test_no_ad_hoc_official_http_without_adapter():
+    """静态守卫：关务模块里出现 HTTP 客户端 ⇒ 必须先在 `OFFICIAL_ADAPTERS` 登记。
+
+    为什么要有这条：开关 + 适配器是**两个**条件，但只有"开关"这一个显式配置项。
+    有人想偷偷接一个官方源时，最省事的做法是直接在 `sources.py` 里 `httpx.get(...)` ——
+    那样绕过了登记表，`official_ready()` 仍然说"没有适配器"，两边的说法打架。
+    本判据把这条路堵上：要么不写 HTTP，要么先登记适配器。
+    """
+    from pathlib import Path
+
+    pkg = Path(src.__file__).parent
+    http_hits = [
+        p.name
+        for p in sorted(pkg.glob("*.py"))
+        if any(
+            tok in p.read_text(encoding="utf-8")
+            for tok in ("import httpx", "import requests", "aiohttp", "urllib.request")
+        )
+    ]
+    if http_hits:
+        assert src.OFFICIAL_ADAPTERS, (
+            f"{http_hits} 里出现了 HTTP 客户端，但 OFFICIAL_ADAPTERS 为空 —— "
+            "接入官方源必须先登记适配器，否则开关与实现会对不上"
+        )
 
 
 # ─────────────────────────────────────────────── API 层

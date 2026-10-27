@@ -65,9 +65,11 @@ class Settings(BaseSettings):
     ENTRUST_ENABLED: bool = False
 
     # ---- 智慧关务（关域）D1 ----
-    # 官方数据源开关。**默认关闭**：Q-02（数据源授权）未定，关务状态只能来自人工登记。
-    # 拿到授权后只改这一项（不改代码、不改页面）：`/api/v1/customs/sources` 会随之翻成
-    # 「可用」，页面据此渲染查询入口。⛔ 打开它**不等于**已有数据 —— 仍需适配层真实回源。
+    # 官方数据源**授权**开关。**默认关闭**：Q-02a（数据源授权）未定，关务状态只能来自人工登记。
+    # ⛔ 它**不是**"官方源可用"的开关 —— 判定式是
+    #   `official_available == True ⇒ 该来源在 customs.sources.OFFICIAL_ADAPTERS 中有真实适配器`。
+    # 只置 true 而不登记适配器，`/api/v1/customs/sources` 会保持 unavailable 并明写
+    # "配置已开启但无真实适配器（守卫拦截）"，同时记一条 warning（见 customs/sources.py）。
     CUSTOMS_OFFICIAL_SOURCE_ENABLED: bool = False
 
     # ---- 附件（S1 第 5 条）----
