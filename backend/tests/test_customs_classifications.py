@@ -23,11 +23,12 @@ import uuid
 os.environ["APP_ENV"] = "test"
 
 import pytest  # noqa: E402
-from app.modules.customs import classifications as cls  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
+
+from app.modules.customs import classifications as cls  # noqa: E402
 
 _TS = "%Y-%m-%d %H:%M:%S"
 
