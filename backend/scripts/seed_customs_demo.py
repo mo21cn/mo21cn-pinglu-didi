@@ -55,7 +55,7 @@ from app.modules.customs import declarations as svc  # noqa: E402
 #: 为什么必须挡：本脚本会写入 `PL-CUS-DEMO-*` 记录。在**生产库**上跑一次，
 #: 那些记录就成了真实客户库里的假数据 —— 既是数据事故，也直接违反 Q-06
 #: （"演示数据全部虚构、可公开、可录屏"只对演示库成立）。
-#: 先前没有这道守卫，而 `DEMO-0-演示台词.md` §7 的检查单又要求"重跑一次" ——
+#: 先前没有这道守卫，而 `DEMO-0-demo-script.md` §7 的检查单又要求"重跑一次" ——
 #: 只要有人把生产库的 `DATABASE_URL` 配进 `.env.production` 再照单执行，就会中招。
 DEMO_ENVS = frozenset({"development", "dev", "local", "test"})
 

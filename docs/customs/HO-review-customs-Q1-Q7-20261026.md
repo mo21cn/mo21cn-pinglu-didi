@@ -168,7 +168,7 @@ rev.1 写于 10-26 11:57，此后代码又走了 5 个提交（`292481e` D2 归�
 | 设备读数 | ⑮ 章 **52/52 ×2 轮**（A 模型可用 `suggested` / B 模型不可达 `manual_required` + `degraded.kind=network`）；历史 43/43（13:26，含 3 条时间判据）；㉕＋㊷ 回归 **PASS=46 / FAIL=0** | `DEMO-1-evidence-index.md` §3.15 / §3.16 / §3.17 / **§3.19** |
 | 静态门禁 | 前端 8 个脚本全绿（UI 交互 421 项） | CI `frontend-static` |
 | 基础库 | 两轮 runtime 快照均 `SDKVersion=3.17.2`、`libVersionCfg` 共享/私有均 3.17.2 | `summary.json` 的 `runtime` 格 |
-| ⚠️ 边界 | ① 全部 runtime 快照均为 **`profile=dev`**（连本机后端）；② 2026-10-27 两轮的 **`libVersionGray=unknown`**（`WeappVendor\cfg.json` 被本机安全策略拦读）⇒ 本轮**不能**复述"灰度=stable" | 演示按 `DEMO-0-演示台词.md` §7 用 **demo 档 / 体验版**（连云托管）⇒ **demo 档路径没有设备证据** |
+| ⚠️ 边界 | ① 全部 runtime 快照均为 **`profile=dev`**（连本机后端）；② 2026-10-27 两轮的 **`libVersionGray=unknown`**（`WeappVendor\cfg.json` 被本机安全策略拦读）⇒ 本轮**不能**复述"灰度=stable" | 演示按 `DEMO-0-demo-script.md` §7 用 **demo 档 / 体验版**（连云托管）⇒ **demo 档路径没有设备证据** |
 
 **三个已修的真机缺陷 + 一次判据自错**（列出来是为了说明"读数全绿"不等于"界面对"）：
 
