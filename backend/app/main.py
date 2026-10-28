@@ -17,6 +17,7 @@ from app.models import Base
 from app.modules.agent import router as agent_router
 from app.modules.auth import router as auth_router
 from app.modules.cargo import router as cargo_router
+from app.modules.customs import router as customs_router
 from app.modules.entrust import router as entrust_router
 from app.modules.match import router as match_router
 from app.modules.order import router as order_router
@@ -106,3 +107,9 @@ app.include_router(order_router, prefix=f"{settings.API_PREFIX}/order", tags=["o
 app.include_router(payment_router, prefix=f"{settings.API_PREFIX}/payment", tags=["payment"])
 # 委托支线：ENTRUST_ENABLED=false 时端点自行返回 404（见 entrust.router.require_entrust_enabled）
 app.include_router(entrust_router, prefix=f"{settings.API_PREFIX}/entrust", tags=["entrust"])
+# 关域（智慧关务）D1 最小骨架：人工登记 + 状态时间线；D2 归类辅助（模型建议 + 人工定稿）。
+# 不设模块级开关：本模块**已从小程序首页绿卡真导航进入**（`pages/customs/home` → `detail`，
+# `a78dec4` 起不再是"规划中"说明层），加开关只是把"未开放"藏起来而不改变事实；
+# 官方来源的可用性由 CUSTOMS_OFFICIAL_SOURCE_ENABLED **加** customs.sources.OFFICIAL_ADAPTERS
+# 共同决定（开关单独不能代表可用，见 Q-02a 守卫）。
+app.include_router(customs_router, prefix=f"{settings.API_PREFIX}/customs", tags=["customs"])

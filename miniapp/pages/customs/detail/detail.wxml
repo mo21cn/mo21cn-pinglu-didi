@@ -1,0 +1,99 @@
+<!--
+  智慧关务 · 详情
+  时间线里「发生时间」与「取到时间」并排 —— 这两列一旦合并，补录的旧状态就会
+  看起来像刚更新的新状态（AC-09）。
+-->
+<view class="page">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" data-act-cus-back="1" hover-class="hover-dim">‹</view>
+      <text class="nav-title">关务记录</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub">状态来自人工登记，以海关等官方系统结果为准</view>
+  </view>
+
+  <view class="page-content">
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      <text class="empty-title">正在读取…</text>
+    </view>
+
+    <view wx:elif="{{view === 'error'}}" class="empty">
+      <text class="empty-icon">⚠️</text>
+      <text class="empty-title">{{errTitle}}</text>
+      <text class="empty-hint">{{errHint}}</text>
+      <view class="btn-primary" bindtap="onRetry" data-act-cus-retry="1" hover-class="hover-dim">重试</view>
+    </view>
+
+    <block wx:else>
+      <!-- 状态大卡 -->
+      <view class="top-card" data-act-cus-head="1">
+        <view class="top-line">
+          <text class="top-no">{{rec.no}}</text>
+          <text class="top-status {{rec.terminal ? 'done' : 'doing'}}">{{rec.statusLabel}}</text>
+        </view>
+        <view class="top-meta">
+          <text class="top-meta-item">更新 {{rec.updatedAt}}</text>
+          <text class="top-meta-item" wx:if="{{rec.note}}">· {{rec.note}}</text>
+        </view>
+      </view>
+
+      <!-- 新鲜度：官方源不可用这块牌子，是 AC-02 在界面上的落点 -->
+      <view class="fresh-card" wx:if="{{freshness}}" data-act-cus-fresh="1">
+        <view class="fresh-row">
+          <text class="fresh-label">官方状态</text>
+          <text class="fresh-chip {{officialUnavailable ? 'off' : 'ok'}}">{{freshness.officialLabel}}</text>
+        </view>
+        <view class="fresh-msg">{{freshness.message}}</view>
+        <view class="fresh-meta" wx:if="{{freshness.lastFetchedAt}}">
+          最后一次获取：{{freshness.lastFetchedAt}}
+          <text wx:if="{{freshness.lastSource}}"> · 来源 {{freshness.lastSource}}</text>
+        </view>
+      </view>
+
+      <!-- 时间线 -->
+      <view class="sec-title">
+        <text>状态时间线</text>
+        <text class="sec-count">{{timeline.length}} 条</text>
+      </view>
+      <!-- 时区要说出来：服务端存 UTC，页面已转本地；不写这一句，用户拿它跟
+           聊天记录里的时间对不上时无法判断是数据错还是时区差。 -->
+      <view class="sec-note">时间均为本地时间</view>
+
+      <view class="empty" wx:if="{{!timeline.length}}">
+        <text class="empty-icon">🕘</text>
+        <text class="empty-title">还没有状态事件</text>
+        <text class="empty-hint">登记一条后，这里才会出现时间线</text>
+      </view>
+
+      <view class="tl" wx:if="{{timeline.length}}">
+        <view class="tl-item" wx:for="{{timeline}}" wx:key="id" data-act-cus-ts="1">
+          <view class="tl-dot {{item.latest ? 'new' : ''}}"></view>
+          <view class="tl-body">
+            <view class="tl-head">
+              <text class="tl-status">{{item.statusLabel}}</text>
+              <text class="tl-src {{item.official ? 'official' : 'manual'}}">{{item.official ? '官方' : '人工登记'}}</text>
+              <text class="tl-correct" wx:if="{{item.correctsId}}">更正 #{{item.correctsId}}</text>
+            </view>
+            <view class="tl-time">发生 {{item.occurredAt}}</view>
+            <view class="tl-time">取得 {{item.fetchedAt}}<text wx:if="{{item.source}}"> · {{item.source}}</text></view>
+            <view class="tl-note" wx:if="{{item.note}}">{{item.note}}</view>
+          </view>
+        </view>
+      </view>
+
+      <!-- D2：从这条记录进入归类辅助。⛔ 文案里不写"查归类结果"——
+           模型给的是候选，结论要人工定稿，这个区别在入口上就得说清。 -->
+      <view class="cls-entry" bindtap="onOpenClassify" data-act-cus-classify="1" hover-class="hover-dim">
+        <view class="cls-entry-main">
+          <text class="cls-entry-title">归类建议</text>
+          <text class="cls-entry-sub">模型只给候选，结论由人工定稿</text>
+        </view>
+        <text class="cls-entry-arrow">›</text>
+      </view>
+
+      <view class="foot-note">本版本不提供申报代理服务；所有状态以海关等官方系统结果为准。</view>
+    </block>
+  </view>
+</view>

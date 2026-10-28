@@ -132,15 +132,45 @@
   />
 
   <!--
-    发货方式选择（点击 tabBar 中间「+发货」进入本页即弹出）
+    发货及关务方式选择（点击 tabBar 中间「+发货」进入本页即弹出）
+    · 智慧关务 → 进入关务首页（D1 已落地，真导航）
     · 自主发货 → 关闭弹窗，留在本页自行填写发布
-    · 委托发货 → 跳「功能预览」占位页（纯前端，不涉及后端）
-    文字/布局/颜色/图标均对齐设计稿；两枚单选圈为设计稿中的「默认」标记，非可交互控件。
+    · 委托发货 → 进入真实的客户受理屏（UI-07），带上已填的货名 / 货量 / 单位
+    文字/布局/颜色/图标均对齐设计稿；三枚单选圈为设计稿中的「默认」标记，非可交互控件。
   -->
   <view wx:if="{{showChannel}}" class="ch-mask">
     <view class="ch-mask-bg" bindtap="closeChannelModal"></view>
     <view class="ch-panel">
-      <view class="ch-opt" bindtap="pickSelfDelivery" hover-class="ch-opt-hover">
+      <!--
+        智慧关务（关域）：设计稿第三条卡片，位置在**最上**（绿卡）。
+        D1 已落地 ⇒ 本卡**真的换页**（`pages/customs/home/home`），不再是"弹一层说明"。
+        三句法务口径（信息服务 / 不代申报 / 以官方结果为准）搬到了关务首页本身：
+        放在说明层里的问题是一点「我知道了」它就消失了，而那恰恰是每次看关务状态
+        都该看到的前提。
+        `data-act-cus-entry` 是走查锚点（三个 `.ch-opt` 是同类元素，工具没有 index 参数），
+        登记在 scripts/verify_miniapp.js 的 WALK_ANCHORS。
+      -->
+      <view
+        class="ch-opt"
+        data-act-cus-entry="1"
+        bindtap="openCustomsEntry"
+        hover-class="ch-opt-hover"
+      >
+        <view class="ch-card ch-card-customs">
+          <view class="ch-icon">
+            <view class="ch-plane"></view>
+            <view class="ch-plane-fold"></view>
+          </view>
+          <text class="ch-card-text">智慧关务</text>
+        </view>
+        <view class="ch-radio">
+          <view class="ch-ring"></view>
+          <text class="ch-radio-label">默认</text>
+        </view>
+      </view>
+      <view class="ch-desc">提供信息查询与辅助工具，本版本不提供申报代理服务。</view>
+
+      <view class="ch-opt ch-opt-gap" bindtap="pickSelfDelivery" hover-class="ch-opt-hover">
         <view class="ch-card ch-card-self">
           <view class="ch-icon">
             <view class="ch-head"></view>
@@ -153,9 +183,9 @@
           <text class="ch-radio-label">默认</text>
         </view>
       </view>
-      <view class="ch-desc">您发布货物，自行在<text class="ch-brand">船好多</text>平台找寻认证船主接单并完成运输。</view>
+      <view class="ch-desc">您发布货物，自行在<text class="ch-brand">向海通</text>平台找寻认证船主接单并完成运输。</view>
 
-      <!-- `data-act-entrust` 是走查锚点：两个 `.ch-opt` 是**同类元素**，而工具没有
+      <!-- `data-act-entrust` 是走查锚点：三个 `.ch-opt` 是**同类元素**，而工具没有
            index 参数（`nth-child` 被忽略、坐标触摸也会落到第一个）⇒ 没有可区分的
            属性就点不到这一项。锚点登记在 scripts/verify_miniapp.js 的 WALK_ANCHORS。 -->
       <view
@@ -178,7 +208,7 @@
           <text class="ch-radio-label">默认</text>
         </view>
       </view>
-      <view class="ch-desc">您发布货物，委托给<text class="ch-brand">船好多</text>平台承运，由平台组织运力完成运输。</view>
+      <view class="ch-desc">您发布货物，委托给<text class="ch-brand">向海通</text>平台承运，由平台组织运力完成运输。</view>
     </view>
   </view>
 </view>

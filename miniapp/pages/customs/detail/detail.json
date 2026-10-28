@@ -1,0 +1,7 @@
+{
+  "usingComponents": {},
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "关务记录",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
+}

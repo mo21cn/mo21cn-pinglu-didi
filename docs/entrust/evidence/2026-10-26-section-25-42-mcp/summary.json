@@ -1,0 +1,371 @@
+{
+  "sections": [
+    "25",
+    "42"
+  ],
+  "project": "E:\\pinglu-didi\\miniapp",
+  "startedAt": "2026-10-26T11:47:13+0800",
+  "finishedAt": "2026-10-26T11:49:56+0800",
+  "argv": [
+    "scripts\\verify_miniapp_devtools.py",
+    "--shots",
+    "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-114627",
+    "--section",
+    "25,42"
+  ],
+  "channel": "mcp",
+  "runtime": {
+    "SDKVersion": "3.17.2",
+    "model": "iPhone 12/13 (Pro)",
+    "platform": "devtools",
+    "system": "iOS 10.0.1",
+    "language": "zh_CN",
+    "profile": "dev",
+    "libVersionCfg": {
+      "sharedPresent": true,
+      "shared": "3.17.2",
+      "privatePresent": true,
+      "private": "3.17.2"
+    },
+    "libVersionGray": {
+      "verdict": "stable",
+      "source": "C:\\Users\\Administrator\\AppData\\Local\\微信开发者工具\\User Data\\bf938c1203f9e0460b7dd4d58f95dcc0\\WeappVendor\\cfg.json",
+      "sourceMtime": "2026-10-26T11:46:20",
+      "cfgLibCount": 48
+    }
+  },
+  "verdict": "NOT_RUN",
+  "tally": {
+    "PASS": 46,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 0,
+    "LIMITATION": 2
+  },
+  "rollup": {
+    "PASS": 46,
+    "FAIL": 0,
+    "ENV_BLOCKED": 0,
+    "REVIEW_REQUIRED": 0,
+    "NOT_RUN": 2
+  },
+  "passed": 46,
+  "notPassed": 2,
+  "attempt": 1,
+  "previousRuns": [],
+  "results": [
+    {
+      "step": "㉕ 前置 · 回到身份选择页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "pages/index/index"
+    },
+    {
+      "step": "㉕ 前置 · 进入货主工作台（落点页，与身份无关）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "pages/shipper/shipper"
+    },
+    {
+      "step": "㉕ 前置 · 实际身份是 seed-owner（演示经理；成果页写权限来自它）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "{\"user_id\": 2, \"openid\": \"mock-openid-seed-owner\", \"nickname\": \"\", \"roles\": [\"shipper\", \"owner\"], \"current_role\": \"shipper\", \"role_label\": \""
+    },
+    {
+      "step": "㉕A view=ready（真实渲染，不是白屏）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "ready"
+    },
+    {
+      "step": "㉕A 页面持有的成果编号正确",
+      "ok": true,
+      "kind": "PASS",
+      "note": "5"
+    },
+    {
+      "step": "㉕A 成果类型为 settlement_draft",
+      "ok": true,
+      "kind": "PASS",
+      "note": "typeCode=settlement_draft；取值不对说明编号漂了，先铺 backend/scripts/seed_entrust_demo.py"
+    },
+    {
+      "step": "㉕A 可编辑 / 可确认入口已亮出",
+      "ok": true,
+      "kind": "PASS",
+      "note": "canEdit=True canConfirm=True"
+    },
+    {
+      "step": "㉕A 缺项提示点名到字段（不是只说「信息不完整」）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "还缺 1 项必填：应收明细"
+    },
+    {
+      "step": "截图 25-A-成果详情-查看态",
+      "ok": true,
+      "kind": "PASS",
+      "note": "23274B"
+    },
+    {
+      "step": "㉕B 投影里有 receivable_lines 字段行",
+      "ok": true,
+      "kind": "PASS",
+      "note": "n=1"
+    },
+    {
+      "step": "㉕B 缺值字段仍按契约判为结构化（declared=list / kind=json）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "declared=list kind=json"
+    },
+    {
+      "step": "㉕B 查看态显示「（未填）」而不是 null / 空白",
+      "ok": true,
+      "kind": "PASS",
+      "note": "empty=True"
+    },
+    {
+      "step": "㉕B 点「编辑内容」后进入编辑态",
+      "ok": true,
+      "kind": "PASS",
+      "note": "True"
+    },
+    {
+      "step": "㉕B 编辑表单里有 receivable_lines",
+      "ok": true,
+      "kind": "PASS",
+      "note": "idx=0"
+    },
+    {
+      "step": "㉕B 编辑态该字段走 JSON 形态且带契约类型",
+      "ok": true,
+      "kind": "PASS",
+      "note": "kind=json declared=list"
+    },
+    {
+      "step": "㉕B 编辑态初始文本是空串（不是 undefined / 'null'）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "\"\""
+    },
+    {
+      "step": "㉕B 编辑态带可读类型提示（含 JSON）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "列表（JSON 数组）"
+    },
+    {
+      "step": "㉕B 渲染层 · 类型提示元素已渲染",
+      "ok": true,
+      "kind": "PASS",
+      "note": ".art-kind-hint n=3"
+    },
+    {
+      "step": "㉕B 渲染层 · 结构化字段走 textarea",
+      "ok": true,
+      "kind": "PASS",
+      "note": "textarea.art-textarea n=3"
+    },
+    {
+      "step": "㉕B 渲染层 · 提示文案是「列表（JSON 数组）」",
+      "ok": true,
+      "kind": "PASS",
+      "note": "<text class=\"art-kind-hint\">列表（JSON 数组）</text>"
+    },
+    {
+      "step": "截图 25-B-成果详情-编辑态",
+      "ok": true,
+      "kind": "PASS",
+      "note": "27966B"
+    },
+    {
+      "step": "㉕C 注入编辑值（setData）",
+      "ok": true,
+      "kind": "PASS",
+      "note": ""
+    },
+    {
+      "step": "㉕C 保存后退出编辑态",
+      "ok": true,
+      "kind": "PASS",
+      "note": "False"
+    },
+    {
+      "step": "㉕C 保存提示说清新版本号",
+      "ok": true,
+      "kind": "PASS",
+      "note": "已保存为 v2，生效版本仍是 v1（需确认才会切换）"
+    },
+    {
+      "step": "㉕C 保存提示说清生效版本未变（少了这句，用户会以为客户已看到新内容）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "已保存为 v2，生效版本仍是 v1（需确认才会切换）"
+    },
+    {
+      "step": "截图 25-C1-保存后",
+      "ok": true,
+      "kind": "PASS",
+      "note": "25199B"
+    },
+    {
+      "step": "㉕C 复核 · 仍指向同一成果编号（未产生重复成果）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "5"
+    },
+    {
+      "step": "㉕C 复核 · 版本数恰好 +1",
+      "ok": true,
+      "kind": "PASS",
+      "note": "1 → 2"
+    },
+    {
+      "step": "㉕C 复核 · 版本号无重复",
+      "ok": true,
+      "kind": "PASS",
+      "note": "[1, 2]"
+    },
+    {
+      "step": "㉕C 复核 · 生效版本仍是保存前的那个（编辑不改生效版本）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "1 vs 1"
+    },
+    {
+      "step": "㉕C 复核 · 新版本进入历史且未标为生效",
+      "ok": true,
+      "kind": "PASS",
+      "note": "v2 isCurrent=False"
+    },
+    {
+      "step": "截图 25-C2-导航复核后",
+      "ok": true,
+      "kind": "PASS",
+      "note": "23289B"
+    },
+    {
+      "step": "㉕D 非生效版本行上有「设为生效版本」入口",
+      "ok": true,
+      "kind": "PASS",
+      "note": "[data-no=\"2\"] n=2"
+    },
+    {
+      "step": "㉕D 渲染层 · 版本历史里有该入口文案",
+      "ok": true,
+      "kind": "PASS",
+      "note": "<view class=\"tl\"><view class=\"tl-item tl-done\"><view class=\"tl-rail\"><view class=\"tl-dot\"></view><vi"
+    },
+    {
+      "step": "㉕D 确认动作未在真机点击（能跑，但工具不可验证 ⇒ 不计入通过）",
+      "ok": false,
+      "kind": "LIMITATION",
+      "note": "原生 showModal 不在渲染层、工具点不到「确定」；确认的后端语义由 verify_frontend_e2e.js 读后端事实覆盖"
+    },
+    {
+      "step": "㉕E 本章运行期无新增 console error",
+      "ok": true,
+      "kind": "PASS",
+      "note": "(无)"
+    },
+    {
+      "step": "㊷ P-1 去向记录（**复用**，不是本章新证）：会话输入框键入 ＋ 该文本真的落进服务端 —— 证据在 ㉞ 章（`input_text` → `bindinput` → `data.form.title`，提交后详情页标题一致）；矩阵里「全仓无先例」那句原文**本轮已订正**（实为 6 处先例、其中一处已断言 `bindinput`）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "去向：㉞ 章「真实输入触发 bindinput」= P-1 的两个分句；本章不重跑（裁定二·A·2）"
+    },
+    {
+      "step": "㊷ 前置①：经 API 批量建**草稿**载体单，使 `view=owner` 的总数**超过一页** —— 没有这一步「第 2 页」无从产生，P-2 只能记「产品侧尚无实现」。⚠️ 建的是草稿：不动任何已存在的单据、不改库",
+      "ok": true,
+      "kind": "PASS",
+      "note": "起点 total=2 新建 25/25（末次 HTTP=200） ⇒ total=27（页长 20）"
+    },
+    {
+      "step": "㊷ ① 首屏只取**第 1 页**（20 张 = min(总数 27, 页长 20)），且 `pageHint` 如实说明还有更早的（『第 1/N 页』）—— 这是触底之前应有的形态",
+      "ok": true,
+      "kind": "PASS",
+      "note": "view='ready' 条目数=20（期望 20） hasMore=True reachCount=0 pageHint='第 1/2 页 · 共 27 条'"
+    },
+    {
+      "step": "截图 42-1-我的委托-第1页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "44817B"
+    },
+    {
+      "step": "㊷ ② **触底真的把更早一页加载进来了**：原生 `pageScrollTo` 滚到底 ⇒ `onReachBottom` 触发 ⇒ 列表变长。⚠️ 这条能成立，是因为本轮先给该页补了 `onReachBottom`：在此之前它只取第 1 页，第 21 张之后的委托**永远看不到**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "scroll=True 条目数 20 → 27（期望 27） reachCount=1 loadingMore=False"
+    },
+    {
+      "step": "截图 42-2-我的委托-触底后第2页",
+      "ok": true,
+      "kind": "PASS",
+      "note": "42573B"
+    },
+    {
+      "step": "㊷ ③ 失败归因（**只在 ② 未过时才有信息量**，此处恒记以便归档）：触底之后 `onReachBottom` 的调用计数 —— `0` ⇒ 工具的 `pageScrollTo` **没能**触发页面触底事件（**工具边界**）；`≥1` 而列表没变长 ⇒ 事件到了、加载没成（**产品侧问题**）。⚠️ 两种原因不能混为一谈：混在一起就只剩一句『分页没验成』，分不清是工具不行还是功能不行",
+      "ok": true,
+      "kind": "PASS",
+      "note": "reachCount=1（0 = 工具没造出触底；≥1 = 造出了）"
+    },
+    {
+      "step": "㊷ ④ 第 2 页到达后 `pageHint` 与 `hasMore` **同步**更新 —— 『分页提示』与『分页能力』必须同时为真：只改提示不改列表，就是本章开头说的那种『缺陷长得像功能』",
+      "ok": true,
+      "kind": "PASS",
+      "note": "pageHint='第 2/2 页 · 共 27 条' hasMore=False page=2 （服务端总数 27，已显示 27）"
+    },
+    {
+      "step": "㊷ ⑤ 负例（对照服务端真相）：界面第 2 页拿到的编号序列与 `GET /assignments?view=owner&page=2` **逐条一致** —— 没有这条，② 只证明『列表变长了』，不能证明『长出来的就是第 2 页』（多出来的也可能只是第 1 页被重复追加了一遍）",
+      "ok": true,
+      "kind": "PASS",
+      "note": "服务端 page2=['9', '8', '7', '6', '5', '4', '3'] 界面追加=['9', '8', '7', '6', '5', '4', '3']"
+    },
+    {
+      "step": "㊷ 本章 console 无未豁免 error（页面自身的运行期错误）",
+      "ok": true,
+      "kind": "PASS",
+      "note": ""
+    },
+    {
+      "step": "㊷ 去向记录：**P-3（下拉刷新真手势）不在本章结论里** —— 工具的动作面只有 `text` / `tap` / `longpress` / `scrollTo` / `input` 五个 element action ＋ 页面级 `pageScrollTo`，**没有任何 swipe / 触摸手势**（已逐方法核对 `wechatide_client.py` 的 `Client`）。P-3 的 `tool_limitation` / `alternative_path` / `design_constraint` 由本轮同一份矩阵文档回填，**不由真机章声称**",
+      "ok": true,
+      "kind": "PASS",
+      "note": "去向：DEMO-1-gesture-matrix.yaml 的 P-3（status = LIMITATION）"
+    },
+    {
+      "step": "㊷ **下拉刷新（真手势）仍无法由本工具触发**",
+      "ok": false,
+      "kind": "LIMITATION",
+      "note": "本页 `enablePullDownRefresh=true`（`onPullDownRefresh` → `load()`），但下拉是**真实触摸手势**，而工具链只有上述五个 element action ＋ `pageScrollTo`，**没有 swipe**。⚠️ 本章新证的是它的**对照面**：同属『滚动类交互』，**触底有原生通路、下拉没有** ⇒ 两者的可脚本化程度并不相同。界面设计要按这个差别走：分页可以走触底（本章已证可造），而『刷新后可复现』这类断言需要页内刷新入口，不能只靠下拉。"
+    }
+  ],
+  "console": {
+    "baselineCaptured": true,
+    "collectFailed": false,
+    "openPhaseWaived": [],
+    "openPhaseUnwaived": [],
+    "bizPhaseUnwaived": [],
+    "whitelist": [
+      {
+        "pattern": "appLaunch with non-empty page stack",
+        "phase": "open",
+        "evidence": "实验脚本 _probe_applaunch.py（2026-09-15）：① 闸门通过后、**发出任何导航之前**console 里就已有该条；② 其后连做两次导航，console 内容逐字不变（无新增条目）；③ 页面启动路径无 reLaunch（app.js.onLaunch 只探活，index.js 仅用户动作后 switchTab）。归为工具/框架侧竞态。见 DR-0009 §8.5⑦"
+      },
+      {
+        "pattern": "routeDone with a webviewId",
+        "phase": "open",
+        "evidence": "同上实验 ①②：WebView 建立期 routeDone 找不到 webview。⚠️ 业务阶段出现**同样文字也不豁免** —— 整族 `[Page route 错误(system error)]` 里包含真缺陷（例如 navigateTo 到不存在的页），按文字永久豁免会把真缺陷一起藏掉（HO D1 明确点名这个范围过宽）"
+      }
+    ]
+  },
+  "consoleError": "",
+  "consoleErrorDetected": false,
+  "consoleNoiseCount": 0,
+  "consoleOtherCount": 0,
+  "shots": "E:\\pinglu-didi\\miniapp-device-artifacts\\walk-20261026-114627"
+}

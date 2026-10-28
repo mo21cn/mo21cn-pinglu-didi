@@ -174,6 +174,9 @@ const WALK_ANCHORS = [
   // ㉞ S1 / UI-07（客户委托草稿/提交屏）：真实入口与两处页内动作。
   // 「委托发货」与「自主发货」在 cargo.wxml 里是**同类元素**（都是 `.ch-opt`），
   // 而走查工具没有 index 参数 ⇒ 必须靠可区分属性才能点到第二项。
+  // 设计稿 v2 又加了第三条「智慧关务」（同为 `.ch-opt`）⇒ 同样需要独立锚点，
+  // 否则走查点到的永远是第一个 `.ch-opt`。
+  { kind: 'act', file: 'pages/publish/cargo/cargo.wxml', class: 'ch-opt', attr: 'data-act-cus-entry', value: '1', handler: 'openCustomsEntry' },
   { kind: 'act', file: 'pages/publish/cargo/cargo.wxml', class: 'ch-opt', attr: 'data-act-entrust', value: '1', handler: 'pickEntrustDelivery' },
   { kind: 'act', file: 'pages/entrust/intake/intake.wxml', attr: 'data-act-submit-intake', value: '1', handler: 'onSubmit' },
   { kind: 'act', file: 'pages/entrust/intake/intake.wxml', attr: 'data-act-intake-restart', value: '1', handler: 'onRestart' },

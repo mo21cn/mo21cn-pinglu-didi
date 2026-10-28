@@ -866,19 +866,21 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
     await shot(mp, '15-发货方式弹窗')
     rec('⑮ 进入发布货物页即弹出发货方式选择', !!(cd && cd.showChannel === true), String(cd && cd.showChannel))
 
-    // 文案逐字对齐设计稿
+    // 文案逐字对齐设计稿（v2：三张卡 —— 智慧关务 / 自主发货 / 委托发货）
     const cardTexts = []
     for (const el of await cp.$$('.ch-card-text')) cardTexts.push((await el.text()).trim())
-    rec('⑮ 两张卡片文案为「自主发货 / 委托发货」', cardTexts.join('|') === '自主发货|委托发货', cardTexts.join('|'))
+    rec('⑮ 三张卡片文案为「智慧关务 / 自主发货 / 委托发货」',
+      cardTexts.join('|') === '智慧关务|自主发货|委托发货', cardTexts.join('|'))
     const descs = []
     for (const el of await cp.$$('.ch-desc')) descs.push((await el.text()).replace(/\s+/g, ''))
-    rec('⑮ 两段说明文案齐全（自行找船 / 平台承运）',
-      descs.length === 2 &&
-      /自行在船好多平台找寻认证船主接单并完成运输。$/.test(descs[0] || '') &&
-      /委托给船好多平台承运，由平台组织运力完成运输。$/.test(descs[1] || ''),
+    rec('⑮ 三段说明文案齐全（关务边界 / 自行找船 / 平台承运）',
+      descs.length === 3 &&
+      /提供信息查询与辅助工具，本版本不提供申报代理服务。$/.test(descs[0] || '') &&
+      /自行在向海通平台找寻认证船主接单并完成运输。$/.test(descs[1] || '') &&
+      /委托给向海通平台承运，由平台组织运力完成运输。$/.test(descs[2] || ''),
       descs.join(' || '))
-    rec('⑮ 两枚单选圈 + 「默认」标记（设计稿元素齐全）',
-      (await cp.$$('.ch-ring')).length === 2 && (await cp.$$('.ch-radio-label')).length === 2)
+    rec('⑮ 三枚单选圈 + 「默认」标记（设计稿元素齐全）',
+      (await cp.$$('.ch-ring')).length === 3 && (await cp.$$('.ch-radio-label')).length === 3)
 
     // 几何：卡片宽高比 / 图标在卡内左侧 / 单选圈在卡外 / 文案在卡下
     let geo = null
@@ -893,21 +895,27 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
         q.select('.ch-icon').boundingClientRect()
         q.select('.ch-ring').boundingClientRect()
         q.select('.ch-desc').boundingClientRect()
+        q.select('.ch-card-customs').boundingClientRect()
         const win = typeof wx.getWindowInfo === 'function' ? wx.getWindowInfo() : { windowHeight: 0 }
         return new Promise((res) => q.exec((r) => res({
-          panel: r[0], self: r[1], entrust: r[2], icon: r[3], ring: r[4], desc: r[5], winH: win.windowHeight
+          panel: r[0], self: r[1], entrust: r[2], icon: r[3], ring: r[4], desc: r[5],
+          customs: r[6], winH: win.windowHeight
         })))
       })
     } catch (e) { geo = null }
     const G = geo || {}
-    const hasGeo = !!(G.panel && G.self && G.entrust && G.icon && G.ring && G.desc)
-    rec('⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案）', hasGeo, hasGeo ? 'ok' : JSON.stringify(G).slice(0, 120))
+    const hasGeo = !!(G.panel && G.self && G.entrust && G.icon && G.ring && G.desc && G.customs)
+    rec('⑮ 弹窗几何可读（面板/三张卡片/图标/单选圈/文案）', hasGeo, hasGeo ? 'ok' : JSON.stringify(G).slice(0, 120))
     if (hasGeo) {
       rec('⑮ 卡片宽高比 ≈ 设计稿 3:1（非压扁/拉伸）',
         G.self.width / G.self.height > 2.7 && G.self.width / G.self.height < 3.4,
         `w/h=${(G.self.width / G.self.height).toFixed(2)} (${G.self.width}x${G.self.height})`)
-      rec('⑮ 两张卡片等高（同规格）', Math.abs(G.self.height - G.entrust.height) <= 1, `${G.self.height} vs ${G.entrust.height}`)
-      rec('⑮ 卡片顺序：自主发货在委托发货之上', G.self.top < G.entrust.top, `self=${G.self.top} entrust=${G.entrust.top}`)
+      rec('⑮ 三张卡片等高（同规格）',
+        Math.abs(G.self.height - G.entrust.height) <= 1 && Math.abs(G.self.height - G.customs.height) <= 1,
+        `${G.customs.height} / ${G.self.height} / ${G.entrust.height}`)
+      rec('⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货',
+        G.customs.top < G.self.top && G.self.top < G.entrust.top,
+        `customs=${G.customs.top} self=${G.self.top} entrust=${G.entrust.top}`)
       rec('⑮ 图标为白圆且在卡片左内侧',
         G.icon.left > G.self.left && G.icon.left - G.self.left < 20 && Math.abs(G.icon.width - G.icon.height) <= 1,
         `Δleft=${(G.icon.left - G.self.left).toFixed(1)} ${G.icon.width}x${G.icon.height}`)
@@ -916,6 +924,26 @@ const log = (t, o) => console.log(`[${t}]`, typeof o === 'string' ? o : JSON.str
       rec('⑮ 弹窗完整落在视口内（不被裁切）',
         G.panel.top >= 0 && G.panel.bottom <= G.winH, `panel=${Math.round(G.panel.top)}..${Math.round(G.panel.bottom)} winH=${G.winH}`)
     }
+
+    // 行为 0：智慧关务（设计稿 v2 新增绿卡）→ 只弹「规划中」说明层，不跳页、不调接口
+    await tapAt(cp, '.ch-card-customs', 0)
+    await sleep(1100)
+    const cusTip = await waitData(cp, (d) => d.cusTipVisible === true, 20, 300)
+    await shot(mp, '15-智慧关务-规划中说明')
+    rec('⑮ 智慧关务点开「规划中」说明层（留在发布货物页，不跳空白页）',
+      !!(cusTip && cusTip.cusTipVisible === true) && cp.path === 'pages/publish/cargo/cargo',
+      `cusTipVisible=${(await cp.data()).cusTipVisible} path=${cp.path}`)
+    let tipText = ''
+    for (const el of await cp.$$('.ct-panel')) tipText = (await el.text()).replace(/\s+/g, '')
+    rec('⑮ 说明层含「不提供申报代理服务」法务口径 + 三句能力说明',
+      /不提供申报代理服务/.test(tipText) && /智慧关务/.test(tipText) && /规划中/.test(tipText),
+      tipText.slice(0, 80))
+    await tapAt(cp, '.ct-btn', 0)
+    await sleep(900)
+    rec('⑮ 「我知道了」可关闭说明层', (await cp.data()).cusTipVisible === false,
+      String((await cp.data()).cusTipVisible))
+    await cp.setData({ showChannel: true })
+    await sleep(700)
 
     // 行为 1：自主发货 → 只关弹窗、留在本页（真实用户路径）
     await tapAt(cp, '.ch-card-self', 0)

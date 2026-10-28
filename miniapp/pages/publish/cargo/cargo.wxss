@@ -96,10 +96,12 @@ page { background: #F5F7FA; }
 .field-row-miss .field-value-placeholder { color: #D98A96; }
 
 /* ==========================================================================
- * 发货方式选择弹窗（点击 tabBar 中间「+发货」进入本页即弹出）
+ * 发货及关务方式选择弹窗（点击 tabBar 中间「+发货」进入本页即弹出）
  * 设计稿取色（纯前端 · 不涉及后端）：
+ *   智慧关务卡  linear-gradient(90deg, #57D780 → #26D554)
  *   自主发货卡  linear-gradient(90deg, #E5A75A → #FECD91)
  *   委托发货卡  linear-gradient(90deg, #3584FD → #4A81FF)
+ *   白圆内纸飞机 机身 #3FCE6C / 折面 #A9E6C3
  *   白圆内人形  头 #FECD91 / 肩 #E5A75A
  *   白圆内手托盒 盒盖 #B2D0FE / 盒身 #5D9DFD / 手 #3585FD
  *   单选圈 #C1C1C1 · 「默认」#3A3544 · 说明文案 #8090A3 · 平台名 #3B5BDB
@@ -160,6 +162,7 @@ page { background: #F5F7FA; }
   box-shadow: 0 8rpx 22rpx rgba(61, 90, 219, .16);
 }
 
+.ch-card-customs { background: linear-gradient(90deg, #57D780 0%, #26D554 100%); }
 .ch-card-self { background: linear-gradient(90deg, #E5A75A 0%, #FECD91 100%); }
 .ch-card-entrust { background: linear-gradient(90deg, #3584FD 0%, #4A81FF 100%); }
 
@@ -181,6 +184,27 @@ page { background: #F5F7FA; }
   border-radius: 50%;
   background: #FFFFFF;
   overflow: hidden;
+}
+
+/* 智慧关务：纸飞机（机身 + 折面，两枚三角形近似设计稿） */
+.ch-plane {
+  position: absolute;
+  left: 24rpx; top: 26rpx;
+  width: 0; height: 0;
+  border-left: 46rpx solid #3FCE6C;
+  border-top: 18rpx solid transparent;
+  border-bottom: 18rpx solid transparent;
+  transform: rotate(-32deg);
+}
+
+.ch-plane-fold {
+  position: absolute;
+  left: 34rpx; top: 44rpx;
+  width: 0; height: 0;
+  border-left: 30rpx solid #A9E6C3;
+  border-top: 10rpx solid transparent;
+  border-bottom: 10rpx solid transparent;
+  transform: rotate(-32deg);
 }
 
 /* 自主发货：人物（头 + 圆肩） */
@@ -272,3 +296,11 @@ page { background: #F5F7FA; }
   color: #3B5BDB;
   font-weight: 600;
 }
+
+/* ==========================================================================
+ * 说明层的样式（`.ct-*`）已随 D1 一并删除 —— 绿卡现在真导航到关务首页，
+ * 那三句法务口径搬到了 `pages/customs/home/home` 的页头副标题与页脚，
+ * 不再是"点「我知道了」就消失"的一层。留空这段注释是为了让下一个人
+ * 知道它不是"漏了"，而是"故意不在了"。
+ * ========================================================================== */
+
