@@ -33,6 +33,7 @@ D1 交付的是「人工登记 → 状态时间线」这一条**只读**链路�
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from datetime import timedelta
@@ -65,16 +66,30 @@ _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
 def _assert_demo_env() -> None:
-    """拒绝在非演示环境执行。⛔ 不提供 `--force`：有开关就等于没有守卫。"""
+    """拒绝在非演示环境执行。
+
+    ⛔ 不提供 `--force`：每次敲命令时带个参数，等于把防护降到"记得就不出事"。
+    取代它的是一个**部署期**声明 `DEMO_DATA_STORE=true` —— 它随部署配方留痕，
+    而不是随某一次手敲的命令留痕（云托管容器里 `APP_ENV` 只能是 `production`，
+    而那个库装的**就是**演示数据，"production" 在本项目里不等于"真实客户库"）。
+    """
     settings = get_settings()
     env = str(getattr(settings, "APP_ENV", "") or "").strip().lower()
-    if env == "production":
+    declared = bool(getattr(settings, "DEMO_DATA_STORE", False))
+    if env == "production" and not declared:
         raise SystemExit(
-            "拒绝执行：APP_ENV=production。\n"
-            "本脚本会写入 PL-CUS-DEMO-* 演示记录，只允许在演示档后端执行（Q-06 守卫）。\n"
-            "演示环境请用 APP_ENV=development（本机）或在演示库上单独执行；\n"
-            "⛔ 生产库不做例外，也不接受任何绕过参数。"
+            "拒绝执行：APP_ENV=production 且**未**声明该库为演示库（Q-06 守卫）。\n"
+            "本脚本会写入 PL-CUS-DEMO-* 演示记录，只允许在演示用途的库上执行。\n"
+            "若这次部署本身就是演示环境（云托管即此情形），请在部署配置里显式声明\n"
+            "DEMO_DATA_STORE=true；⛔ 不接受任何命令行绕过参数。"
         )
+    if env == "production":
+        print(
+            "⚠️ APP_ENV=production，但已显式声明 DEMO_DATA_STORE=true ⇒ 按**演示库**处理，"
+            "即将写入 PL-CUS-DEMO-*（Q-06 守卫据此放行）",
+            file=sys.stderr,
+        )
+        return
     if env not in DEMO_ENVS:
         raise SystemExit(
             f"拒绝执行：APP_ENV={env!r} 不在演示环境白名单 {sorted(DEMO_ENVS)} 内（Q-06 守卫）。"
@@ -113,6 +128,39 @@ def _user_id(db: Session, code: str, nickname: str) -> int:
     return int(user.id)
 
 
+def _resolve_owner(db: Session, *, openid: str | None, user_id: int | None) -> int:
+    """决定演示数据挂在谁名下。
+
+    两个参数都不给 ⇒ 沿用演示账号 `seed-shipper`（本机 dev 的既有行为，零改动）。
+    给了 ⇒ 该账号**必须已存在**：⛔ 凭一个字符串造出来的账号，无法证明它就是演示者
+    本人的微信号 —— 与 `bind_demo_identity` 拒绝 `auto` 是同一条纪律。
+
+    为什么要它：云端演示账号的 openid 已被**过继**给真实微信号
+    （`BIND_DEMO_IDENTITY`），种子再按 `mock-openid-seed-shipper` 找会找不到
+    ⇒ 新建一个账号 ⇒ 数据挂在没人登录的 user_id 下，界面看起来"功能正常但全空"。
+    """
+    if user_id is not None:
+        row = db.execute(text("SELECT id FROM users WHERE id = :i"), {"i": user_id}).first()
+        if not row:
+            raise SystemExit(f"拒绝执行：user_id={user_id} 不存在（⛔ 不自动创建）")
+        return int(row[0])
+    if openid:
+        row = db.execute(text("SELECT id FROM users WHERE openid = :o"), {"o": openid}).first()
+        if not row:
+            raise SystemExit(f"拒绝执行：openid={openid} 不存在（⛔ 不自动创建）")
+        return int(row[0])
+    return _user_id(db, SHIPPER_CODE, "演示货主")
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="铺关务演示数据（幂等）")
+    p.add_argument("--owner-openid", default=None, help="把数据挂到这个已存在的 openid 名下")
+    p.add_argument(
+        "--owner-user-id", type=int, default=None, help="把数据挂到这个已存在的 user_id 名下"
+    )
+    return p.parse_args(argv)
+
+
 def _exists(db: Session, user_id: int, no: str) -> int:
     row = db.execute(
         text(
@@ -147,11 +195,12 @@ def _ensure(
     return int(body["declaration"]["id"])
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     _assert_demo_env()
     db = SessionLocal()
     try:
-        user_id = _user_id(db, SHIPPER_CODE, "演示货主")
+        user_id = _resolve_owner(db, openid=args.owner_openid, user_id=args.owner_user_id)
 
         main_id = _ensure(
             db,

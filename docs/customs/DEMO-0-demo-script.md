@@ -141,6 +141,9 @@
 2. 演示库里有 **2 条**关务记录（`PL-CUS-DEMO-0001` 在建、`0002` 已放行）—— 没数据就重跑
    `python backend/scripts/seed_customs_demo.py`（幂等，重复跑不会变两条变四条）；
    ⛔ 该脚本带环境守卫：`APP_ENV=production` 会**直接拒绝执行**（Q-06，防止生产库长出 `PL-CUS-DEMO-*`）；
+   **云端（体验版走的库）另有通路**：合并 #207 后给云托管加 `DEMO_DATA_STORE=true` ＋
+   `SEED_CUSTOMS_OWNER=<你的 openid>`，重部署即铺 —— 详见工作单 **E-0.10**；
+   ⚠️ 不设 owner 就不铺：云端演示账号的 openid 已被过继，默认账号会挂到没人登录的 user_id 上；
 3. 小程序档位：本机走查用 `dev`，**演示手机用体验版**（`demo` 档，走云托管）；
    ⛔ 别把 `RUNTIME_PROFILE` 停在 `dev` 就发出去 —— 那样手机上打不到云托管；
 4. 断网演练一次：把手机飞行模式打开再关，页面应显示错误 + 「重试」，⛔ 不会停在旧数据上；

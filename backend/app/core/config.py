@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     # "配置已开启但无真实适配器（守卫拦截）"，同时记一条 warning（见 customs/sources.py）。
     CUSTOMS_OFFICIAL_SOURCE_ENABLED: bool = False
 
+    # 演示库声明。**默认 False**：`APP_ENV=production` 时演示种子脚本一律拒绝执行（Q-06 守卫）。
+    #
+    # 为什么需要它：云托管容器里 `APP_ENV` 必须是 `production`（部署形态决定的），
+    # 而那个库装的**就是**演示数据（`ent_*` 的种子已在里面）⇒ "production" 这个词
+    # 在本项目里不等于"真实客户库"。判据因此从"环境名"换成"**这个库的用途**"：
+    # 运维显式声明它是演示库，种子才肯写。⛔ 不声明 = 拒绝，与之前一样。
+    #
+    # ⛔ 它不是绕过开关：声明是**一次显式配置**，且随部署配方一起留痕；
+    # 而 `--force` 那种"每次执行时带一个参数"的写法，等于把防护降到"记得就不出事"。
+    DEMO_DATA_STORE: bool = False
+
     # ---- 附件（S1 第 5 条）----
     # 20 MiB 上限**可配置**（计划 §3.2 建模红线），不是硬编码常量。
     ATTACHMENT_MAX_BYTES: int = 20 * 1024 * 1024

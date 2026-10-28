@@ -5,6 +5,7 @@
 | 环境变量 | 动作 | 语义 |
 | --- | --- | --- |
 | `SEED_ON_BOOT=true` | 按序铺委托侧种子（幂等） | 见下方"执行顺序" |
+| `SEED_CUSTOMS_OWNER=<openid｜user:<id>>` | 铺**关务**演示数据，挂到显式给定的账号下 | **独立于**上面那个开关与播种守卫（理由见 `_run_customs_seed`）；⛔ 不接受 `auto`/`true` |
 | `BIND_DEMO_IDENTITY=<openid｜user:<id>>` | 把演示账号的 openid **过继**给真实登录账号 | 一次性 |
 | `DEMO_GRANT_ORG_MEMBER=<openid｜user:<id>>` | 给该账号补**组织成员资格**（受理台才有数据） | 一次性；**可多个**，逗号分隔 |
 
@@ -228,6 +229,51 @@ def _run_oneshots() -> list[str]:
     return failed
 
 
+def _customs_owner_args() -> tuple[tuple[str, ...] | None, str | None]:
+    """把 `SEED_CUSTOMS_OWNER=<openid｜user:<id>>` 翻成种子脚本的参数。
+
+    ⛔ 拒绝 `auto` / `true`：那会落到"自动挑一个账号"上，无法证明挑中的就是演示者本人。
+    """
+    raw = os.getenv("SEED_CUSTOMS_OWNER", "").strip()
+    if not raw:
+        return None, ""
+    if raw.lower() in {"auto", "true", "1", "yes"}:
+        return None, raw
+    if raw.startswith("user:"):
+        tail = raw[len("user:") :].strip()
+        if not tail.isdigit():
+            return None, raw
+        return ("--owner-user-id", tail), None
+    return ("--owner-openid", raw), None
+
+
+def _run_customs_seed() -> list[str]:
+    """铺**关务**演示数据 —— 刻意**独立于**委托侧的播种守卫与 `SEED_ON_BOOT`。
+
+    为什么独立：委托侧的 `bound` 守卫防的是"过继之后再铺一遍 ⇒ 第二套样本"；
+    关务种子的幂等键是 `(declaration_no, owner_user_id)`，而 owner 由
+    `SEED_CUSTOMS_OWNER` **显式**给定 ⇒ 重复执行只会命中已存在记录直接返回，
+    不存在"铺出两套"的问题。若挂在委托侧守卫下面，云端一旦过继过就**永远**铺不上
+    关务数据 —— 界面表现恰好是那种最难查的"功能正常但列表全空"。
+
+    ⛔ 不设 owner 就不铺：`mock-openid-seed-shipper` 在云端（已过继）并不存在，
+    沿用默认账号会新建一个没人登录的 user_id，数据照样看不见。
+    """
+    extra, bad = _customs_owner_args()
+    if extra is None:
+        if bad:
+            print(
+                f"[boot_seed] ⛔ SEED_CUSTOMS_OWNER={bad} 不接受：auto/true 无法证明是演示者本人",
+                flush=True,
+            )
+            print("[boot_seed]    请改用显式值：<openid> 或 user:<id>", flush=True)
+            return [f"seed_customs_demo.py(参数非法:{bad})"]
+        return []
+    print("[boot_seed] SEED_CUSTOMS_OWNER 已显式设置 ⇒ 铺关务演示数据", flush=True)
+    ok = _run_script("seed_customs_demo.py", extra, timeout=300)
+    return [] if ok else ["seed_customs_demo.py"]
+
+
 def main() -> int:
     """按序铺种子 + 跑一次性动作；**始终返回 0**（不阻塞服务启动）。"""
     failed: list[str] = []
@@ -254,6 +300,7 @@ def main() -> int:
     else:
         print("[boot_seed] SEED_ON_BOOT 未开启，跳过铺种子", flush=True)
 
+    failed.extend(_run_customs_seed())
     failed.extend(_run_oneshots())
 
     if failed:
