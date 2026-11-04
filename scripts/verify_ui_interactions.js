@@ -1211,24 +1211,31 @@ section('⑤ 静态防线')
     const cargoJs = read('pages/publish/cargo/cargo.js')
     const cargoWxss = read('pages/publish/cargo/cargo.wxss')
 
-    // —— 结构：弹窗 + 两张卡片 + 两枚单选 + 两段说明（对齐设计稿）——
-    check('发布货物页有发货方式弹窗（进入本页即弹出）',
+    // —— 结构：弹窗 + 三张卡片 + 三枚单选 + 三段说明（对齐设计稿 v2）——
+    // 设计稿 v2 在「自主发货 / 委托发货」之上新增第三条「智慧关务」（绿卡），
+    // 因此下面的计数与顺序断言跟着改成 3 —— 旧口径（2 张、自主在前）会让新卡片
+    // **静默通过**，等于把"卡片没渲染"和"卡片多了一张"都放过。
+    check('发布货物页有发货及关务方式弹窗（进入本页即弹出）',
       /wx:if="\{\{showChannel\}\}"/.test(cargoWxml) && /class="ch-panel"/.test(cargoWxml))
-    check('两张卡片文案为「自主发货 / 委托发货」，且自主在前',
-      /自主发货/.test(cargoWxml) && /委托发货/.test(cargoWxml) &&
+    check('三张卡片文案为「智慧关务 / 自主发货 / 委托发货」，且智慧关务在最上',
+      /智慧关务/.test(cargoWxml) && /自主发货/.test(cargoWxml) && /委托发货/.test(cargoWxml) &&
+      cargoWxml.indexOf('智慧关务') < cargoWxml.indexOf('自主发货') &&
       cargoWxml.indexOf('自主发货') < cargoWxml.indexOf('委托发货'))
-    check('两张卡片各带一枚单选圈 + 「默认」标记（设计稿 1:1）',
-      (cargoWxml.match(/class="ch-ring"/g) || []).length === 2 &&
-      (cargoWxml.match(/class="ch-radio-label">默认</g) || []).length === 2)
-    check('两段说明文案齐全（平台名用品牌色强调）',
+    check('三张卡片各带一枚单选圈 + 「默认」标记（设计稿 1:1）',
+      (cargoWxml.match(/class="ch-ring"/g) || []).length === 3 &&
+      (cargoWxml.match(/class="ch-radio-label">默认</g) || []).length === 3)
+    check('三段说明文案齐全（关务边界 / 自行找船 / 平台承运）',
       (cargoWxml.match(/class="ch-brand"/g) || []).length === 2 &&
+      /提供信息查询与辅助工具，本版本不提供申报代理服务/.test(cargoWxml) &&
       /自行在/.test(cargoWxml) && /委托给/.test(cargoWxml) &&
       /找寻认证船主接单并完成运输/.test(cargoWxml) && /由平台组织运力完成运输/.test(cargoWxml))
-    check('图标为纯 CSS 矢量（白圆 + 人形 / 手托盒），不新增图片资源',
+    check('图标为纯 CSS 矢量（白圆 + 纸飞机 / 人形 / 手托盒），不新增图片资源',
+      /\.ch-plane\s*\{/.test(cargoWxss) && /\.ch-plane-fold\s*\{/.test(cargoWxss) &&
       /\.ch-head\s*\{/.test(cargoWxss) && /\.ch-shoulder\s*\{/.test(cargoWxss) &&
       /\.ch-box-front\s*\{/.test(cargoWxss) && /\.ch-box-lid\s*\{/.test(cargoWxss) &&
       /\.ch-palm\s*\{/.test(cargoWxss) && !/\.ch-icon[^}]*url\(/.test(cargoWxss))
-    check('卡片配色取自设计稿（橙 #E5A75A→#FECD91 / 蓝 #3584FD→#4A81FF）',
+    check('卡片配色取自设计稿（绿 #57D780→#26D554 / 橙 #E5A75A→#FECD91 / 蓝 #3584FD→#4A81FF）',
+      /\.ch-card-customs\s*\{[^}]*#57D780[^}]*#26D554/.test(cargoWxss) &&
       /\.ch-card-self\s*\{[^}]*#E5A75A[^}]*#FECD91/.test(cargoWxss) &&
       /\.ch-card-entrust\s*\{[^}]*#3584FD[^}]*#4A81FF/.test(cargoWxss))
 
@@ -1251,8 +1258,33 @@ section('⑤ 静态防线')
       /cargo_name=/.test(entBody) && /quantity=/.test(entBody) && /quantity_unit=/.test(entBody))
     check('委托发货不再跳占位预览页（该入口曾经是「无接口调用的看起来有」）',
       !/\/pages\/preview\/preview/.test(entBody))
-    check('本功能纯前端：发货方式相关代码零接口调用',
-      !/request\(/.test(selfBody) && !/request\(/.test(entBody))
+    // 智慧关务：D0 时只交付入口与口径、**不**导航（关务页还没开发，跳过去是空白页）。
+    // D1 落地后换成**真导航**，本节断言同步改写 —— 留着"只弹说明层"的旧断言，
+    // 等于把已经作废的产品决定钉成契约，而且会**恒红**（`cusTipVisible` 已随说明层删除）。
+    const cusBody = cargoCode.slice(cargoCode.indexOf('openCustomsEntry'), cargoCode.indexOf('pickSelfDelivery'))
+    check('智慧关务经 R.go() 进入**已注册**的关务首页（真导航，不再是弹层）',
+      /R\.go\(\s*['"]\/pages\/customs\/home\/home['"]/.test(cusBody) &&
+      /showChannel:\s*false/.test(cusBody) &&
+      !/navigateTo|redirectTo|reLaunch/.test(cusBody) &&
+      JSON.parse(read('app.json')).pages.indexOf('pages/customs/home/home') >= 0)
+    check('智慧关务入口带 `from`（否则 go() 无法判断是可 push 的边还是非法跳转）',
+      /from:\s*['"]pages\/publish\/cargo\/cargo['"]/.test(cusBody))
+    check('「规划中」说明层已整体移除（`cusTipVisible` / `closeCustomsTip` 不得残留 —— '
+      + '留着就是一段谁也到不了的死代码）',
+      !/cusTipVisible/.test(cargoCode) && !/closeCustomsTip/.test(cargoCode) &&
+      !/cusTipVisible/.test(cargoWxml) && !/\.ct-panel\s*\{/.test(cargoWxss))
+    // 三句法务口径没有丢，而是搬到了真正该出现它的地方：关务首页本身。
+    // 断言必须落在**关务首页**上（而不是原来的弹层），否则"口径还在"会变成空话。
+    const cusHomeWxml = read('pages/customs/home/home.wxml')
+    check('法务口径搬到了关务首页（信息服务 / 不代申报 / 以官方结果为准），'
+      + '不再是"点我知道了就消失"的一层',
+      /不提供申报代理服务/.test(cusHomeWxml) &&
+      /以海关等官方系统结果为准/.test(cusHomeWxml) &&
+      /data-act-cus-official-off="1"/.test(cusHomeWxml))
+    check('智慧关务有独立走查锚点（三张 `.ch-opt` 需要可区分属性）',
+      /data-act-cus-entry="1"/.test(cargoWxml))
+    check('本功能纯前端：发货方式相关代码零接口调用（关务页自己取数，入口页不取）',
+      !/request\(/.test(selfBody) && !/request\(/.test(entBody) && !/request\(/.test(cusBody))
     check('遮罩可关闭（再次点 tabBar 中间「+发货」可重新唤起）',
       /bindtap="closeChannelModal"/.test(cargoWxml) && /closeChannelModal\(\)/.test(cargoCode))
 
@@ -2695,6 +2727,230 @@ section('⑤ 静态防线')
     check('本节确实覆盖到了含 data-df 的页面（否则上面的断言全是空转）', checked > 0)
     if (skippedDyn > 0) {
       ok('跳过 ' + skippedDyn + ' 处动态 data-df（值由插值决定，静态配不了对）')
+    }
+  }
+
+  // ---------------------------------------------------------------- ⑫ 智慧关务 D1 两页
+  // 为什么这几条必须在这里（而不是只靠真机走查）：D1 的全部价值都在**口径**上 ——
+  // "官方源不可用就说不可用"、"发生时间与取得时间分列"、"未知状态保持未知"。
+  // 这三件事写错了界面照样能点、能截图，只有把口径函数真的跑一遍才看得出来。
+  section('⑫ 智慧关务 D1（数据源状态条 / 人工登记时间线）口径契约')
+  {
+    const CUS = require(path.join(MP, 'utils', 'customs.js'))
+
+    // —— sourcesView：官方源不可用这件事必须**照实**传出去 ——
+    const off = CUS.sourcesView({
+      checked_at: '2026-10-26 10:00:00',
+      official_available: false,
+      notice: '本版本不接官方数据源：所有状态来自人工登记，以官方结果为准',
+      sources: [
+        { key: 'official', label: '海关官方', kind: 'official', state: 'unavailable', reason: '未取得授权' },
+        { key: 'manual', label: '人工登记', kind: 'manual', state: 'available', reason: '不依赖外部系统' }
+      ]
+    })
+    check('官方源不可用 ⇒ officialUnavailable 为真（AC-02 的界面开关）', off.officialUnavailable === true)
+    check('官方源不可用 ⇒ notice 原样透传（页面不自己编一句"暂无数据"）',
+      off.notice === '本版本不接官方数据源：所有状态来自人工登记，以官方结果为准', off.notice)
+    check('人工登记始终可用 ⇒ manualAvailable 为真（AC-08「断源仍可作业」）', off.manualAvailable === true)
+    // ⚠️ 这里**不断言具体时分数值**：服务端存 UTC，页面按运行环境时区转本地（见
+    // `toLocalTime`）。写死一个值会让这条断言在 CI（UTC）与本机（UTC+8）给出不同答案 ——
+    // 那是把"跑在哪台机器上"伪装成"产品对不对"。断的是**形状**与**不丢**。
+    check('核对时间来自服务端 checked_at（页面不自造时间戳，也不留空）',
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(off.checkedAt), off.checkedAt)
+    check('服务端时间戳（UTC 无时区标记）被转成本地时间（否则屏幕上会差 8 小时且看不出来）',
+      CUS.toLocalTime('2026-10-26 03:21:53') !== '2026-10-26 03:21:53' ||
+      // 运行环境恰好在 UTC：此时"不转"是对的，改断格式而不是断差异
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(CUS.toLocalTime('2026-10-26 03:21:53')),
+      CUS.toLocalTime('2026-10-26 03:21:53'))
+    check('解析失败的时间**原样返回**（显示一个可疑但真实的值，好过 Invalid Date 或"刚刚"）',
+      CUS.toLocalTime('not-a-time') === 'not-a-time' && CUS.toLocalTime('') === '',
+      CUS.toLocalTime('not-a-time'))
+
+    // ⭐ 正控：同一条判据在官方源**可用**时必须翻成 false。
+    //    不做这一条，"officialUnavailable 恒真"这种写法也能全绿 —— 那是假绿。
+    const on = CUS.sourcesView({
+      official_available: true,
+      sources: [{ key: 'official', label: '海关官方', kind: 'official', state: 'available' }]
+    })
+    check('（正控）官方源可用 ⇒ officialUnavailable 翻为假 —— 否则上一条恒真、等于没断',
+      on.officialUnavailable === false)
+
+    // —— eventView：发生时间与取得时间必须**分开** ——
+    const ev = CUS.eventView({
+      id: 7, status: 'inspection', occurred_at: '2026-10-20 09:00:00',
+      fetched_at: '2026-10-26 08:00:00', source: '人工补录', source_kind: 'manual'
+    })
+    check('事件的两个时间各归各位（occurred_at → 发生 / fetched_at → 取得，互不覆盖）',
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(ev.occurredAt) &&
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(ev.fetchedAt) &&
+      ev.occurredAt !== ev.fetchedAt,
+      `occurred=${ev.occurredAt} fetched=${ev.fetchedAt}`)
+    check('补录事件的取得时间**晚于**发生时间时不被抹平（抹平＝伪装新鲜度，AC-09 禁止）',
+      ev.occurredAt !== ev.fetchedAt)
+    check('来源类型 official 才有官方标记（人工补录不得显示成官方回执）', ev.official === false)
+
+    // —— declarationView：未知保持未知 ——
+    const dz = CUS.declarationView({ id: 1, declaration_no: 'X1', status: 'some_new_state' })
+    check('未收录的状态回落「未知」，不猜成某一个已知状态', dz.statusLabel === '未知', dz.statusLabel)
+    check('终态判定只认 released（多认一个就等于替海关宣布结案）',
+      CUS.isTerminal('released') === true && CUS.isTerminal('held') === false &&
+      CUS.isTerminal('inspection') === false)
+
+    // —— 两页的取数口径：都走同一个 util，不各写一份 ——
+    const homeJs = read('pages/customs/home/home.js')
+    const detailJs = read('pages/customs/detail/detail.js')
+    // 判「代码里有没有 X」必须剥注释（本页注释里正写着反例，见 404 那条的说明）
+    const detailCode = stripComments(detailJs)
+    check('两页共用 `utils/customs` 的口径函数（各写一份就会出现"列表说不可用、详情说已接入"）',
+      /require\(['"].*utils\/customs['"]\)/.test(homeJs) &&
+      /require\(['"].*utils\/customs['"]\)/.test(detailJs))
+    check('两页都经 `guardEntry` 接入运行期治理（`MIGRATED_PAGES` 名单已含两页）',
+      /R\.guardEntry\(\s*SELF/.test(homeJs) && /R\.guardEntry\(\s*SELF/.test(detailJs) &&
+      require(path.join(MP, 'utils', 'routes.js')).MIGRATED_PAGES.indexOf('pages/customs/home/home') >= 0 &&
+      require(path.join(MP, 'utils', 'routes.js')).MIGRATED_PAGES.indexOf('pages/customs/detail/detail') >= 0)
+    check('列表 → 详情走 `R.go()` 并带 `from`（裸 navigateTo 会让页面栈预算失效）',
+      /R\.go\(\s*['"]\/pages\/customs\/detail\/detail\?id=/.test(homeJs) &&
+      /from:\s*SELF/.test(homeJs) && !/wx\.navigateTo\(/.test(stripComments(homeJs)))
+
+    // —— 模板：口径落的**位置**对不对 ——
+    const homeWxml = read('pages/customs/home/home.wxml')
+    const detailWxml = read('pages/customs/detail/detail.wxml')
+    check('首页：官方源不可用时渲染 `.src-off` 说明块（而不是留一块空白让人猜）',
+      /wx:if="\{\{officialUnavailable\}\}"[\s\S]{0,120}src-off/.test(homeWxml))
+    check('首页：本页**不存在**任何"查官方状态"的入口 —— 说明块就是它的替代物',
+      !/data-act-cus-official-query/.test(homeWxml) && !/data-act-cus-official="1"/.test(homeWxml))
+    check('首页：列表标题标明「非官方」，不让任何一条看起来像海关回执',
+      /人工登记记录/.test(homeWxml) && /非官方/.test(homeWxml))
+    check('详情：状态取自 `freshness`（服务端算好的那一份），页面不自己再算一遍',
+      /freshness\.officialLabel/.test(detailWxml) && /freshness\.message/.test(detailWxml))
+    // 同一个屏幕上不能同时出现两个时区：时间线已转本地，若新鲜度卡还直接渲染
+    // 服务端 UTC 原值，就会出现"上面 03:30、下面 11:30"——用户分不清是数据错还是时区差。
+    check('详情：新鲜度卡的时间也过 `freshnessView`（模板里不得直接读 `freshness.*_at` 原始字段）',
+      !/freshness\.last_fetched_at/.test(detailWxml) &&
+      !/freshness\.last_source/.test(detailWxml) &&
+      /freshnessView/.test(detailCode))
+    check('详情：时间线里「发生」与「取得」分两行渲染（合成一行就是伪装新鲜度）',
+      /发生\s*\{\{item\.occurredAt\}\}/.test(detailWxml) &&
+      /取得\s*\{\{item\.fetchedAt\}\}/.test(detailWxml))
+    check('详情：两条时间线文案之间必须有换行元素（同一行内并排＝看起来像一个时间）',
+      /发生\s*\{\{item\.occurredAt\}\}<\/view>\s*<view class="tl-time">取得/.test(detailWxml))
+
+    // —— 详情页的取数失败：404 与"无权限"同一个响应，措辞不能泄漏存在性 ——
+    // 判"代码里有没有这四个字"必须剥注释：本页的注释里**正写着**「⛔ 不要写成无权限」，
+    // 把注释算进来会把一次正确实现判成失败（`stripComments` 保长，切片下标不受影响）。
+    check('详情：404 措辞为「不存在或不可见」，⛔ 不写"无权查看"（那等于承认记录存在）',
+      /记录不存在或不可见/.test(detailCode) && !/无权查看/.test(detailCode))
+    // ⭐ 这条是真机踩出来的：`guardEntry(url, ctx)` 从 **url** 里解析参数，
+    //    只传页面路径 = 告诉守卫"这页没有参数" ⇒ 每次进入都被拦成
+    //    「id 缺少必填参数」，而列表跳转本身是对的（2026-10-26 截图可见）。
+    //    静态判据拦得住这一类：带 params 的页，守卫的入参必须是**拼过参的**字符串。
+    check('详情：把 id 拼进 url 再交给 `guardEntry`（只传页面路径 ⇒ 恒被拦成「缺参」）',
+      /R\.guardEntry\(\s*SELF\s*\+/.test(detailCode), '守卫入参未拼参数')
+
+    // ---------------------------------------------------------------- ⑫-2 智慧关务 D2 归类
+    // D2 的全部价值在**边界**上，而不在"能不能调模型"：
+    //   候选 ≠ 结论；候选为空 ≠ 失败；模型挂了 ≠ 没有出口。
+    // 这三句话任何一句在界面上塌掉，页面照样能点、能截图 —— 所以必须在这里跑一遍口径函数。
+    section('⑫-2 智慧关务 D2（归类候选 / 降级原因 / 人工定稿）口径契约')
+    {
+      // —— 降级：模型没给建议时，页面必须给出原因 + 手工通路，而不是一个空列表 ——
+      const deg = CUS.classificationView({
+        id: 9,
+        status: 'manual_required',
+        product_name: '钢结构支架',
+        product_desc: null,
+        hs_code: null,
+        degraded: { kind: 'network', reason: '归类模型暂时不可达（网络或服务端异常），本次没有给出建议' },
+        manual_entry: { available: true, hint: '模型没有给出建议，可直接手工填写税则号列并确认结论' },
+        candidates: [],
+        model: { name: 'qwen', mocked: false },
+        created_at: '2026-10-26 05:11:00'
+      })
+      check('（降级）模型没给建议 ⇒ 降级原因为非空中文句（不是错误码，也不是空串）',
+        deg.hasDegraded === true && deg.degraded.reason.length > 8 && deg.degraded.kind === 'network',
+        JSON.stringify(deg.degraded))
+      // ⭐ 这一条是本次的核心判据：降级时**手工入口必须可见**。
+      //   把入口藏起来，用户就只剩"模型坏了，没别的办法"——那正是要消灭的形态。
+      check('（降级）手工填写入口**可见**（模型不可用不是死路：Q-10 的出口）',
+        deg.manualVisible === true && deg.manual.hint.length > 0, JSON.stringify(deg.manual))
+      check('（降级）候选为空 但 `hasOutcome` 为真 —— 页面上有降级块可看，不是一片空白',
+        deg.hasCandidates === false && deg.hasOutcome === true)
+      check('（降级）没有结论（模型候选永不自动落 `hs_code`）',
+        deg.hasConclusion === false && deg.conclusion === '', deg.conclusion)
+      check('（降级）降级原因与候选**互不替代**（拿"候选空"当"模型挂了"的判断依据就会同时错两边）',
+        deg.hasDegraded === true && deg.candidates.length === 0)
+
+      // —— 建议：有候选，但**仍然不是结论** ——
+      const sug = CUS.classificationView({
+        id: 10,
+        status: 'suggested',
+        product_name: '钢结构支架',
+        hs_code: null,
+        degraded: null,
+        manual_entry: { available: true, hint: '也可手工填写或改判；人工结论记为独立候选，不覆盖模型建议' },
+        candidates: [
+          { id: 1, hs_code: '7308900000', label: '其他钢铁结构件', confidence: 0.86, source: 'model', rank: 1, created_at: '2026-10-26 05:12:00' },
+          { id: 2, hs_code: '7308200000', label: '钢铁结构体', confidence: null, source: 'model', rank: 2 }
+        ],
+        model: { name: 'qwen', mocked: true }
+      })
+      check('（建议）候选带来源与置信度；缺失的置信度**不补 0**（补 0 会被读成"模型放弃了"）',
+        sug.hasCandidates === true &&
+        sug.candidates[0].sourceLabel === '模型候选' &&
+        sug.candidates[0].confidenceText === '86%' &&
+        sug.candidates[1].confidenceText === '',
+        JSON.stringify(sug.candidates.map((c) => c.confidenceText)))
+      check('（建议）有候选**不等于**有结论（`hs_code` 仍为空 ⇒ 界面上写着"尚未定稿"）',
+        sug.hasConclusion === false && sug.conclusion === '')
+      check('（建议）降级块不出现（没有降级就不许显示"模型不可用"，否则是自相矛盾）',
+        sug.hasDegraded === false && sug.degraded === null)
+      check('（建议）人工入口仍可用（人工结论不覆盖模型候选，两者都在记录里）',
+        sug.manualVisible === true)
+
+      // —— 已定稿：结论来自人工，且此时服务端关掉了人工入口 ——
+      const done = CUS.classificationView({
+        id: 11,
+        status: 'confirmed',
+        product_name: '钢结构支架',
+        hs_code: '7308900000',
+        manual_entry: { available: false, hint: '结论已确认。候选表只追加，如需更正请新建一条归类记录' },
+        candidates: [
+          { id: 3, hs_code: '7308900000', label: '人工定稿', source: 'manual', rank: 1 },
+          { id: 1, hs_code: '7308900000', label: '模型候选', confidence: 0.86, source: 'model', rank: 1 }
+        ],
+        decided_at: '2026-10-26 06:00:00'
+      })
+      check('（定稿）结论只在人工定稿后出现，且带定稿时间（留人留时：Q-10）',
+        done.hasConclusion === true && done.conclusion === '7308900000' && !!done.decidedAt)
+      check('（定稿）人工入口由服务端关闭时页面照办（⛔ 前端不按状态自己猜还能不能改）',
+        done.manualVisible === false && done.manual.available === false)
+      check('（定稿）模型候选与人工定稿**分列**呈现，人工不覆盖模型（候选表只追加）',
+        done.candidates.length === 2 &&
+        done.candidates.filter((c) => c.isModel).length === 1 &&
+        done.candidates.filter((c) => !c.isModel).length === 1)
+
+      // —— 模板：三块必须各自独立渲染，且手工块不得由"有没有候选"决定 ——
+      const clsJs = read('pages/customs/classify/classify.js')
+      const clsCode = stripComments(clsJs)
+      const clsWxml = read('pages/customs/classify/classify.wxml')
+      check('归类页：手工块可见性取自 `rec.manualVisible`（服务端判定），⛔ 不写成"有候选才显示"',
+        /cls-manual[\s\S]{0,80}wx:if="\{\{rec\.manualVisible\}\}"/.test(clsWxml) ||
+        /wx:if="\{\{rec\.manualVisible\}\}"[\s\S]{0,120}cls-manual/.test(clsWxml),
+        '手工块条件未接 manualVisible')
+      check('归类页：候选遍历 `rec.candidates`，⛔ 不把第一条候选当结论渲染',
+        /wx:for="\{\{rec\.candidates\}\}"/.test(clsWxml) && !/candidates\[0\]/.test(clsWxml))
+      check('归类页：降级块独立于候选块渲染（两块都有自己的 `wx:if`）',
+        /wx:if="\{\{rec\.hasDegraded\}\}"/.test(clsWxml) &&
+        /wx:if="\{\{!rec\.hasCandidates && !rec\.hasDegraded\}\}"/.test(clsWxml))
+      check('归类页：写端点带 `Idempotency-Key`（分类发起与人工定稿都是写命令，缺键由服务端 409）',
+        /Idempotency-Key/.test(read('utils/customs.js')))
+      check('归类页：跳转一律 `R.go()`（本页在 `MIGRATED_PAGES`，裸 navigateTo 会让栈预算失效）',
+        /R\.go\(/.test(clsCode) && !/wx\.navigateTo\(/.test(clsCode) &&
+        require(path.join(MP, 'utils', 'routes.js')).MIGRATED_PAGES
+          .indexOf('pages/customs/classify/classify') >= 0)
+      check('详情页：进入归类的入口走 `R.go()` 并带 `declaration_id`（⛔ 裸 navigateTo）',
+        /R\.go\(\s*['"]\/pages\/customs\/classify\/classify\?declaration_id=/.test(detailCode) &&
+        !/wx\.navigateTo\(/.test(detailCode))
     }
   }
 

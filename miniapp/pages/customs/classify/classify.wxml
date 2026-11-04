@@ -1,0 +1,145 @@
+<!--
+  智慧关务 · 归类辅助（D2）
+  三块物理分开、互不替代：候选（模型建议）/ 降级原因（这次没给的原因）/ 人工定稿（不含模型字段的通路）。
+  ⛔ 候选为空 ≠ 失败；⛔ 候选第一条 ≠ 结论。
+-->
+<view class="page">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" data-act-cus-cls-back="1" hover-class="hover-dim">‹</view>
+      <text class="nav-title">归类辅助</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub">模型只给候选，结论由人工定稿；以海关等官方结果为准</view>
+  </view>
+
+  <view class="page-content">
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      <text class="empty-title">正在读取…</text>
+    </view>
+
+    <view wx:elif="{{view === 'error'}}" class="empty">
+      <text class="empty-icon">⚠️</text>
+      <text class="empty-title">{{errTitle}}</text>
+      <text class="empty-hint">{{errHint}}</text>
+      <view class="btn-primary" bindtap="onRetry" data-act-cus-cls-retry="1" hover-class="hover-dim">重试</view>
+    </view>
+
+    <block wx:else>
+      <!-- ① 发起：只填商品名与描述，⛔ 不接受"直接填结论" -->
+      <view class="cls-card">
+        <view class="cls-card-title">发起一次归类建议</view>
+        <view class="cls-field">
+          <text class="cls-label">商品名称</text>
+          <input class="cls-input" value="{{form.name}}" placeholder="按报关单上的品名原文填写"
+                 bindinput="onNameInput" data-act-cus-cls-name="1" />
+        </view>
+        <view class="cls-field">
+          <text class="cls-label">补充描述（选填）</text>
+          <input class="cls-input" value="{{form.desc}}" placeholder="材质 / 用途 / 规格"
+                 bindinput="onDescInput" data-act-cus-cls-desc="1" />
+        </view>
+        <view class="cls-hint">模型给的是「建议」，不会自动成为结论（Q-10）</view>
+        <view class="cls-btn {{submitting ? 'busy' : ''}}" bindtap="onPropose"
+              data-act-cus-cls-propose="1" hover-class="hover-dim">
+          {{submitting ? '正在询问模型…' : '获取归类建议'}}
+        </view>
+      </view>
+
+      <!-- ② 结果：候选 / 降级 / 结论，三块各自独立 -->
+      <block wx:if="{{rec}}">
+        <view class="cls-card" data-act-cus-cls-result="1">
+          <view class="cls-card-title">
+            <text>{{rec.productName}}</text>
+            <text class="cls-status {{rec.status}}">{{rec.statusLabel}}</text>
+          </view>
+          <view class="cls-meta" wx:if="{{rec.model.name}}">
+            模型 {{rec.model.name}}{{rec.model.mocked ? '（本地模拟）' : ''}}
+          </view>
+
+          <!-- ②-1 结论：只有人工定稿才有值 -->
+          <view class="cls-verdict" wx:if="{{rec.hasConclusion}}" data-act-cus-cls-verdict="1">
+            <text class="cls-verdict-label">人工结论</text>
+            <text class="cls-verdict-code">{{rec.conclusion}}</text>
+            <text class="cls-verdict-by" wx:if="{{rec.decidedAt}}">定稿 {{rec.decidedAt}}</text>
+          </view>
+          <view class="cls-verdict none" wx:else data-act-cus-cls-noverdict="1">
+            尚未有人定稿 —— 下面这些只是「候选」，不是结论
+          </view>
+
+          <!-- ②-2 降级：模型这次没给建议的原因（不是错误码，是一句中文） -->
+          <view class="cls-degraded" wx:if="{{rec.hasDegraded}}" data-act-cus-cls-degraded="1">
+            <text class="cls-degraded-tag">模型不可用</text>
+            <text class="cls-degraded-msg">{{rec.degraded.reason}}</text>
+            <text class="cls-degraded-kind">（{{rec.degraded.kind}}）</text>
+          </view>
+
+          <!-- ②-3 候选：每条都带来源；模型候选与人工定稿分列 -->
+          <view class="cls-cand" wx:for="{{rec.candidates}}" wx:key="id"
+                data-act-cus-cls-cand="1">
+            <view class="cls-cand-line">
+              <text class="cls-cand-code">{{item.hsCode}}</text>
+              <text class="cls-cand-conf" wx:if="{{item.confidenceText}}">{{item.confidenceText}}</text>
+              <text class="cls-cand-src {{item.isModel ? 'model' : 'manual'}}">{{item.sourceLabel}}</text>
+            </view>
+            <view class="cls-cand-label" wx:if="{{item.label}}">{{item.label}}</view>
+            <view class="cls-cand-why" wx:if="{{item.rationale}}">{{item.rationale}}</view>
+          </view>
+          <view class="cls-empty" wx:if="{{!rec.hasCandidates && !rec.hasDegraded}}">
+            还没有候选，也没有降级原因 —— 这条记录刚建，稍后下拉刷新
+          </view>
+        </view>
+
+        <!-- ③ 人工定稿：模型全挂时这一块也必须能用 -->
+        <view class="cls-card cls-manual" wx:if="{{rec.manualVisible}}" data-act-cus-cls-manual-form="1">
+          <view class="cls-card-title">人工填写并确认结论</view>
+          <view class="cls-hint">{{rec.manual.hint}}</view>
+          <view class="cls-field">
+            <text class="cls-label">税则号列（8–10 位）</text>
+            <input class="cls-input" value="{{manual.hs}}" placeholder="如 7308900000" type="number"
+                   bindinput="onHsInput" data-act-cus-cls-hs="1" />
+          </view>
+          <view class="cls-field">
+            <text class="cls-label">商品名称（选填）</text>
+            <input class="cls-input" value="{{manual.label}}" placeholder="定稿时采用的名字"
+                   bindinput="onManualLabelInput" data-act-cus-cls-candlabel="1" />
+          </view>
+          <view class="cls-field">
+            <text class="cls-label">定稿依据（选填）</text>
+            <input class="cls-input" value="{{manual.rationale}}" placeholder="如：报关行回执 / 税则注释第 X 章"
+                   bindinput="onRationaleInput" data-act-cus-cls-rationale="1" />
+          </view>
+          <view class="cls-err" wx:if="{{manualError}}">{{manualError}}</view>
+          <view class="cls-btn {{manualSubmitting ? 'busy' : ''}}" bindtap="onSubmitManual"
+                data-act-cus-cls-manual="1" hover-class="hover-dim">
+            {{manualSubmitting ? '提交中…' : '确认结论'}}
+          </view>
+          <view class="cls-hint">人工结论不覆盖模型候选，两者都会留在记录里</view>
+        </view>
+      </block>
+
+      <!-- ④ 历史：本账号可见的归类记录 -->
+      <view class="cls-sec">
+        <text>归类记录</text>
+        <text class="cls-sec-count">{{list.length}} 条</text>
+      </view>
+      <view class="cls-empty" wx:if="{{!list.length}}">还没有归类记录</view>
+      <view class="cls-item" wx:for="{{list}}" wx:key="id" data-id="{{item.id}}"
+            data-act-cus-cls-item="1" bindtap="onOpenItem" hover-class="hover-dim">
+        <view class="cls-item-line">
+          <text class="cls-item-name">{{item.productName}}</text>
+          <text class="cls-status {{item.status}}">{{item.statusLabel}}</text>
+        </view>
+        <view class="cls-item-meta">
+          <text wx:if="{{item.hasConclusion}}">结论 {{item.conclusion}}</text>
+          <text wx:else>尚无结论 · 候选 {{item.candidates.length}} 条</text>
+          <text wx:if="{{item.createdAt}}"> · {{item.createdAt}}</text>
+        </view>
+      </view>
+
+      <view class="cls-foot" wx:if="{{viewHint}}">{{viewHint}}</view>
+      <view class="cls-foot">本页不提供申报代理服务；归类以海关等官方结果为准。</view>
+    </block>
+  </view>
+</view>

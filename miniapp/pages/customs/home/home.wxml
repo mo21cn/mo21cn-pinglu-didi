@@ -1,0 +1,109 @@
+<!--
+  智慧关务 · 首页
+  设计原则：**先讲清数据从哪来，再谈能查什么**。
+  没有官方数据源时，这里不出现"查官方状态"输入框（点进去必然失败的入口比没有更糟），
+  只出现一句显式说明 + 人工登记记录的查询。
+-->
+<view class="page">
+  <view class="head-bg" style="padding-top: {{statusBarHeight}}px">
+    <view class="nav-inner">
+      <view class="nav-back" bindtap="onBack" data-act-cus-back="1" hover-class="hover-dim">‹</view>
+      <text class="nav-title">智慧关务</text>
+      <view class="nav-spacer"></view>
+    </view>
+    <view class="head-sub">状态来自人工登记，以海关等官方系统结果为准</view>
+  </view>
+
+  <view class="page-content">
+    <!-- 加载中 -->
+    <view wx:if="{{view === 'loading'}}" class="empty">
+      <text class="empty-icon">⏳</text>
+      <text class="empty-title">正在读取数据源状态…</text>
+    </view>
+
+    <!-- 失败：不沿用旧值，直接显式失败 -->
+    <view wx:elif="{{view === 'error'}}" class="empty">
+      <text class="empty-icon">⚠️</text>
+      <text class="empty-title">{{errTitle}}</text>
+      <text class="empty-hint">{{errHint}}</text>
+      <view class="btn-primary" bindtap="onRetry" data-act-cus-retry="1" hover-class="hover-dim">重试</view>
+    </view>
+
+    <block wx:else>
+      <!-- ── 数据源状态条 ─────────────────────────────────────────── -->
+      <view class="src-card">
+        <view class="src-head">
+          <text class="src-title">数据源</text>
+          <text class="src-time" wx:if="{{checkedAt}}">核对于 {{checkedAt}}</text>
+        </view>
+        <view class="src-notice" wx:if="{{notice}}">{{notice}}</view>
+
+        <view class="src-row" wx:for="{{sources}}" wx:key="key" data-act-cus-source="1">
+          <view class="src-main">
+            <text class="src-label">{{item.label}}</text>
+            <text class="src-reason">{{item.reason}}</text>
+          </view>
+          <text class="src-chip {{item.available ? 'ok' : 'off'}}">{{item.stateLabel}}</text>
+        </view>
+
+        <!-- 官方源不可用：给一句说明，**不给**输入框 -->
+        <view class="src-off" wx:if="{{officialUnavailable}}" data-act-cus-official-off="1">
+          <text class="src-off-title">官方状态查询：暂不可用</text>
+          <text class="src-off-hint">未取得数据源授权，本版本不提供官方状态查询；下方记录均为人工登记</text>
+        </view>
+      </view>
+
+      <!-- ── 人工登记记录查询 ─────────────────────────────────────── -->
+      <view class="sec-title">
+        <text>人工登记记录</text>
+        <text class="sec-tag">非官方</text>
+      </view>
+      <view class="search-row">
+        <input
+          class="search-input"
+          value="{{keyword}}"
+          placeholder="输入报关单号精确查"
+          confirm-type="search"
+          bindinput="onInput"
+          bindconfirm="onSearch"
+          data-act-cus-input="1"
+        />
+        <view class="search-btn" bindtap="onSearch" data-act-cus-search="1" hover-class="hover-dim">查询</view>
+      </view>
+      <view class="search-clear" wx:if="{{searched}}" bindtap="onClearSearch" data-act-cus-clear="1">
+        清除单号筛选，看全部记录
+      </view>
+
+      <view class="list-hint" wx:if="{{viewHint}}">{{viewHint}}</view>
+
+      <!-- 空态：说清"为什么空"，而不是只说"没有数据" -->
+      <view class="empty" wx:if="{{!list.length}}">
+        <text class="empty-icon">📋</text>
+        <text class="empty-title">{{searched ? '没有查到这一单' : '还没有人工登记记录'}}</text>
+        <text class="empty-hint">{{searched ? '单号需与登记时完全一致（区分大小写）' : '登记入口在后续版本开放；当前版本只提供查询与状态时间线'}}</text>
+      </view>
+
+      <!-- 记录列表 -->
+      <view
+        class="rec-card"
+        wx:for="{{list}}"
+        wx:key="id"
+        data-act-cus-item="1"
+        data-id="{{item.id}}"
+        bindtap="onOpenItem"
+        hover-class="hover-dim"
+      >
+        <view class="rec-top">
+          <text class="rec-no">{{item.no}}</text>
+          <text class="rec-status {{item.terminal ? 'done' : 'doing'}}">{{item.statusLabel}}</text>
+        </view>
+        <view class="rec-meta">
+          <text class="rec-meta-item">更新 {{item.updatedAt}}</text>
+          <text class="rec-meta-item" wx:if="{{item.note}}">· {{item.note}}</text>
+        </view>
+      </view>
+
+      <view class="foot-note">本版本不提供申报代理服务；所有状态以海关等官方系统结果为准。</view>
+    </block>
+  </view>
+</view>

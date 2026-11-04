@@ -112,3 +112,29 @@ var/attachments/
 *.p12
 *.pfx
 !*.example.pem
+
+# ===== 本机视频/录制工具（**不入库**，2026-10-27 定）=====
+# `scripts/` 下 13 个 *_demo / *_video / *_audio 脚本是评审视频的一次性制作工具
+# （分镜拼帧、配音合成、静帧抽取）。它们**不在 CI 执行路径上**，也不产出交付物。
+#
+# 为什么必须显式忽略（而不是"放着不管"）：CI 的「后端 lint + test」第 8 步有**登记完整性**
+# 检查 —— 仓库根 `scripts/*.py` 每一个都必须出现在 `linted` 或 `exempt` 名单里，
+# 名单在 `.github/workflows/ci.yml` 内联写死（当前 `linted 7 / exempt 1`）。
+# 于是任何人一次 `git add .` 都会把它们带进提交，CI 立刻红在"登记完整性"上，
+# 而报错信息只说"某个脚本没有登记"，看不出根因是"顺手 add 了本机工具"。
+#
+# ⇒ 二选一的另一半（"纳入 lint 登记"）被否掉了：这些脚本是**一次性的**，
+#   登记进 CI 等于永久为它们付 lint 成本，还会让人以为它们是项目的一部分。
+scripts/_sheet.py
+scripts/_stills.py
+scripts/assemble_video.py
+scripts/build_audio.py
+scripts/capture_rects.py
+scripts/compose_demo.py
+scripts/music_build.py
+scripts/pick_music.py
+scripts/record_demo.py
+scripts/verify_demo_90s.py
+scripts/verify_demo_video.py
+scripts/vo_build.py
+scripts/vo_tryout.py

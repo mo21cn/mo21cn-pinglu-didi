@@ -118,6 +118,7 @@ import traceback
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -195,6 +196,125 @@ def backend_ready(timeout: float = 2.0) -> bool:
             return int(resp.status) == 200
     except Exception:  # noqa: BLE001
         return False
+
+
+# ------------------------------------------------------------ 运行环境自证（2026-10-26）
+# 为什么非要单独取这一格：2026-10-26 那一轮 §15 **30/30 全绿**、五张截图与哈希都真，
+# 但**四份产物（summary.json / stdout / 截图 / 结果明细）里没有一处写着基础库版本**。
+# 于是"这批证据跑在 3.17.2 稳定版上"只能靠口头转述 —— 复核的人既无法确认也无法推翻。
+# 设备证据的前提是**能自证环境**，所以版本必须由产物自己带出来，不能靠人记得。
+_RUNTIME_FN = (
+    "function(){var o={};try{var s=wx.getSystemInfoSync();"
+    "o.SDKVersion=s.SDKVersion;o.model=s.model;o.platform=s.platform;"
+    "o.system=s.system;o.language=s.language;}catch(e){o.error=String(e);}return o;}"
+)
+
+
+def runtime_profile(project: str = DEFAULT_PROJECT) -> str:
+    """读 `miniapp/config/env.js` 的 `RUNTIME_PROFILE`（`dev` / `demo` / …）。
+
+    ⚠️ 这一格**必须随证据一起记**：本机走查要 `dev` 档，而仓库默认是 `demo` 档
+    （`demo` 走 `wx.cloud.callContainer` 打云端生产库，个人维度页面会是空的）。
+    同一个章节在两种档位下的读数**根本不是一件事**，不记档位等于不记环境。
+    """
+    p = os.path.join(project, "config", "env.js")
+    try:
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                s = line.strip()
+                if s.startswith("const RUNTIME_PROFILE"):
+                    return s.split("=", 1)[1].strip().strip("'\";")
+    except OSError:
+        pass
+    return ""
+
+
+def lib_version_cfg(project: str = DEFAULT_PROJECT) -> dict:
+    """项目侧写的基础库版本 —— 注意这是**「应该用哪个」**，不是「实际用了哪个」。
+
+    `project.private.config.json` 覆盖 `project.config.json`，而前者在 `.gitignore` 里
+    ⇒ 换一台机器复现时它会消失、行为跟着回退。所以两份都要记：
+    只记私有那份，等于记了一个别人手里根本没有的状态。
+    """
+    out: dict = {}
+    for name, key in (
+        ("project.config.json", "shared"),
+        ("project.private.config.json", "private"),
+    ):
+        p = os.path.join(project, name)
+        out[key + "Present"] = os.path.exists(p)
+        try:
+            with open(p, encoding="utf-8") as fh:
+                out[key] = json.load(fh).get("libVersion")
+        except (OSError, ValueError):
+            out[key] = None
+    return out
+
+
+def lib_version_gray(ver: str) -> dict:
+    """判定某版本是不是灰度基础库（读 IDE 自己的 `WeappVendor/cfg.json`）。
+
+    `notGrayList` = 不在灰度里的版本（即正式可用）。
+
+    ⚠️ 同一台机器上可能存在**多份** cfg.json（不同 IDE 数据目录），快照时间不同、
+    结论甚至相互矛盾 —— 2026-10-26 实踩：按一份 10-21 的旧快照读会得出
+    "3.17.3 也是灰度"，而当天生效那份里 3.17.3 **在** `notGrayList` 内。
+    ⇒ 本函数**取 mtime 最新的一份**，并把来源路径与时间一并返回，让读数可核；
+    查不到时如实回 `unknown`，⛔ 不猜。
+    """
+    la = os.environ.get("LOCALAPPDATA") or ""
+    best: tuple[float, str] | None = None
+    for name in ("微信开发者工具", "微信web开发者工具"):
+        root = os.path.join(la, name, "User Data") if la else ""
+        if not root or not os.path.isdir(root):
+            continue
+        try:
+            subs = os.listdir(root)
+        except OSError:
+            continue
+        for sub in subs:
+            p = os.path.join(root, sub, "WeappVendor", "cfg.json")
+            if not os.path.isfile(p):
+                continue
+            try:
+                m = os.path.getmtime(p)
+            except OSError:
+                continue
+            if best is None or m > best[0]:
+                best = (m, p)
+    if best is None:
+        return {"verdict": "unknown", "why": "未找到 IDE 的 WeappVendor/cfg.json"}
+    try:
+        with open(best[1], encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return {"verdict": "unknown", "why": f"cfg.json 读不了：{repr(exc)[:100]}"}
+    not_gray = {str(v) for v in (cfg.get("notGrayList") or [])}
+    base = {
+        "source": best[1],
+        "sourceMtime": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(best[0])),
+        "cfgLibCount": len(cfg.get("list") or []),
+    }
+    if not ver:
+        return {"verdict": "unknown", "why": "拿不到运行时 SDKVersion", **base}
+    return {"verdict": "stable" if ver in not_gray else "not_stable", **base}
+
+
+def capture_runtime(client) -> dict:
+    """本轮**实际**在跑什么：基础库 / 机型 / 系统 / 档位 / 项目侧配置，全部进 summary。"""
+    info: dict = {}
+    try:
+        val = client.evaluate(_RUNTIME_FN)
+    except Exception as exc:  # noqa: BLE001
+        val = {"error": repr(exc)[:160]}
+    if isinstance(val, dict):
+        for k in ("SDKVersion", "model", "platform", "system", "language", "error"):
+            if val.get(k) not in (None, ""):
+                info[k] = val[k]
+    info["profile"] = runtime_profile()
+    info["libVersionCfg"] = lib_version_cfg()
+    info["libVersionGray"] = lib_version_gray(str(info.get("SDKVersion") or ""))
+    return info
 
 
 # ---------------------------------------------------------------- REST 锚点预取
@@ -756,6 +876,13 @@ CASE_CREATE = "pages/entrust/case-create/case-create"
 SESSION = "pages/entrust/session/session"
 #: S1 工作项 5：货主侧「我的委托」列表（真实状态 + 承接组织）。
 MINE_LIST = "pages/entrust/assignments/assignments"
+#: D1 关务域两页。⑮ 章的行为 0 现在断的是"绿卡真的导航到这里"，
+#: 所以这两条路径是**断言的落点**，不写死就等于断"某个页面"。
+CUSTOMS_HOME = "pages/customs/home/home"
+CUSTOMS_DETAIL = "pages/customs/detail/detail"
+#: D2 归类辅助页。⑮ 章从这里断的是「模型没给建议时，页面不是一片空白，而是
+#: 降级原因 + 手工定稿入口」—— 也就是"候选为空 ≠ 失败"这条边界在真机上成不成立。
+CUSTOMS_CLASSIFY = "pages/customs/classify/classify"
 
 # ㉖/㉗/㉘ 章（ENT-030 切四之六：登记案件 → 记录决定 → 关闭）依赖的演示数据。
 # 委托 `#1` 是 `seed_entrust_demo.py` 的 `ASSIGNMENT_MAIN`，状态 `claimed`
@@ -787,9 +914,96 @@ _STATE: dict = {}
 # 换成另一个库 / 另一份种子时编号会漂，此时 ㉕A 的成果类型断言会明确失败。
 ARTIFACT_ID = 5
 
-# ⑮ 章文案（逐字对齐设计稿）
-DESC_SELF = "您发布货物，自行在船好多平台找寻认证船主接单并完成运输。"
-DESC_ENTRUST = "您发布货物，委托给船好多平台承运，由平台组织运力完成运输。"
+# ⑮ 章文案（逐字对齐设计稿 v2：三张卡 —— 智慧关务 / 自主发货 / 委托发货）
+DESC_CUSTOMS = "提供信息查询与辅助工具，本版本不提供申报代理服务。"
+DESC_SELF = "您发布货物，自行在向海通平台找寻认证船主接单并完成运输。"
+DESC_ENTRUST = "您发布货物，委托给向海通平台承运，由平台组织运力完成运输。"
+#: 法务口径里**必须出现**的两句（PRD §10.1 / 附录 B 原文）。
+#: D0 时这两句挂在「规划中」说明层上；D1 说明层删除后它们搬到了**关务首页**
+#: （页头副标题 + 页脚），所以 ⑮ 章改在 `CUSTOMS_HOME` 上断这两句。
+TIP_MUST = ("不提供申报代理服务", "以海关等官方系统结果为准")
+
+# ---------------------------------------------------------------------------
+# 「看图」判据：屏幕上出现的时间串必须是**本地时间**，且只有一种格式
+#
+# 为什么需要这一条（2026-10-26 实测，⑮ 章 40/40 全绿那一轮）：
+# 服务端时间列是 **UTC 朴素时间**（无时区标记），页面第一版直接把它上屏 ⇒
+# 屏幕上写「核对于 03:21」，而真实时间是上午 11:21。**格式完全正常**，断言全绿，
+# 只有人打开截图才看得出来。这类缺陷靠"有没有渲染出来"永远抓不到，必须比**内容**。
+#
+# 判据分两层：
+#   ① 格式层：所有时间串只能是 `YYYY-MM-DD HH:MM`（展示层 `toLocalTime` 的输出单位）；
+#      出现 `T`、`Z`、`+08:00`、毫秒尾巴、或多余的秒，都说明**原始串**漏到了屏幕上
+#      （没走展示层）；
+#   ② 数值层：屏幕上的时间必须 = 服务端 UTC **+8 小时**（Asia/Shanghai）——
+#      这一层才是真正能抓住"差 8 小时"的那一层。
+# ---------------------------------------------------------------------------
+
+#: 候选时间串（含各种"不像我们格式"的写法，用于**发现**而不是放行）
+SCREEN_TIME_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?"
+)
+#: 唯一允许的格式：**本地时间、分钟级**（`utils/customs.js` 的 `toLocalTime` 输出）。
+#:
+#: ⚠️ 这里刻意**不**允许秒：展示层统一截到分钟是产品决定（状态时间到秒是噪音）。
+#: 所以 `13:20:10` 这种"多给了秒"也算越界 —— 它说明某个字段**绕过了** `toLocalTime`
+#: 直接上了屏，那正是这条判据要抓的东西（2026-10-26 13:19 首跑就抓到 3 处越界，
+#: 当时是我把断言写成秒级、页面是分钟级；按真实约定改正后下面第二层才真正起作用）。
+SCREEN_TIME_OK = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+#: 展示层与服务端的时差（本项目演示环境固定东八区；服务器时间列按 UTC 存）
+SCREEN_UTC_OFFSET_HOURS = 8
+
+
+def screen_text(wxml: str) -> str:
+    """把 WXML 变成"人眼看到的一段文本"。
+
+    ⚠️ 标签替换成**空格**而不是空串：时间经常被拆在两个 `<text>` 里
+    （`{{d}}` 与 `{{t}}` 分开渲染），用空串拼起来会变成 `2026-10-2611:37:00`，
+    于是判据既抓不到合法的、也抓不到非法的。
+    """
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", wxml))
+
+
+def screen_time_strings(wxml: str) -> list[str]:
+    """屏幕上出现的时间串（按出现顺序，保留重复 —— 重复本身不是问题）。"""
+    return SCREEN_TIME_RE.findall(screen_text(wxml))
+
+
+def screen_has_stamp(wxml: str, stamp: str) -> bool:
+    """屏幕上是否出现某个 `YYYY-MM-DD HH:MM`（容忍节点切分造成的空格差异）。"""
+    day, _, clock = stamp.partition(" ")
+    if not clock:
+        return False
+    pat = re.escape(day) + r"[\s]*" + re.escape(clock)
+    return re.search(pat, screen_text(wxml)) is not None
+
+
+def local_from_utc(raw: str | None) -> str | None:
+    """服务端 UTC（`YYYY-MM-DD HH:MM:SS`）→ 屏幕上应显示的本地时间（分钟级）。
+
+    截到分钟是**对齐展示层**（`toLocalTime`），不是放宽判据：差 8 小时这种错，
+    在分钟级上照样一眼可见（03:20 vs 11:20）。
+    """
+    if not raw:
+        return None
+    try:
+        dt = datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return (dt + timedelta(hours=SCREEN_UTC_OFFSET_HOURS)).strftime("%Y-%m-%d %H:%M")
+
+
+def check_screen_time_format(w: Walker, label: str, wxml: str) -> list[str]:
+    """① 格式层：断言这一页所有时间串都是本地格式，返回命中的时间串。"""
+    found = screen_time_strings(wxml)
+    bad = [s for s in found if not SCREEN_TIME_OK.match(s)]
+    w.rep.rec(
+        f"{label} · 屏幕上每处时间都是本地格式 `YYYY-MM-DD HH:MM`"
+        "（出现 T / Z / +08:00 / 毫秒尾巴 ⇒ 原始串漏上屏了）",
+        bool(found) and not bad,
+        f"命中 {len(found)} 处，越界 {bad[:3]}" if found else "本页没有任何时间串",
+    )
+    return found
 
 
 class Reporter:
@@ -1527,7 +1741,7 @@ def sec_12(w: Walker) -> None:
 
 
 def sec_15(w: Walker) -> None:
-    """⑮ 发货方式选择：自主发货 / 委托发货（纯前端 + 几何对齐设计稿）。"""
+    """⑮ 发货及关务方式选择：智慧关务 / 自主发货 / 委托发货（纯前端 + 几何对齐设计稿 v2）。"""
 
     def intake_query() -> dict:
         """读受理屏（`pages/entrust/intake/intake`）实例自己记着的 `onLoad` 入参。
@@ -1551,6 +1765,25 @@ def sec_15(w: Walker) -> None:
         return read()
 
     print("\n== ⑮ 发货方式选择 ==", flush=True)
+    # ── 身份前置（D1 之后新增）─────────────────────────────────────────
+    # 本章**以前**不需要登录：它断的是弹窗、文案、几何，全是纯前端。
+    # D1 把绿卡接成真导航之后，"关务首页读到官方源不可用"这条要**真的调**
+    # `/customs/sources`（要 token），于是没登录就整页错误态、四条断言齐红。
+    # 2026-10-26 11:09 首跑实测就是如此（`view='error'`，而 console 无报错）——
+    # FAIL 指向了产品，真因是"这一章没登录"。⇒ 先把身份钉死（与 ⑯ 同一个演示账号）。
+    id_path = w.login_as("seed-shipper")
+    role_ok = id_path == INDEX and w.enter_role("shipper", SHIPPER)
+    w.rep.rec(
+        "⑮ 前置 · 已登录进入货主工作台（关务首页要带 token 才读得到数据源状态）",
+        role_ok,
+        f"identity={id_path} role_ok={role_ok}",
+    )
+    if not role_ok:
+        w.rep.not_run(
+            "⑮ 发货方式选择 · 全部断言",
+            "前置登录/切角色没成功 ⇒ 后面每一条都没有对象（⛔ 不是产品行为违反预期）",
+        )
+        return
     # ⭐ 2026-09-20：**先证明自己到了那一页**。此前这里只有一句 `nav()`，**不看返回值**
     #    ⇒ 当模拟器停在上一次运行留下的深栈上（实测开窗即 `pages/mine/mine` ＋ 栈内还有
     #    其它页）时，`navigateTo` **静默不落地**，随后 12 条断言**齐刷刷指向产品**
@@ -1586,26 +1819,35 @@ def sec_15(w: Walker) -> None:
     )
 
     # 文案：`--action text` 只能读第一个匹配项 → 用整块 WXML 做包含断言（等价）。
-    # ⚠️ 必须先剥掉标签：desc 文案里嵌了 `<text class="ch-brand">船好多</text>`，
+    # ⚠️ 必须先剥掉标签：desc 文案里嵌了 `<text class="ch-brand">向海通</text>`，
     # 标签会把纯文本切断（2026-09-13 实测踩到，误报为「文案缺失」）。
     panel = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".ch-panel")))
     w.rep.rec(
-        "⑮ 两张卡片文案为「自主发货 / 委托发货」",
-        "自主发货" in panel and "委托发货" in panel,
+        "⑮ 三张卡片文案为「智慧关务 / 自主发货 / 委托发货」",
+        "智慧关务" in panel and "自主发货" in panel and "委托发货" in panel,
         f"面板文本 {len(panel)} 字符",
     )
+    # 顺序必须用**面板文本里的下标**比，而不是靠"两个词都在"：三张卡同构，
+    # 顺序错了（绿卡跑到最下）仍然会"两个词都在"⇒ 旧断言会假绿。
+    order_ok = panel.find("智慧关务") < panel.find("自主发货") < panel.find("委托发货")
+    w.rep.rec(
+        "⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（设计稿 v2）",
+        order_ok,
+        f"idx={panel.find('智慧关务')}/{panel.find('自主发货')}/{panel.find('委托发货')}",
+    )
+    has_cus = DESC_CUSTOMS.replace(" ", "") in panel
     has_self = DESC_SELF.replace(" ", "") in panel
     has_entrust = DESC_ENTRUST.replace(" ", "") in panel
     w.rep.rec(
-        "⑮ 两段说明文案齐全（自行找船 / 平台承运）",
-        has_self and has_entrust,
-        f"self={has_self} entrust={has_entrust}",
+        "⑮ 三段说明文案齐全（关务边界 / 自行找船 / 平台承运）",
+        has_cus and has_self and has_entrust,
+        f"customs={has_cus} self={has_self} entrust={has_entrust}",
     )
     rings = w.c.count(".ch-ring")
     labels = w.c.count(".ch-radio-label")
     w.rep.rec(
-        "⑮ 两枚单选圈 + 「默认」标记（设计稿元素齐全）",
-        rings == 2 and labels == 2,
+        "⑮ 三枚单选圈 + 「默认」标记（设计稿元素齐全）",
+        rings == 3 and labels == 3,
         f"ring={rings} label={labels}",
     )
 
@@ -1615,15 +1857,16 @@ def sec_15(w: Walker) -> None:
         return got[0] if got else {}
 
     panel_r = first(".ch-panel")
+    cus_r = first(".ch-card-customs")
     self_r = first(".ch-card-self")
     ent_r = first(".ch-card-entrust")
     icon_r = first(".ch-icon")
     ring_r = first(".ch-ring")
     desc_r = first(".ch-desc")
     win_h = w.win_height()
-    has_geo = all((panel_r, self_r, ent_r, icon_r, ring_r, desc_r))
+    has_geo = all((panel_r, cus_r, self_r, ent_r, icon_r, ring_r, desc_r))
     w.rep.rec(
-        "⑮ 弹窗几何可读（面板/卡片/图标/单选圈/文案）",
+        "⑮ 弹窗几何可读（面板/三张卡片/图标/单选圈/文案）",
         has_geo,
         "ok" if has_geo else "缺几何回执",
     )
@@ -1635,32 +1878,34 @@ def sec_15(w: Walker) -> None:
             f"w/h={ratio:.2f} ({self_r['width']:.0f}x{self_r['height']:.0f})",
         )
         w.rep.rec(
-            "⑮ 两张卡片等高（同规格）",
-            abs(self_r["height"] - ent_r["height"]) <= 1,
-            f"{self_r['height']:.1f} vs {ent_r['height']:.1f}",
+            "⑮ 三张卡片等高（同规格）",
+            abs(self_r["height"] - ent_r["height"]) <= 1
+            and abs(self_r["height"] - cus_r["height"]) <= 1,
+            f"{cus_r['height']:.1f} / {self_r['height']:.1f} / {ent_r['height']:.1f}",
         )
         w.rep.rec(
-            "⑮ 卡片顺序：自主发货在委托发货之上",
-            self_r["top"] < ent_r["top"],
-            f"self={self_r['top']:.1f} entrust={ent_r['top']:.1f}",
+            "⑮ 卡片顺序：智慧关务 → 自主发货 → 委托发货（几何）",
+            cus_r["top"] < self_r["top"] < ent_r["top"],
+            f"customs={cus_r['top']:.1f} self={self_r['top']:.1f} entrust={ent_r['top']:.1f}",
         )
+        # 图标 / 单选圈 / 说明文案都取**第一组**（＝智慧关务那组），所以拿 cus_r 比。
         w.rep.rec(
             "⑮ 图标为白圆且在卡片左内侧",
-            icon_r["left"] > self_r["left"]
-            and icon_r["left"] - self_r["left"] < 20
+            icon_r["left"] > cus_r["left"]
+            and icon_r["left"] - cus_r["left"] < 20
             and abs(icon_r["width"] - icon_r["height"]) <= 1,
-            f"Δleft={icon_r['left'] - self_r['left']:.1f} "
+            f"Δleft={icon_r['left'] - cus_r['left']:.1f} "
             f"{icon_r['width']:.0f}x{icon_r['height']:.0f}",
         )
         w.rep.rec(
             "⑮ 单选圈在卡片右侧之外（设计稿布局）",
-            ring_r["left"] >= self_r["right"],
-            f"ring.left={ring_r['left']:.1f} card.right={self_r['right']:.1f}",
+            ring_r["left"] >= cus_r["right"],
+            f"ring.left={ring_r['left']:.1f} card.right={cus_r['right']:.1f}",
         )
         w.rep.rec(
             "⑮ 说明文案在卡片下方且不重叠",
-            desc_r["top"] >= self_r["bottom"] - 1,
-            f"desc.top={desc_r['top']:.1f} card.bottom={self_r['bottom']:.1f}",
+            desc_r["top"] >= cus_r["bottom"] - 1,
+            f"desc.top={desc_r['top']:.1f} card.bottom={cus_r['bottom']:.1f}",
         )
         w.rep.rec(
             "⑮ 弹窗完整落在视口内（不被裁切）",
@@ -1668,7 +1913,247 @@ def sec_15(w: Walker) -> None:
             f"panel={panel_r['top']:.0f}..{panel_r['bottom']:.0f} winH={win_h:.0f}",
         )
 
+    # 行为 0：智慧关务 → **真导航**进关务首页（D1 已落地）。
+    # ⚠️ 这一格在 D0 断的是「只弹页内说明层、留在本页」—— 那是一个**已经作废**的产品决定
+    #    （`pages/customs/*` 当时还不存在，跳过去只会是空白页）。D1 把两页做出来之后，
+    #    留着旧断言会 ① 恒红（`cusTipVisible` 已随说明层一并删除）
+    #    ② 即使不红也是在给"入口没接上"背书 —— 那正是本仓库反复踩的"假绿"。
+    #    ⇒ 现在断新契约，而且**三件事都断**：
+    #      a) 真的换页了（不是弹个层留在原地）；
+    #      b) 读到了"官方源不可用"（D1 的立身之本：没授权就说没授权，AC-02）；
+    #      c) 那一块说明在屏幕上**真的画出来了**（矩形非空）—— 只有 data 里一个布尔不算。
+    src_form_before = w.c.page_data().get("form") or {}
+    t_cus = w.c.tap('[data-act-cus-entry="1"]')
+    time.sleep(1.8)
+    at_cus = w.c.wait_path(CUSTOMS_HOME, 25)
+    time.sleep(1.2)  # 页面已就位但渲染帧可能滞后（与受理屏那两格同一条理由）
+    w.shot("15-智慧关务-首页-数据源状态条")
+    d_cus = w.c.page_data()
+    w.rep.rec(
+        "⑮ 智慧关务换成真导航：落在关务首页（⛔ 不再是「弹一层说明、留在发布页」）",
+        at_cus,
+        f"path={w.c.current_path()} tap={t_cus}",
+    )
+    w.rep.rec(
+        "⑮ 关务首页读到「官方源不可用」（AC-02 的界面开关：没授权就必须说没授权）",
+        d_cus.get("officialUnavailable") is True and d_cus.get("view") == "ready",
+        f"officialUnavailable={d_cus.get('officialUnavailable')!r} view={d_cus.get('view')!r}",
+    )
+    # ⚠️ 取几何用**类选择器**，不用 `[data-act-cus-official-off="1"]`：
+    #    2026-10-26 11:19 实测同一个节点 `count()` 能数到、`boundingClientRect()`
+    #    却回空数组（截图里那块明显画着）。`count` 走的是节点查询、`rects` 走的是
+    #    布局查询，两者对自定义 data 属性的支持并不一致 —— 断"画出来了"这件事
+    #    用类选择器更稳，锚点仍然用 data 属性（那是给点击用的）。
+    off_got = w.c.rects(".src-off")
+    off_r = off_got[0] if off_got else {}
+    w.rep.rec(
+        "⑮ 「官方状态查询暂不可用」在屏幕上真的画出来了（矩形非空，不是只有 data 里一个布尔）",
+        bool(off_r) and off_r.get("width", 0) > 0 and off_r.get("height", 0) > 0,
+        f"rect={off_r.get('width')}x{off_r.get('height')}" if off_r else "取不到几何",
+    )
+    src_rows = w.c.count('[data-act-cus-source="1"]')
+    w.rep.rec(
+        "⑮ 状态条逐条列出数据源（官方 + 人工登记至少各一条）",
+        src_rows >= 2,
+        f"数据源条目={src_rows}",
+    )
+    # 法务口径必须能在**关务页**上读到：说明层删了之后它是搬过来的，不是丢了。
+    home_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+    w.rep.rec(
+        "⑮ 法务口径随页面搬过来（不提供申报代理服务 / 以海关等官方系统结果为准）",
+        not [s for s in TIP_MUST if s not in home_txt],
+        f"缺={[s for s in TIP_MUST if s not in home_txt]}",
+    )
+    # 「看图」判据 ①（首页）：核对时间这类服务端字段必须走展示层再上屏。
+    check_screen_time_format(w, "⑮ 关务首页", w.c.outer_wxml(".page"))
+
+    # 列表 → 详情：**空态也算通过**，但"进了详情"这件事必须真的发生。
+    # 造一条记录不归本章管（本章断的是入口），所以有记录就点开验时间线两列，
+    # 没记录就只验空态文案 —— 两侧都如实写进读数，⛔ 不把"没数据"说成"通过"。
+    n_rec = w.c.count('[data-act-cus-item="1"]')
+    if n_rec > 0:
+        t_item = w.c.tap('[data-act-cus-item="1"]')
+        time.sleep(1.6)
+        at_det = w.c.wait_path(CUSTOMS_DETAIL, 25)
+        time.sleep(1.0)
+        w.shot("15-智慧关务-记录详情-发生与取得分列")
+        d_det = w.c.page_data()
+        w.rep.rec(
+            "⑮ 列表 → 详情：真的进了详情页（`R.go()` 的 push 边生效）",
+            at_det,
+            f"path={w.c.current_path()} tap={t_item}",
+        )
+        w.rep.rec(
+            "⑮ 详情页时间线的两条时间**不是同一个值**（合并即伪装新鲜度，AC-09 禁止）",
+            any(
+                (it.get("occurredAt") or "") != (it.get("fetchedAt") or "")
+                for it in (d_det.get("timeline") or [])
+            ),
+            f"events={len(d_det.get('timeline') or [])}",
+        )
+        det_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+        w.rep.rec(
+            "⑮ 详情页把「发生」与「取得」写成两行（并排会让补录的旧状态看起来像刚更新）",
+            "发生" in det_txt and "取得" in det_txt,
+            f"文本 {len(det_txt)} 字符",
+        )
+        # ── 「看图」判据 ②（详情页）：格式 + **数值**
+        # 这一页是本项目时间显示最密的地方（状态时间 + 两条时间线 × 发生/取得 + 新鲜度），
+        # 也是 2026-10-26 那次"同屏两个时区"的现场。格式对、数值错正是那一轮的样子。
+        det_wxml = w.c.outer_wxml(".page")
+        check_screen_time_format(w, "⑮ 关务详情", det_wxml)
+        # 数值层：直接问一次服务端拿**原始 UTC**，再算它应该显示成什么，
+        # 然后去屏幕上找。⛔ 不比页面 data（那是转换后的，等于拿答案对答案）。
+        rid = (d_det.get("rec") or {}).get("id")
+        tok = (api_login("seed-shipper") or {}).get("access_token")
+        raw_det = api_get(f"/customs/declarations/{rid}", tok) if (tok and rid) else None
+        raw_stamps = []
+        fresh = (raw_det or {}).get("freshness") or {}
+        # ⚠️ 服务端字段名是 snake_case（`last_fetched_at`），页面 data 里才是驼峰 ——
+        #    这里读的是**接口原文**，别顺手改成页面那套命名（改了就恒 None ⇒ 假绿）。
+        if fresh.get("last_fetched_at"):
+            raw_stamps.append(str(fresh["last_fetched_at"]))
+        for ev in (raw_det or {}).get("timeline") or []:
+            for key in ("occurred_at", "fetched_at"):
+                if ev.get(key):
+                    raw_stamps.append(str(ev[key]))
+        expected = [local_from_utc(s) for s in raw_stamps]
+        expected = [e for e in expected if e]
+        missing = [e for e in expected if not screen_has_stamp(det_wxml, e)]
+        w.rep.rec(
+            "⑮ 屏幕上的时间 = 服务端 UTC + 8 小时（⛔ 全绿也可能差 8 小时，本轮实测过）",
+            bool(expected) and not missing,
+            (
+                f"接口 {len(expected)} 个时间点，屏幕上缺 {missing[:2]}"
+                if expected
+                else f"取不到接口原文（api_error={_LAST_API_ERROR}）⇒ 本格无对象"
+            ),
+        )
+        # ── D2：详情 → 归类辅助（新页的第一条判据是"能不能到"，不是"好不好看"）──
+        # 这一块**故意放在返回关务首页之前**：归类是"这条记录的下一步"，
+        # 正常用户的路径就是从详情进去的；从首页直接 `navigateTo` 过去虽然也能到，
+        # 但那不是产品路径，用那条路断"入口通了"等于自己搭桥自己过。
+        t_cls = w.c.tap('[data-act-cus-classify="1"]')
+        time.sleep(1.8)
+        at_cls = w.c.wait_path(CUSTOMS_CLASSIFY, 25)
+        time.sleep(1.0)
+        w.shot("15-智慧关务-归类辅助-发起")
+        w.rep.rec(
+            "⑮ 详情页 → 归类辅助：真的换了页（`R.go()` 的 push 边生效）",
+            at_cls,
+            f"path={w.c.current_path()} tap={t_cls}",
+        )
+        if at_cls:
+            cls_txt = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+            w.rep.rec(
+                "⑮ 归类页把「候选」与「结论」分开写（模型给的是建议，不是结论）",
+                "候选" in cls_txt and "结论" in cls_txt,
+                f"文本 {len(cls_txt)} 字符",
+            )
+            # 发起一次归类建议：**模型不可用时接口仍 201**（`manual_required`），
+            # 所以这里不断"成功/失败"，只断"表单能不能用、结果块有没有东西可看"。
+            typed = w.c.input_text('[data-act-cus-cls-name="1"]', "钢结构支架")
+            time.sleep(0.4)
+            t_prop = w.c.tap('[data-act-cus-cls-propose="1"]')
+            # 模型调用可能几十秒（超时也会降级返回），给到 80s。⛔ 不缩短成 10s：
+            # 那样跑出来的红是"我懒得等"，不是"页面不对"。
+            d_prop = w.wait_data(
+                lambda d: (
+                    isinstance(d.get("rec"), dict) and bool((d.get("rec") or {}).get("status"))
+                ),
+                tries=160,
+                gap=0.5,
+            )
+            rec_prop = d_prop.get("rec") if isinstance(d_prop.get("rec"), dict) else None
+            if not rec_prop:
+                w.rep.not_run(
+                    "⑮ 归类发起后的结果块（候选 / 降级 / 手工入口）",
+                    "发起请求在 80 秒内没有落到结果块（页面仍停在提交中）⇒ 本格**没有对象**。"
+                    f"typed={typed} tap={t_prop} submitting={d_prop.get('submitting')!r}",
+                )
+            else:
+                w.shot("15-智慧关务-归类辅助-结果")
+                # ⭐ 本条是这一章新增的核心判据：**候选为空也不能是一片空白** ——
+                #    模型没给建议时必须有降级原因，否则用户只看到一个空列表。
+                w.rep.rec(
+                    "⑮ 结果块有东西可看：候选 或 降级原因至少有一块（⛔ 空列表＝要消灭的形态）",
+                    rec_prop.get("hasOutcome") is True,
+                    f"status={rec_prop.get('status')!r} candidates={len(rec_prop.get('candidates') or [])} "
+                    f"degraded={rec_prop.get('degraded')!r}",
+                )
+                # ⭐ 降级时手工入口必须可见（Q-10 的出口；也是「模型挂了业务照跑」的界面证据）
+                w.rep.rec(
+                    "⑮ 降级/建议态下手工填写入口可见（模型不可用不是死路）",
+                    rec_prop.get("manualVisible") is True,
+                    f"manualVisible={rec_prop.get('manualVisible')!r} manual={rec_prop.get('manual')!r}",
+                )
+                man_got = w.c.rects(".cls-manual")
+                man_r = man_got[0] if man_got else {}
+                w.rep.rec(
+                    "⑮ 手工填写块在屏幕上真的画出来了（矩形非空，不是只有 data 里一个布尔）",
+                    bool(man_r) and man_r.get("width", 0) > 0 and man_r.get("height", 0) > 0,
+                    f"rect={man_r.get('width')}x{man_r.get('height')}" if man_r else "取不到几何",
+                )
+                # 模型候选**不得**被渲染成结论：结论为空时页面上要有"尚未定稿"这句话。
+                # ⚠️ 2026-10-27 首跑 FAIL 打的就是这里：原来用的是 `cls_txt` —— 那是
+                #     **发起之前**（空态）取的文本，而这句话只在结果块渲染后才出现。
+                #     判据本身写错了对象，页面是对的。现在改为**结果渲染之后**再取一次文本。
+                cls_after = re.sub(r"\s+", "", re.sub(r"<[^>]+>", "", w.c.outer_wxml(".page")))
+                has_conc = rec_prop.get("hasConclusion") is True
+                verdict_txt = rec_prop.get("conclusion") or ""
+                if has_conc:
+                    # 已有结论：页面必须把它标成「人工结论」，并出现那个号列
+                    ok_verdict = ("人工结论" in cls_after) and (
+                        not verdict_txt or verdict_txt in cls_after
+                    )
+                else:
+                    # 只有候选：页面必须明说"还没人定稿"，⛔ 不能把第一条候选冒充结论
+                    ok_verdict = "尚未有人定稿" in cls_after or "尚无结论" in cls_after
+                w.rep.rec(
+                    "⑮ 未定稿时页面明写「尚未有人定稿」（⛔ 不把第一条候选当结论显示）",
+                    ok_verdict,
+                    f"hasConclusion={has_conc} conclusion={verdict_txt!r} "
+                    f"结果块文本 {len(cls_after)} 字符",
+                )
+            w.c.back()
+            time.sleep(1.0)
+            w.rep.rec(
+                "⑮ 从归类辅助可返回关务详情（push 边，回来时详情还在栈里）",
+                w.c.wait_path(CUSTOMS_DETAIL, 15),
+                w.c.current_path(),
+            )
+        w.c.back()
+        time.sleep(1.0)
+        w.rep.rec("⑮ 从详情可返回关务首页", w.c.wait_path(CUSTOMS_HOME, 15), w.c.current_path())
+    else:
+        w.rep.not_run(
+            "⑮ 关务列表 → 详情 · 时间线两列",
+            "本次库里没有本账号可见的人工登记记录 ⇒ 列表为空态，**没有对象可点**。"
+            "⛔ 这不是通过，也不是产品缺陷（D1 只做查询，登记入口在后续切片）",
+        )
+
+    # 返回发布页：关务入口是 push 边，回来时那张已经填了一半的货单**不该被清空**。
+    back_cargo = False
+    for _ in range(3):
+        w.c.back()
+        time.sleep(0.9)
+        if w.c.wait_path(PUBLISH_CARGO, 15):
+            back_cargo = True
+            break
+    w.rep.rec(
+        "⑮ 从关务首页可返回发布货物页（push 边，不是 replace）", back_cargo, w.c.current_path()
+    )
+    form_after = w.c.page_data().get("form") or {}
+    w.rep.rec(
+        "⑮ 返回后源页表单仍在（一旦换成 replace，用户填了一半的货单会被扔掉）",
+        (not src_form_before.get("expect_date"))
+        or form_after.get("expect_date") == src_form_before.get("expect_date"),
+        f"before={src_form_before.get('expect_date')!r} after={form_after.get('expect_date')!r}",
+    )
+
     # 行为 1：自主发货 → 只关弹窗、留在本页
+    w.c.set_data({"showChannel": True})
+    time.sleep(0.8)
     w.c.tap(".ch-card-self")
     time.sleep(1.1)
     d2 = w.wait_data(lambda d: d.get("showChannel") is False)
@@ -14549,6 +15034,24 @@ def main() -> int:
         )
         return 2
     print("模拟器  ：pageStack 非空", flush=True)
+    # 环境自证：谁跑的、跑在哪版基础库/哪档上 —— 与截图、哈希一起构成证据。
+    rt = capture_runtime(client)
+    _gray = (rt.get("libVersionGray") or {}).get("verdict") or "unknown"
+    print(
+        f"基础库  ：{rt.get('SDKVersion') or '?'}（{_gray}）"
+        f" ／ 档位 {rt.get('profile') or '?'}"
+        f" ／ 机型 {rt.get('model') or '?'}（{rt.get('system') or '?'}）"
+        f" ／ 通道 {getattr(client, 'channel', lambda: 'cli')()}",
+        flush=True,
+    )
+    _cfg = rt.get("libVersionCfg") or {}
+    _cfg_v = _cfg.get("private") or _cfg.get("shared")
+    if _cfg_v and rt.get("SDKVersion") and _cfg_v != rt.get("SDKVersion"):
+        # 配置与实测不一致时必须点名：否则事后只能靠"谁配的、谁记得"来判读数归属。
+        print(
+            f"           ⚠️ 项目配置写的是 {_cfg_v}，实测 {rt.get('SDKVersion')} ⇒ **以实测为准**",
+            flush=True,
+        )
     # 开窗阶段结束的切点：此后产生的 console 条目都算「业务阶段」，**一律不豁免**。
     console_at_open = _errors_safe(client)
 
@@ -14650,6 +15153,10 @@ def main() -> int:
                 "startedAt": started_at,
                 "finishedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "argv": sys.argv,
+                # 通道必须进证据：同一章用 CLI 轨与 MCP 轨跑出来的 PASS 不是同一件事，
+                # 复核者要能一眼看出这份产物是哪条通道产出的（2026-10-26 MCP 轨上线）。
+                "channel": getattr(w.c, "channel", lambda: "cli")(),
+                "runtime": rt,
                 "verdict": verdict,
                 "tally": tally,
                 "rollup": rollup,

@@ -65,19 +65,43 @@ Page({
     ppPorts: PORTS,
     ppAction: '',
 
-    // 发货方式选择弹窗（纯前端，不涉及后端；进入本页即弹出）
+    // 发货及关务方式选择弹窗（纯前端，不涉及后端；进入本页即弹出）
     showChannel: true
   },
 
   onLoad() {
     const d = new Date(Date.now() + 24 * 3600 * 1000)
-    // 点击 tabBar 中间「+发货」进入本页 → 先弹「自主发货 / 委托发货」选择
+    // 点击 tabBar 中间「+发货」进入本页 → 先弹「智慧关务 / 自主发货 / 委托发货」选择
     this.setData({ 'form.expect_date': fmtDate(d), showChannel: true })
     // 来自「✨Ai 解析页」或「统一入口」的草稿 → 回填表单
     this.applySmartDraft()
   },
 
-  // ---- 发货方式选择（纯前端：自主发货=本页续填；委托发货=占位预览页） ----
+  // ---- 发货 / 关务方式选择（智慧关务=真导航；自主发货=本页续填；委托发货=真实受理屏） ----
+  /**
+   * 智慧关务（关域）：进入关务首页。
+   *
+   * 演变：D0 时 `pages/customs/*` 还不存在，点进去只会是空白页（PRD §3 第 4 条
+   * 「不要放一个点进去必然失败的入口」），所以当时只弹一层边界说明。
+   * D1 落地后两页已注册（`app.json` + `routes.js`），这里改成**真导航**。
+   *
+   * 那三句法务口径（信息服务 / 不代申报 / 以官方结果为准）**没有丢**，而是搬到了
+   * 真正该出现它的地方 —— 关务首页的 `foot-note` 与页头副标题。放在说明层里的问题是：
+   * 用户点「我知道了」之后那句就消失了，而它恰恰是每次看关务状态都该看到的前提。
+   *
+   * **不带货单参数**：关务页回答的是"这票货在海关那边是什么状态"，而本页此刻
+   * 还没有一张已提交的货单（提交是后面的事），带过去只会让关务页显示一个
+   * 平台里并不存在的单号 —— 那是编数据。用户自己在关务页按单号查。
+   *
+   * 走 `R.go()` 而不是裸 `wx.navigateTo`：本页不在 `MIGRATED_PAGES` 里
+   * （HO 第 4 条不要求改造旧页面），但**新增的这条边**必须落进注册表 ——
+   * 否则页面栈预算与深链参数契约对它无效，`verify_routes.js` 会直接报未声明边。
+   */
+  openCustomsEntry() {
+    this.setData({ showChannel: false })
+    R.go('/pages/customs/home/home', { from: 'pages/publish/cargo/cargo' })
+  },
+
   /** 自主发货：关闭弹窗，留在本页自行填写发布 */
   pickSelfDelivery() {
     this.setData({ showChannel: false })

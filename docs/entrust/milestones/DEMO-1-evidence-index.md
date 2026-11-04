@@ -612,6 +612,312 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 ⇒ **段B 的结论**：模型**持续不可用**时，经理**经界面人工建立成果**后，在**同一张委托**上完成了
 接受→合同→变更→履约→结算→**结案**→**受控重开**→**重载一致性**，且这一轮 **`FAIL=0`**。
 ---
+### 3.13 E-2026-10-26-A — ⑮ 发货方式选择改三卡后的**设备证据**（含「智慧关务」入口 ＋ 规划中说明层）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-15-lib-3.17.2/`（逐字节入库；含 `env-provenance.md`）
+> 轮次：`walk-20261026-075640`（**第 3 次尝试**；前两轮 `walk-20261026-074751` / `-075344` 亦 `PASS`，
+> 由 `summary.json` 的 `previousRuns` 串起来，**没有被覆盖**）
+> 命令（产物自证）：`scripts\verify_miniapp_devtools.py --shots …\walk-20261026-075640 --section 15`
+> 环境：见下（⚠️ **有一格不能自证**，不要按"已确认"引用）
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-15-stdout.txt` | 权威逐条读数（**30/30 PASS**，`FAIL/ENV_BLOCKED/NOT_RUN` 均 0，console 增量空） | 4671 | `60fe821736efcb3b` |
+| `summary.json` | 该轮汇总（含 `previousRuns` 两轮溯源） | 8696 | `64cd76872982066f` |
+| `shots/15-发货方式弹窗.jpg` | **三卡**：智慧关务 / 自主发货 / 委托发货 | 37050 | `9fc59d6332b95f24` |
+| `shots/15-智慧关务-规划中说明层.jpg` | 点绿卡 ⇒ 页内「规划中」说明层（**不跳空白页**） | 33570 | `db8b318a8a150a50` |
+| `shots/15-自主发货-留在发布页.jpg` | 自主发货只关弹窗 | 31310 | `58e0fd0e2cd94333` |
+| `shots/15-委托发货-受理屏.jpg` | 委托发货 ⇒ 受理屏（⛔ 不再是"功能预览"占位页） | 14531 | `a8fe635d6c590f2e` |
+| `shots/15-委托发货前-源页表单已填.jpg` | 前置正控：货名/货量确已填入 | 31847 | `61616a3101353141` |
+| `env-provenance.md` | 出处、自证/转述分档、被推翻的两条转述、本会话复跑受阻记录 | — | — |
+
+**证据能证明什么（逐条，可直接核对 stdout）**
+
+| # | 格 | 结果 | 关键读数 |
+| --- | --- | --- | --- |
+| ① | 三卡文案与**顺序** | ✅ PASS | 面板文本 100 字符；`idx=0/31/65`（智慧关务→自主→委托）；几何 `y=159/302/462` |
+| ② | 三卡**同规格** | ✅ PASS | 宽高比 `3.03`（227×75）、等高 `75.0/75.0/75.0`；⛔ 压扁/拉伸会在这里露 |
+| ③ | 图标与单选圈位置 | ✅ PASS | 白圆 48×48、`Δleft=10.0`；单选圈在卡片**右侧之外**（`309.5 > 297.0`）；`ring=3`、`label=3` |
+| ④ | ⭐ 点「智慧关务」⇒ **只弹说明层、不导航** | ✅ PASS | `cusTipVisible=True`、`showChannel=False`、`path` 仍是 `pages/publish/cargo/cargo` |
+| ⑤ | 说明层写清法务底线 | ✅ PASS | 缺项 `[]`；原文含「本版本**不提供申报代理服务**」「以海关等官方系统结果为准」 |
+| ⑥ | 「我知道了」可关闭说明层 | ✅ PASS | 关闭后 `cusTipVisible=False` |
+| ⑦ | 自主发货 / 遮罩点击都只关弹窗 | ✅ PASS | 两条均 `showChannel=False` 且留在发布页 |
+| ⑧ | 委托发货 ⇒ 受理屏且**带值** | ✅ PASS | `cargo_name='走查货物·铁矿石'`、`quantity='2400' unit='吨'`（源页表单经 query 携带，非空 url） |
+| ⑨ | 从受理屏可回车源页 | ✅ PASS | 二级页栈正常回 `pages/publish/cargo/cargo` |
+
+**⭐ 这一轮补的是什么**：D0 的"入口只讲边界、不假装有功能"此前**只有静态校验**（`UI 377/0`、锚点 186），
+没有任何设备侧读数。本节第一次证明：**三卡同屏、顺序与设计稿一致、点绿卡既不跳空白页也不假装进功能**。
+
+**⚠️ 三处如实标注（⛔ 不要当"已确认"引用）**
+
+1. **基础库版本不能自证**：`summary.json` / stdout / 截图里**都没有** `SDKVersion`。
+   "3.17.2 稳定版"只有旁证（`project.private.config.json` mtime 07:55；IDE `cfg.json` 的
+   `notGrayList` 含 `3.17.2`，且该 cfg mtime 07:57:04 恰在本轮）。⇒ 已改代码关闭该缺口
+   （见 §4 第 6 条），但**对已产出的这一批无效**；复核者可要求重跑。
+2. **`RUNTIME_PROFILE='dev'` 未随证据记录**：仓库默认 `demo`，两者读数**不是一回事**
+   （`demo` 走 `wx.cloud.callContainer` 打云端生产库）。跑后已还原 `demo` 并复核 `git status`。
+3. **外层命令是转述**：产物只自证内层 argv（`verify_miniapp_devtools.py … --section 15`）；
+   据称的外层入口 `run_walkthrough_devtools.py --section 15 --skip-ide` 无产物可自证。
+
+**与既有登记的冲突，已更正**：转述里"3.17.3 不在 `notGrayList` ⇒ 仍是灰度"是按 **10-21 旧快照**得出的；
+按 **10-26 生效那份**（`list` 48 条）3.17.3 与 3.17.4 **都在**表内。结论（3.17.2 是稳定版）不变，
+但"3.17.2 是最新稳定版 / 使用率最高"**不成立**（当前 `usageRateList[0]` 是 3.17.4）。详见 `env-provenance.md` §3。
+
+---
+
+### 3.14 E-2026-10-26-B — ⑮ 章**换 MCP 通道后**的首轮自证证据（取代 3.13 作正式证据）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-15-mcp/`（逐字节入库；含 `env-provenance.md`）
+> 轮次：`walk-20261026-092810`（同章节第 5 次运行，前 4 次均 `PASS`，**都不覆盖**）
+> 命令（产物自证 argv）：`scripts\verify_miniapp_devtools.py --shots …\walk-20261026-092810 --section 15`
+> 外层入口：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`（runner 起后端）
+> **通道：`mcp`** —— `summary.json` 的 `channel` 字段自证（本轮起新增该字段）
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-15-stdout.txt` | 权威逐条读数（**30/30 PASS**，其余四档全 0，console 增量空） | 4845 | `e2cd4eef162f065d` |
+| `summary.json` | 该轮汇总，含 `channel=mcp` 与 `runtime.SDKVersion=3.17.2` | 10186 | `6baa825e85864514` |
+| `shots/15-发货方式弹窗.jpg` | **三卡**：智慧关务 / 自主发货 / 委托发货 | 36973 | `8d86e708d24c0171` |
+| `shots/15-智慧关务-规划中说明层.jpg` | 点绿卡 ⇒ 页内「规划中」说明层（**不跳空白页**） | 33503 | `20f2a6339b048eb5` |
+| `shots/15-自主发货-留在发布页.jpg` | 自主发货只关弹窗 | 31210 | `c99f2c28ad0225f4` |
+| `shots/15-委托发货-受理屏.jpg` | 委托发货 ⇒ 受理屏（⛔ 不再是占位页） | 14476 | `d7c845bcd09f0e80` |
+| `shots/15-委托发货前-源页表单已填.jpg` | 前置正控：货名/货量确已填入 | 31745 | `28dc5dac1741a889` |
+| `env-provenance.md` | 出处、通道说明、环境自证字段、与 3.13 的关系 | — | — |
+
+**⭐ 这一轮补的两个缺口**（正是 3.13 标"不能自证"的两条）
+
+| 缺口 | 3.13 的状态 | 3.14 的状态 |
+| --- | --- | --- |
+| 基础库版本不能自证 | 只能靠 `project.private.config.json` 的 mtime 旁证 | ✅ `runtime.SDKVersion=3.17.2`，灰度判定 `stable`（来源 cfg 48 个版本） |
+| `RUNTIME_PROFILE` 未随证据记录 | 转述 | ✅ `runtime.profile=dev` 进 summary |
+
+**通道为什么换了（这是本轮真正的排障结论）**
+
+旧轨用 IDE 自带 Electron 当 Node 跑 `wechatide` CLI，前置是**能读 IDE 安装目录**
+（`icudtl.dat`、`resource/app.asar.unpacked/.../index.js`）并**能写** `debug.log`。
+本机安全策略逐条拒绝后旧轨整体失效。⚠️ 而"去文件安全里改那两条规则"是**死路**：
+`settings.json` 里 135 条预设规则 **deny 数 = 0**、`customized=false`，审计的 `matchedRule`
+就等于文件路径本身 ⇒ 那是**按路径逐条生成**的拦截，**UI 里没有可编辑的规则条目**。
+
+现用 IDE **自带的 MCP 服务端**：`POST http://127.0.0.1:<.ide>/mcp` ＋ `Authorization: Bearer <token>`
+（配置与端口都从 IDE 自己的 `User Data\<hash>\Default\{.ide,mcp.json}` 读）。
+**不启动任何 exe、不读 IDE 安装目录** ⇒ 与那些文件规则完全不发生关系。
+代码：`scripts/wechatide_mcp.py`（`McpBackend`，与 `Client` 同接口；`__init__` 里方法级替换，
+走查脚本 224 处 `w.c.tap` / 221 处 `w.c.count` 无须改动），回退开关 `WALK_CHANNEL=cli`。
+
+**⚠️ 一个必须记住的授权坑**：未授权回 `403 -32002 Client authorization pending`，IDE 会弹
+420px 小窗，但**窗口生命周期绑在请求方连接上** —— "发一次就退出"会让 IDE **1.3 秒后**
+`forceClose` 并记 `authResult=deny`。必须用 `scripts/ide_mcp_auth.py` **复用长连接轮询**等人点。
+
+---
+
+### 3.15 E-2026-10-26-C — **D1 关务两页**的设备证据（⑮ 章由"弹层"改断"真导航"）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-15-d1/`（逐字节入库）
+> 定档轮次：`walk-20261026-113603`（同章节第 8 次运行；前 7 次**保留不覆盖**）
+> 命令：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
+> **通道 `mcp`**；`runtime.SDKVersion=3.17.2` / `profile=dev` / 灰度判定 `stable` 三格自证
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-15-stdout.txt` | 权威逐条读数（**40/40 PASS**，四档其余全 0，console 增量空） | 6081 | `90e51a2d9ff94e53` |
+| `summary.json` | 定档轮汇总（`channel=mcp` / `SDKVersion=3.17.2` / `profile=dev`） | 13803 | `54f56f38cf9fb963` |
+| `shots/15-智慧关务-首页-数据源状态条.jpg` | 关务首页：三个来源逐条列可用性 + 「官方状态查询暂不可用」说明块 + 两条人工登记记录 | 44488 | `f9e3403e5ffaf530` |
+| `shots/15-智慧关务-记录详情-发生与取得分列.jpg` | 详情：状态卡 + 新鲜度卡 + 时间线「发生 10-21 11:37 / 取得 10-26 11:37」两行 | 27881 | `665baaeede94e00a` |
+| `shots/15-发货方式弹窗.jpg` | 三卡（智慧关务 / 自主发货 / 委托发货），绿卡已真导航 | 37350 | `96914629953dea18` |
+| `shots/15-自主发货-留在发布页.jpg` | 自主发货只关弹窗 | 31569 | `c49db3cecf2ab95d` |
+| `shots/15-委托发货-受理屏.jpg` | 委托发货 ⇒ 受理屏（⛔ 不是占位页） | 30808 | `038b3dcae2492107` |
+| `shots/15-委托发货前-源页表单已填.jpg` | 前置正控：货名/货量确已填入 | 32114 | `9aaac00010f2dadc` |
+| `summary-FAIL-round1-111934.json` | **首轮 FAIL**（3 条红）：rects 取不到 + 详情页恒被拦「缺参」 | 12956 | `867db087ef8a69b2` |
+| `summary-PASS-112940.json` | ⚠️ **中间轮：40/40 PASS，但屏幕上两个时区**（见下） | 13380 | `1a131fda122bf408` |
+
+**这一轮断的是什么**：⑮ 章的「行为 0」在 D0 断的是"只弹页内说明层、留在发布页"——
+那是一个**已作废**的产品决定（关务页当时还不存在）。D1 把两页做出来之后，旧断言
+① 会恒红（`cusTipVisible` 随说明层一并删除）② 即使不红，也是在给"入口没接上"背书。
+现在断三件事：真的换页了 / 读到了"官方源不可用" / 那块说明**真的画在屏幕上**（矩形非空）。
+
+**⭐ 这两条缺陷值得单独记，因为它们都"看起来正常"**
+
+| # | 现象 | 真因 | 现在靠什么拦 |
+| --- | --- | --- | --- |
+| 1 | 详情页每次都显示「入口不合法 · id 缺少必填参数」，而列表跳转是对的 | `guardEntry(url, ctx)` 从 **url** 里解析参数，第一版只传了页面路径 | `verify_ui_interactions.js` ⑫ 新增静态判据：带参页的守卫入参必须是**拼过参的**字符串 |
+| 2 | 同一屏上「最后一次获取 03:30」与时间线「取得 11:30」并存 | 服务端时间列是 **UTC 且无时区标记**，展示层直接渲染 | ⑫ 新增：新鲜度卡的时间也必须过 `freshnessView`，模板里不得直接读 `freshness.*_at` |
+
+> ⚠️ **第 2 条尤其要注意取证方式**：`summary-PASS-112940.json` 那一轮是 **40/40 PASS**，
+> 红一条都没有 —— 而屏幕上明明白白差着 8 小时。**走查全绿不等于界面对**，
+> 这条只能靠"看图 + 加静态判据"补上，这也是为什么它被留在这份索引里而不是删掉。
+
+**本轮同时成立的两件事**
+
+- 静态契约新增 `verify_ui_interactions.js` ⑫（智慧关务 D1 口径契约，22 条，含 1 条**正控**：
+  官方源可用时 `officialUnavailable` 必须翻成 false，否则"恒真"也能全绿）；UI 交互总计 **403 项**。
+- 演示数据 `backend/scripts/seed_customs_demo.py` 接进 runner 固定顺序（幂等，2 条记录 / 3 条事件）。
+
+---
+
+### 3.16 E-2026-10-26-D — **MCP 轨整章回归**（㉕ ＋ ㊷ 两个重章）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-25-42-mcp/`
+> 轮次：`walk-20261026-114627`（两章在该通道下**首次**运行，无历史轮）
+> 命令：`python scripts/run_walkthrough_devtools.py --section 25,42 --skip-ide`
+> 读数：**PASS=46 / FAIL=0**，另有 2 条 `LIMITATION`（均为**既有**工具限制，非本轮新增）
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-25-42-stdout.txt` | 权威逐条读数 | 9941 | `bf2763ce59f9f66d` |
+| `summary.json` | 该轮汇总（`channel=mcp`） | 14084 | `865f665e26f35208` |
+| `shots/25-A-成果详情-查看态.jpg` … `25-C2-导航复核后.jpg` | ㉕ 章四态（查看 / 编辑 / 保存后 / 导航复核后） | 23274 / 27966 / 25199 / 23289 | `ff2cf2470e75d22c` / `fd9ff6d929c0e04d` / `b0fd054c24d43137` / `2e4e23cf81201bda` |
+| `shots/42-1-我的委托-第1页.jpg`、`42-2-我的委托-触底后第2页.jpg` | ㊷ 章触底分页（第 1 页 → 触底后第 2 页） | 44817 / 42573 | `8f63f30d4e64e9e7` / `33e08970bd600e2a` |
+
+**为什么选这两章回归**：它们分别压住两条最容易被通道换轨打坏的能力 ——
+㉕ 章要连续 `set_data` → 点保存 → 导航复核（**写侧 + 导航**），
+㊷ 章要 `scrollTo` 触底触发分页（**滚动 + 异步追加**）。两条都过了，
+说明 MCP 通道不是"只能点点看"，而是能承担既有主链的读写与滚动语义。
+
+**两条 `LIMITATION` 都不是本轮引入的**（如实登记，⛔ 不当通过）：
+
+1. ㉕D 确认动作点不到：`wx.showModal` 是**原生层**，不在渲染层，工具点不到「确定」；
+   确认的后端语义由 `verify_frontend_e2e.js` 读后端事实覆盖；
+2. ㊷ 下拉刷新（真手势）：工具链只有 `text`/`tap`/`longpress`/`scrollTo`/`input`
+   五个 element action ＋ `pageScrollTo`，**没有 swipe**。⚠️ 本章新证的是它的**对照面**：
+   同属"滚动类交互"，触底有原生通路、下拉没有 ⇒ 界面设计要按这个差别走。
+
+---
+
+### 3.17 E-2026-10-26-E — **时间串判据**（⑮ 章 43/43；含一次真实 FAIL 留证）
+
+> 目录：`docs/entrust/evidence/2026-10-26-section-15-timereflect/`
+> 命令：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
+> 读数：**PASS=43 / FAIL=0**（原 40 条 ＋ 新增 3 条时间判据），`channel=mcp`、`SDKVersion=3.17.2`
+
+| 文件 | 内容 | 字节 | sha256（前 16） |
+| --- | --- | --- | --- |
+| `walk-15-stdout.txt` | 权威逐条读数（PASS 轮） | 6665 | `2127a4c9bd5ca04a` |
+| `summary-PASS-132603.json` | PASS 轮汇总（`verdict=PASS` / `passed=43` / `attempt=11`） | 15415 | `ca1347f35a7cc283` |
+| `summary-FAIL-round1-131936.json` | **首轮 FAIL 留证**（`FAIL=3`，见下） | 15161 | `ad995f3399f60e69` |
+
+**为什么留一份 FAIL 的产物**：这套判据第一次跑就红了，红的原因是**判据比展示层严**
+（我按秒级写，页面是分钟级 `YYYY-MM-DD HH:MM`）。留着它有两层用处：
+
+1. 证明这条判据**能失败**（本项目对判据的基本要求：能失败 ＋ 有正控）；
+2. 提醒后来人：**"全绿"与"界面对"是两件事**。上一轮 40/40 全绿，是靠**人眼看截图**
+   才发现同一屏出现 03:30 与 11:30；这一轮的判据就是把那次人眼动作变成断言。
+
+**判据两层**（都在 `verify_miniapp_devtools.py`，可复用到任何页面）：
+
+| 层 | 断什么 | 抓什么缺陷 |
+| --- | --- | --- |
+| ① 格式 | 屏幕上每处时间串只能是 `YYYY-MM-DD HH:MM` | 原始串漏上屏（`T` / `Z` / `+08:00` / 毫秒 / 多余秒 ⇒ 某字段**绕过了** `toLocalTime`） |
+| ② 数值 | 屏幕上的时间 = 服务端 UTC **+8 小时** | **差 8 小时**（格式完全正常，看不出来；必须拿接口原文算） |
+
+实现要点（踩过才知道的）：
+
+- 取文本时**标签替换成空格**而不是空串：时间常被拆在两个 `<text>` 里，
+  拼成 `2026-10-2611:37` 会让判据两头都失效；
+- 第 ② 层**读接口原文**（`api_get` 拿 `freshness.last_fetched_at` 与事件的
+  `occurred_at`/`fetched_at`），⛔ 不比页面 `data` —— 那是转换后的结果，等于拿答案对答案；
+- 服务端字段是 snake_case，页面 data 是驼峰；读错字段会恒 `None` ⇒ **假绿**，
+  所以"取不到原文"这一格显式判 FAIL 而不是跳过（`expected` 为空时给出 `api_error`）。
+
+---
+
+### 3.18 E-2026-10-27-A — **D2 归类页**：静态契约已过，设备证据当时未取到（✅ 同日已补，见 §3.19）
+
+> ✅ **2026-10-27 11:30 已解除**：设备证据已取到，**52/52 ×2 轮**，见 **§3.19**（含真实降级轮）。
+> 本节保留当时的阻塞记录 —— 它记的是"通道被本机安全策略挡住"这一事实与三条解阻塞路径，
+> 对下次遇到同一现象仍有价值。
+
+> 提交：`2fe608b`（PR #207）｜ 档位：仓库 `RUNTIME_PROFILE=demo`（走查前临时切 `dev`，跑完已复位）
+> 命令：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
+
+| 层 | 读数 | 判据来源 |
+| --- | --- | --- |
+| 静态契约（口径 + 模板） | **OK 421 · FAIL 0**（原 403，新增 ⑫-2 共 18 项） | `node scripts/verify_ui_interactions.js`，CI「前端静态契约」job 已 success |
+| 后端守卫 | `sources` 真值表 5 项 / 旧名守卫 2 项 **全过** | `pytest backend/tests/test_customs_{declarations,naming_guard}.py` |
+| **设备证据（⑮ 章含归类段落）** | ⛔ **本轮未取到**（`rc=2`，前置不通过） | 见下 |
+
+**为什么没取到**：两种通道都不通，且**都不是产品问题**——
+
+1. **MCP 通道**：需要读 IDE 用户目录 `User Data\<hash>\Default\.ide`（端口）与 `mcp.json`（令牌），
+   这三个路径被**安全中心按路径拒绝读取**（`file-read` deny 已记在审计里）；
+2. **CLI 通道**：`wechatide` 读 `D:\Program Files (x86)\Tencent\微信web开发者工具\resources\app.asar.unpacked\…`
+   时报 `EPERM`（同一性质的路径拒绝），所以"能启动、但通道没通"。
+
+⇒ 归类页的**真机断行为 0**（"从详情进得去 / 候选或降级至少一块可见 / 手工块矩形非空"）
+目前只有**代码与静态契约**支撑，⛔ 不能记成 PASS。按四档口径：**代码已合 / 静态契约已过 /
+设备已验＝未做（环境阻塞）**。
+
+**解阻塞需要其中一条**（都不是开发侧能自己完成的）：
+
+| # | 做法 | 影响面 |
+| --- | --- | --- |
+| 1 | 在安全中心放行 `…\微信开发者工具\User Data\*\Default\.ide` 与 `mcp.json` 两个读权限 | 走查 MCP 通道恢复（首选，改动最小） |
+| 2 | 放行 IDE 安装目录 `app.asar.unpacked`（仅 CLI 通道需要） | 走查 CLI 通道恢复 |
+| 3 | 用户在**普通终端**（非沙箱）跑同一条命令，把 `_walk_*_out.txt` 与截图目录给我归档 | 不改任何配置，但要在两个进程间搬产物 |
+
+**给下一轮的注意事项**：⑮ 章的归类段落**会真的调一次模型**（`POST /classifications`），
+最坏要等 80 秒；⛔ 不要为了跑快去缩短等待 —— 那样红的不是页面，是耐心。
+模型不可用也没关系：接口仍 201，页面必须落成"降级原因 + 手工入口"，那正是这一段要断的东西。
+
+---
+
+### 3.19 E-2026-10-27-B — **D2 归类页设备证据**（⑮ 章 **52/52 ×2 轮**；含真实降级轮与一次判据自错留证）
+
+> 目录：`docs/entrust/evidence/2026-10-27-section-15-d2/`
+> 命令（两轮只差一个环境变量）：
+> A `python scripts/run_walkthrough_devtools.py --section 15 --skip-ide --llm-mock`
+> B `LLM_BASE_URL=http://127.0.0.1:9/v1 python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
+> 读数：**A 轮 PASS=52 / FAIL=0**（`walk-20261027-112607`）｜**B 轮 PASS=52 / FAIL=0**（`walk-20261027-113013`）
+
+| 文件 | 内容 | 字节 |
+| --- | --- | --- |
+| `walk-15-stdout-A-suggested.txt` | A 轮（模型可用）权威逐条读数 | 7933 |
+| `summary-PASS-A-112607.json` | A 轮汇总（`verdict=PASS` / `passed=52`） | 18059 |
+| `walk-15-stdout-B-degraded.txt` | B 轮（模型不可达）逐条读数 | 8075 |
+| `summary-PASS-B-degraded-113013.json` | B 轮汇总（`verdict=PASS` / `passed=52`） | 18592 |
+| `summary-FAIL-round1-111951.json` | **首轮 FAIL 留证**（`FAIL=1`，判据自错，见下） | 17604 |
+| `shots-A-suggested/`（8 张） | 含 `15-智慧关务-归类辅助-{发起,结果}.jpg` | — |
+| `shots-B-degraded/`（8 张） | 同上，**结果页那张是降级形态** | — |
+
+**环境自证**（`summary.json` 的 `runtime` 格，两轮一致）：`channel=mcp`、`SDKVersion=3.17.2`、
+`profile=dev`、`libVersionCfg={shared:3.17.2, private:3.17.2}`。
+⚠️ **本轮 `libVersionGray.verdict=unknown`**（`WeappVendor\cfg.json` 被本机安全策略拦读，
+`PermissionError(13)`）—— 与 10-26 那轮 `=stable` 不同。**这是取证环境的降级，不是产品问题**，
+但按"读数要看自证格"的纪律必须写明：本轮**不能**复述"灰度=stable"。
+
+**新增的 9 条归类断言与两轮读数**（A=模型建议 / B=模型不可达）：
+
+| 断言 | A 轮读数 | B 轮读数 |
+| --- | --- | --- |
+| 详情 → 归类：真的换了页（push 边生效） | `path=pages/customs/classify/classify` | 同 |
+| 归类页把「候选」与「结论」分开写 | 文本 118 字符 | 同 |
+| 结果块有东西可看（⛔ 空列表＝要消灭的形态） | `status=suggested` · `candidates=1` · `degraded=None` | **`status=manual_required` · `candidates=0` · `degraded={kind:network, reason:"归类模型暂时不可达（网络或服务端异常），本次没有给出建议"}`** |
+| 降级/建议态下手工入口可见 | `manualVisible=True`，hint「也可手工填写或改判…」 | **`manualVisible=True`，hint「模型没有给出建议，可直接手工填写税则号列并确认结论」** |
+| 手工块在屏幕上真画出来了 | `rect=342x377.75` | `rect=342x377.75` |
+| 未定稿时明写「尚未有人定稿」 | `hasConclusion=False`，结果块 314 字符 | `hasConclusion=False`，结果块 307 字符 |
+| 从归类辅助可返回关务详情 | `pages/customs/detail/detail` | 同 |
+
+⭐ **这两轮合起来才是结论**：同一条判据在"模型给了建议"和"模型挂了"两种形态下都必须过 ——
+**判据本身不假设模型可用**（`hasOutcome = 候选 或 降级原因`）。B 轮的 hint 文案与 A 轮不同，
+正好证明前端是按 `manual_entry.hint` 分岔渲染的，而不是把一句固定文案写死。
+
+**首轮为什么 FAIL（值得留档的失败）**：第 1 轮（`111951`）报 `FAIL=1`，
+是「未定稿时页面明写「尚未定稿」」这条 —— 但**页面是对的，判据写错了对象**：
+它拿的是**发起之前**（空态）取的 `cls_txt`，而这句话只在结果块渲染后才出现。
+修法：结果渲染后**重新取一次**页面文本（`cls_after`），并分岔成
+「有结论 ⇒ 必须出现「人工结论」＋ 号列」/「无结论 ⇒ 必须出现「尚未有人定稿」或「尚无结论」」。
+⇒ 与 §3.17 那轮 FAIL 同性质：**新判据第一次跑就红，红在判据，不在产品**。
+两轮 FAIL 的 summary 都留在仓里，是为了让"判据能失败"这件事可核。
+
+**仍然没覆盖的**：`profile=demo`（云托管 / 体验版）下**没有**设备证据 —— 上面两轮都是
+`profile=dev` 连本机后端。演示按 DEMO-0 §7 走 demo 档，这条边界继续写在 §3.15 的口径里。
+
+**复现通道的坑（这轮才遇到）**：本机安全策略会拦**子进程**读 IDE 用户目录
+（`.ide` 端口 / `mcp.json` 令牌），`discover()` 会把 `OSError` 吞掉并返回 `None`，
+现象与"IDE 没启动"**无法区分**（`rc=2`）。已在 `scripts/wechatide_mcp.py` 加**显式注入**：
+`WECHATIDE_PORT` + `WECHATIDE_TOKEN` 同时存在时直接用，不再做目录发现（令牌不落盘、不打印）。
+
+---
 
 ## 4. 待补（本索引自己的缺口，如实登记）
 
@@ -624,3 +930,4 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 | 4 | **同一张新委托的 13 步主链** | ⭐ **2026-09-20：第 1–9 步已在同一张新委托上跑通**（见 **§3.5 ＋ §3.6**：八章同一 `aid=6`，命令见 `runbook` §8.9）—— 含第 5 步的 900 吨/不拆批候选、第 6–7 步在本单组装→发布→客户接受→派生、第 8 步 `800→950`、第 9 步复核＋重新确认＋**换新成果重新接受**＋A2 接管。**仍未覆盖：第 10–13 步在本单上的动作**（费用/结算已有章 52 证据、结案/重开已有章 53） |
 | 5.5 | **证据文件的行尾归一化会毁掉可核对性** | 已修：`docs/entrust/evidence/.gitattributes` 加 `* -text`（该目录逐字节入库）；⛔ 新证据入库前要**复核「工作区哈希 == 索引 blob 哈希」**；⭐ **核对方式已固化成小工具**：`python -X utf8 backend/scripts/check_evidence_integrity.py`（`git ls-files -s -z` **NUL 分隔解析文件名** ＋ 逐件内容哈希比对；⛔ 不要用"`ls-files` 逐行 + 字符串路径"的老查法 —— `core.quotepath=true` 会把中文名转成八进制转义，实测把 124 件里的 **70 件中文名 `.jpg` 全判成"不一致"**）|
 | 5 | **密钥文件曾被本机删除故障永久删除** | 2026-09-19 核实发现 `backend/.env.local`（含**可用订阅 Key**）缺失、**回收站无记录**；已从 `_b_recon3.txt`（09-16 的 env 基线快照）找回并还原，`llm_key_doctor.py` **四步全绿**。⚠️ **untracked 文件不在护栏的恢复范围内** ⇒ 已扩展护栏（见 DR-0019 追加节） |
+| 6 | ~~**设备证据不自证运行环境**（基础库版本 / 档位）~~ ⇒ **2026-10-26 已改代码关闭，待下一轮生效** | §3.13 那批产物里**没有一处**记着 `SDKVersion`，"跑在 3.17.2 稳定版上"只能靠口头转述。已修：`verify_miniapp_devtools.py` 新增 `capture_runtime()` / `lib_version_gray()` —— 此后 `summary.json` 自带 `runtime.SDKVersion`、`runtime.profile`（`RUNTIME_PROFILE`）、`runtime.libVersionCfg`（共享/私有两份）与 `runtime.libVersionGray`（含来源 cfg 路径与 mtime），并在头部打印一行；配置与实测不一致时**点名以实测为准**。⚠️ **对已产出的历史证据无效**，只在下一轮起生效。同时把 `miniapp/project.config.json` 的 `libVersion` 由 `3.0.0`（差 17 个小版本）改为 `3.17.2`，使干净 clone 不再依赖被忽略的 `project.private.config.json`。✅ **2026-10-26 09:28 已生效**（见 **§3.14**，`runtime.SDKVersion=3.17.2` / `profile=dev` 均进 summary） |

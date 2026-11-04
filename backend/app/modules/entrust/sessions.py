@@ -288,11 +288,18 @@ def list_sessions(
 
 def next_seq(session: Session, session_id: int) -> int:
     """会话内下一条消息序号（`UNIQUE(session_id, seq)` 兜住并发重复）。"""
-    current = session.execute(
-        text("SELECT COALESCE(MAX(seq), 0) AS m FROM ent_session_message WHERE session_id = :sid"),
-        {"sid": session_id},
-    ).scalar_one()
-    return int(current) + 1
+    # 显式 `int(...)`：`scalar_one()` 的返回类型是 `Any`，mypy 新版本会要求
+    # 「无法推断的局部变量必须有注解」（var-annotated）。包一层转换比加注解更直接，
+    # 也顺手把 MySQL 的 `Decimal` 之类返回压回 int。
+    current = int(
+        session.execute(
+            text(
+                "SELECT COALESCE(MAX(seq), 0) AS m FROM ent_session_message WHERE session_id = :sid"
+            ),
+            {"sid": session_id},
+        ).scalar_one()
+    )
+    return current + 1
 
 
 def append_message(

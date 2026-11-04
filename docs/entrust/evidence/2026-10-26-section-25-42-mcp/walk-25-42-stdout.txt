@@ -1,0 +1,89 @@
+===== 走查 stdout =====
+项目    ：E:\pinglu-didi\miniapp
+截图目录：E:\pinglu-didi\miniapp-device-artifacts\walk-20261026-114627
+章节    ：25,42
+门禁    ：ok / versionRelation=skip_check / loginExpired=False / tokenRequired=False
+后端    ：8000 应答正常
+
+== 开窗 ==
+    [   1.1s] pageStack=[{'pageId': 232, 'path': 'pages/index/index', 'query': {}, 'route': '/pages/index/index', 'title': '向海通'}]  (探测   1.1s)
+模拟器  ：pageStack 非空
+基础库  ：3.17.2（stable） ／ 档位 dev ／ 机型 iPhone 12/13 (Pro)（iOS 10.0.1） ／ 通道 mcp
+
+== ㉕ 成果详情（ENT-025）==
+PASS | ㉕ 前置 · 回到身份选择页 | pages/index/index
+PASS | ㉕ 前置 · 进入货主工作台（落点页，与身份无关） | pages/shipper/shipper
+PASS | ㉕ 前置 · 实际身份是 seed-owner（演示经理；成果页写权限来自它） | {"user_id": 2, "openid": "mock-openid-seed-owner", "nickname": "", "roles": ["shipper", "owner"], "current_role": "shipper", "role_label": "
+
+-- A. 进入成果详情页 --
+PASS | ㉕A view=ready（真实渲染，不是白屏） | ready
+PASS | ㉕A 页面持有的成果编号正确 | 5
+PASS | ㉕A 成果类型为 settlement_draft | typeCode=settlement_draft；取值不对说明编号漂了，先铺 backend/scripts/seed_entrust_demo.py
+PASS | ㉕A 可编辑 / 可确认入口已亮出 | canEdit=True canConfirm=True
+PASS | ㉕A 缺项提示点名到字段（不是只说「信息不完整」） | 还缺 1 项必填：应收明细
+PASS | 截图 25-A-成果详情-查看态 | 23274B
+
+-- B. 缺值列表字段：进编辑态 --
+PASS | ㉕B 投影里有 receivable_lines 字段行 | n=1
+PASS | ㉕B 缺值字段仍按契约判为结构化（declared=list / kind=json） | declared=list kind=json
+PASS | ㉕B 查看态显示「（未填）」而不是 null / 空白 | empty=True
+PASS | ㉕B 点「编辑内容」后进入编辑态 | True
+PASS | ㉕B 编辑表单里有 receivable_lines | idx=0
+PASS | ㉕B 编辑态该字段走 JSON 形态且带契约类型 | kind=json declared=list
+PASS | ㉕B 编辑态初始文本是空串（不是 undefined / 'null'） | ""
+PASS | ㉕B 编辑态带可读类型提示（含 JSON） | 列表（JSON 数组）
+PASS | ㉕B 渲染层 · 类型提示元素已渲染 | .art-kind-hint n=3
+PASS | ㉕B 渲染层 · 结构化字段走 textarea | textarea.art-textarea n=3
+PASS | ㉕B 渲染层 · 提示文案是「列表（JSON 数组）」 | <text class="art-kind-hint">列表（JSON 数组）</text>
+PASS | 截图 25-B-成果详情-编辑态 | 27966B
+
+-- C. 保存新版本 → 导航复核不产生重复成果 --
+PASS | ㉕C 注入编辑值（setData）
+PASS | ㉕C 保存后退出编辑态 | False
+PASS | ㉕C 保存提示说清新版本号 | 已保存为 v2，生效版本仍是 v1（需确认才会切换）
+PASS | ㉕C 保存提示说清生效版本未变（少了这句，用户会以为客户已看到新内容） | 已保存为 v2，生效版本仍是 v1（需确认才会切换）
+PASS | 截图 25-C1-保存后 | 25199B
+PASS | ㉕C 复核 · 仍指向同一成果编号（未产生重复成果） | 5
+PASS | ㉕C 复核 · 版本数恰好 +1 | 1 → 2
+PASS | ㉕C 复核 · 版本号无重复 | [1, 2]
+PASS | ㉕C 复核 · 生效版本仍是保存前的那个（编辑不改生效版本） | 1 vs 1
+PASS | ㉕C 复核 · 新版本进入历史且未标为生效 | v2 isCurrent=False
+PASS | 截图 25-C2-导航复核后 | 23289B
+
+-- D. 确认入口可见（**刻意不点**）--
+PASS | ㉕D 非生效版本行上有「设为生效版本」入口 | [data-no="2"] n=2
+PASS | ㉕D 渲染层 · 版本历史里有该入口文案 | <view class="tl"><view class="tl-item tl-done"><view class="tl-rail"><view class="tl-dot"></view><vi
+LIMITATION | ㉕D 确认动作未在真机点击（能跑，但工具不可验证 ⇒ 不计入通过） | 原生 showModal 不在渲染层、工具点不到「确定」；确认的后端语义由 verify_frontend_e2e.js 读后端事实覆盖
+PASS | ㉕E 本章运行期无新增 console error | (无)
+
+== ㊷ 触底分页探针（DR-0018 的 A.P-2）==
+PASS | ㊷ P-1 去向记录（**复用**，不是本章新证）：会话输入框键入 ＋ 该文本真的落进服务端 —— 证据在 ㉞ 章（`input_text` → `bindinput` → `data.form.title`，提交后详情页标题一致）；矩阵里「全仓无先例」那句原文**本轮已订正**（实为 6 处先例、其中一处已断言 `bindinput`） | 去向：㉞ 章「真实输入触发 bindinput」= P-1 的两个分句；本章不重跑（裁定二·A·2）
+PASS | ㊷ 前置①：经 API 批量建**草稿**载体单，使 `view=owner` 的总数**超过一页** —— 没有这一步「第 2 页」无从产生，P-2 只能记「产品侧尚无实现」。⚠️ 建的是草稿：不动任何已存在的单据、不改库 | 起点 total=2 新建 25/25（末次 HTTP=200） ⇒ total=27（页长 20）
+PASS | ㊷ ① 首屏只取**第 1 页**（20 张 = min(总数 27, 页长 20)），且 `pageHint` 如实说明还有更早的（『第 1/N 页』）—— 这是触底之前应有的形态 | view='ready' 条目数=20（期望 20） hasMore=True reachCount=0 pageHint='第 1/2 页 · 共 27 条'
+PASS | 截图 42-1-我的委托-第1页 | 44817B
+
+-- 触底：原生 pageScrollTo --
+PASS | ㊷ ② **触底真的把更早一页加载进来了**：原生 `pageScrollTo` 滚到底 ⇒ `onReachBottom` 触发 ⇒ 列表变长。⚠️ 这条能成立，是因为本轮先给该页补了 `onReachBottom`：在此之前它只取第 1 页，第 21 张之后的委托**永远看不到** | scroll=True 条目数 20 → 27（期望 27） reachCount=1 loadingMore=False
+PASS | 截图 42-2-我的委托-触底后第2页 | 42573B
+PASS | ㊷ ③ 失败归因（**只在 ② 未过时才有信息量**，此处恒记以便归档）：触底之后 `onReachBottom` 的调用计数 —— `0` ⇒ 工具的 `pageScrollTo` **没能**触发页面触底事件（**工具边界**）；`≥1` 而列表没变长 ⇒ 事件到了、加载没成（**产品侧问题**）。⚠️ 两种原因不能混为一谈：混在一起就只剩一句『分页没验成』，分不清是工具不行还是功能不行 | reachCount=1（0 = 工具没造出触底；≥1 = 造出了）
+PASS | ㊷ ④ 第 2 页到达后 `pageHint` 与 `hasMore` **同步**更新 —— 『分页提示』与『分页能力』必须同时为真：只改提示不改列表，就是本章开头说的那种『缺陷长得像功能』 | pageHint='第 2/2 页 · 共 27 条' hasMore=False page=2 （服务端总数 27，已显示 27）
+PASS | ㊷ ⑤ 负例（对照服务端真相）：界面第 2 页拿到的编号序列与 `GET /assignments?view=owner&page=2` **逐条一致** —— 没有这条，② 只证明『列表变长了』，不能证明『长出来的就是第 2 页』（多出来的也可能只是第 1 页被重复追加了一遍） | 服务端 page2=['9', '8', '7', '6', '5', '4', '3'] 界面追加=['9', '8', '7', '6', '5', '4', '3']
+PASS | ㊷ 本章 console 无未豁免 error（页面自身的运行期错误）
+PASS | ㊷ 去向记录：**P-3（下拉刷新真手势）不在本章结论里** —— 工具的动作面只有 `text` / `tap` / `longpress` / `scrollTo` / `input` 五个 element action ＋ 页面级 `pageScrollTo`，**没有任何 swipe / 触摸手势**（已逐方法核对 `wechatide_client.py` 的 `Client`）。P-3 的 `tool_limitation` / `alternative_path` / `design_constraint` 由本轮同一份矩阵文档回填，**不由真机章声称** | 去向：DEMO-1-gesture-matrix.yaml 的 P-3（status = LIMITATION）
+LIMITATION | ㊷ **下拉刷新（真手势）仍无法由本工具触发** | 本页 `enablePullDownRefresh=true`（`onPullDownRefresh` → `load()`），但下拉是**真实触摸手势**，而工具链只有上述五个 element action ＋ `pageScrollTo`，**没有 swipe**。⚠️ 本章新证的是它的**对照面**：同属『滚动类交互』，**触底有原生通路、下拉没有** ⇒ 两者的可脚本化程度并不相同。界面设计要按这个差别走：分页可以走触底（本章已证可造），而『刷新后可复现』这类断言需要页内刷新入口，不能只靠下拉。
+
+================ 汇总 ================
+断言 48 项：**通过 46** / 未取得通过证据 2
+  分档：PASS=46 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=0 | LIMITATION=2
+  归并（HO 五档）：PASS=46 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=2
+  LIMITATION: ㉕D 确认动作未在真机点击（能跑，但工具不可验证 ⇒ 不计入通过） | 原生 showModal 不在渲染层、工具点不到「确定」；确认的后端语义由 verify_frontend_e2e.js 读后端事实覆盖
+  LIMITATION: ㊷ **下拉刷新（真手势）仍无法由本工具触发** | 本页 `enablePullDownRefresh=true`（`onPullDownRefresh` → `load()`），但下拉是**真实触摸手势**，而工具链只有上述五个 element action ＋ `pageScrollTo`，**没有 swipe**。⚠️ 本章新证的是它的**对照面**：同属『滚动类交互』，**触底有原生通路、下拉没有** ⇒ 两者的可脚本化程度并不相同。界面设计要按这个差别走：分页可以走触底（本章已证可造），而『刷新后可复现』这类断言需要页内刷新入口，不能只靠下拉。
+[运行期 console·本轮增量] 开窗阶段：豁免 0 / 未豁免 0 ｜ 业务阶段：豁免 0(按阶段规则恒为 0) / 未豁免 0 ｜ 基线采集 正常
+[运行期 console error] 本轮增量：(无)
+[console·原文（本轮增量）] (空)
+[截图目录] E:\pinglu-didi\miniapp-device-artifacts\walk-20261026-114627
+[重跑关联] 同章节历史运行 0 次（首次结果**保留不覆盖**）：无
+RESULT: NOT_RUN （LIMITATION=2）
+
+===== 走查 stderr =====
+(空)

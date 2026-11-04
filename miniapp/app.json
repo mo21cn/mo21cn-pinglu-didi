@@ -23,10 +23,13 @@
     "pages/entrust/session/session",
     "pages/entrust/intake/intake",
     "pages/entrust/assignments/assignments",
-    "pages/entrust/finance/finance"
+    "pages/entrust/finance/finance",
+    "pages/customs/home/home",
+    "pages/customs/detail/detail",
+    "pages/customs/classify/classify"
   ],
   "window": {
-    "navigationBarTitleText": "船好多",
+    "navigationBarTitleText": "向海通",
     "navigationBarBackgroundColor": "#3B5BDB",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#F5F7FA",

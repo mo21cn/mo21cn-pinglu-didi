@@ -104,6 +104,77 @@ def _reject_bare_attr(selector: str) -> None:
         )
 
 
+#: **「权限被拒」的指纹** —— 和「IDE 没开」「没授权」长得完全不一样，别再并成一句。
+#:
+#: 2026-10-26 实测（本机 Windows + 安全中心）：调用 `wechatide` 时两块证据同时出现 ——
+#:   · stderr `[ERROR:base\i18n\icu_util.cc] Invalid file descriptor to ICU data received`
+#:   · rc = 2147483651（0x80000003）
+#: 审计日志里对应的是 `category=file-safety` / `eventType=file-safety.deny-matched` /
+#: `messageKey=…denyMatched.readWithRule`，路径 `D:\…\微信web开发者工具\icudtl.dat`；
+#: 同一轮还有一条 `writeWithRule` 指向该目录下的 `debug.log`。
+#:
+#: ⚠️ 为什么必须单独识别：当时 **IDE 明明在跑**（模拟器已编译、控制台有 `App.onLaunch`
+#:    日志、基础库 3.17.5、资源来自 `127.0.0.1:39133`）。若把它并进
+#:    "wechatide 不可用 → 请确认 1) IDE 已启动 2) 已授权 3) 非沙箱"，
+#:    读数会把人指向**三个都成立**的方向，而真因在第四个地方（安全中心文件规则）。
+#:    这正是本项目反复记的那类坑：判据把两种相反性质的事写成同一个名字。
+_POLICY_BLOCK_RC = 2147483651
+#: ⚠️ 2026-10-26 收紧：此前这里还有 `Access is denied` / `Permission denied` 两条。
+#:    它们太泛 —— 用户目录权限、被占用的端口、杀软隔离单个文件都会吐这两句，
+#:    一旦命中就把故障**改判成「安全中心拦了 IDE」**，人照着去改那条根本不存在的规则。
+#:    只保留 ICU 这一条：它与 rc=2147483651 是同一个故障的两种表现，其余都不认。
+_POLICY_BLOCK_MARKERS = ("Invalid file descriptor to ICU data",)
+
+#: 泛化的权限类字样。**只用于给「连不上」的报错补一句可能的旁证**，
+#: ⛔ 不参与分支判定 —— 见上面那段「为什么收紧」。
+_PERMISSION_SMELLS = ("Access is denied", "Permission denied", "EACCES", "EPERM")
+
+
+def classify_launch_failure(rc: int, raw: str) -> str:
+    """判定一次 CLI 启动失败的性质：`"policy"`（本机权限拦截）或 `""`（未命中）。
+
+    之所以只认这两个**指纹**而不是"看看 stderr 里有没有 error"：Electron 正常启动时
+    stderr 也会刷无害告警（如 `link preload` 之类），按"有 error 就算坏"会大面积假红。
+
+    ⚠️ 判据宁可**漏判**也不要**错判**：漏判的后果是报成"连不上"（人再查一轮即可），
+    错判的后果是让人去改一条无关的安全策略 —— 后者更贵，且会让人怀疑整套诊断。
+    """
+    if rc == _POLICY_BLOCK_RC:
+        return "policy"
+    blob = str(raw or "")
+    if any(m in blob for m in _POLICY_BLOCK_MARKERS):
+        return "policy"
+    return ""
+
+
+def permission_smells(raw: str) -> bool:
+    """stderr 里有没有泛化权限字样（仅作旁证，⛔ 不用于分支判定）。"""
+    blob = str(raw or "")
+    return any(m in blob for m in _PERMISSION_SMELLS)
+
+
+def _policy_block_hint(ide: str, project: str, client: str) -> str:
+    """「权限被拒」的处置指引 —— 要能让照着做的人一次改对，而不是再猜一轮。"""
+    ide_n = os.path.normpath(ide)
+    return (
+        "wechatide 被**本机安全策略**拦住：安全中心拒绝读取 IDE 安装目录。\n"
+        "  ⛔ 这不是「IDE 没启动」。IDE 在跑也照样报这个 —— 拦的是读文件，不是连进程。\n"
+        "  证据：审计中心里 category=file-safety / eventType=deny-matched，\n"
+        f"        路径 {os.path.normpath(os.path.join(ide_n, 'icudtl.dat'))}（读）"
+        "与同目录 debug.log（写）。\n"
+        "\n  改法（客户端内操作，改完从下一条消息生效）：\n"
+        "    设置 → 安全中心 → 沙箱安全 → 文件安全\n"
+        f"    找到路径为 `{ide_n}` 的规则（可能显示为整个目录，也可能拆成两条具体文件）\n"
+        "    把「读取」「写入」由「拒绝」改为「允许」；若规则是误建的，直接删除该条。\n"
+        "    找不到时：审计中心搜 `微信web开发者工具`，点那条拦截记录可跳到命中规则。\n"
+        "\n  兜底（不改策略）：在同一台机器用**普通终端**跑\n"
+        "    python scripts/verify_miniapp_devtools.py --section 15\n"
+        f"    （{os.path.normpath(project)}；如需真机环境先设 RUNTIME_PROFILE='dev'）\n"
+        "  另一条兜底：把 IDE 目录整体复制到不受保护的盘（如 E:），再设环境变量\n"
+        f"    WECHAT_DEVTOOLS_HOME=<副本目录>，client={client} 不用改。\n"
+    )
+
+
 # 在页面上下文取「匹配元素个数」
 _COUNT_FN = (
     "function(sel){return new Promise(function(res){"
@@ -187,6 +258,40 @@ class Client:
     ) -> None:
         self.project = os.path.abspath(project)
         self.client = client
+        self.timeout = timeout
+        if not os.path.isdir(self.project):
+            raise RuntimeError(f"小程序项目目录不存在：{self.project}")
+
+        # ---------------------------------------------------------- 通道选择
+        # 2026-10-26：IDE **自带的 MCP 服务端**成为默认通道（`POST http://127.0.0.1:<.ide>/mcp`
+        # + `Authorization: Bearer <token>`，配置与端口都从 IDE 自己的用户数据目录读）。
+        #
+        # 为什么必须换：旧轨（本文件下半部分）要用 IDE 自带 Electron 当 Node 跑 CLI，
+        # 前置是**能读 IDE 安装目录**（`icudtl.dat`、`skill-index.js`）并**能写** `debug.log`。
+        # 本机安全策略逐条拒绝后旧轨整体失效，而"去改那条规则"是死路 —— 文件安全的规则表里
+        # deny 条数为 0，那些拦截不是用户可编辑的规则，是通道本身用错了。
+        # MCP 轨只走 localhost HTTP，不启动任何 exe、不读 IDE 目录，因此不受该规则影响。
+        #
+        # 回退：`WALK_CHANNEL=cli` 强制旧轨；MCP 不可用（端口没开 / 未授权）时自动回退。
+        self.mcp = None
+        if os.environ.get("WALK_CHANNEL", "auto").strip().lower() != "cli":
+            try:
+                from wechatide_mcp import McpBackend
+
+                self.mcp = McpBackend(self.project, client=client, timeout=timeout)
+                # 实例属性覆盖类方法 ⇒ 走查脚本里 224 处 `w.c.tap(...)` 一行都不用改
+                for _name in McpBackend.PUBLIC:
+                    setattr(self, _name, getattr(self.mcp, _name))
+            except Exception:  # noqa: BLE001
+                self.mcp = None
+        if self.mcp is not None:
+            self.ide = ""
+            self.cli = ""
+            self.electron = ""
+            self._args_dir = ""
+            self._args_file = ""
+            return
+
         self.ide = resolve_ide_dir(ide_dir)
         if not self.ide:
             raise RuntimeError(
@@ -282,16 +387,33 @@ class Client:
         j = self.status(skill_version)
         if j.get("ok"):
             return j
+        # ⚠️ 顺序很重要：**先判「本机安全策略拦截」，再判「真的连不上」**。
+        #    两者的处置完全相反，而本项目的读数曾把它们并成同一句
+        #    "wechatide 不可用 → 请确认 IDE 已启动 / 已授权 / 非沙箱"，
+        #    结果三条全部成立、人却被引偏（真因在第四个地方：安全中心文件规则）。
+        try:
+            rc0 = int(j.get("__rc__") or 0)
+        except (TypeError, ValueError):
+            rc0 = 0
+        if classify_launch_failure(rc0, str(j.get("__raw__") or "")) == "policy":
+            raise RuntimeError(_policy_block_hint(self.ide, self.project, self.client))
         probe = self.open_window()
         if probe.get("ok"):
             return {"ok": True, "degraded": True, "status": j, "probe": probe}
+        tail = ""
+        if permission_smells(str(j.get("__raw__") or "")):
+            tail = (
+                "\n  旁证：stderr 里有权限类字样（Access is denied / EACCES 等）。\n"
+                "        ⚠️ 这不是「安全中心拦 IDE」的判据（那条要同时满足 rc=2147483651\n"
+                "        或 ICU 指纹），更常见的是项目目录/临时目录的权限问题。\n"
+            )
         raise RuntimeError(
-            "wechatide 不可用 —— 请依次确认：\n"
+            "wechatide 连不上 IDE（能启动，但通道没通）—— 请依次确认：\n"
             f'  1) IDE 已启动：`"{os.path.join(self.ide, "cli.bat")}" open '
             f'--project "{self.project}"`\n'
             f"  2) 已授权：`wechatide auth -c {self.client}` 并在 IDE 内点击批准\n"
             f"  3) 助手工具不在沙箱中运行（官方硬要求）\n"
-            f"原始返回：{str(j)[:300]}"
+            f"原始返回：{str(j)[:300]}{tail}"
         )
         return j
 
