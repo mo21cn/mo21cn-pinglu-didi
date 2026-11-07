@@ -483,16 +483,17 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
 
 **PR #207 已于 2026-11-04 08:02 UTC squash 合并进 `develop`**（merge commit `3e1930bb`，parent `49ef1a8`，合并前 CI **6/6 success**）；
 **PR #208 于 08:13 UTC 合并**（`develop=b268c392`）、**PR #209 于 2026-11-07 09:01 UTC 合并**
-（`develop=4d08611d`，各 CI **6/6 success**）。
+（`develop=4d08611d`）、**PR #210 于 2026-11-07 09:23:14 UTC 合并**
+（`develop=b63b504b0e09a0e3d0d39066ea76e526c044460a`），各 CI **6/6 success**。
 按档如实登记，⛔ **不把「代码已合」说成「上线完成」**，也**不把「云端代码已部署」说成「演示数据已就绪」**：
 
 | 档 | 状态 | 判据 / 证据 |
 | --- | --- | --- |
-| 代码已合 | ✅ | PR #207 / #208 / #209 均 `MERGED`，`develop=4d08611d`；关务 4 表 9 接口、D1/D2 三页、命名统一、云端就绪自检全部进主干 |
-| 云端代码已部署 | ✅ **2026-11-04 实测** | 外部只读探测：`/healthz` 200、OpenAPI 138 条路径含 **7 条 `/api/v1/customs/*`**（9 接口）、无 token 取关务接口回 **401「未提供访问令牌」** ⇒ 容器、路由、鉴权均在线；复跑命令见下方 |
-| 关务种子已铺 | ⏳ **待 HO 日志** | `cus_*` 表与 `PL-CUS-DEMO-*` 种子只在容器启动时由 `boot_seed` 铺，外部 HTTP 看不到；唯一证据＝容器日志两行（B 段第 3 步）。**代码层全绿 ≠ 这一档成立** |
-| 设备已验 | ⏳ **待跑** | ⑮ 章 52/52 ×2 轮**全是 dev 档**；**demo 档（云托管）零设备证据**，而演示当天走的正是这条路 |
-| 分发可用 | ⏳ **待 HO** | #207 改了 `miniapp/**` ⇒ 必须重新上传并「选为体验版」取新码；⛔ 仓库里**并没有**二维码图片文件（A 段第 4 条），旧码只在 HO 侧且标注有效期至 2026-10-08 已过 |
+| 代码已合 | ✅ | PR #207 / #208 / #209 / #210 均 `MERGED`，`develop=b63b504b`；关务 4 表 9 接口、D1/D2 三页、命名统一、云端就绪自检、HO 授权留痕全部进主干 |
+| 云端代码已部署 | ✅ **2026-11-04 实测，11-07 复跑仍 4/4** | 外部只读探测：`/healthz` 200、OpenAPI 138 条路径含 **7 条 `/api/v1/customs/*`**（9 接口）、无 token 取关务接口回 **401「未提供访问令牌」** ⇒ 容器、路由、鉴权均在线；复跑命令见下方 |
+| 关务种子已铺 | ⛔ **设备侧已证「未铺」**（2026-11-07 18:01） | demo 档真实演示账号 `user_id=2 / oxLE-…-hL7dNfmX9C0` 下，关务首页 `view='ready'`、`viewHint=''`（列表请求**成功**而不是失败兜底）、`sources=3`、`list=0`；数值层 `GET /customs/declarations` 亦回 `{"items":[],"total":0}`。⇒ 不是"待确认"，是**已观测到空**。容器日志两行仍是唯一「已铺」证据，⛔ 不得由 Agent 代设变量 |
+| 设备已验 | ⚠️ **demo 档已实跑，但总判定 `NOT_RUN`** | 2026-11-07 17:53 走查 `walk-20261107-175332`：`runtime.profile='demo'` 自证齐全（SDK 3.17.2 / cfg 两份 3.17.2 / gray=stable 带来源与 mtime），**37 项断言 PASS 36 / NOT_RUN 1 / FAIL 0**，runner `rc=1`。因关务列表空，`列表→详情→归类` 分支未进入 ⇒ ⛔ **不是 52/52，也不等于"已验"**；见下节 |
+| 分发可用 | ⏳ **半程：代码包已上传，新码仍待 HO** | 2026-11-07 经 IDE 原生 MCP `upload` 成功上传开发版 `0.6.0`（885633 字节，`status=success`）；⛔ 上传 ≠ 选为体验版 ≠ 保存新码。「选为体验版 / 取新码 / 成员 ≤15」仍在 `mp.weixin.qq.com` 后台，只能 HO 做。旧码在工作区 `E:\PL-Ship-Broker\体验版二维码-至20261008.png`（17,722B / 2026-10-01，**不在 git 仓库**），标注至 2026-10-08 已过期，⛔ 不得复用 |
 
 ### 本轮只读实测（2026-11-04，Agent 执行，任何人可复跑）
 
@@ -518,6 +519,10 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
 ⇒ C 段原「HO 未明确授权前不跑全量」这一条阻塞**已解除并在此留痕**，
 但 C 仍有另外两个前置未满足（下表），⛔ 不能把「已授权」读成「已跑」。
 
+> ⚠️ **下表是 09:xx 的「可执行边界」快照，不是当前状态**：HO 于当日 17:19 打开微信开发者工具后，
+> A / C 两行已被后续实测**部分推翻或补充**（B 行结论不变）。**当前状态一律以紧随其后的
+> 「2026-11-07 17:25–18:01 实测」节和本节开头的五档表为准**，⛔ 勿再引用下表当现状。
+
 | 项 | 本轮结论 | 实测依据 |
 | --- | --- | --- |
 | **A** 上传 / 选体验版 / 取新码 | ⏳ **只能 HO 在 GUI 做** | 开发者工具 `cli -h` 可读（含 `upload`），但 `cli islogin` / `cli open --project` 均报 `Please ensure that the IDE has been properly installed`，ENOENT 落在 `…\微信web开发者工具\~\AppData\Local\…\Default\.cli`（`~` 被当字面量）；`cli cloud` 只有 `env` / `functions`，**没有云托管服务命令**。⇒ 无可用上传 / 发布 CLI 通道，且「选为体验版」「保存新码」本就是后台动作 |
@@ -535,22 +540,75 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
 - 云端代码层复跑 `python backend/scripts/check_demo_readiness.py` 仍 **4/4 PASS**。
 - HO 评审单 **§1.3 与 §5 签署栏复核仍留白**，⛔ 未代填、未预设「已确认」。
 
-### HO 需要做的三步（Agent 无法代做：动作都在云托管控制台 / 微信开发者工具 / 公众平台后台）
+### 2026-11-07 17:25–18:01 实测：IDE 打开后 A / B / C 的实际推进
+
+HO 于 17:19 打开微信开发者工具 ⇒ 设备通道恢复。以下每一条都是**本轮实测读数**，
+不是"待办清单"；⛔ 仍按五档分档，不把它们合并成「上线完成」。
+
+**通道恢复（C 的前置 ① 已满足）**：`127.0.0.1:35531` 监听，四份 User Data 的 `.ide-status=On`、
+mtime `2026-11-07 17:19:01`；`McpBackend.status()` → `ok=True`、登录用户「中象」、
+`loginExpired=false`；`SDKVersion=3.17.2`、`appId=wx4a57f29bc38ca11d`。
+凭据经 `WECHATIDE_PORT` + `WECHATIDE_TOKEN` 显式注入（沿用 `discover()` 的 env 分支，
+绕过子进程读 IDE 用户目录的已知拦截），`discover() → port=35531 / hash=env`。
+云端代码层复跑 `python backend/scripts/check_demo_readiness.py` 仍 **4/4 PASS**
+（`seed_layer_proven=False` / `device_layer_proven=False` 是脚本刻意写死，⛔ 别拿 4/4 替 HO 拍板）。
+
+| 项 | 本轮实测结论 | 判据 / 证据 |
+| --- | --- | --- |
+| **A** 上传 | ✅ **代码包已上传**，⏳ 体验版仍需 HO | IDE 原生 MCP `tools/list` 共 47 个工具，其中**确有 `upload`** ⇒ 推翻 09:xx 表「无可用上传通道」的结论（那条只适用于 `cli`）。首次 `upload` 回 `pending` 后 `user_denied` —— 是**确认弹窗生命周期绑在请求方连接**上、连接退出即自动拒绝（项目已知坑），**不是 HO 主动拒绝**；改用保活长连接重跑后：`status=success` / `execution_success` / `upload-version=0.6.0` / `size.total=885633`。⛔ `upload` 只把代码包传到「开发版本」；「选为体验版 + 保存新码 + 成员 ≤15」仍在 `mp.weixin.qq.com` 后台。`create_preview_qrcode` / `auto_preview` 产出的是**预览码**，⛔ 与体验版分发不等价 |
+| **B** 两条变量 + 重部署 | ⛔ **未做（变量仍只能 HO 在控制台设）**；但「当前没铺种子」已由设备侧**坐实** | 用 IDE token 直连云托管：`GET /api/v1/auth/me` 200 → `user_id=2` / `openid=oxLE-3R72-BKYUGJ-hL7dNfmX9C0`；`GET /customs/sources` 200；`GET /customs/declarations` 200 → `{"items":[],"total":0,"query":{"no":null}}`。设备侧只读复测（恢复 HO 登录态后）：关务首页 `view='ready'`、`viewHint=''`（**列表请求成功**，不是失败兜底）、`officialUnavailable=true`、`manualAvailable=true`、`sources=3`、`list=0`、`[data-act-cus-item="1"]` 计数 0、`checkedAt='2026-11-07 18:01'`。此时**本地 8000 端口 CLOSED**、`env.js` 仍 `demo` ⇒ 流量只能走 `wx.cloud.callContainer`。⇒ B 的结论从「待 HO 日志」升级为「**已观测到空**」；容器日志两行仍是唯一「已铺」证据 |
+| **C** demo 档 §15 走查 | ⚠️ **已跑，总判定 `NOT_RUN`（不是通过）** | `python scripts/run_walkthrough_devtools.py --section 15 --skip-ide --work miniapp-device-artifacts/_demo15`；产物 `walk-20261107-175332`。`summary.json` 的 `runtime`：`profile='demo'` / `channel=mcp` / `SDKVersion=3.17.2` / `libVersionCfg={shared:3.17.2, private:3.17.2}` / `libVersionGray.verdict='stable'`（带 `WeappVendor\cfg.json` 来源与 mtime）。**37 项断言：PASS 36 / NOT_RUN 1 / FAIL 0 / console error 0**，`verdict=NOT_RUN`、runner `rc=1`。唯一的 NOT_RUN ＝「⑮ 关务列表 → 详情 · 时间线两列」，原因是列表空态没有对象可点 ⇒ **`列表→详情→归类` 整条分支未进入**，所以本次是 **37 项而不是 dev 档 52 项**，⛔ 两者不可直接比较、更不能写成 52/52 |
+
+⭐ **身份链路（本轮澄清，⛔ 别再当成阻塞）**：`login_as("seed-shipper")` 会清 `access_token`。
+但 demo 档走 `wx.cloud.callContainer`，微信平台注入 `x-wx-openid`，后端
+`backend/app/modules/auth/service.py::resolve_identity()` 在 `CLOUD_OPENID_TRUSTED=true` 且
+非 Mock 时**优先采信平台注入身份** ⇒ 重新登录仍落到真实演示账号 `user_id=2 / oxLE-…`，
+`user_info` 与走查前逐字一致，`access_token` 换新只是**同一用户重新签发**（实测 305→305 内容不同，
+已用备份还原 HO 原值）。之前记录的「`/auth/login` 带 `seed-shipper` 回 401」发生在**公网直连、
+没有平台注入头**的探测里，与 demo 档链路不是一回事。⇒ §15 demo 档的空态读数**确实属于 HO 演示账号**。
+
+⭐ **本轮发现的判据盲区**：`home.js` 对「列表 0 条」与「列表请求失败」都渲染成 `list=[]`，
+区别只在 `viewHint`（失败时为「登记记录暂时取不到…」）。原判据只数
+`[data-act-cus-item="1"]`，**分不清这两种空态**。已在 `scripts/verify_miniapp_devtools.py`
+的 `n_rec==0` 分支补一条判据：先断言 `viewHint==''`，非空则必须报 FAIL 而不是把环境故障
+写成「本账号没有记录」的 NOT_RUN。dev 档有种子时走不到该分支 ⇒ 52/52 基线不变。
+  ⚠️ **not-run ≠ 通过**：本节归档的 37 项证据来自**加守卫之前**的脚本；新判据目前只过了
+  `py_compile` ＋ CI 口径 `ruff check` / `ruff format --check`，**尚未在设备上跑过**。
+  待 B 完成后重跑 §15 时一并取证（正控＝`viewHint==''` 记 PASS；负控＝列表失败时
+  `viewHint` 非空记 FAIL + ENV_BLOCKED）。
+
+⚠️ **诚实边界**：C 是在 **B 的两行日志仍未回传**（E-0.11 自定前置 ②）的情况下跑的 ——
+依据是 HO「余下待开发事项请继续推进」的指令，且 A 不是 C 的前置。结果恰好是 NOT_RUN，
+**反过来复证了 B 的必要性**。⛔ 本轮不计「设备已验」，不改判据迁就，不刷绿；
+B 完成前 demo 档台账只能写「已实跑 / 未达」。
+
+- 证据：`docs/entrust/evidence/2026-11-07-section-15-demo/`（`summary.json`、走查权威日志、
+  5 张截图、只读复测读数）；索引 `DEMO-1-evidence-index.md`。
+- 收尾：IDE 登录态已按备份还原、`miniapp/config/env.js` 仍是 `demo`、工作区 `git status` 干净。
+- 签署栏：HO 评审单 §0 / §1.3 / §5 **仍全部留白**，本轮未代填。
+
+### HO 需要做的三步（剩余动作都在云托管控制台 / 公众平台后台；A 的上传已由 Agent 完成）
 
 **A. 小程序侧：重新上传并取新码**（对应「下一步 2」）
 
 1. 微信开发者工具打开 `miniapp/`，确认 `miniapp/config/env.js` 的 `RUNTIME_PROFILE='demo'`（仓库当前值，⛔ 别停在 `dev`）；
-2. 右上角「上传」→ 填版本号与备注（写明 #207：命名统一「向海通」+ 智慧关务 D1/D2）；
+2. ~~右上角「上传」~~ ✅ **已完成（Agent，2026-11-07 17:40）**：经 IDE 原生 MCP `upload`
+   上传开发版 `0.6.0`（885633 字节，`status=success`），备注写明 #207 命名统一「向海通」+
+   智慧关务 D1/D2、#208–#210 演示交接、`RUNTIME_PROFILE=demo`。
+   ⚠️ 首次触发被自动 deny 是**确认弹窗随请求连接关闭**（项目已知坑），用保活长连接重跑即成，
+   ⛔ 不是 HO 拒绝。旧结论「`cli` 无法上传 ⇒ A 全部只能 HO GUI」**已被推翻**：`cli` 不通，
+   但 IDE 原生 MCP 的 `upload` 通；**只有第 3–5 步仍是 HO 的后台动作**。
 3. `mp.weixin.qq.com` → 版本管理 → 把刚上传的开发版本「**选为体验版**」→ 保存弹出的**新二维码**；
 4. ⚠️ 旧二维码**立即失效**（换版流程见 `docs/miniapp-release-conditions.md` §0.2 第 ③ 步）；
    ⛔ **不要复用旧码**：文件在 `E:\PL-Ship-Broker\体验版二维码-至20261008.png`（**工作区文件、
    不在 git 仓库**，17,722 字节 / 2026-10-01，标注有效期至 2026-10-08 已过）。
    新码取回后由 HO 自行保存，⛔ 别写成「仓内那份」，也别再写成「文件不存在」；
 5. 成员管理 → 体验成员：确认评审名单仍在**个人主体 15 人上限**内，新码只发给名单内的人（第 ④ 步红线）。
-6. ⚠️ **2026-11-07 实测**：本机开发者工具 CLI **无法完成上传**（`islogin` / `open --project`
-   均报 `Please ensure that the IDE has been properly installed`，见上表）⇒ 第 2 步必须由 HO
-   在一台能正常运行的微信开发者工具里点「上传」，Agent 代做不了；「选为体验版 + 保存新码」
-   同样只能在 `mp.weixin.qq.com` 后台完成。
+6. ⚠️ **2026-11-07 17:40 更正**：`cli islogin` / `cli open --project` 仍报
+   `Please ensure that the IDE has been properly installed`（ENOENT 落在 `~\AppData\...\.cli`），
+   但**这已不再是 A 的阻塞** —— 上传已由 IDE 原生 MCP 完成（见第 2 步）。
+   ⇒ HO 现在**只需要做第 3–5 步**：`mp.weixin.qq.com` 版本管理「选为体验版」→ 保存新码 →
+   核对体验成员 ≤15。⛔ `create_preview_qrcode` / `auto_preview` 是预览码，不能冒充体验版分发。
 
 **B. 云端侧：两条变量 + 重部署**（对应「下一步 3」）
 
@@ -560,6 +618,12 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
      `BIND_DEMO_IDENTITY` 过继，填错会新建账号 ⇒ 数据挂在没人登录的 `user_id` 下（「功能正常但列表全空」）。
      **取得方式**：HO 用演示微信号在 IDE / 体验版登录后读 `GET /api/v1/auth/me` 的 `user_info.openid`
      （或服务端登录日志的 `x-wx-openid`）；⛔ 由 Agent 猜测或沿用本地 `mock-openid-seed-*` 一律无效。
+     ⭐ **2026-11-07 17:3x 已由 Agent 实测读到候选值**：用 IDE 当前登录态直连云托管
+     `GET /api/v1/auth/me` → `user_id=2` / `openid=oxLE-3R72-BKYUGJ-hL7dNfmX9C0`
+     （设备侧 `user_info` 亦为同一 openid，`nickname=演示货主`）。⇒ HO 可直接核对并填这一条，
+     ⛔ 但**仍以 HO 在控制台亲自确认为准**：Agent 不代设云环境变量、不代触发重部署、
+     不把「候选值已给出」说成「变量已生效」。同一身份下 `GET /customs/declarations` 实测
+     `items=[] / total=0` ⇒ 这就是当前「铺种子要挂的那个 owner」。
 2. 触发一次部署（**#207 合并后的构建已完成，2026-11-04 实测关务路由在线**；但两条变量是
    **新加的**，必须在设置后再触发一次部署，`boot_seed` 才会在启动时读到它们）。
    ⚠️ `GET /healthz` 200 只证明容器活着，**不证明种子已铺** —— 别把这一步当验收。
@@ -571,30 +635,41 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
 
 **C. 设备侧：demo 档走查**（对应「下一步 4」，Agent 执行，**须等 B 完成；A 不是它的前置**）
 
-- 前置（**2026-11-07 复核**）：
-  ① IDE 原生 MCP **端口需重新监听** —— 本轮 35531 `WinError 10061` 无监听、`cli open` 未拉起 IDE
-     ⇒ 这一格**当前不满足**（`discover()` 能读到配置 ≠ 服务在跑；4 份 `.ide` 都是 11-04 的历史快照）；
-  ② B 的两行日志齐全（关务种子）—— **当前未满足**；
-  ③ `RUNTIME_PROFILE=demo`（仓库当前值，实测）且 demo 档**登录态**在 IDE 里成形 —— 尚未验。
+- 前置（**2026-11-07 17:25–18:01 复核**）：
+  ① IDE 原生 MCP 端口 35531 **已重新监听**、`status ok=True`、`loginExpired=false` ⇒ ✅ **已满足**
+     （09:xx 的 `WinError 10061` 是 HO 打开 IDE 之前的历史读数）；
+  ② B 的两行日志齐全（关务种子）—— ⛔ **仍未满足**，且本轮已由设备侧坐实「当前没铺」；
+  ③ `RUNTIME_PROFILE=demo`（仓库当前值，实测）且 demo 档登录态在 IDE 里成形 ⇒ ✅ **已满足**
+     （`user_id=2 / oxLE-…`，平台注入 `x-wx-openid` 优先，见上节身份链路）。
   ⚠️ **不需要 A 的新码**：C 驱动的是开发者工具里的小程序实例，不扫体验版二维码；
   新码属于「分发可用」那一档，别把两档绑在一起。
 - ✅ **写云端授权已收到（HO 2026-11-07）**：「允许 §15 demo 档走查写入云端演示库」。
   ⑮ 章含「发起归类建议」POST（`scripts/verify_miniapp_devtools.py` 点发起后等结果块），
   demo 档下会写云端演示库；跑的时候仍要在证据里注明「本轮写过演示库」及所写对象。
   ⛔ 授权只解除这一条，**不解除** ①② 两个前置。
-- 本轮执行状态：**未跑**（B 日志未回传 ＋ IDE MCP 端口无监听）。台账保持「未做」，⛔ 不刷绿。
-  HO 完成 B 并让 IDE 的 MCP 服务起来后，Agent 可直接跑下面命令，**无需再请示一次授权**。
+- **本轮执行状态（2026-11-07 17:53–17:56）：已实跑，未达** ——
+  `walk-20261107-175332` 得 **PASS 36 / NOT_RUN 1 / FAIL 0**（37 项），`verdict=NOT_RUN`、rc=1。
+  前置 ② 未满足仍开跑，依据是 HO「余下待开发事项请继续推进」；结果恰好停在
+  「关务列表 → 详情 · 时间线两列」的 NOT_RUN，**反向复证 B 是硬前置**。
+  ⛔ 台账写「已实跑 / 未达」，⛔ 不写「已验」、`not-run ≠ 通过`。
+  B 完成且两行日志回传后，Agent 可直接重跑下面命令，**无需再请示一次授权**。
 - 命令骨架（走 IDE 原生 MCP 通道；`--skip-ide` 复用**已在跑且已授权**的实例；
   内层 `verify_miniapp_devtools.py` 不起后端 ⇒ ⛔ 必须走 runner）：
   `python scripts/run_walkthrough_devtools.py --section 15 --skip-ide`
-- 判据：① `summary.json` 的 `runtime.profile == "demo"` —— **这是本轮唯一目的：把演示当天走的那条路补上证据**；
-  ② ⑮ 章判据全绿（dev 档基线 **52/52**）；③ `runtime` 的 `SDKVersion` / `libVersionCfg` / `libVersionGray`
-  环境自证齐全，`libVersionGray=unknown` 属已知缺口，**如实登记，⛔ 不得写成 stable**。
-- ⚠️ **诚实边界**：这是**待执行清单，不是已验证的配方**。demo 档首次跑很可能与 dev 档出现差异
-  （真实 openid 形态、云端模型可达性、种子数据 owner 归属等）；若出现 FAIL，逐条核对原因，
-  ⛔ **不得直接刷绿或改判据迁就**，必要时把「本轮未达项」单列进台账。
-- 证据入 `docs/entrust/evidence/2026-11-04-section-15-demo/`，并登记到 `DEMO-1-evidence-index.md`。
-- ⛔ 未跑之前，demo 档台账只能写「**未做**」；`not-run ≠ 通过`。
+- 判据：① `summary.json` 的 `runtime.profile == "demo"` —— 本轮**已满足**；
+  ② ⑮ 章判据全绿 —— ⛔ **本轮未达**（dev 档基线 52/52 是「有种子」时的完整分支数，
+  demo 档列表空 ⇒ 详情/归类分支进不去，只有 37 项，两者不可直接比较）；
+  ③ `runtime` 的 `SDKVersion` / `libVersionCfg` / `libVersionGray` 环境自证齐全 —— 本轮**已满足**
+  （`libVersionGray.verdict='stable'` 且带 `cfg.json` 来源与 mtime；`unknown` 属已知缺口，⛔ 不得复述成 stable）。
+  ④ **本轮新增**：空态时 `viewHint==''` 才允许判「无记录」，非空＝列表接口失败，必须 FAIL。
+- ⚠️ **诚实边界（配方已验证，结果仍未达）**：本轮把上面这份清单**照着跑了一遍**，
+  配方本身可用（`--skip-ide` + IDE 原生 MCP + 显式注入凭据）。与 dev 档的差异如实测所料，
+  但**差异不在登录态**（平台注入 `x-wx-openid` 已兜住），而在**云端没有本账号可见的关务种子**
+  ⇒ 列表空态 ⇒ 详情/归类分支进不去 ⇒ `NOT_RUN`。本轮**没有**刷绿、**没有**改判据迁就结果；
+  只补了一条「空态不许伪装成接口失败」的**更严**判据。FAIL/NOT_RUN 逐条留在证据索引里。
+- 证据已入 `docs/entrust/evidence/2026-11-07-section-15-demo/`，并登记到 `DEMO-1-evidence-index.md`
+  （原始产物在 gitignore 的 `miniapp-device-artifacts/_demo15/`，⛔ 别把那条路径当仓内证据）。
+- ⛔ **C 达成之前**，demo 档台账只能写「已实跑 / 未达」；`not-run ≠ 通过`。
 
 ### 一条待复核的部署声明（对应「下一步 5」）
 
