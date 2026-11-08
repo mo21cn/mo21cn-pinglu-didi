@@ -137,13 +137,19 @@
 
 ## 7. 演示前 5 分钟检查单
 
-1. **先认清档位**（⛔ 这一步错了后面全错）：演示手机走 `demo` 档云托管，
-   `miniapp/config/env.js` 的 `RUNTIME_PROFILE='demo'`（`USE_CLOUD=true` ⇒ `wx.cloud.callContainer`）。
-   验活要用云端地址 `https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com/healthz`
-   → `{"status":"ok","env":"production"}`；**⛔ `curl http://127.0.0.1:8000/healthz` 只适用于
-   本机 `dev` 档走查**，对演示手机没有任何意义（本机后端甚至可能是关的）。
-   可复跑 `python backend/scripts/check_demo_readiness.py`（只读 4 项，2026-11-07 复跑仍 4/4 PASS，
-   ⚠️ 它的 `seed_layer_proven` / `device_layer_proven` 恒为 False，别拿 4/4 当数据已就绪）；
+1. ⛔ **第一步先确认云托管环境没有被隔离**（2026-11-08 新增，优先级高于档位判断）：
+   访问 `https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com/healthz`。
+   **2026-11-08 09:3x 实测回 `HTTP 402 {"code":"ENV_ISOLATED"}`** ⇒ 环境套餐到期 / 欠费被
+   CloudBase 隔离，连 `wx.cloud.callContainer` 也回 402，**演示手机当前连不上后端**。
+   官方解法只有 HO 去 `https://tcb.cloud.tencent.com/dev` 查状态并**续费**
+   （见工作单 **E-0.11「2026-11-08 实测」节**）。⛔ 这一条不过，下面 2–7 条全部无效。
+   环境恢复后该地址应回 `{"status":"ok","env":"production"}`。
+   然后认清档位：演示手机走 `demo` 档云托管，
+   `miniapp/config/env.js` 的 `RUNTIME_PROFILE='demo'`（`USE_CLOUD=true` ⇒ `wx.cloud.callContainer`）；
+   ⛔ `curl http://127.0.0.1:8000/healthz` 只适用于本机 `dev` 档走查，对演示手机没有任何意义。
+   可复跑 `python backend/scripts/check_demo_readiness.py`（只读 4 项；11-07 曾 4/4 PASS，
+   **11-08 已降级为 3 FAIL / 1 PASS「代码层已部署：否」** ⇒ 拿它判断环境是否恢复；
+   ⚠️ 它的 `seed_layer_proven` / `device_layer_proven` 恒为 False，别拿 PASS 当数据已就绪）；
 2. **云端演示库里要有 2 条关务记录**（`PL-CUS-DEMO-0001` 在建、`0002` 已放行）——
    **2026-11-07 18:01 实测：当前是 0 条**。用 IDE 登录态读
    `GET /api/v1/customs/declarations` 得 `{"items":[],"total":0}`；设备侧关务首页
@@ -151,7 +157,9 @@
    ⛔ **跑本地 `python backend/scripts/seed_customs_demo.py` 修不了这个问题**：它写的是本机
    sqlite，demo 档连的是云托管 MySQL，两条路互不相通（2026-11-07 走查里本地明明铺了 2 条、
    设备侧依旧空态，已实证）。
-   **唯一通路**：HO 给云托管加 `DEMO_DATA_STORE=true` ＋
+   ⛔ **2026-11-08 前置**：环境已被 `ENV_ISOLATED` 隔离，**先按第 1 条续费解除隔离**，
+   否则设变量 / 重部署都不生效（网关直接 402）。
+   **唯一通路**（环境恢复后）：HO 给云托管加 `DEMO_DATA_STORE=true` ＋
    `SEED_CUSTOMS_OWNER=oxLE-3R72-BKYUGJ-hL7dNfmX9C0`
    （2026-11-07 用 IDE 登录态实测 `GET /api/v1/auth/me` → `user_id=2`；
    ⛔ 仍以 HO 控制台核对为准）并**重部署**，再回传容器日志两行 ——
@@ -167,7 +175,10 @@
    那两张（首页状态条 / 详情时间线）是 **dev 档**，投屏时要标明档位，⛔ 别当成演示手机实测。
    ⚠️ demo 档这一轮**没有详情/时间线截图**（列表空 ⇒ 分支没进去），缺口如实说。
 6. **体验版二维码与成员名单**：#207 含 `miniapp/**` 改动 ⇒ 必须重新上传并「选为体验版」，
-   ⛔ 旧码立即失效。**2026-11-07 精确复核**：旧码文件在
+   ⛔ 旧码立即失效。⭐ **2026-11-08 09:22:04 代码发布审核结果「已通过审核」**（提交版本 `0.6.0`，
+   小程序「智丘科技」）⇒ ⛔ **审核通过 ≠ 已发布 ≠ 已上线**：审核结果页仍提示「前往发布」，
+   正式发布属 HO 拍板项；体验版「选为体验版 + 保存新码」是另一条路，不会因审核通过自动完成。
+   **2026-11-07 精确复核**：旧码文件在
    `E:\PL-Ship-Broker\体验版二维码-至20261008.png`（**工作区，不在 git 仓库**；17,722 字节 /
    2026-10-01，标注有效期至 2026-10-08 已过）⇒ **不要复用**，也别再写成「文件不存在」或「仓内那份」。
    ⚠️ **2026-11-07 17:40 更正**：`cli islogin` / `open` 确实仍报 IDE 未正确安装，
@@ -181,6 +192,8 @@
    关务种子，列表空态 ⇒ 详情/归类分支未进入。⇒ **demo 档已有设备证据，但仍不是「已验」**；
    ⛔ 不得写成 52/52、不得把 `NOT_RUN` 刷绿，也不得把「代码已合」说成「上线完成」。
    B 段两条变量重部署 + 容器日志两行回传后需重跑一轮才算达成（见 E-0.11 C 段）。
+   ⛔ **2026-11-08 起云托管环境被 `ENV_ISOLATED` 隔离（402）**：HO 续费解除隔离前，
+   demo 档重跑只会得到错误页 ⇒ 不做无效跑、不计「已验」、不改判据迁就。
 
 ---
 
