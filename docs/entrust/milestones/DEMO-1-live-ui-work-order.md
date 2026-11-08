@@ -484,16 +484,18 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
 **PR #207 已于 2026-11-04 08:02 UTC squash 合并进 `develop`**（merge commit `3e1930bb`，parent `49ef1a8`，合并前 CI **6/6 success**）；
 **PR #208 于 08:13 UTC 合并**（`develop=b268c392`）、**PR #209 于 2026-11-07 09:01 UTC 合并**
 （`develop=4d08611d`）、**PR #210 于 2026-11-07 09:23:14 UTC 合并**
-（`develop=b63b504b0e09a0e3d0d39066ea76e526c044460a`），各 CI **6/6 success**。
+（`develop=b63b504b0e09a0e3d0d39066ea76e526c044460a`）、**PR #211 于 2026-11-08 01:30:57 UTC 合并**
+（`develop=6669bfa1a284099e0df2af759a79477d81bc4a0d`），各 CI **6/6 success**。
 按档如实登记，⛔ **不把「代码已合」说成「上线完成」**，也**不把「云端代码已部署」说成「演示数据已就绪」**：
 
 | 档 | 状态 | 判据 / 证据 |
 | --- | --- | --- |
-| 代码已合 | ✅ | PR #207 / #208 / #209 / #210 均 `MERGED`，`develop=b63b504b`；关务 4 表 9 接口、D1/D2 三页、命名统一、云端就绪自检、HO 授权留痕全部进主干 |
-| 云端代码已部署 | ✅ **2026-11-04 实测，11-07 复跑仍 4/4** | 外部只读探测：`/healthz` 200、OpenAPI 138 条路径含 **7 条 `/api/v1/customs/*`**（9 接口）、无 token 取关务接口回 **401「未提供访问令牌」** ⇒ 容器、路由、鉴权均在线；复跑命令见下方 |
-| 关务种子已铺 | ⛔ **设备侧已证「未铺」**（2026-11-07 18:01） | demo 档真实演示账号 `user_id=2 / oxLE-…-hL7dNfmX9C0` 下，关务首页 `view='ready'`、`viewHint=''`（列表请求**成功**而不是失败兜底）、`sources=3`、`list=0`；数值层 `GET /customs/declarations` 亦回 `{"items":[],"total":0}`。⇒ 不是"待确认"，是**已观测到空**。容器日志两行仍是唯一「已铺」证据，⛔ 不得由 Agent 代设变量 |
-| 设备已验 | ⚠️ **demo 档已实跑，但总判定 `NOT_RUN`** | 2026-11-07 17:53 走查 `walk-20261107-175332`：`runtime.profile='demo'` 自证齐全（SDK 3.17.2 / cfg 两份 3.17.2 / gray=stable 带来源与 mtime），**37 项断言 PASS 36 / NOT_RUN 1 / FAIL 0**，runner `rc=1`。因关务列表空，`列表→详情→归类` 分支未进入 ⇒ ⛔ **不是 52/52，也不等于"已验"**；见下节 |
-| 分发可用 | ⏳ **半程：代码包已上传，新码仍待 HO** | 2026-11-07 经 IDE 原生 MCP `upload` 成功上传开发版 `0.6.0`（885633 字节，`status=success`）；⛔ 上传 ≠ 选为体验版 ≠ 保存新码。「选为体验版 / 取新码 / 成员 ≤15」仍在 `mp.weixin.qq.com` 后台，只能 HO 做。旧码在工作区 `E:\PL-Ship-Broker\体验版二维码-至20261008.png`（17,722B / 2026-10-01，**不在 git 仓库**），标注至 2026-10-08 已过期，⛔ 不得复用 |
+| 代码已合 | ✅ | PR #207–#211 均 `MERGED`，`develop=6669bfa1`（该提交 CI 6/6）；关务 4 表 9 接口、D1/D2 三页、命名统一、云端就绪自检、HO 授权留痕、A/B/C 实测回填与判据守卫全部进主干 |
+| ⛔ **环境可用**（11-08 新增，最高优先） | ⛔ **环境隔离，服务不可达** | 2026-11-08 09:3x：云托管 `prod-d0ga9bxi6e4226222` 所有路径回 `HTTP 402 {"code":"ENV_ISOLATED"}`，`wx.cloud.callContainer` 亦回 402 ⇒ **演示手机当前连不上后端**。官方释义＝「环境套餐到期未续费 / 欠费」，解法只有 HO 去 `https://tcb.cloud.tencent.com/dev` 查状态并**续费**。⛔ 此档不过，B / C 全部不生效；详见下方「2026-11-08 实测」节 |
+| 云端代码已部署 | ⚠️ **历史 4/4 PASS 已失效** | 2026-11-04 首测、11-07 复跑 4/4 PASS（`/healthz` 200、OpenAPI 138 路径含 **7 条 `/api/v1/customs/*`**、无 token 回 401）证明**当时**容器/路由/鉴权在线；**2026-11-08 复跑降级为 3 FAIL / 1 PASS，脚本结论「代码层已部署：否」**。⛔ 不是代码回退，是环境被隔离；不得再引用旧 4/4 当现状 |
+| 关务种子已铺 | ⛔ **设备侧已证「未铺」**（11-07 18:01）；且当前无法重部署 | demo 档真实演示账号 `user_id=2 / oxLE-…-hL7dNfmX9C0` 下，关务首页 `view='ready'`、`viewHint=''`（列表请求**成功**而不是失败兜底）、`sources=3`、`list=0`；数值层 `GET /customs/declarations` 亦回 `{"items":[],"total":0}`。⇒ 不是"待确认"，是**已观测到空**。容器日志两行仍是唯一「已铺」证据；11-08 环境隔离期间连设置变量与重部署都做不到 |
+| 设备已验 | ⚠️ **demo 档已实跑，但总判定 `NOT_RUN`** | 2026-11-07 17:53 走查 `walk-20261107-175332`：`runtime.profile='demo'` 自证齐全（SDK 3.17.2 / cfg 两份 3.17.2 / gray=stable 带来源与 mtime），**37 项断言 PASS 36 / NOT_RUN 1 / FAIL 0**，runner `rc=1`。因关务列表空，`列表→详情→归类` 分支未进入 ⇒ ⛔ **不是 52/52，也不等于"已验"**；11-08 环境隔离期间无法补跑 |
+| 分发可用 | ⏳ **半程：0.6.0 审核已过 + 代码包已上传，发布/新码仍待 HO** | ⭐ **2026-11-08 09:22:04 代码发布审核结果「已通过审核」**（提交版本 `0.6.0`，提交时间 11-07 18:35:05，小程序「智丘科技」）⇒ ⛔ **审核通过 ≠ 已发布 ≠ 已上线**：页面仍提示「前往发布」，正式发布属 HO 拍板项。体验版侧：代码包已由 IDE 原生 MCP `upload` 上传（885633 字节、`status=success`），但「选为体验版 / 保存新码 / 成员 ≤15」仍在 `mp.weixin.qq.com` 后台。旧码在工作区 `E:\PL-Ship-Broker\体验版二维码-至20261008.png`（17,722B / 2026-10-01，**不在 git 仓库**），标注至 2026-10-08 已过期，⛔ 不得复用 |
 
 ### 本轮只读实测（2026-11-04，Agent 执行，任何人可复跑）
 
@@ -511,6 +513,11 @@ CMD ["sh", "-c", "python migrate.py && (python boot_seed.py &) && exec uvicorn a
 
 > 这条自检**故意把「种子层 / 设备层」写死为 False**：`DEMO_DATA_STORE` / `SEED_CUSTOMS_OWNER`
 > 是否生效、`cus_*` 四表是否建出，只有控制台与容器日志能证。别让一次漂亮的 4/4 PASS 替 HO 拍板。
+>
+> ⛔ **2026-11-08 状态更新**：上面这段 4/4 是 **11-04 / 11-07 的历史读数**。
+> 11-08 复跑因环境隔离降级为 **3 FAIL / 1 PASS（「代码层已部署：否」）**，见下方
+> 「2026-11-08 实测」节与 `docs/entrust/evidence/2026-11-08-env-isolated/`。
+> ⛔ 勿再把这段 4/4 当现状。
 
 ### 2026-11-07 复核：HO 授权留痕 + Agent 可执行边界（本轮实测）
 
@@ -587,7 +594,78 @@ B 完成前 demo 档台账只能写「已实跑 / 未达」。
 - 收尾：IDE 登录态已按备份还原、`miniapp/config/env.js` 仍是 `demo`、工作区 `git status` 干净。
 - 签署栏：HO 评审单 §0 / §1.3 / §5 **仍全部留白**，本轮未代填。
 
-### HO 需要做的三步（剩余动作都在云托管控制台 / 公众平台后台；A 的上传已由 Agent 完成）
+### 2026-11-08 09:29–09:38 实测：0.6.0 审核通过 ＋ 云托管环境隔离（本轮最高优先阻塞）
+
+**HO 于 2026-11-08 授权 / 告知 5 条**：① 合并 PR #211（✅ 已完成，`develop=6669bfa1`，CI 6/6）；
+② `0.6.0` 版本**已通过代码发布审核**；③「**云托管设置你可代办**」；④⑤ 同意执行上一轮「下一步 4、5」。
+⇒ ③ 的授权在此留痕；但本轮实测发现一个**比「变量没设」高一级的阻塞**，③④⑤ 的处置如实列在下面，
+⛔ 不虚报「已代办」、不宣称上线、不代填签署栏。
+
+**事实 1 · 审核通过 ≠ 已发布 ≠ 已上线**：HO 提供的「代码发布审核结果」截图读数 ——
+小程序「智丘科技」、**发布审核结果：代码发布已通过审核**、提交时间 `2026-11-07 18:35:05`、
+提交版本 `0.6.0`、审核时间 `2026-11-08 09:22:04`；页面底部仍有「**前往发布**」入口。
+⇒ 这只证明**代码包过了平台审核**，发布动作尚未发生；正式发布属 HO 拍板项
+（见 `docs/miniapp-release-conditions.md` §0 判定表「提交审核 / 面向公众正式上线」）。
+体验版分发的「选为体验版 / 保存新码」是**另一条路**，不因审核通过而自动完成。
+
+**事实 2 · 环境隔离（决定性）**：2026-11-08 09:3x 外部只读探测，云托管
+`https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com` 的
+`/healthz` `/openapi.json` `/api/v1/customs/sources` `/` `/docs` **全部**返回：
+
+```
+HTTP 402
+{"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated.
+For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED",
+"requestId":"..."}
+```
+
+响应头 `server: cbrgw` ⇒ **CloudBase Run 网关层**，不是应用返回的错误。
+`python backend/scripts/check_demo_readiness.py` 从 11-07 的 **4/4 PASS 降级为 3 FAIL / 1 PASS**
+（结论「代码层已部署：否」、`rc=1`；唯一 PASS 是本地 `RUNTIME_PROFILE='demo'`）。
+⭐ 更关键：在 IDE 小程序页面上下文按产品真实参数直发 `wx.cloud.callContainer`
+（`config.env=prod-d0ga9bxi6e4226222` / `X-WX-SERVICE=pinglu-backend` / `GET /api/v1/customs/sources`）
+同样得到 `statusCode: 402` 且 body 为 `ENV_ISOLATED`
+⇒ **不是公网直连被挡，是整个环境不可用；`demo` 档演示手机当前连不上后端**。
+（IDE 侧 `status ok=True` / `loginExpired=false`；`simulator_refresh` 是热重载、`onShow` 不重跑，
+残留的 `view='ready'` / `checkedAt='2026-11-07 18:01'` **不能**当作「云端还通」的证据。）
+
+**官方释义**（`docs.cloudbase.net/error-code/ENV_ISOLATED`）：
+> 「环境已到期隔离，无法正常访问服务。可能的原因：1. 环境套餐到期，未及时续费；2. 环境欠费。」
+> 解法：前往云开发控制台 `https://tcb.cloud.tencent.com/dev` 查看环境状态与到期时间，
+> 对环境**续费**，环境恢复后再重新发起请求。
+
+**「云托管设置你可代办」的实测边界（授权已收，当前不可执行）**：
+- 历史依据确实存在：`E:\PL-Ship-Broker\云端部署执行记录-20260923.md` 开头写明
+  「执行人：**AI（代 HO 侧控制台操作）**」「证据来源：控制台页面读数（**脚本驱动 Chrome**）…」，
+  所以 HO 的授权不是凭空提出。
+- 但 2026-11-08 实测本机：无 `cloudbase` / `tcb` CLI；环境变量中无腾讯云 API 凭据
+  （仅 `TENCENT_DOCS_LOCAL_*` 两个无关项）；无 `~/.cloudbase` / `~/.config/cloudbase` / `.cloudbaserc.json`
+  登录态；`tencentcloud` Python SDK 未安装；Chrome 已装但**未开 9222 调试端口**、
+  14 个进程属 HO 日常窗口，`playwright` / `selenium` 均未安装 ⇒ 09-23 那条浏览器代办通道**当前不可用**。
+- 且**续费是账号支付动作**，只能 HO 本人完成；环境隔离期间，改环境变量与触发重部署都不会生效
+  （网关直接 402）。⇒ 本轮不宣称「变量已设」「已重部署」，也不去动 HO 的 Chrome 进程。
+- 环境恢复后，若 HO 提供腾讯云 API 密钥（或开启可驱动的浏览器通道），Agent 可据此代办
+  「设两条变量 + 触发重部署」，授权无需再请示一次。
+
+**HO 恢复清单（按顺序，前一步不过下一步无效）**：
+1. `https://tcb.cloud.tencent.com/dev` → 查 `prod-d0ga9bxi6e4226222` 状态与到期时间 → **续费 / 解除隔离**
+   （⛔ 这是唯一能消除 `ENV_ISOLATED` 的动作，Agent 代不了）；
+2. 复跑 `python backend/scripts/check_demo_readiness.py`，确认回到 **4/4 PASS** 且 `/healthz` 200；
+3. 云托管服务 `pinglu-backend` → 环境变量新增 `DEMO_DATA_STORE=true` 与
+   `SEED_CUSTOMS_OWNER=oxLE-3R72-BKYUGJ-hL7dNfmX9C0`（候选值来源见 B 段）→ **触发一次重部署**；
+4. 回传容器日志两行 `SEED_CUSTOMS_OWNER 已显式设置` / `关务演示数据就绪` ⇒ B 才算完成。
+
+**第 4、5 条授权的处置（如实登记，⛔ 不做无效动作）**：
+- **第 4 条「B 完成后重跑 §15」：本轮不跑**。环境 402 下跑只会得到错误页，是无效证据；
+  且 B 未落地 ⇒ 详情 / 归类仍无对象可点。待续费 + B 完成后重跑，并一并给新增的 `viewHint==''`
+  守卫取设备正控 / 负控（该守卫目前仍只有静态门禁证据）。
+- **第 5 条「HO 签署后收口台账」：本轮不收口**。评审单 §0 / §1.3 / §5 仍留白（HO 未签署、不代填），
+  且新增「环境隔离」硬阻塞 ⇒ 台账按**新增阻塞档**登记，⛔ 不写「已上线」。
+
+- 证据：`docs/entrust/evidence/2026-11-08-env-isolated/`；索引 `DEMO-1-evidence-index.md` **§3.21**。
+- 收尾：本轮全程只读探测，未改 IDE 登录态、未改 `env.js`、未写云端、未触碰 HO 的 Chrome。
+
+### HO 需要做的动作（⛔ 先做「第 0 步：续费解除隔离」，否则下面 A / B / C 全部不生效）
 
 **A. 小程序侧：重新上传并取新码**（对应「下一步 2」）
 
@@ -611,6 +689,12 @@ B 完成前 demo 档台账只能写「已实跑 / 未达」。
    核对体验成员 ≤15。⛔ `create_preview_qrcode` / `auto_preview` 是预览码，不能冒充体验版分发。
 
 **B. 云端侧：两条变量 + 重部署**（对应「下一步 3」）
+
+> ⛔ **2026-11-08 新增第 0 步**：环境 `prod-d0ga9bxi6e4226222` 已被 `ENV_ISOLATED` 隔离
+> （所有请求 402，含 `wx.cloud.callContainer`）。**必须先由 HO 在 `https://tcb.cloud.tencent.com/dev`
+> 续费解除隔离**，否则下面 1–3 步做任何设置都不会生效。见上方「2026-11-08 实测」节。
+> HO 已授权「云托管设置你可代办」，但当前缺腾讯云 API 凭据 / 可驱动的浏览器通道，
+> 且续费是账号支付动作 ⇒ 本轮 Agent **未代设、未重部署**；环境恢复并具备通道后可直接代办，授权无需重申。
 
 1. 云托管「配置 → 环境变量」确认 / 新增：
    - `DEMO_DATA_STORE=true` —— 声明「**这个库是演示库**」（Q-06 守卫的放行条件，见 E-0.10 与评审单 §1.3）；
