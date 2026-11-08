@@ -137,29 +137,50 @@
 
 ## 7. 演示前 5 分钟检查单
 
-1. `curl http://127.0.0.1:8000/healthz` → `{"status":"ok"}`；
-2. 演示库里有 **2 条**关务记录（`PL-CUS-DEMO-0001` 在建、`0002` 已放行）—— 没数据就重跑
-   `python backend/scripts/seed_customs_demo.py`（幂等，重复跑不会变两条变四条）；
-   ⛔ 该脚本带环境守卫：`APP_ENV=production` 会**直接拒绝执行**（Q-06，防止生产库长出 `PL-CUS-DEMO-*`）；
-   **云端（体验版走的库）另有通路**：#207 已于 2026-11-04 合并（`3e1930bb`），待 HO 给云托管加
-   `DEMO_DATA_STORE=true` ＋ `SEED_CUSTOMS_OWNER=<你的 openid>` 并重部署才铺 ——
-   详见工作单 **E-0.11**（含 HO 三步操作单；⛔ 合并本身**不等于**云端数据已就绪）；
+1. **先认清档位**（⛔ 这一步错了后面全错）：演示手机走 `demo` 档云托管，
+   `miniapp/config/env.js` 的 `RUNTIME_PROFILE='demo'`（`USE_CLOUD=true` ⇒ `wx.cloud.callContainer`）。
+   验活要用云端地址 `https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com/healthz`
+   → `{"status":"ok","env":"production"}`；**⛔ `curl http://127.0.0.1:8000/healthz` 只适用于
+   本机 `dev` 档走查**，对演示手机没有任何意义（本机后端甚至可能是关的）。
+   可复跑 `python backend/scripts/check_demo_readiness.py`（只读 4 项，2026-11-07 复跑仍 4/4 PASS，
+   ⚠️ 它的 `seed_layer_proven` / `device_layer_proven` 恒为 False，别拿 4/4 当数据已就绪）；
+2. **云端演示库里要有 2 条关务记录**（`PL-CUS-DEMO-0001` 在建、`0002` 已放行）——
+   **2026-11-07 18:01 实测：当前是 0 条**。用 IDE 登录态读
+   `GET /api/v1/customs/declarations` 得 `{"items":[],"total":0}`；设备侧关务首页
+   `view='ready'` / `viewHint=''`（请求成功，不是失败兜底）/ `list=0`。
+   ⛔ **跑本地 `python backend/scripts/seed_customs_demo.py` 修不了这个问题**：它写的是本机
+   sqlite，demo 档连的是云托管 MySQL，两条路互不相通（2026-11-07 走查里本地明明铺了 2 条、
+   设备侧依旧空态，已实证）。
+   **唯一通路**：HO 给云托管加 `DEMO_DATA_STORE=true` ＋
+   `SEED_CUSTOMS_OWNER=oxLE-3R72-BKYUGJ-hL7dNfmX9C0`
+   （2026-11-07 用 IDE 登录态实测 `GET /api/v1/auth/me` → `user_id=2`；
+   ⛔ 仍以 HO 控制台核对为准）并**重部署**，再回传容器日志两行 ——
+   详见工作单 **E-0.11 B 段**（⛔ 合并本身**不等于**云端数据已就绪）；
    ⚠️ 不设 owner 就不铺：云端演示账号的 openid 已被过继，默认账号会挂到没人登录的 user_id 上；
+   ⚠️ 该脚本带环境守卫：`APP_ENV=production` 会**直接拒绝执行**（Q-06，防止生产库长出 `PL-CUS-DEMO-*`）；
 3. 小程序档位：本机走查用 `dev`，**演示手机用体验版**（`demo` 档，走云托管）；
    ⛔ 别把 `RUNTIME_PROFILE` 停在 `dev` 就发出去 —— 那样手机上打不到云托管；
 4. 断网演练一次：把手机飞行模式打开再关，页面应显示错误 + 「重试」，⛔ 不会停在旧数据上；
-5. 截图备用：`docs/entrust/evidence/2026-10-26-section-15-d1/shots/` 两张
-   （首页状态条 / 详情时间线），现场投屏出问题就直接放这两张。
+5. 截图备用：**优先用 demo 档**
+   `docs/entrust/evidence/2026-11-07-section-15-demo/shots/`（关务首页状态条等，
+   `runtime.profile='demo'` 自证齐全）；`docs/entrust/evidence/2026-10-26-section-15-d1/shots/`
+   那两张（首页状态条 / 详情时间线）是 **dev 档**，投屏时要标明档位，⛔ 别当成演示手机实测。
+   ⚠️ demo 档这一轮**没有详情/时间线截图**（列表空 ⇒ 分支没进去），缺口如实说。
 6. **体验版二维码与成员名单**：#207 含 `miniapp/**` 改动 ⇒ 必须重新上传并「选为体验版」，
    ⛔ 旧码立即失效。**2026-11-07 精确复核**：旧码文件在
    `E:\PL-Ship-Broker\体验版二维码-至20261008.png`（**工作区，不在 git 仓库**；17,722 字节 /
    2026-10-01，标注有效期至 2026-10-08 已过）⇒ **不要复用**，也别再写成「文件不存在」或「仓内那份」。
-   ⚠️ 本机开发者工具 CLI 无法上传（`islogin` / `open` 均报 IDE 未正确安装）⇒ 上传、选体验版、
-   取新码全部由 HO 在 GUI 完成；HO 重取新码后自行保存，并确认体验成员仍在 **15 人上限**内
-   （操作单见工作单 **E-0.11 A 段**）；
-7. **档位与证据边界**：演示手机走 `demo` 档（云托管）；⑮ 章 52/52 ×2 轮**全是 dev 档**，
-   **demo 档零设备证据**。在 E-0.11 C 段那一轮走查跑完并回填前，台账只能写「**未做**」，
-   ⛔ 不得把「代码已合」说成「设备已验」或「上线完成」。
+   ⚠️ **2026-11-07 17:40 更正**：`cli islogin` / `open` 确实仍报 IDE 未正确安装，
+   但**上传已由 IDE 原生 MCP 的 `upload` 完成**（开发版 `0.6.0`，885633 字节，`status=success`），
+   不再需要 HO 点「上传」。⇒ HO 现在只剩两件 GUI 动作：`mp.weixin.qq.com` 版本管理
+   「**选为体验版**」→ **保存新码**，并确认体验成员仍在 **15 人上限**内
+   （操作单见工作单 **E-0.11 A 段**）。⛔ 预览码不等于体验版二维码；旧码不要复用、新码由 HO 自行保存；
+7. **档位与证据边界**：演示手机走 `demo` 档（云托管）；⑮ 章 52/52 ×2 轮**全是 dev 档**。
+   **2026-11-07 17:53 demo 档已实跑一轮**：`runtime.profile='demo'` 自证齐全，
+   **PASS 36 / NOT_RUN 1 / FAIL 0（37 项），总判定 `NOT_RUN`** —— 因云端没有本账号可见的
+   关务种子，列表空态 ⇒ 详情/归类分支未进入。⇒ **demo 档已有设备证据，但仍不是「已验」**；
+   ⛔ 不得写成 52/52、不得把 `NOT_RUN` 刷绿，也不得把「代码已合」说成「上线完成」。
+   B 段两条变量重部署 + 容器日志两行回传后需重跑一轮才算达成（见 E-0.11 C 段）。
 
 ---
 

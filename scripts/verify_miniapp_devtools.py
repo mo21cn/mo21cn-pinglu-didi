@@ -2126,11 +2126,31 @@ def sec_15(w: Walker) -> None:
         time.sleep(1.0)
         w.rep.rec("⑮ 从详情可返回关务首页", w.c.wait_path(CUSTOMS_HOME, 15), w.c.current_path())
     else:
-        w.rep.not_run(
-            "⑮ 关务列表 → 详情 · 时间线两列",
-            "本次库里没有本账号可见的人工登记记录 ⇒ 列表为空态，**没有对象可点**。"
-            "⛔ 这不是通过，也不是产品缺陷（D1 只做查询，登记入口在后续切片）",
+        # ⭐ 2026-11-07 demo 档实测发现的**判据盲区**：`pages/customs/home/home.js::load()`
+        # 对「查到 0 条」和「fetchDeclarations() 抛错」都渲染 `list=[]`，区别只在
+        # `viewHint`（失败时写「登记记录暂时取不到…」）。只数 `[data-act-cus-item="1"]`
+        # 分不清两者 —— 一次 401 / 断网会被写成「本账号没有记录」，等于把环境故障
+        # 说成产品空态。⇒ 先钉死 `viewHint==''`，才允许把这次空态判为「无对象可点」。
+        d_empty = w.c.page_data()
+        empty_hint = str(d_empty.get("viewHint") or "").strip()
+        w.rep.rec(
+            "⑮ 空态确为「无记录」而非列表请求失败的兜底（viewHint 必须为空）",
+            empty_hint == "",
+            f"viewHint={empty_hint!r} view={d_empty.get('view')!r} "
+            f"sources={len(d_empty.get('sources') or [])}",
         )
+        if empty_hint:
+            w.rep.env_blocked(
+                "⑮ 关务列表 → 详情 · 时间线两列",
+                f"列表取数失败被页面兜底成空态：{empty_hint!r} ⇒ 本格**没有对象可点**，"
+                "且原因不是「没有记录」。⛔ 不套用「库里没有记录」的 NOT_RUN 结论",
+            )
+        else:
+            w.rep.not_run(
+                "⑮ 关务列表 → 详情 · 时间线两列",
+                "本次库里没有本账号可见的人工登记记录 ⇒ 列表为空态，**没有对象可点**。"
+                "⛔ 这不是通过，也不是产品缺陷（D1 只做查询，登记入口在后续切片）",
+            )
 
     # 返回发布页：关务入口是 push 边，回来时那张已经填了一半的货单**不该被清空**。
     back_cargo = False

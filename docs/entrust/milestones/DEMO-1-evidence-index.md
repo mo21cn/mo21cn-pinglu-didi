@@ -909,13 +909,80 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 ⇒ 与 §3.17 那轮 FAIL 同性质：**新判据第一次跑就红，红在判据，不在产品**。
 两轮 FAIL 的 summary 都留在仓里，是为了让"判据能失败"这件事可核。
 
-**仍然没覆盖的**：`profile=demo`（云托管 / 体验版）下**没有**设备证据 —— 上面两轮都是
+**当时仍然没覆盖的**：`profile=demo`（云托管 / 体验版）下**没有**设备证据 —— 上面两轮都是
 `profile=dev` 连本机后端。演示按 DEMO-0 §7 走 demo 档，这条边界继续写在 §3.15 的口径里。
+> ✅ **2026-11-07 已部分补上**：demo 档首轮实跑见 **§3.20**（`runtime.profile='demo'` 自证齐全，
+> 但总判定 `NOT_RUN` ⇒ 只是「有证据」，**不是「已验」**）。本节两轮 52/52 仍**只代表 dev 档**。
 
 **复现通道的坑（这轮才遇到）**：本机安全策略会拦**子进程**读 IDE 用户目录
 （`.ide` 端口 / `mcp.json` 令牌），`discover()` 会把 `OSError` 吞掉并返回 `None`，
 现象与"IDE 没启动"**无法区分**（`rc=2`）。已在 `scripts/wechatide_mcp.py` 加**显式注入**：
 `WECHATIDE_PORT` + `WECHATIDE_TOKEN` 同时存在时直接用，不再做目录发现（令牌不落盘、不打印）。
+
+---
+
+### 3.20 E-2026-11-07-A — **首个 `profile=demo` 设备证据**（⑮ 章 37 项：PASS 36 / NOT_RUN 1；总判定 `NOT_RUN`）
+
+**目录**：`docs/entrust/evidence/2026-11-07-section-15-demo/`
+（原始产物在 gitignore 的 `miniapp-device-artifacts/_demo15/`，⛔ 别把那条路径当仓内证据；
+归档时把 5 张中文名截图改成 ASCII 名，逐字节 `copy2`，内容未改）。
+
+命令：`python scripts/run_walkthrough_devtools.py --section 15 --skip-ide --work miniapp-device-artifacts/_demo15`
+（`--skip-ide` 复用 HO 已打开且已授权的 IDE 实例；内层 `verify_miniapp_devtools.py` 不起后端，
+⛔ 必须走 runner）。IDE MCP 凭据经 `WECHATIDE_PORT` + `WECHATIDE_TOKEN` 注入。
+
+| 文件 | 内容 | 字节 |
+| --- | --- | --- |
+| `walk-15-stdout-demo.txt` | 走查权威逐条读数（runner + verify 合并输出） | 6006 |
+| `summary-NOT_RUN-demo-175332.json` | 汇总（`verdict=NOT_RUN` / `passed=36` / `notPassed=1`） | 10092 |
+| `probe-record.md` | 18:01 云端只读复测读数抄录（见下） | — |
+| `shots/01-channel-popup.jpg` | 发货方式三卡弹窗 | 37411 |
+| `shots/02-self-ship.jpg` | 自主发货留在发布页 | 31572 |
+| `shots/03-entrust-before.jpg` | 委托发货前源页表单 | 32111 |
+| `shots/04-entrust-intake.jpg` | 委托发货受理屏 | 31556 |
+| `shots/05-customs-home.jpg` | **关务首页 · 数据源状态条**（本轮唯一关务页截图） | 38598 |
+
+**环境自证**（`summary.json` 的 `runtime` 格）：`channel=mcp`、`SDKVersion=3.17.2`、
+`platform=devtools`、`profile=demo`、`libVersionCfg={shared:3.17.2, private:3.17.2}`、
+`libVersionGray.verdict='stable'`（带 `WeappVendor\cfg.json` 来源路径、mtime `2026-11-07T17:51:14`、
+`cfgLibCount=50`）。⇒ **本轮可以复述 stable**，与 §3.19 那两轮 `unknown` 不同。
+
+**读数**：`PASS=36 | FAIL=0 | ENV_BLOCKED=0 | REVIEW_REQUIRED=0 | NOT_RUN=1`，
+运行期 console error 增量 **0**，runner `rc=1`（NOT_RUN 不是通过）。唯一未达项：
+
+> `⑮ 关务列表 → 详情 · 时间线两列` —— 本次库里没有本账号可见的人工登记记录 ⇒ 列表为空态，
+> **没有对象可点**。⛔ 这不是通过，也不是产品缺陷（D1 只做查询，登记入口在后续切片）。
+
+⚠️ **为什么只有 37 项而不是 52 项**：`n_rec = count('[data-act-cus-item="1"]') == 0`
+⇒ `列表→详情→归类辅助` 整条分支（含 9 条归类断言与时间线数值判据）**未进入**。
+dev 档 52/52 是「有种子」时的完整分支数，⛔ **两者不可直接比较**，更不能写成 52/52。
+
+**独立对照（排除"接口失败伪装成空态"）**：走查结束后按备份还原 HO 登录态，
+另做一次只读复测（详见 `probe-record.md`）：本地 8000 **CLOSED**、`env.js` 仍 `demo`，
+关务首页仍 `view='ready'` / `viewHint=''` / `sources=3` / `list=0` /
+`checkedAt='2026-11-07 18:01'`；数值层 `GET /customs/declarations` →
+`{"items":[],"total":0}`。`viewHint` 为空说明列表请求**成功**，不是 `home.js` 的失败兜底。
+⇒ 空态**确实属于 HO 演示账号** `user_id=2 / oxLE-3R72-BKYUGJ-hL7dNfmX9C0`，
+也反证了 E-0.11 B 段（云端种子）尚未完成。
+
+⭐ **本轮澄清的身份链路**：`login_as("seed-shipper")` 清 token，但 `callContainer` 由平台注入
+`x-wx-openid`，`resolve_identity()` 在 `CLOUD_OPENID_TRUSTED=true` 下优先采信它 ⇒ 仍登录为
+同一真实演示账号，`user_info` 逐字一致、token 只是同用户重新签发（305→305 内容不同，已还原）。
+早先「`seed-shipper` 直连 `/auth/login` 回 401」是**公网直连无注入头**的探测，不构成 demo 档阻塞。
+
+⭐ **判据盲区与修复**：`home.js` 对「0 条记录」和「列表请求失败」都渲染 `list=[]`，
+区别只在 `viewHint`。原判据只数锚点，**分不清两者**。本轮在
+`scripts/verify_miniapp_devtools.py` 的 `n_rec==0` 分支补一条：断言 `viewHint==''`，
+非空必须报 FAIL。dev 档有种子时走不到该分支 ⇒ §3.19 的 52/52 基线不变。
+⛔ 这条是**更严**的判据，不是为让本轮变绿而改判据。
+⚠️ **not-run ≠ 通过**：本目录归档的 37 项证据由**加守卫之前**的脚本产出；
+新守卫只过了 `py_compile` ＋ CI 口径 `ruff check` / `ruff format --check`，
+**尚无设备运行证据**，⛔ 不得说成「已验证」。B 完成后重跑 §15 时一并取正控/负控。
+
+**诚实边界**：本轮在 B 段容器日志两行未回传的前提下开跑（依据 HO「余下待开发事项请继续推进」），
+结果停在 NOT_RUN —— **反向复证 B 是硬前置**。台账写「已实跑 / 未达」，
+⛔ 不写「设备已验」、`not-run ≠ 通过`、不改判据迁就、不刷绿。
+B 完成后需重跑一轮 §15 才算达成；届时详情/归类分支才有对象可点。
 
 ---
 
@@ -931,3 +998,5 @@ python -X utf8 scripts/reset_demo_env.py --db <同一隔离库>.db --seed     # 
 | 5.5 | **证据文件的行尾归一化会毁掉可核对性** | 已修：`docs/entrust/evidence/.gitattributes` 加 `* -text`（该目录逐字节入库）；⛔ 新证据入库前要**复核「工作区哈希 == 索引 blob 哈希」**；⭐ **核对方式已固化成小工具**：`python -X utf8 backend/scripts/check_evidence_integrity.py`（`git ls-files -s -z` **NUL 分隔解析文件名** ＋ 逐件内容哈希比对；⛔ 不要用"`ls-files` 逐行 + 字符串路径"的老查法 —— `core.quotepath=true` 会把中文名转成八进制转义，实测把 124 件里的 **70 件中文名 `.jpg` 全判成"不一致"**）|
 | 5 | **密钥文件曾被本机删除故障永久删除** | 2026-09-19 核实发现 `backend/.env.local`（含**可用订阅 Key**）缺失、**回收站无记录**；已从 `_b_recon3.txt`（09-16 的 env 基线快照）找回并还原，`llm_key_doctor.py` **四步全绿**。⚠️ **untracked 文件不在护栏的恢复范围内** ⇒ 已扩展护栏（见 DR-0019 追加节） |
 | 6 | ~~**设备证据不自证运行环境**（基础库版本 / 档位）~~ ⇒ **2026-10-26 已改代码关闭，待下一轮生效** | §3.13 那批产物里**没有一处**记着 `SDKVersion`，"跑在 3.17.2 稳定版上"只能靠口头转述。已修：`verify_miniapp_devtools.py` 新增 `capture_runtime()` / `lib_version_gray()` —— 此后 `summary.json` 自带 `runtime.SDKVersion`、`runtime.profile`（`RUNTIME_PROFILE`）、`runtime.libVersionCfg`（共享/私有两份）与 `runtime.libVersionGray`（含来源 cfg 路径与 mtime），并在头部打印一行；配置与实测不一致时**点名以实测为准**。⚠️ **对已产出的历史证据无效**，只在下一轮起生效。同时把 `miniapp/project.config.json` 的 `libVersion` 由 `3.0.0`（差 17 个小版本）改为 `3.17.2`，使干净 clone 不再依赖被忽略的 `project.private.config.json`。✅ **2026-10-26 09:28 已生效**（见 **§3.14**，`runtime.SDKVersion=3.17.2` / `profile=dev` 均进 summary） |
+| 7 | **`profile=demo` 的完整设备证据（含详情 / 归类分支）** | ⚠️ **2026-11-07 首轮已实跑但未达**：见 **§3.20**，37 项 `PASS 36 / NOT_RUN 1`，因云端无本账号可见的关务种子 ⇒ 列表空态 ⇒ 详情/归类分支没进去。⛔ 不是 52/52，也不是「已验」。**解除条件**：HO 完成 E-0.11 B 段（两条变量 + 重部署 + 容器日志两行）后重跑一轮 §15，取到含时间线/归类的完整分支证据 |
+| 8 | **体验版新二维码** | ⏳ 代码包 `0.6.0` 已于 2026-11-07 经 IDE 原生 MCP `upload` 上传成功；但「选为体验版 + 保存新码 + 成员 ≤15」仍在 `mp.weixin.qq.com` 后台，**只能 HO 做**。旧码在工作区（不在 git 仓库）且已过期，⛔ 不复用 |
