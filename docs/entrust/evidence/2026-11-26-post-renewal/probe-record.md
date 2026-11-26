@@ -79,22 +79,37 @@ Base：`https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com`
 ⛔ **不是代码 bug、改仓库代码修不好**；也⛔ **不是「代码没部署」**——
 网关层拦截，容器未收到请求，不要据此重复合并 / 部署代码。
 
-## 5. 能力边界与「可代办」状态
+## 5. 能力边界与控制台读数（⛔ 13:2x 二次复核，更正「需扫码」）
 
-- 11-08 判定「无浏览器自动化通道」**只覆盖 Python 侧**；本轮复核发现
-  09-23 的历史通道仍在：Node `playwright-core@1.60.0-alpha`（位于
-  `C:/Users/Administrator/AppData/Roaming/npm/node_modules/@playwright/cli/node_modules/`）
-  ＋ 持久化 profile `E:\PL-Ship-Broker\.workbuddy\abprofile`
-  ＋ `tmp/cr_login.js` / `cloudrun_probe.js` / `cr_env.js` / `cr_envvars.js`
+- 09-23 历史代办通道仍在：Node `playwright-core@1.60.0-alpha`
+  （`C:/Users/Administrator/AppData/Roaming/npm/node_modules/@playwright/cli/node_modules/`）
+  ＋ 持久化 profile `E:\PL-Ship-Broker\.workbuddy\abprofile` ＋ `tmp/cr_*.js`
   ＋ `C:\Program Files\Google\Chrome\Application\chrome.exe`。
-- `node tmp/cloudrun_probe.js` 实测：页面跳回 `https://cloud.weixin.qq.com/cloudrun`
-  营销首页，`NEED_LOGIN=true` / `IS_CONSOLE=false` ⇒ **控制台登录态已过期**。
-- 已启动 `node tmp/cr_login.js`（后台）等待 HO 扫码，每 120 秒刷新二维码截图
-  `tmp/cr_qr.png`；扫码成功后脚本会 dump 服务列表并截 `tmp/cr_service_list.png`。
-- ⛔ **扫码前不宣称已代办**：未读服务列表、未改环境变量、未触发重部署。
-  续费本身是账号支付动作，只能 HO 完成。
+  11-08「浏览器通道不可用」的结论**只覆盖 Python 侧**，已更正。
+- 首跑 `tmp/cloudrun_probe.js`（13:01）跳回 `/cloudrun` 营销首页，曾据此判
+  「登录态过期、需 HO 扫码」并起了扫码等待窗口。⭐ **该判断已被二次复核推翻**。
+- 二次复核（`tmp/cr_state.js` / `tmp/cr_console.js`，13:18–13:20，同一 profile、全程只读）：
+  - `GET /cloudrun` 正文含「**已经登录云托管**」「前往控制台」「退出登录」
+    ⇒ **登录态有效，⛔ 不需要扫码**；
+  - 点「前往控制台」→ `https://cloud.weixin.qq.com/cloudrun/console`；
+  - `/cloudrun/service?envId=prod-d0ga9bxi6e4226222`、`/cloudrun/settings/env`、
+    `/cloudrun/console` **三处全部**落到「免费快速部署 / 选择模板」向导
+    （Express.js / Spring Boot / Django …「使用」按钮），**没有任何服务列表或环境列表**；
+  - 09-23 `tmp/cr_login.log` 曾 dump 出「自定义域名 / MySQL / 环境设置 / 服务列表」等菜单，
+    说明当时同一 URL 能进控制台 ⇒ **现在的状态与 09-23 不同**。
+- ⇒ 可观测事实：**当前登录账号下，原 envId 对应的服务在控制台不可见**。
+  两种可能都会让 `callContainer` 找不到目标：
+  ① 环境 / 服务 `pinglu-backend` 已被回收删除（与 `INVALID_HOST` 一致）；
+  ② 当前登录的微信号不是原环境所属账号，或控制台入口已迁移到腾讯云侧。
+  ⛔ 本证据**不区分**这两种，需 HO 用「续费时用的那个账号」到
+  `https://tcb.cloud.tencent.com/dev` 核对。
+- ⛔ **未代办**：未创建环境、未创建服务、未改任何配置、未触发部署；
+  二维码图不再需要。续费本身是账号支付动作，只能 HO 完成。
 
 ## 6. 待控制台确认（决定要不要改代码）
+
+> ⚠️ **前置**：先用「**续费时用的那个账号**」确认控制台里能看到环境；若当前登录的微信号
+> 看不到任何环境（§5 实测），先核对账号归属，否则下面几项无从查起。
 
 1. 环境 `prod-d0ga9bxi6e4226222` 是否仍存在、**ID 是否变化**；
 2. 服务 `pinglu-backend` 是否还在、实例数、流水线（`develop` / `backend` / `8000`）绑定；

@@ -710,11 +710,17 @@ For more information, please refer to https://docs.cloudbase.net/error-code/serv
 3. 取新的默认域名 ⇒ `python backend/scripts/check_demo_readiness.py --base-url https://<新域名>`
   复跑，确认 **4/4 PASS** 后才继续 B / C。
 
-⭐ **代办通道已就绪**：09-23 的 Node 侧 `playwright-core` + 持久化 profile
-`E:\PL-Ship-Broker\.workbuddy\abprofile` 仍在；本轮用它打开控制台发现**登录态已过期**，
-已启动 `tmp/cr_login.js` 等待 HO 扫码（每 120 秒刷新二维码）。扫码后 Agent 可直接读
-服务列表 / 环境变量 / 新域名，并依 11-08 授权代办设置与重部署。
-⛔ **未扫码前不宣称已代办**；续费本身是账号支付动作，只能 HO 完成。
+⭐ **控制台二次复核（13:2x，⛔ 更正「需扫码」）**：09-23 的 Node 侧
+`playwright-core` + 持久化 profile `E:\PL-Ship-Broker\.workbuddy\abprofile` 仍在，
+且 `/cloudrun` 明确显示「**已经登录云托管**」⇒ **登录态有效，不需要扫码**。
+但 `/cloudrun/service?envId=prod-d0ga9bxi6e4226222`、`/cloudrun/settings/env`、
+点「前往控制台」后的 `/cloudrun/console` **三处全部**落到「免费快速部署 / 选择模板」
+新建向导，**看不到任何服务列表或环境列表**（09-23 同 URL 曾能 dump 出服务/环境菜单）。
+⇒ 可观测事实：**当前登录账号下原 envId 的服务不可见**；可能是环境/服务已被回收，
+也可能是当前微信号不是环境所属账号（或控制台入口已迁移）。⛔ 本轮**不代办**：
+未创建环境、未创建服务、未改配置、未触发部署。
+**HO 需用「续费时的账号」到 `https://tcb.cloud.tencent.com/dev` 核对环境归属**，
+再把新的环境 ID / 服务状态 / 默认域名给 Agent，之后才谈设置变量与重部署。
 
 - 证据：`docs/entrust/evidence/2026-11-26-post-renewal/`；索引 `DEMO-1-evidence-index.md` **§3.22**。
 
@@ -745,11 +751,14 @@ For more information, please refer to https://docs.cloudbase.net/error-code/serv
 
 > ⛔ **2026-11-26 更新（覆盖 11-08 的第 0 步）**：续费**已完成**、`402 ENV_ISOLATED` 已消失，
 > 但旧默认域名所有请求改回 **`404 INVALID_HOST`** ⇒ 当前缺的不是付费，而是
-> **服务 `pinglu-backend` / 默认域名的存在性**。必须先由 HO（或扫码授权后的 Agent）在云托管控制台
-> 确认环境 ID、恢复/重建服务并重新部署，否则下面 1–3 步做任何设置都不会生效。
-> 见上方「2026-11-26 续费后实测」节。HO 已授权「云托管设置你可代办」，
-> 09-23 的浏览器代办通道已复现可用，但**控制台登录态已过期、需 HO 扫码**；
-> ⛔ 扫码前 Agent 不宣称「已代设 / 已重部署」。
+> **服务 `pinglu-backend` / 默认域名的存在性**。必须先由 HO（或拿到控制台读数后的 Agent）
+> 用「**续费时的账号**」确认环境 ID、恢复 / 重建环境与服务并重新部署，
+> 否则下面 1–3 步做任何设置都不会生效。见上方「2026-11-26 续费后实测」节。
+> HO 已授权「云托管设置你可代办」；⭐ 09-23 的浏览器通道仍在且**登录态有效**
+> （`/cloudrun` 显示「已经登录云托管」，⛔ 不需要扫码），但三个控制台入口全部落到
+> 「新建第一个服务」向导、看不到任何服务 / 环境列表 ⇒ **当前账号下原服务不可见**
+> （环境被回收 或 账号归属不对，本轮不区分）。
+> ⛔ 控制台读数未回传前 Agent 不宣称「已代设 / 已重部署」。
 
 1. 云托管「配置 → 环境变量」确认 / 新增：
    - `DEMO_DATA_STORE=true` —— 声明「**这个库是演示库**」（Q-06 守卫的放行条件，见 E-0.10 与评审单 §1.3）；
