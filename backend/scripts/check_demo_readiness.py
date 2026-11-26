@@ -14,6 +14,10 @@ DEMO-1 工作单 E-0.11 原来把「云端已通」写成一个档。但**外部
 误当成「演示数据已就绪」。所以这里把结论拆成 `code_layer_ready` 与
 恒为 False 的 `seed_layer_proven`，并明确写出各自的证据来源。
 
+网关层错误（`server: cbrgw`）单独诊断：402 `ENV_ISOLATED` 是环境欠费被隔离、
+404 `INVALID_HOST` 是默认域名已注销 / 服务未部署 —— 两者请求都没到容器，
+⛔ 都不能翻译成「代码没部署」。2026-11-08 / 11-26 两次实证后补上 `gateway_diagnosis`。
+
 ⛔ 硬约束：只发 GET；不登录、不写云端、不携带任何凭据、不读环境变量里的密钥。
    §15 走查里有归类发起（POST），那属于设备侧动作，⛔ 不在本脚本范围内。
 """
@@ -57,6 +61,36 @@ SEED_NOTE = (
     "代码层全绿 ≠ 种子已铺，⛔ 不得据此宣布云端已通或进入 §15 demo 档走查。"
 )
 
+#: 云托管**网关层**错误码 →（含义、恢复动作）。这些响应由 `cbrgw` 直接给出，
+#: 请求根本没到容器。⛔ 一律不能翻译成「代码没部署」——那会让人去重复合并/部署代码，
+#: 而真正要修的是环境付费状态或服务的部署/域名绑定（2026-11-08 / 11-26 两次实证）。
+GATEWAY_DIAGNOSIS: dict[str, tuple[str, str]] = {
+    "ENV_ISOLATED": (
+        "云托管环境被隔离（套餐到期未续费 / 欠费）",
+        "HO 到 https://tcb.cloud.tencent.com/dev 续费；续费后重跑本自检",
+    ),
+    "INVALID_HOST": (
+        "云托管默认域名已从网关注销 / 服务 pinglu-backend 未部署",
+        "HO 在云托管控制台重建或重新部署服务，取到新域名后用 --base-url 复跑；"
+        "若环境 ID 变更，同步 miniapp/config/env.js 的 CLOUD_ENV_ID",
+    ),
+}
+
+GATEWAY_NOTE = (
+    "⛔ 该错误来自 cbrgw 网关层，请求未到达容器；上面的 FAIL 不是「代码没部署」，"
+    "不要据此重复合并/部署代码。"
+)
+
+
+def _gateway_code(body: str) -> str:
+    """从网关 JSON 响应里取 `code`；非 JSON / 非字典 / 非字符串一律回空串（⛔ 不吞错也不臆测）。"""
+    try:
+        doc = json.loads(body)
+    except (ValueError, TypeError):
+        return ""
+    code = doc.get("code") if isinstance(doc, dict) else None
+    return code if isinstance(code, str) else ""
+
 
 def _get(base_url: str, path: str, timeout: float) -> tuple[int, str]:
     """只读 GET。HTTP 错误照实回码；网络异常回 -1 并把原因写进 evidence（⛔ 不吞错）。"""
@@ -89,14 +123,17 @@ def read_runtime_profile(repo: Path) -> tuple[str, str]:
 def probe(base_url: str, repo: Path, timeout: float = 15.0) -> dict[str, Any]:
     """跑完四项只读检查，返回可序列化结论。⛔ 不抛异常给调用方，失败以 check 形式落盘。"""
     checks: list[dict[str, Any]] = []
+    bodies: list[str] = []
 
     code, body = _get(base_url, "/healthz", timeout)
+    bodies.append(body)
     health_ok = False
     with contextlib.suppress(ValueError, AttributeError):
         health_ok = code == 200 and json.loads(body).get("status") == "ok"
     checks.append(_check("healthz", health_ok, f"HTTP {code} body={body[:160]}"))
 
     code, body = _get(base_url, "/openapi.json", timeout)
+    bodies.append(body)
     missing: list[str] = []
     paths_note = ""
     try:
@@ -109,6 +146,7 @@ def probe(base_url: str, repo: Path, timeout: float = 15.0) -> dict[str, Any]:
     checks.append(_check("customs_routes", code == 200 and not missing, paths_note))
 
     code, body = _get(base_url, "/api/v1/customs/sources", timeout)
+    bodies.append(body)
     checks.append(
         _check(
             "customs_auth",
@@ -122,10 +160,22 @@ def probe(base_url: str, repo: Path, timeout: float = 15.0) -> dict[str, Any]:
         _check("runtime_profile", profile == EXPECTED_PROFILE, f"RUNTIME_PROFILE={profile!r} {why}")
     )
 
+    gateway_code = next(
+        (c for c in (_gateway_code(b) for b in bodies) if c in GATEWAY_DIAGNOSIS), ""
+    )
+    meaning, action = GATEWAY_DIAGNOSIS.get(gateway_code, ("", ""))
+
     return {
         "base_url": base_url,
         "checks": checks,
         "code_layer_ready": all(c["ok"] for c in checks),
+        "gateway_diagnosis": {
+            "code": gateway_code,
+            "blocking": bool(gateway_code),
+            "meaning": meaning,
+            "action": action,
+            "note": GATEWAY_NOTE if gateway_code else "",
+        },
         "seed_layer_proven": False,
         "seed_layer_note": SEED_NOTE,
         "device_layer_proven": False,
@@ -151,6 +201,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         for c in result["checks"]:
             print(f"[{'PASS' if c['ok'] else 'FAIL'}] {c['name']}: {c['evidence']}")
+        diag = result["gateway_diagnosis"]
+        if diag["blocking"]:
+            print(f"\n⛔ 网关层阻塞：{diag['code']} —— {diag['meaning']}")
+            print(f"   恢复动作：{diag['action']}")
+            print(f"   {diag['note']}")
         print(f"\n代码层已部署：{'是' if result['code_layer_ready'] else '否'}")
         print(f"种子层已证：否 —— {SEED_NOTE}")
         print("设备层已证：否 —— 需 IDE 原生 MCP 通道的 §15 demo 档走查证据。")
