@@ -1,0 +1,31 @@
+# 2026-11-08 09:3x 外部只读探测原始响应（未加工）
+# base: https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com
+# 方式: urllib + ProxyHandler({}) 直连，只发 GET，无凭据
+# 统一响应头: content-type=application/json; charset=utf-8 / server=cbrgw
+#             x-cloudbase-request-id 与 x-request-id 逐请求不同（见各条）
+
+[/healthz]                       HTTP 402 len=231
+{"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED","requestId":"f0c0758c-819b-4fcd-8458-b039fb2237cc"}
+
+[/openapi.json]                  HTTP 402 len=231
+{"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED","requestId":"ea492360-3352-45be-9a54-0a5465292fb3"}
+
+[/api/v1/customs/sources]        HTTP 402 len=231
+{"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED","requestId":"746048ec-1de4-4344-84e9-7fd6377c3964"}
+
+[/]                              HTTP 402 len=231
+{"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED","requestId":"39ae123e-0f82-44f6-b727-7e1724dda367"}
+
+[/docs]                          HTTP 402 len=231
+{"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED","requestId":"d0d931a0-fcee-41dd-838e-ea98658a621d"}
+
+# ---- 设备侧决定性对照（IDE 小程序页面上下文，wx.cloud.callContainer 真实参数） ----
+# config.env=prod-d0ga9bxi6e4226222 / path=/api/v1/customs/sources / method=GET
+# header: Content-Type=application/json, X-WX-SERVICE=pinglu-backend
+# 时间: 2026-11-08 09:37:31 ~ 09:37:41 (GMT+8)
+
+{"ok": true, "statusCode": 402, "body": "{\"code\":\"ENV_ISOLATED\",\"message\":\"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED\",\"requestId\":\"fbee861b-db14-11f1-9dad-52540026ca1e\"}"}
+
+# ⇒ 不是公网直连被挡，是整个环境不可用；demo 档演示手机连不上后端。
+# ⚠️ 同期 simulator_refresh 后页面残留 view='ready' / checkedAt='2026-11-07 18:01'
+#    属热重载旧数据（onShow 未重跑），不得当作「云端还通」的证据。

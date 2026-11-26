@@ -1,0 +1,17 @@
+# 2026-11-08 09:3x 原始输出（未加工）
+# 命令: python backend/scripts/check_demo_readiness.py
+# cwd : E:\pinglu-didi  (Python 3 / -X utf8)
+# rc  : 1
+# 前置: 只读 GET，无凭据；云端地址 https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com
+
+[FAIL] healthz: HTTP 402 body={"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/se
+[FAIL] customs_routes: HTTP 402 paths=0 missing=['/api/v1/customs/classifications', '/api/v1/customs/classifications/{classification_id}', '/api/v1/customs/classifications/{classification_id}/manual', '/api/v1/customs/declarations', '/api/v1/customs/declarations/{declaration_id}', '/api/v1/customs/declarations/{declaration_id}/events', '/api/v1/customs/sources']
+[FAIL] customs_auth: HTTP 402 body={"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/se（期望 401 未提供访问令牌，不是 404/500/200）
+[PASS] runtime_profile: RUNTIME_PROFILE='demo' E:\pinglu-didi\miniapp\config\env.js
+
+代码层已部署：否
+种子层已证：否 —— 关务种子由 boot_seed 在容器启动时铺；外部 HTTP 看不到它。唯一证据是容器日志的『SEED_CUSTOMS_OWNER 已显式设置』与『关务演示数据就绪』两行。代码层全绿 ≠ 种子已铺，⛔ 不得据此宣布云端已通或进入 §15 demo 档走查。
+设备层已证：否 —— 需 IDE 原生 MCP 通道的 §15 demo 档走查证据。
+
+# 对照: 2026-11-07 同命令为 4/4 PASS（代码层已部署：是），见 §3.20 / E-0.11。
+# 本轮唯一 PASS 是本地文件 env.js 的档位读数，与云端可用性无关。

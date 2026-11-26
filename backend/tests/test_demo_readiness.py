@@ -190,3 +190,51 @@ def test_main_exit_code_matches_code_layer(readiness, serve, tmp_path, monkeypat
     )
     bad = serve(_ok_responses(readiness, health=500))
     assert readiness.main(["--base-url", bad, "--repo", str(tmp_path), "--json"]) == 1
+
+
+# ───────────────────────── 网关层错误码：不得误译成「代码没部署」
+
+
+def _gateway_responses(code: str, status: int) -> dict[str, tuple[int, str]]:
+    body = json.dumps({"code": code, "message": code, "requestId": "probe"})
+    paths = ("/healthz", "/openapi.json", "/api/v1/customs/sources")
+    return dict.fromkeys(paths, (status, body))
+
+
+def test_env_isolated_is_diagnosed_as_gateway_block(readiness, serve, tmp_path):
+    """402 ENV_ISOLATED（11-08 实证）：解法是续费，不是重新合并/部署代码。"""
+    url = serve(_gateway_responses("ENV_ISOLATED", 402))
+    result = readiness.probe(url, _repo(tmp_path, "demo"))
+    assert result["code_layer_ready"] is False
+    diag = result["gateway_diagnosis"]
+    assert diag["code"] == "ENV_ISOLATED"
+    assert diag["blocking"] is True
+    assert "续费" in diag["action"]
+
+
+def test_invalid_host_is_diagnosed_as_gateway_block(readiness, serve, tmp_path):
+    """404 INVALID_HOST（11-26 续费后实证）：解法是重建/重部署服务或更新 envId。"""
+    url = serve(_gateway_responses("INVALID_HOST", 404))
+    result = readiness.probe(url, _repo(tmp_path, "demo"))
+    assert result["code_layer_ready"] is False
+    diag = result["gateway_diagnosis"]
+    assert diag["code"] == "INVALID_HOST"
+    assert diag["blocking"] is True
+    assert "--base-url" in diag["action"]
+    assert "CLOUD_ENV_ID" in diag["action"]
+
+
+def test_healthy_probe_has_no_gateway_diagnosis(readiness, serve, tmp_path):
+    url = serve(_ok_responses(readiness))
+    result = readiness.probe(url, _repo(tmp_path, "demo"))
+    assert result["code_layer_ready"] is True
+    assert result["gateway_diagnosis"]["blocking"] is False
+    assert result["gateway_diagnosis"]["code"] == ""
+
+
+def test_unknown_gateway_code_is_not_claimed_as_known_block(readiness, serve, tmp_path):
+    """未知 code 不得冒充已知诊断（⛔ 判据要能失败，也要防止臆测）。"""
+    url = serve(_gateway_responses("SOME_OTHER_CODE", 503))
+    result = readiness.probe(url, _repo(tmp_path, "demo"))
+    assert result["gateway_diagnosis"]["blocking"] is False
+    assert result["gateway_diagnosis"]["meaning"] == ""

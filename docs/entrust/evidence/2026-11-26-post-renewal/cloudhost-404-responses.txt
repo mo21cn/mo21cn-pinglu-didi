@@ -1,0 +1,60 @@
+云托管网关原始响应（2026-11-26 12:5x，只读探测）
+Base = https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com
+全部响应 server: cbrgw / content-type: application/json; charset=utf-8
+requestId 每次生成，此处统一以 <uuid> 代占位。
+
+--- 主探测：5 个路径 + 1 个 POST ---
+
+GET /healthz
+HTTP 404
+{"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}
+
+GET /openapi.json
+HTTP 404
+{"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}
+
+GET /api/v1/customs/sources
+HTTP 404
+{"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}
+
+GET /
+HTTP 404
+{"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}
+
+GET /docs
+HTTP 404
+{"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}
+
+POST /api/v1/auth/login  body={"code":"probe-only"}  Content-Type: application/json
+HTTP 404
+{"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}
+
+--- 显式加业务头（排除「缺 X-WX-SERVICE 才被拒」）---
+
+GET /healthz  header X-WX-SERVICE: pinglu-backend
+HTTP 404  INVALID_HOST（同上 body）
+
+GET /healthz  header Host: prod-d0ga9bxi6e4226222
+HTTP 421 Misdirected Request
+
+--- 负控：不存在的 host 返回完全相同的 404 ---
+
+GET https://prod-d0ga9bxi6e4226222.sh.run.tcloudbase.com/healthz
+HTTP 404  {"code":"INVALID_HOST", ...}
+
+GET https://pinglu-backend.sh.run.tcloudbase.com/healthz
+HTTP 404  {"code":"INVALID_HOST", ...}
+
+GET https://definitely-not-a-real-service-xyz.sh.run.tcloudbase.com/healthz
+HTTP 404  {"code":"INVALID_HOST", ...}
+
+--- DNS（旧域名仍正常解析，排除 DNS 未生效）---
+
+pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com -> 124.223.145.112, 124.223.146.85
+prod-d0ga9bxi6e4226222.sh.run.tcloudbase.com            -> 124.223.145.112, 124.223.146.85
+pinglu-backend.sh.run.tcloudbase.com                     -> 124.223.145.112, 124.223.146.85
+
+--- 11-08 历史对照（同一批路径）---
+
+HTTP 402
+{"code":"ENV_ISOLATED","message":"Environment prod-d0ga9bxi6e4226222 is isolated. For more information, please refer to https://docs.cloudbase.net/error-code/service/ENV_ISOLATED","requestId":"<uuid>"}

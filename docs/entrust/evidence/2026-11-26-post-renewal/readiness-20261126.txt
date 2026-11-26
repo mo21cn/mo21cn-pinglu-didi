@@ -1,0 +1,26 @@
+check_demo_readiness.py 实跑输出（2026-11-26 12:5x，仓库根，rc=1）
+脚本：backend/scripts/check_demo_readiness.py（本轮已加 gateway_diagnosis）
+说明：requestId 为网关每次生成，此处以 <uuid> 代占位；其余逐字转录。
+
+[FAIL] healthz: HTTP 404 body={"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}
+[FAIL] customs_routes: HTTP 404 paths=0 missing=['/api/v1/customs/classifications', '/api/v1/customs/classifications/{classification_id}', '/api/v1/customs/classifications/{classification_id}/manual', '/api/v1/customs/declarations', '/api/v1/customs/declarations/{declaration_id}', '/api/v1/customs/declarations/{declaration_id}/events', '/api/v1/customs/sources']
+[FAIL] customs_auth: HTTP 404 body={"code":"INVALID_HOST","message":"Invalid host. For more information, please refer to https://docs.cloudbase.net/error-code/service/INVALID_HOST","requestId":"<uuid>"}（期望 401 未提供访问令牌，不是 404/500/200）
+[PASS] runtime_profile: RUNTIME_PROFILE='demo' E:\pinglu-didi\miniapp\config\env.js
+
+⛔ 网关层阻塞：INVALID_HOST —— 云托管默认域名已从网关注销 / 服务 pinglu-backend 未部署
+   恢复动作：HO 在云托管控制台重建或重新部署服务，取到新域名后用 --base-url 复跑；若环境 ID 变更，同步 miniapp/config/env.js 的 CLOUD_ENV_ID
+   ⛔ 该错误来自 cbrgw 网关层，请求未到达容器；上面的 FAIL 不是「代码没部署」，不要据此重复合并/部署代码。
+
+代码层已部署：否
+种子层已证：否 —— 关务种子由 boot_seed 在容器启动时铺；外部 HTTP 看不到它。唯一证据是容器日志的『SEED_CUSTOMS_OWNER 已显式设置』与『关务演示数据就绪』两行。代码层全绿 ≠ 种子已铺，⛔ 不得据此宣布云端已通或进入 §15 demo 档走查。
+设备层已证：否 —— 需 IDE 原生 MCP 通道的 §15 demo 档走查证据。
+
+--- 历史对照 ---
+2026-11-04 首测 / 11-07 复跑：4/4 PASS（/healthz 200、OpenAPI 138 路径、无 token 401、profile=demo）
+2026-11-08 隔离期：3 FAIL / 1 PASS，网关 402 ENV_ISOLATED
+2026-11-26 续费后：3 FAIL / 1 PASS，网关 404 INVALID_HOST（本文件）
+
+--- 本机门禁 ---
+pytest tests/test_demo_readiness.py -q  → 13 passed
+ruff check --config pyproject.toml scripts/check_demo_readiness.py tests/test_demo_readiness.py → All checks passed!
+ruff format --check（同上两文件）→ 2 files already formatted
