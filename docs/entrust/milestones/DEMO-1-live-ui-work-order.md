@@ -11,7 +11,28 @@
 | Reviewed PR | #188, head 2e25c408388b4b8338f6773e1b24c4002dc6f79f; open, mergeable clean, six checks successful at inspection |
 | Suggested repository location | docs/entrust/milestones/DEMO-1-live-ui-work-order.md |
 
-## 1. Endpoint and scope
+> ## ⭐ 2026-11-26 云端环境重建落地（覆盖下方 11-08/11-26 上午「阻塞待恢复」结论）
+>
+> 原环境 `prod-d0ga9bxi6e4226222` 经官方 API `DescribeEnvInfo` 确认 `env not found`（已回收），
+> 非账号问题。经 HO 授权「在 cloud1 重建 1-4」+ 选定「容器内 SQLite」，**已在同一账号
+> （UIN 100053147292）下的个人版环境 `cloud1-d4gn8kbna39f50593` 完成重建并落地**：
+>
+> - 云托管经 `tcbr/CreateCloudRunEnv` 开通（`DescribeEnvBaseInfo.Status=normal`/`IsExist=true`）；
+> - `pinglu-backend` 部署成功（`√ Deployment successful`），版本 -001 流量 100%，
+>   新域名 `https://pinglu-backend-354972-10-1494250212.sh.run.tcloudbase.com`（旧域名随 prod 注销）；
+> - 11 项环境变量一次性注入，`DATABASE_URL=sqlite:////app/pinglu_demo.db`（容器内 demo 库，
+>   重启丢数据，HO 已确认接受），JWT 换 60 位新密钥；
+> - `miniapp/config/env.js::CLOUD_ENV_ID` → `cloud1-d4gn8kbna39f50593`（仅此一处），
+>   IDE MCP `upload` 0.6.1 成功（885635 B）；⛔ 上传前必须先 `open_project_window`，否则 `code 10`；
+> - **自检 4/4 PASS**；云端 `/auth/login` 200（新 user_id=3 / openid `oxLE-…`）；
+>   模拟器登录后关务页 `view=ready` / `viewHint=''` / `sources=3` / `checkedAt` 实时 / 法务口径正确；
+> - 关务 `declarations` 仍 0 条（与 11-07 基线一致，是 demo 档种子时序边界，**非本次回归**，详见
+>   `E:\PL-Ship-Broker\cloud1-rebuild-execution-20261126.md` 第五节）。⛔ 不刷绿。
+>
+> ⛔ **未达**：§15 全量 37 项未在 cloud1 重跑（本轮仅关务页定点验证）；0.6.1 审核/发布待 HO；
+> 签署栏留白；PR #212 仍 open 待 HO。完整读数见上述工作区执行记录（证据入工作区，待 HO 决定入库）。
+>
+> ## 1. Endpoint and scope
 
 The endpoint is a limited-scope live release: admitted real customers and authorized staff can complete the entrusted-shipping workflow through the product UI against a deployed, persistent backend. They do not depend on a developer workstation, developer-supplied business IDs, direct HTTP commands, console scripts, or database edits during normal operations.
 
