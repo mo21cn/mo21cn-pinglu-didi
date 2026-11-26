@@ -1024,6 +1024,44 @@ HO 授权已留痕。历史依据：`E:\PL-Ship-Broker\云端部署执行记录-
 
 ---
 
+### 3.22 2026-11-26 · 续费后 402 消除，但旧域名 404 `INVALID_HOST`（登录仍失败）
+
+- 触发：HO 反馈「云托管续费已完成」并提供手机截图 —— 点身份卡弹
+  「**进入货主工作台失败 / 失败环节：登录（/auth/login）/ 原因：云托管调用失败**」。
+  ⛔ 续费**没有**让小程序恢复登录，故先复现再动手。
+- 证据目录：`docs/entrust/evidence/2026-11-26-post-renewal/`
+  （`probe-record.md`、`readiness-20261126.txt`、`cloudhost-404-responses.txt`）。
+- 读数（只读 GET / 空 code POST，全部 `server: cbrgw`）：
+
+  | 路径 | 11-08 | 11-26 |
+  | --- | --- | --- |
+  | `/healthz` | 402 `ENV_ISOLATED` | **404 `INVALID_HOST`** |
+  | `/openapi.json` | 402 | 404 |
+  | `/api/v1/customs/sources` | 402 | 404 |
+  | `POST /api/v1/auth/login` | 402 | 404 |
+
+- ⭐ **负控**：`definitely-not-a-real-service-xyz.sh.run.tcloudbase.com` 等任意不存在的 host
+  返回**完全相同**的 404 `INVALID_HOST`；旧域名 DNS 仍解析到 `124.223.145.112 / 124.223.146.85`
+  ⇒ 不是 DNS 未生效、不是 402 残留，而是**旧默认域名已从网关注销**
+  （官方释义：请求域名既非合法默认域名，也非已绑定且解析正确的自定义域名）。
+- 定性：**环境付费层已恢复**（402 消失），**服务 / 域名层未恢复** ⇒
+  `callContainer` 按 `envId + X-WX-SERVICE` 找不到服务 ⇒ `fail` 回调 ⇒
+  `describeError()` 三条固定文案 ⇒ 登录失败。⛔ 不是代码 bug、改仓库代码修不好；
+  也⛔ 不是「代码没部署」——网关请求根本没到容器。
+- ⭐ **判据升级**：`backend/scripts/check_demo_readiness.py` 新增 `gateway_diagnosis`
+  （`ENV_ISOLATED` → 续费；`INVALID_HOST` → 重建 / 重部署服务或更新 `CLOUD_ENV_ID`），
+  `backend/tests/test_demo_readiness.py` **9 → 13 条**全绿；本轮实跑 `rc=1`，
+  打印 `⛔ 网关层阻塞：INVALID_HOST` 与对应恢复动作。
+- ⚠️ **本轮未改 `miniapp/**`**：改前端会让已上传的 `0.6.0` 代码包失效、需重新上传，
+  服务未恢复前属无效动作。前端 `describeError()` 未透出原始 `errMsg` / 网关 code 是已知诊断缺口。
+- **能力边界**：09-23 Node 侧 `playwright-core` + 持久化 profile 仍在，
+  但控制台**登录态已过期**；已启动 `tmp/cr_login.js` 等 HO 扫码（每 120 秒刷新二维码）。
+  ⛔ 扫码前不宣称「已代办 / 已重部署」；续费是账号支付动作，只能 HO 完成。
+- 待补：控制台读数（环境 ID 是否变化 / 服务是否存在与实例数 / 新默认域名 / 环境变量是否还在）
+  ⇒ 决定是「仅重新部署」还是「改 `env.js` + 重新上传代码包」。
+
+---
+
 ## 4. 待补（本索引自己的缺口，如实登记）
 
 | # | 缺口 | 处置 |
@@ -1038,4 +1076,5 @@ HO 授权已留痕。历史依据：`E:\PL-Ship-Broker\云端部署执行记录-
 | 6 | ~~**设备证据不自证运行环境**（基础库版本 / 档位）~~ ⇒ **2026-10-26 已改代码关闭，待下一轮生效** | §3.13 那批产物里**没有一处**记着 `SDKVersion`，"跑在 3.17.2 稳定版上"只能靠口头转述。已修：`verify_miniapp_devtools.py` 新增 `capture_runtime()` / `lib_version_gray()` —— 此后 `summary.json` 自带 `runtime.SDKVersion`、`runtime.profile`（`RUNTIME_PROFILE`）、`runtime.libVersionCfg`（共享/私有两份）与 `runtime.libVersionGray`（含来源 cfg 路径与 mtime），并在头部打印一行；配置与实测不一致时**点名以实测为准**。⚠️ **对已产出的历史证据无效**，只在下一轮起生效。同时把 `miniapp/project.config.json` 的 `libVersion` 由 `3.0.0`（差 17 个小版本）改为 `3.17.2`，使干净 clone 不再依赖被忽略的 `project.private.config.json`。✅ **2026-10-26 09:28 已生效**（见 **§3.14**，`runtime.SDKVersion=3.17.2` / `profile=dev` 均进 summary） |
 | 7 | **`profile=demo` 的完整设备证据（含详情 / 归类分支）** | ⚠️ **2026-11-07 首轮已实跑但未达**：见 **§3.20**，37 项 `PASS 36 / NOT_RUN 1`，因云端无本账号可见的关务种子 ⇒ 列表空态 ⇒ 详情/归类分支没进去。⛔ 不是 52/52，也不是「已验」。**解除条件（11-08 追加前置）**：先由 HO 续费解除 `ENV_ISOLATED`（见 **§3.21**），再完成 E-0.11 B 段（两条变量 + 重部署 + 容器日志两行），最后重跑一轮 §15 取完整分支证据；并为新增的 `viewHint==''` 守卫取设备正控 / 负控 |
 | 8 | **体验版新二维码** | ⏳ 代码包 `0.6.0` 已于 2026-11-07 经 IDE 原生 MCP `upload` 上传成功；**2026-11-08 09:22:04 代码发布审核「已通过审核」**，但 ⛔ 审核通过 ≠ 已发布 ≠ 已上线（页面仍有「前往发布」），正式发布属 HO 拍板项。体验版「选为体验版 + 保存新码 + 成员 ≤15」仍在 `mp.weixin.qq.com` 后台，**只能 HO 做**。旧码在工作区（不在 git 仓库）且已过期，⛔ 不复用 |
-| 9 | **云托管环境隔离（`ENV_ISOLATED`）** | ⛔ **2026-11-08 新增最高优先阻塞**：环境 `prod-d0ga9bxi6e4226222` 套餐到期 / 欠费被隔离，所有请求（含 `wx.cloud.callContainer`）回 **402** ⇒ 演示手机连不上后端，B / C 全部不生效。见 **§3.21**。**解除条件**：HO 在 `https://tcb.cloud.tencent.com/dev` 续费 → 复跑 `check_demo_readiness.py` 回到 4/4 PASS。⛔ Agent 无腾讯云 API 凭据 / 浏览器自动化通道，且续费是支付动作，本轮**未代办、不虚报** |
+| 9 | ~~**云托管环境隔离（`ENV_ISOLATED`）**~~ ⇒ ✅ **付费层已解除（11-26）** | 11-08 环境套餐到期 / 欠费被隔离，所有请求回 **402**（见 **§3.21**）。**HO 已于 2026-11-26 完成续费，402 已消失**。⛔ 但**不等于演示可用**：见第 10 项 |
+| 10 | **服务 / 默认域名未恢复（`INVALID_HOST`）** | ⛔ **2026-11-26 新增最高优先阻塞**：续费后旧默认域名全路径回 **404 `INVALID_HOST`**，负控证明域名已从网关注销 ⇒ 服务 `pinglu-backend` 未部署或环境 ID 已变，`callContainer` 找不到目标 ⇒ 手机登录失败。见 **§3.22** / 证据 `2026-11-26-post-renewal/`。**解除条件**：HO 扫码登录控制台（或自行操作）确认环境 ID / 服务 / 实例数 / 新域名，**恢复或重建服务并重新部署**，再用 `--base-url` 复跑自检回到 4/4 PASS。⛔ 扫码前 Agent 不宣称已代办 |

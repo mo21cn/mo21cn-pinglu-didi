@@ -108,6 +108,13 @@
 > `https://tcb.cloud.tencent.com/dev` **续费解除隔离**之前都不产生可用效果。
 > 详见 `docs/entrust/milestones/DEMO-1-live-ui-work-order.md` **E-0.11「2026-11-08 实测」节**
 > 与证据 `docs/entrust/evidence/2026-11-08-env-isolated/`。
+>
+> ⭐ **2026-11-26 状态更新**：HO 已完成续费，`402 ENV_ISOLATED` 消失；但旧默认域名
+> 全路径改回 **`404 INVALID_HOST`**（网关层，负控证明域名已注销）⇒ 服务 `pinglu-backend`
+> 或它的默认域名不存在，**手机仍连不上后端、登录失败**。⛔ 分发动作依旧不产生可用效果；
+> 当前要做的不是再续费、也不是重传代码包，而是**到云托管控制台恢复 / 重建服务并取得新域名**；
+> 若环境 ID 变化，还需同步 `miniapp/config/env.js` 并重新上传。
+> 见 E-0.11「2026-11-26 续费后实测」节与证据 `docs/entrust/evidence/2026-11-26-post-renewal/`。
 
 > 📌 **概念澄清：「基础库」是哪一层？**（这一步最容易被问住）
 > **基础库 = 微信客户端内置的小程序运行环境**（决定小程序能用哪些 API），它不在你列的三个位置里：

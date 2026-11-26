@@ -137,19 +137,22 @@
 
 ## 7. 演示前 5 分钟检查单
 
-1. ⛔ **第一步先确认云托管环境没有被隔离**（2026-11-08 新增，优先级高于档位判断）：
-   访问 `https://pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com/healthz`。
-   **2026-11-08 09:3x 实测回 `HTTP 402 {"code":"ENV_ISOLATED"}`** ⇒ 环境套餐到期 / 欠费被
-   CloudBase 隔离，连 `wx.cloud.callContainer` 也回 402，**演示手机当前连不上后端**。
-   官方解法只有 HO 去 `https://tcb.cloud.tencent.com/dev` 查状态并**续费**
-   （见工作单 **E-0.11「2026-11-08 实测」节**）。⛔ 这一条不过，下面 2–7 条全部无效。
-   环境恢复后该地址应回 `{"status":"ok","env":"production"}`。
+1. ⛔ **第一步先确认云托管「环境 + 服务」都活着**（2026-11-26 更新，优先级高于档位判断）：
+   访问 `https://<当前云托管默认域名>/healthz`，期望 `200 {"status":"ok","env":"production"}`。
+   - **11-08** 曾全路径 `402 ENV_ISOLATED`（欠费隔离）⇒ HO 已于 **11-26 续费完成，402 已消失**；
+   - ⛔ **但 11-26 续费后旧域名 `pinglu-backend-318466-5-1494250212.sh.run.tcloudbase.com`
+     改回全路径 `404 INVALID_HOST`**（负控证明该域名已从网关注销）⇒ 服务 `pinglu-backend`
+     或它的默认域名不存在，`wx.cloud.callContainer` 找不到目标，**演示手机仍连不上后端、登录失败**。
+   - ⇒ 现在要做的**不是再续费、也不是重部署代码**，而是到云托管控制台确认环境 ID /
+     服务是否存在并**恢复或重建服务、取得新默认域名**（见工作单 **E-0.11「2026-11-26 续费后实测」节**）。
+     ⛔ 这一条不过，下面 2–7 条全部无效。
    然后认清档位：演示手机走 `demo` 档云托管，
    `miniapp/config/env.js` 的 `RUNTIME_PROFILE='demo'`（`USE_CLOUD=true` ⇒ `wx.cloud.callContainer`）；
    ⛔ `curl http://127.0.0.1:8000/healthz` 只适用于本机 `dev` 档走查，对演示手机没有任何意义。
-   可复跑 `python backend/scripts/check_demo_readiness.py`（只读 4 项；11-07 曾 4/4 PASS，
-   **11-08 已降级为 3 FAIL / 1 PASS「代码层已部署：否」** ⇒ 拿它判断环境是否恢复；
-   ⚠️ 它的 `seed_layer_proven` / `device_layer_proven` 恒为 False，别拿 PASS 当数据已就绪）；
+   可复跑 `python backend/scripts/check_demo_readiness.py --base-url https://<新域名>`
+   （只读 4 项；11-07 曾 4/4 PASS，**11-08 与 11-26 均为 3 FAIL / 1 PASS** ⇒ 拿它判断服务是否恢复；
+   ⭐ 新版会直接打印 `⛔ 网关层阻塞：ENV_ISOLATED / INVALID_HOST` 及对应恢复动作，
+   别把 FAIL 误读成「代码没部署」；⚠️ `seed_layer_proven` / `device_layer_proven` 恒为 False）；
 2. **云端演示库里要有 2 条关务记录**（`PL-CUS-DEMO-0001` 在建、`0002` 已放行）——
    **2026-11-07 18:01 实测：当前是 0 条**。用 IDE 登录态读
    `GET /api/v1/customs/declarations` 得 `{"items":[],"total":0}`；设备侧关务首页
@@ -157,8 +160,8 @@
    ⛔ **跑本地 `python backend/scripts/seed_customs_demo.py` 修不了这个问题**：它写的是本机
    sqlite，demo 档连的是云托管 MySQL，两条路互不相通（2026-11-07 走查里本地明明铺了 2 条、
    设备侧依旧空态，已实证）。
-   ⛔ **2026-11-08 前置**：环境已被 `ENV_ISOLATED` 隔离，**先按第 1 条续费解除隔离**，
-   否则设变量 / 重部署都不生效（网关直接 402）。
+   ⛔ **2026-11-26 前置**：续费已完成（402 消失），但旧域名 `404 INVALID_HOST` ⇒
+   **先按第 1 条恢复服务 / 域名**，否则设变量 / 重部署都不生效（网关直接 404）。
    **唯一通路**（环境恢复后）：HO 给云托管加 `DEMO_DATA_STORE=true` ＋
    `SEED_CUSTOMS_OWNER=oxLE-3R72-BKYUGJ-hL7dNfmX9C0`
    （2026-11-07 用 IDE 登录态实测 `GET /api/v1/auth/me` → `user_id=2`；
