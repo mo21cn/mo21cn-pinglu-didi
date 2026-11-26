@@ -33,8 +33,11 @@ const PROFILE = isNodeRuntime
   ? process.env.MP_PROFILE || NODE_FALLBACK_PROFILE
   : RUNTIME_PROFILE
 
-// 微信云托管环境 ID（envId）—— 2026-09-23 HO 开通，与 AppID wx4a57f29bc38ca11d 同主体
-const CLOUD_ENV_ID = 'prod-d0ga9bxi6e4226222'
+// 云开发环境 ID（envId）—— 与 AppID wx4a57f29bc38ca11d 同主体（UIN 100053147292）。
+// 2026-11-26：原 prod-d0ga9bxi6e4226222 已在云端回收（API DescribeEnvInfo=env not found）；
+// 在同一账号下的个人版环境 cloud1-d4gn8kbna39f50593 重建 pinglu-backend 服务。
+// 该环境已通过 tcbr/CreateCloudRunEnv 开通云托管，域名由 callContainer 自动路由，不在此硬编码。
+const CLOUD_ENV_ID = 'cloud1-d4gn8kbna39f50593'
 
 // 后端在云托管里的服务名（小程序调用时经 `X-WX-SERVICE` 头路由）
 // ⚠️ 必须与云托管控制台里创建的服务名一致；服务尚未创建前 release/demo 档不可用
